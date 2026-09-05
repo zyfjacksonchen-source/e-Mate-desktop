@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { generateKeyPairSync, randomUUID, sign, createHmac } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
 import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
@@ -19,7 +19,7 @@ import { createService, start } from '../src/server.ts'
 import { FilePackages, sha256 } from '../src/packages.ts'
 import { TABLES, postgresQuery } from '../src/postgres.ts'
 import type { PackageMetadata } from '../../skill-hub-worker/src/ports.ts'
-import { MAX_BODY_BYTES } from '../../skill-hub-worker/src/core.ts'
+import { MAX_BODY_BYTES, versionSort } from '../../skill-hub-worker/src/core.ts'
 
 const databaseUrl = process.env.E_MATE_TEST_POSTGRES_URL
 const integration = databaseUrl ? test : test.skip
@@ -28,7 +28,7 @@ after(async () => { await pool?.end() })
 const prefix = '/ecorex-agent/client/skill-hub/v1'
 const sessionId = '01234567-89ab-4def-8123-456789abcdef'
 
-async function snapshotFixture(t: TestContext) {
+async function snapshotFixture(t: TestContext, options: { historicalSort?: boolean } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'skill-hub-fixture-')))
   const snapshotDirectory = join(directory, 'snapshot')
   await mkdir(join(snapshotDirectory, 'packages'), { recursive: true })
@@ -44,6 +44,10 @@ async function snapshotFixture(t: TestContext) {
   const alpha = await publish('alpha-skill', '1.0.0')
   const newer = await publish('alpha-skill', '2.0.0')
   await publish('beta-skill', '1.0.0')
+  if (options.historicalSort) {
+    await publish('alpha-skill', '0.9.0')
+    await publish('alpha-skill', '1.0.0-beta')
+  }
   const intent = await direct(source, `${prefix}/skills/alpha-skill/versions/1.0.0/install-intent`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ package_sha256: alpha.package_sha256, client_request_id: 'install:seed-request' }),
   }, 'user-2', sessionId)
@@ -57,6 +61,10 @@ async function snapshotFixture(t: TestContext) {
     const rows = source.DB.database.prepare(`SELECT * FROM ${table}`).all() as Record<string, string | number | null>[]
     counts[table] = rows.length
     for (const row of rows) {
+      if (options.historicalSort && table === 'skill_hub_versions' && row.version !== '2.0.0') {
+        const historical = { '1.0.0': '0011.0010.0010~', '0.9.0': '0010.0019.0010~', '1.0.0-beta': '0011.0010.0010.1004beta!' }
+        row.version_sort = historical[row.version as keyof typeof historical]
+      }
       const values = Object.values(row).map((value) => value === null ? 'NULL' : typeof value === 'number' ? String(value) : `'${value.replaceAll("'", "''")}'`)
       sql += `\nINSERT INTO ${table} (${Object.keys(row).join(',')}) VALUES (${values.join(',')});`
     }
@@ -148,6 +156,42 @@ test('snapshot SQL cannot attach a host file, and missing or corrupt object byte
   await writeFile(manifestPath, JSON.stringify(manifest))
   await rm(join(fixture.snapshotDirectory, manifest.objects[0].key))
   await assert.rejects(inspectSnapshot(fixture.snapshotDirectory, fixture.source.AUTHOR_KEY))
+})
+
+integration('mixed historical sort rows migrate canonically while old signed cursors keep the same page', async (t) => {
+  const fixture = await snapshotFixture(t, { historicalSort: true })
+  const original = await readFile(join(fixture.snapshotDirectory, 'd1.snapshot'))
+  const snapshot = await inspectSnapshot(fixture.snapshotDirectory, fixture.source.AUTHOR_KEY)
+  assert.equal(snapshot.summary.transformations.legacy_version_sort_rows, 4)
+  assert.equal(snapshot.summary.source.d1_sha256, sha256(original))
+  assert.notEqual(snapshot.summary.source.version_rows_sha256, snapshot.summary.tables.skill_hub_versions.sha256)
+  assert(snapshot.tables.skill_hub_versions.every((row) => row.version_sort === versionSort(row.version)))
+  const applied = await migrate({ ...fixture, authorKey: fixture.source.AUTHOR_KEY, pool: pool!, apply: true })
+  assert.deepEqual(applied.summary, snapshot.summary)
+  const gateway = await realGateway(t)
+  const service = createService({ ...fixture, ...gateway, authorKey: fixture.source.AUTHOR_KEY, pool: pool! })
+  const call = (cursor = '') => service.fetch(new Request(`https://hub.example${prefix}/skills/alpha-skill?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, {
+    headers: { authorization: `Bearer ${gateway.token()}` },
+  }))
+  const first = await (await call()).json() as { versions: Array<{ version: string }>; next_cursor: string }
+  assert.deepEqual(first.versions.map((row) => row.version), ['1.0.0'])
+  const payload = JSON.parse(Buffer.from(first.next_cursor.split('.')[0]!, 'base64url').toString())
+  payload.version_sort = '0011.0010.0010~'
+  const bytes = Buffer.from(JSON.stringify(payload))
+  const legacyCursor = `${bytes.toString('base64url')}.${createHmac('sha256', fixture.source.AUTHOR_KEY).update(bytes).digest('base64url')}`
+  const second = await (await call(first.next_cursor)).json() as { versions: Array<{ version: string }>; next_cursor: string }
+  assert.deepEqual(await (await call(legacyCursor)).json(), second)
+  assert.deepEqual(second.versions.map((row) => row.version), ['1.0.0-beta'])
+  const third = await (await call(second.next_cursor)).json() as { versions: Array<{ version: string }>; next_cursor: null }
+  assert.deepEqual(third.versions.map((row) => row.version), ['0.9.0'])
+  assert.equal(third.next_cursor, null)
+  assert.deepEqual(await readFile(join(fixture.snapshotDirectory, 'd1.snapshot')), original)
+  const corrupt = original.toString().replace('0011.0010.0010~', '00011.00010.00010~')
+  const manifestPath = join(fixture.snapshotDirectory, 'manifest.json')
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')); manifest.d1_sha256 = sha256(corrupt)
+  await writeFile(join(fixture.snapshotDirectory, 'd1.snapshot'), corrupt)
+  await writeFile(manifestPath, JSON.stringify(manifest))
+  await assert.rejects(inspectSnapshot(fixture.snapshotDirectory, fixture.source.AUTHOR_KEY), /sort identity/)
 })
 
 integration('a lost PostgreSQL activation reply preserves the committed generation and identical apply replays safely', async (t) => {

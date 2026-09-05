@@ -23,6 +23,8 @@ node --experimental-strip-types enterprise/apps/skill-hub-service/src/migrate.ts
 
 Dry-run stages and independently reads back PostgreSQL rows and package bytes, then removes its staging data, including when a staging COMMIT reply is lost. Apply activates the verified schema and durable file generation. A lost activation response requires retrying the **same** snapshot and reading back the durable receipt; do not replace its input or delete retained generation directories. Replay fully validates active rows and package bytes against that snapshot. It fails if data is damaged or subsequent business writes have changed it, and never restores old data over newer writes. Back up and restore PostgreSQL and its referenced generation together; health polling alone does not verify a restore. Only the main agent performs source freeze, backup/restore rehearsal, deployment and fixed-Worker cutover. See [the migration and compatibility contract](../../../../docs/skill-hub-compatibility.md) for the exact manifest and ordering.
 
+Migration recognizes only the exact historical `version_sort` encoder from `38ef7bb` and the current encoder introduced by `8e0c035`. It normalizes this derived column to the current format without rewriting the source snapshot. The receipt records the raw D1 hash, original version-row hash, converted row count and normalized table hash. Old version cursors are normalized only after their original signature and version identity pass validation. Unknown sort keys fail closed.
+
 Focused checks:
 
 ```sh

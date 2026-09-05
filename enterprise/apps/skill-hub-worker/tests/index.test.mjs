@@ -3,8 +3,10 @@ import { Buffer } from 'node:buffer'
 import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { deflateRawSync } from 'node:zlib'
+import { createHmac } from 'node:crypto'
 import test from 'node:test'
 import worker, { handleRequest, inspectSkillArchive, versionSort } from '../src/index.js'
+import { normalizeVersionSort } from '../src/core.ts'
 
 import { MemoryD1, MemoryR2, zip, skill, modelToken, environment, request, activeSession, direct, publicationBody } from './fixtures.mjs'
 
@@ -282,6 +284,20 @@ test('uses opaque keyset cursors for catalog and version history', async () => {
   assert.deepEqual(secondVersions.versions.map(item => item.version), ['1.0.0'])
   assert.equal(secondVersions.skill.version, '2.0.0')
   assert.equal(secondVersions.next_cursor, null)
+  const legacyPayload = JSON.parse(Buffer.from(firstVersions.next_cursor.split('.')[0], 'base64url').toString())
+  legacyPayload.version_sort = '0012.0010.0010.1004beta!'
+  const signCursor = payload => {
+    const bytes = Buffer.from(JSON.stringify(payload))
+    return `${bytes.toString('base64url')}.${createHmac('sha256', env.AUTHOR_KEY).update(bytes).digest('base64url')}`
+  }
+  const legacyCursor = signCursor(legacyPayload)
+  const legacySecond = await direct(env, `/ecorex-agent/client/skill-hub/v1/skills/version-pages?limit=2&cursor=${encodeURIComponent(legacyCursor)}`)
+  assert.equal(legacySecond.status, 200)
+  assert.deepEqual(await legacySecond.json(), secondVersions)
+  const corruptCursor = signCursor({ ...legacyPayload, version_sort: '0012.0010.0010.1004oops!' })
+  assert.equal((await direct(env, `/ecorex-agent/client/skill-hub/v1/skills/version-pages?cursor=${encodeURIComponent(corruptCursor)}`)).status, 422)
+  const forgedCursor = `${Buffer.from(JSON.stringify({ ...legacyPayload, version: '1.0.0' })).toString('base64url')}.${legacyCursor.split('.')[1]}`
+  assert.equal((await direct(env, `/ecorex-agent/client/skill-hub/v1/skills/version-pages?cursor=${encodeURIComponent(forgedCursor)}`)).status, 422)
   const exactVersion = await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/version-pages/versions/1.0.0')).json()
   assert.equal(exactVersion.version, '1.0.0')
 })
@@ -289,6 +305,10 @@ test('uses opaque keyset cursors for catalog and version history', async () => {
 test('keeps version sort keys exact beyond three-digit numeric identifier lengths', () => {
   assert.ok(versionSort(`1.0.0-${'9'.repeat(1_000)}`) > versionSort(`1.0.0-${'9'.repeat(999)}`))
   assert.ok(versionSort('1.0.0-a-') > versionSort('1.0.0-a.1'))
+  assert.equal(normalizeVersionSort('1.0.0', '0011.0010.0010~'), versionSort('1.0.0'))
+  assert.equal(normalizeVersionSort('0.0.1', '0010.0010.0011~'), versionSort('0.0.1'))
+  assert.equal(normalizeVersionSort('1.0.0-rc.12', '0011.0010.0010.1002rc.000212!'), versionSort('1.0.0-rc.12'))
+  assert.throws(() => normalizeVersionSort('1.0.0', '00011.00010.00010~'), /sort identity/)
 })
 
 test('rejects browser bearer transport and binds one-time install credentials to the authenticated session', async () => {

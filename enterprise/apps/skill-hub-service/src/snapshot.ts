@@ -2,7 +2,7 @@ import { DatabaseSync, constants } from 'node:sqlite'
 import { mkdtemp, rm, writeFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { inspectSkillArchive, versionSort } from '../../skill-hub-worker/src/core.ts'
+import { inspectSkillArchive, versionSort, normalizeVersionSort } from '../../skill-hub-worker/src/core.ts'
 import type { PackageMetadata } from '../../skill-hub-worker/src/ports.ts'
 import { readRegular, sha256 } from './packages.ts'
 import { TABLES, type HubTable } from './postgres.ts'
@@ -22,7 +22,12 @@ export type Snapshot = {
   authorKeySha256: string
   tables: Record<HubTable, SnapshotRow[]>
   objects: PackageMetadata[]
-  summary: { tables: Record<HubTable, { count: number; sha256: string }>; objects: { count: number; bytes: number; sha256: string } }
+  summary: {
+    source: { d1_sha256: string; version_rows_sha256: string }
+    transformations: { legacy_version_sort_rows: number }
+    tables: Record<HubTable, { count: number; sha256: string }>
+    objects: { count: number; bytes: number; sha256: string }
+  }
 }
 const digestPattern = /^[a-f0-9]{64}$/
 const authorPattern = /^author_[a-f0-9]{24}$/
@@ -127,6 +132,12 @@ export async function inspectSnapshot(directory: string, authorKey: string): Pro
   const data = await readRegular(join(directory, 'd1.snapshot'), 256 * 1024 * 1024)
   if (sha256(data) !== manifest.d1_sha256) throw new Error('D1 snapshot checksum differs')
   const tables = await readD1(data)
+  const sourceVersionRowsSha256 = tableDigest(tables.skill_hub_versions)
+  let legacyVersionSortRows = 0
+  for (const row of tables.skill_hub_versions) {
+    const normalized = normalizeVersionSort(String(row.version), row.version_sort)
+    if (normalized !== row.version_sort) { row.version_sort = normalized; legacyVersionSortRows++ }
+  }
   relations(tables)
   const counts = manifest.table_counts as Record<string, unknown>
   if (Object.keys(counts).sort().join(',') !== [...TABLES].sort().join(',')) throw new Error('Invalid snapshot table count set')
@@ -163,5 +174,7 @@ export async function inspectSnapshot(directory: string, authorKey: string): Pro
         skill?.name !== row.slug || skill.version !== row.version) throw new Error('Version has no exact package bytes')
   }
   return { directory, manifestSha256: sha256(manifestBytes), authorKeySha256: String(manifest.author_key_sha256), tables, objects,
-    summary: { tables: summaryTables, objects: { count: objects.length, bytes, sha256: sha256(objects.map((object) => `${object.key}:${object.size}:${object.customMetadata!.archive_sha256}`).sort().join('\n')) } } }
+    summary: { source: { d1_sha256: manifest.d1_sha256, version_rows_sha256: sourceVersionRowsSha256 },
+      transformations: { legacy_version_sort_rows: legacyVersionSortRows },
+      tables: summaryTables, objects: { count: objects.length, bytes, sha256: sha256(objects.map((object) => `${object.key}:${object.size}:${object.customMetadata!.archive_sha256}`).sort().join('\n')) } } }
 }

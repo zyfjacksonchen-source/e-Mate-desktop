@@ -505,6 +505,20 @@ export function versionSort(version) {
   return `${core}${match[4].split('.').map(part => /^\d+$/u.test(part) ? `.0${numeric(part)}` : `.1${lexical(part)}`).join('')}!`
 }
 
+export function normalizeVersionSort(version: string, stored: unknown): string {
+  if (typeof version !== 'string') throw new HttpError(422, 'Skill version sort identity is invalid')
+  const current = versionSort(version)
+  if (stored === current) return current
+  // 38ef7bb emitted this exact format; 8e0c035 replaced both numeric width and lexical encoding.
+  const match = VERSION.exec(version)!
+  const numeric = (value: string) => `${String(value.length).padStart(3, '0')}${value}`
+  const core = `${numeric(match[1])}.${numeric(match[2])}.${numeric(match[3])}`
+  const legacy = match[4] === undefined ? `${core}~` :
+    `${core}${match[4].split('.').map(part => `${/^\d+$/u.test(part) ? '.0' : '.1'}${numeric(part)}`).join('')}!`
+  if (stored !== legacy) throw new HttpError(422, 'Skill version sort identity is invalid')
+  return current
+}
+
 function card(row) {
   return {
     slug: row.slug,
@@ -750,6 +764,7 @@ async function detail(request, env, config, fetchImplementation, slug, url) {
     || typeof decoded.version_sort !== 'string' || !VERSION.test(decoded.version))) {
     throw new HttpError(422, 'Skill Hub version filters are invalid')
   }
+  if (decoded !== null) decoded.version_sort = normalizeVersionSort(decoded.version, decoded.version_sort)
   const latest = await first(env,
     'SELECT v.* FROM skill_hub_skills s JOIN skill_hub_versions v ON v.slug=s.slug AND v.version=s.latest_version WHERE s.slug=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version)',
     [slug],

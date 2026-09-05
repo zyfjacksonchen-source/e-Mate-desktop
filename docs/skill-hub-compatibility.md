@@ -160,6 +160,10 @@ manifest 的格式为：
 
 根代理按以下顺序执行，秘密路径通过上表环境配置，不放入 CLI 参数：
 
+历史排序键有两个有据格式：`38ef7bb` 使用三位数值长度前缀，预发布字符串使用长度加原文；`8e0c035` 改用八位长度前缀和字符串十六进制编码。迁移只接受按真实 `version` 重新计算后与其中一套**完全相等**的 `version_sort`，仅在内存及新 PostgreSQL 行中将这个派生字段规范化为当前格式，未知排序键仍拒绝。报告保留 `summary.source.d1_sha256`、转换前版本表 `version_rows_sha256`、`transformations.legacy_version_sort_rows` 和转换后版本表 SHA；原 D1 文件、slug、version、所有权、ZIP 字节及其他列不改写，原始快照继续用于来源核对和恢复。
+
+目标库必须完整迁移后再提供新服务。版本历史的旧签名游标先校验原 HMAC、用途、slug 和 version，再对同一认可旧格式规范化；新游标继续使用当前格式。任意损坏或与 version 不对应的排序键拒绝，不能只凭签名绕过排序身份校验。目录游标按 slug 排序，其签名与作用域合同不变。
+
 1. 让旧 Worker 进入 `SKILL_HUB_READ_ONLY=true`，等待已有写请求结束后导出六表、完整 R2 对象 inventory/bytes 和原 HMAC key 的指纹。备份和冻结证明由主代理保留。
 2. 运行 `node --experimental-strip-types enterprise/apps/skill-hub-service/src/migrate.ts --dry-run <snapshot>`。检查原始 D1 hash、六表行数、每表内容 hash、每个对象 hash/bytes、slug/version/latest/author/receipt 关系及 key 指纹。历史同名或双 owner 不自动修复；旧的重复 intent request ID 保留，不能伪造新 token。
 3. dry-run 也会写入**独立私有 staging schema 和文件目录**，从独立 PostgreSQL 连接及文件系统完整回读校验，再删除 staging。staging COMMIT 回包丢失时仍按本次唯一 staging 身份清理，不触碰活动目标。它不激活目标，也不改写原输入。
