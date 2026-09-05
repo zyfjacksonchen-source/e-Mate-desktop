@@ -131,6 +131,32 @@ test('password and refresh endpoints use the exact desktop request and response 
   });
 });
 
+test('password and refresh explicitly forward the optional 2.0.18 capability while preserving legacy requests', async () => {
+  const versions: Array<string | undefined> = [];
+  const store = successStore();
+  store.authenticatePassword = async (input) => {
+    versions.push(input.clientVersion);
+    return { ok: true, identity, sessionId: 'session-1', refreshToken };
+  };
+  store.rotateRefreshToken = async (input) => {
+    versions.push(input.clientVersion);
+    return { ok: true, identity, sessionId: 'session-1', refreshToken };
+  };
+  await withGateway(store, async (baseUrl) => {
+    for (const clientVersion of [undefined, '2.0.18']) {
+      for (const [path, body] of [
+        ['/v1/auth/password', { clientId: 'e-mate-desktop', organization: 'Acme', user: 'alice@example.test', password: 'secret' }],
+        ['/v1/auth/refresh', { clientId: 'e-mate-desktop', refreshToken, refreshRequestId: 'request-1' }],
+      ] as const) {
+        const response = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...body, ...(clientVersion ? { clientVersion } : {}) }) });
+        assert.equal(response.status, 200);
+      }
+    }
+  });
+  assert.deepEqual(versions, [undefined, undefined, '2.0.18', '2.0.18']);
+});
+
 test('registration, logout, and password change use bounded first-use contracts', async () => {
   await withGateway(successStore(), async (baseUrl) => {
     const challengeResponse = await fetch(`${baseUrl}/v1/auth/registration/challenge`, {

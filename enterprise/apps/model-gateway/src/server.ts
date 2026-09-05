@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import {
   isDefaultEnabledModelRoute,
+  modelSupportsClient,
   parseConsentAcceptanceInput,
   type ConsentAcceptanceInput,
 } from '@e-mate/admin-contract';
@@ -74,6 +75,7 @@ const fixedReasoningEffort = (routeId: string): 'high' | 'medium' => (routeId ==
 const managedCodexModelIds = new Set([
   'gpt-5.6-luna',
   'gpt-5.6-sol',
+  'gpt-6-astra',
   'deepseek',
   'doubao-seed-2-0-pro-260215',
 ]);
@@ -1552,6 +1554,9 @@ function validateRoute(route: ModelGatewayRoute): void {
     route.providerMark.length > 8 ||
     typeof route.reasoning !== 'boolean' ||
     (route.id === 'gpt-5.6-luna' && route.reasoning !== true) ||
+    (route.id === 'gpt-6-astra' &&
+      (route.reasoning !== true || route.upstreamModelId !== 'gpt-6-astra' ||
+        (route.apiMode !== undefined && route.apiMode !== 'responses'))) ||
     route.input.length < 1 ||
     route.input.length > 2 ||
     new Set(route.input).size !== route.input.length ||
@@ -2082,9 +2087,11 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       }
       if (url.pathname === '/v1/models') {
         if (request.method !== 'GET') return method(response, 'GET');
+        const clientVersion = url.searchParams.get('client_version') ?? request.headers['x-e-mate-client-version'];
         const availableRoutes = (
           await Promise.all(
             options.routes.map(async (route) =>
+              modelSupportsClient(route.id, typeof clientVersion === 'string' ? clientVersion : undefined) &&
               principalAllowsRoute(identity, route.id) &&
               (await modelRouteEnabled(options.tenantModelRoutePolicy, identity.tenantId, route.id))
                 ? route
@@ -2177,6 +2184,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           await Promise.all(
             options.routes.map(async (route) =>
               managedCodexModelIds.has(route.id) &&
+              modelSupportsClient(route.id, effectiveClientVersion) &&
               route.apiMode !== 'images-generations' &&
               principalAllowsRoute(identity, route.id) &&
               (await modelRouteEnabled(options.tenantModelRoutePolicy, identity.tenantId, route.id))
@@ -2314,7 +2322,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             ? 'high'
             : route.id === 'deepseek'
               ? 'max'
-              : ['gpt-5.6-sol', 'doubao-seed-2-0-pro-260215'].includes(route.id)
+              : ['gpt-5.6-sol', 'gpt-6-astra', 'doubao-seed-2-0-pro-260215'].includes(route.id)
                 ? 'medium'
                 : undefined;
         const remoteCompaction = isRemoteCompactionRequest(body);
@@ -2327,12 +2335,14 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             ? (body.reasoning as Record<string, unknown>)
             : {};
         const { reasoning: _clientReasoning, ...bodyWithoutReasoning } = body;
-        const managedBody = {
+        const managedBody: Record<string, unknown> = {
           ...bodyWithoutReasoning,
           ...(requiredReasoningEffort
             ? { reasoning: { ...requestedReasoning, effort: requiredReasoningEffort } }
             : {}),
         };
+        // Astra has no enterprise fast-mode grant yet; client priority never enables it.
+        if (route.id === 'gpt-6-astra') delete managedBody.service_tier;
         let chatRequest: ReturnType<typeof responsesToChatCompletionsRequest> | undefined;
         try {
           chatRequest =

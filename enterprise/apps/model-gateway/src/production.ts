@@ -89,7 +89,9 @@ export function createProductionAuthenticator(
       const modelIds = await usageStore.activeModelIds(sessionPrincipal, tokenScopedRouteIds);
       return modelIds.length > 0 ? { ...sessionPrincipal, modelIds } : null;
     }
-    return policy.authenticateClientCredential(token, callableRouteIds);
+    // Versionless legacy API keys cannot grant the 2.0.18-only model.
+    const legacyRouteIds = callableRouteIds.filter((id) => id !== 'gpt-6-astra');
+    return legacyRouteIds.length ? policy.authenticateClientCredential(token, legacyRouteIds) : null;
   };
 }
 

@@ -37,6 +37,18 @@ const routes = [
   ),
 ];
 
+test('Astra extends the existing GPT catalog and probes Responses medium with the same credential', async () => {
+  const mock = mockFetch();
+  const astra = route('gpt-6-astra', 'responses', 'gpt-6-astra', 'https://main-provider.ecorex.internal:18443/v1');
+  const result = await runModelSmoke({ routes: [...routes, astra], catalogSha256: 'a'.repeat(64), operator: 'fixture-admin',
+    timeoutMs: 1000, fetchImplementation: mock.fetchImplementation });
+  assert.equal(result.results.length, 6);
+  const request = mock.requests.find(({ body }) => body.model === 'gpt-6-astra');
+  assert(request);
+  assert.equal(request.url.endsWith('/responses'), true);
+  assert.deepEqual(request.body.reasoning, { effort: 'medium' });
+});
+
 function responsesStream(id: string): Response {
   return new Response(
     [

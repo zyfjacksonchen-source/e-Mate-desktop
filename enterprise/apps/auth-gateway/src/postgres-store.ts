@@ -1,9 +1,10 @@
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
-import { DEFAULT_ENABLED_MODEL_ROUTE_IDS } from '@e-mate/admin-contract';
+import { DEFAULT_ENABLED_MODEL_ROUTE_IDS, modelSupportsClient } from '@e-mate/admin-contract';
 import {
   AUTH_CREDENTIAL_SCHEMA_SQL,
   AUTH_CREDENTIAL_SOURCE_VERSION_MIGRATION_SQL,
   normalizeLoginIdentifier,
+  isLoginIdentityConflict,
 } from '@e-mate/auth-credential';
 import type { Pool, PoolClient } from 'pg';
 import {
@@ -282,7 +283,7 @@ export class PostgresAuthStore implements AuthStore {
         return { ok: false, code: 'INVALID_CHALLENGE' };
       }
       const existing = await client.query(
-        `SELECT 1 FROM e_mate_auth_password_credential
+        `SELECT 1 FROM e_mate_auth_login_identity
           WHERE tenant_id = $1 AND login_identifier_normalized = $2`,
         [tenantId, account]
       );
@@ -318,13 +319,14 @@ export class PostgresAuthStore implements AuthStore {
       return { ok: true, registrationId: userId };
     } catch (error) {
       await rollback(client);
+      if (isLoginIdentityConflict(error)) return { ok: false, code: 'ACCOUNT_EXISTS' };
       throw error;
     } finally {
       client.release();
     }
   }
 
-  async #enabledModelIds(client: PoolClient, tenantId: string, userId: string): Promise<string[]> {
+  async #enabledModelIds(client: PoolClient, tenantId: string, userId: string, clientVersion?: string): Promise<string[]> {
     const result = await client.query<{ model_ids: string[] }>(
       `
       SELECT ARRAY(
@@ -341,7 +343,7 @@ export class PostgresAuthStore implements AuthStore {
         FROM e_mate_tenant_user AS app_user
        WHERE app_user.tenant_id = $1 AND app_user.user_id = $3
     `,
-      [tenantId, this.#routeIds, userId, DEFAULT_ENABLED_MODEL_ROUTE_IDS]
+      [tenantId, this.#routeIds.filter((id) => modelSupportsClient(id, clientVersion)), userId, DEFAULT_ENABLED_MODEL_ROUTE_IDS]
     );
     const modelIds = result.rows[0]?.model_ids;
     if (
@@ -386,7 +388,8 @@ export class PostgresAuthStore implements AuthStore {
     tenantId: string,
     loginIdentifier: string,
     clientId: string,
-    password: string
+    password: string,
+    clientVersion?: string
   ): Promise<AuthenticationResult> {
     const client = await this.#pool.connect();
     try {
@@ -453,7 +456,7 @@ export class PostgresAuthStore implements AuthStore {
           await rollback(client);
           return { ok: false, code: 'INVALID_GRANT' };
         }
-        const modelIds = await this.#enabledModelIds(client, tenantId, current.user_id);
+        const modelIds = await this.#enabledModelIds(client, tenantId, current.user_id, clientVersion);
         const identity = identityFromRow(current, modelIds);
         if (!identity) {
           await rollback(client);
@@ -467,7 +470,7 @@ export class PostgresAuthStore implements AuthStore {
         await rollback(client);
         return { ok: false, code: 'INVALID_GRANT' };
       }
-      const modelIds = await this.#enabledModelIds(client, tenantId, legacy.user_id);
+      const modelIds = await this.#enabledModelIds(client, tenantId, legacy.user_id, clientVersion);
       const identity = identityFromRow(legacy, modelIds);
       if (!identity) {
         await rollback(client);
@@ -557,7 +560,7 @@ export class PostgresAuthStore implements AuthStore {
     );
     const candidate = lookup.rows[0];
     if (!candidate) {
-      return this.#authenticateLegacyPassword(tenantId, loginIdentifier, clientId, input.password);
+      return this.#authenticateLegacyPassword(tenantId, loginIdentifier, clientId, input.password, input.clientVersion);
     }
     if (!(await verifyPassword(input.password, verifier(candidate)))) {
       return { ok: false, code: 'INVALID_GRANT' };
@@ -603,7 +606,7 @@ export class PostgresAuthStore implements AuthStore {
         await rollback(client);
         return { ok: false, code: 'INVALID_GRANT' };
       }
-      const modelIds = await this.#enabledModelIds(client, tenantId, current.user_id);
+      const modelIds = await this.#enabledModelIds(client, tenantId, current.user_id, input.clientVersion);
       const identity = identityFromRow(current, modelIds);
       if (!identity) {
         await rollback(client);
@@ -739,7 +742,7 @@ export class PostgresAuthStore implements AuthStore {
           return { ok: false, code: 'SESSION_REVOKED' };
         }
       }
-      const modelIds = await this.#enabledModelIds(client, row.tenant_id, row.user_id);
+      const modelIds = await this.#enabledModelIds(client, row.tenant_id, row.user_id, input.clientVersion);
       const identity = identityFromRow(
         {
           tenant_id: row.tenant_id,

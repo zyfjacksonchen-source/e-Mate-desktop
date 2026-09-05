@@ -12,6 +12,7 @@ const scryptMaximumMemory = 96 * 1024 * 1024;
 const dummySalt = createHash('sha256').update('e-mate-auth-gateway-dummy-password-v1', 'utf8').digest();
 
 export const AUTH_CREDENTIAL_SCHEMA_SQL = `
+  SELECT pg_advisory_xact_lock(hashtext('e-mate-auth-credential-schema'));
   CREATE TABLE IF NOT EXISTS e_mate_auth_password_credential (
     credential_id uuid PRIMARY KEY,
     tenant_id text NOT NULL,
@@ -47,6 +48,51 @@ export const AUTH_CREDENTIAL_SCHEMA_SQL = `
     FOREIGN KEY (tenant_id, user_id)
       REFERENCES e_mate_tenant_user (tenant_id, user_id)
   );
+  CREATE TABLE IF NOT EXISTS e_mate_auth_login_identity (
+    tenant_id text NOT NULL,
+    login_identifier_normalized text NOT NULL,
+    user_id text NOT NULL,
+    PRIMARY KEY (tenant_id, login_identifier_normalized),
+    UNIQUE (tenant_id, login_identifier_normalized, user_id),
+    FOREIGN KEY (tenant_id, user_id) REFERENCES e_mate_tenant_user (tenant_id, user_id) ON DELETE CASCADE
+  );
+  -- Fail before backfill on ambiguous historical ownership. Never choose or merge a user.
+  DO $$ BEGIN
+    IF EXISTS (
+      SELECT 1 FROM (
+        SELECT tenant_id, login_identifier_normalized, user_id FROM e_mate_auth_password_credential
+        UNION SELECT tenant_id, login_identifier_normalized, user_id FROM e_mate_auth_legacy_password_credential
+        UNION SELECT tenant_id, login_identifier_normalized, user_id FROM e_mate_auth_login_identity
+      ) AS owners GROUP BY tenant_id, login_identifier_normalized HAVING count(DISTINCT user_id) > 1
+    ) THEN RAISE EXCEPTION 'Conflicting login identity owners; run redacted preflight'; END IF;
+  END $$;
+  INSERT INTO e_mate_auth_login_identity (tenant_id, login_identifier_normalized, user_id)
+    SELECT tenant_id, login_identifier_normalized, user_id FROM e_mate_auth_password_credential
+    UNION SELECT tenant_id, login_identifier_normalized, user_id FROM e_mate_auth_legacy_password_credential
+    ON CONFLICT DO NOTHING;
+  CREATE OR REPLACE FUNCTION e_mate_claim_login_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN
+    INSERT INTO e_mate_auth_login_identity (tenant_id, login_identifier_normalized, user_id)
+      VALUES (NEW.tenant_id, NEW.login_identifier_normalized, NEW.user_id) ON CONFLICT DO NOTHING;
+    IF NOT EXISTS (
+      SELECT 1 FROM e_mate_auth_login_identity WHERE tenant_id = NEW.tenant_id
+        AND login_identifier_normalized = NEW.login_identifier_normalized AND user_id = NEW.user_id
+    ) THEN
+      RAISE EXCEPTION 'Login identity already belongs to another user'
+        USING ERRCODE = '23505', CONSTRAINT = 'e_mate_auth_login_identity_owner';
+    END IF;
+    RETURN NEW;
+  END $$;
+  DO $$ DECLARE credential_table text; BEGIN
+    FOREACH credential_table IN ARRAY ARRAY['e_mate_auth_password_credential', 'e_mate_auth_legacy_password_credential'] LOOP
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = credential_table::regclass AND tgname = 'claim_login_identity') THEN
+        EXECUTE format('CREATE TRIGGER claim_login_identity BEFORE INSERT OR UPDATE OF tenant_id, user_id, login_identifier_normalized ON %I FOR EACH ROW EXECUTE FUNCTION e_mate_claim_login_identity()', credential_table);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = credential_table::regclass AND conname = 'login_identity_owner') THEN
+        EXECUTE format('ALTER TABLE %I ADD CONSTRAINT login_identity_owner FOREIGN KEY (tenant_id, login_identifier_normalized, user_id) REFERENCES e_mate_auth_login_identity (tenant_id, login_identifier_normalized, user_id)', credential_table);
+      END IF;
+    END LOOP;
+  END $$;
   CREATE TABLE IF NOT EXISTS e_mate_auth_credential_migration (
     tenant_id text NOT NULL,
     user_id text NOT NULL,
@@ -89,6 +135,21 @@ export const AUTH_CREDENTIAL_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS e_mate_auth_refresh_session
     ON e_mate_auth_refresh_token (session_id, generation);
 `;
+
+/** Read-only aggregate preflight; never returns account identifiers or credential material. */
+export const AUTH_LOGIN_IDENTITY_PREFLIGHT_SQL = `
+  WITH owners AS (
+    SELECT tenant_id, login_identifier_normalized, user_id FROM e_mate_auth_password_credential
+    UNION SELECT tenant_id, login_identifier_normalized, user_id FROM e_mate_auth_legacy_password_credential
+  ) SELECT count(*)::text AS conflicting_accounts FROM (
+    SELECT 1 FROM owners GROUP BY tenant_id, login_identifier_normalized HAVING count(DISTINCT user_id) > 1
+  ) AS conflicts`;
+
+export function isLoginIdentityConflict(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const value = error as { code?: unknown; constraint?: unknown };
+  return value.code === '23505' && value.constraint === 'e_mate_auth_login_identity_owner';
+}
 
 export const AUTH_CREDENTIAL_SOURCE_VERSION_MIGRATION_SQL = `
   SELECT pg_advisory_xact_lock(hashtext('e-mate-auth-source-version-migration'));

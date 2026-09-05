@@ -108,7 +108,7 @@ test('model catalog removal is tenant-scoped, fail-closed, and reversible only f
 
 test('new client credentials are model-only, user-bound, and revocable', async () => {
   let now = Date.parse('2026-07-30T10:00:00.000Z');
-  const store = new InMemoryAdminManagementStore([], () => now);
+  const store = new InMemoryAdminManagementStore([{ routeId: 'gpt-5.6-sol', label: 'Sol', provider: 'fixture' }], () => now);
   const admin = tenantAdmin('tenant-a');
   await store.createUser(admin, {
     schemaVersion: 1,
@@ -149,7 +149,7 @@ test('new client credentials are model-only, user-bound, and revocable', async (
 });
 
 test('suspended and missing users cannot receive model credentials', async () => {
-  const store = new InMemoryAdminManagementStore([]);
+  const store = new InMemoryAdminManagementStore([{ routeId: 'gpt-5.6-sol', label: 'Sol', provider: 'fixture' }]);
   const admin = tenantAdmin('tenant-a');
   const created = await store.createUser(admin, {
     schemaVersion: 1,
@@ -183,7 +183,7 @@ test('suspended and missing users cannot receive model credentials', async () =>
 });
 
 test('deleting a user is idempotent, terminal, and revokes existing credentials', async () => {
-  const store = new InMemoryAdminManagementStore([]);
+  const store = new InMemoryAdminManagementStore([{ routeId: 'gpt-5.6-sol', label: 'Sol', provider: 'fixture' }]);
   const admin = tenantAdmin('tenant-a');
   const created = await store.createUser(admin, {
     schemaVersion: 1,

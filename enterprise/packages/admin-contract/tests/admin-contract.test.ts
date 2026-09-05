@@ -17,6 +17,7 @@ import {
   parseTenantUserDelete,
   parseTenantUserUpdate,
   isDefaultEnabledModelRoute,
+  modelSupportsClient,
 } from '../src/index.ts';
 
 const consentPolicy = {
@@ -26,6 +27,15 @@ const consentPolicy = {
   disclaimerVersion: '1.0.0',
   contentHash: 'a'.repeat(64),
 } as const;
+
+test('Astra is an explicit 2.0.18 capability and leaves the default model set unchanged', () => {
+  assert.equal(isDefaultEnabledModelRoute('gpt-6-astra'), false);
+  for (const version of [undefined, '2.0.12', '2.0.17']) {
+    assert.equal(modelSupportsClient('gpt-6-astra', version), false);
+    assert.equal(modelSupportsClient('gpt-5.6-sol', version), true);
+  }
+  assert.equal(modelSupportsClient('gpt-6-astra', '2.0.18'), true);
+});
 
 test('admin request contracts reject caller-controlled tenant fields and privilege-shaped roles', () => {
   assert.deepEqual(

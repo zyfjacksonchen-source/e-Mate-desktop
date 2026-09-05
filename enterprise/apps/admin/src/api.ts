@@ -180,6 +180,7 @@ export async function loginAdmin(
     headers: { accept: 'application/json', 'content-type': 'application/json' },
     body: JSON.stringify({
       clientId: input.clientId,
+      clientVersion: '2.0.18',
       organization: input.organization,
       user: input.account,
       password: input.password,
@@ -259,6 +260,7 @@ async function modelRequest(
   const headers = new Headers(init.headers);
   if (!headers.has('accept')) headers.set('accept', 'application/json');
   headers.set('authorization', `Bearer ${session.sessionToken}`);
+  headers.set('x-e-mate-client-version', '2.0.18');
   const response = await sameOriginRequest(
     { kind: 'model', base: session.basePath, path: normalizeModelTestPath(path) },
     signal,
@@ -368,6 +370,7 @@ export async function testModelConnection(
       model: routeId,
       input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Reply with OK.' }] }],
       max_output_tokens: 32,
+      ...(routeId === 'gpt-6-astra' ? { reasoning: { effort: 'medium' } } : {}),
       stream: true,
       store: false,
     }),

@@ -245,7 +245,8 @@ export function createAuthGatewayHandler(options: AuthGatewayServerOptions) {
       }
       if (path === '/v1/auth/password') {
         if (
-          !exactFields(input, ['clientId', 'organization', 'user', 'password']) ||
+          !exactFields(input, ['clientId', 'organization', 'user', 'password', ...(input.clientVersion === undefined ? [] : ['clientVersion'])]) ||
+          (input.clientVersion !== undefined && (typeof input.clientVersion !== 'string' || !/^2\.0\.(?:1[2-8])$/.test(input.clientVersion))) ||
           typeof input.clientId !== 'string' ||
           !clientIdPattern.test(input.clientId) ||
           typeof input.organization !== 'string' ||
@@ -276,6 +277,7 @@ export function createAuthGatewayHandler(options: AuthGatewayServerOptions) {
           clientId: input.clientId,
           user: input.user,
           password: input.password,
+          ...(typeof input.clientVersion === 'string' ? { clientVersion: input.clientVersion } : {}),
         });
         if (!result.ok) {
           failure(response, result);
@@ -336,7 +338,8 @@ export function createAuthGatewayHandler(options: AuthGatewayServerOptions) {
       }
 
       if (
-        !exactFields(input, ['clientId', 'refreshToken', 'refreshRequestId']) ||
+        !exactFields(input, ['clientId', 'refreshToken', 'refreshRequestId', ...(input.clientVersion === undefined ? [] : ['clientVersion'])]) ||
+        (input.clientVersion !== undefined && (typeof input.clientVersion !== 'string' || !/^2\.0\.(?:1[2-8])$/.test(input.clientVersion))) ||
         typeof input.clientId !== 'string' ||
         !clientIdPattern.test(input.clientId) ||
         typeof input.refreshToken !== 'string' ||
@@ -355,6 +358,7 @@ export function createAuthGatewayHandler(options: AuthGatewayServerOptions) {
         clientId: input.clientId,
         refreshToken: input.refreshToken,
         refreshRequestId: input.refreshRequestId,
+        ...(typeof input.clientVersion === 'string' ? { clientVersion: input.clientVersion } : {}),
       });
       if (!result.ok) {
         failure(response, result);

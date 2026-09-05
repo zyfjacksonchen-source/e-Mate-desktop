@@ -14,7 +14,7 @@ import {
   Tooltip,
 } from '@arco-design/web-react';
 import { ChartLine, Plus, Refresh, UserBusiness } from '@icon-park/react';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AdminModelFastMode,
   GptFastModelId,
@@ -58,6 +58,7 @@ import {
   type AdminModelSession,
 } from './api';
 import { messagesFor } from './i18n';
+import { policyTargets, reconcilePolicyResults, runPolicyBatch, type PolicyResult } from './user-policy';
 
 type ConsoleFacts = {
   users: TenantUser[];
@@ -117,6 +118,7 @@ export function App() {
   const [state, setState] = useState<ConsoleState>({ kind: 'loading' });
   const [mutationError, setMutationError] = useState(false);
   const [mutating, setMutating] = useState(false);
+  const mutationLock = useRef(false);
   const [userModal, setUserModal] = useState(false);
   const [userId, setUserId] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -130,6 +132,9 @@ export function App() {
   const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>('K');
   const [quotaUnlimited, setQuotaUnlimited] = useState(false);
   const [policyModelIds, setPolicyModelIds] = useState<string[]>([]);
+  const [keepPolicyQuota, setKeepPolicyQuota] = useState(true);
+  const [keepPolicyModels, setKeepPolicyModels] = useState(true);
+  const [policyResults, setPolicyResults] = useState<PolicyResult[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [userStatusFilter, setUserStatusFilter] = useState<UserStatusFilter>('ALL');
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -268,6 +273,7 @@ export function App() {
   };
 
   const signOut = () => {
+    if (mutationLock.current) return;
     sessionStorage.removeItem(ADMIN_TOKEN_SESSION_KEY);
     sessionStorage.removeItem(ADMIN_MODEL_SESSION_KEY);
     setToken('');
@@ -278,6 +284,8 @@ export function App() {
   };
 
   const mutate = async (action: (signal: AbortSignal) => Promise<void>) => {
+    if (mutationLock.current) return;
+    mutationLock.current = true;
     const controller = new AbortController();
     setMutationError(false);
     setMutating(true);
@@ -289,6 +297,7 @@ export function App() {
       setMutationError(true);
       setReloadKey((value) => value + 1);
     } finally {
+      mutationLock.current = false;
       setMutating(false);
     }
   };
@@ -349,18 +358,55 @@ export function App() {
   const availableModelIds = facts?.routes
     .filter((route) => route.published && route.enabled)
     .map((route) => route.routeId) ?? [];
-  const selectedUsers = facts?.users.filter((user) => selectedUserIds.includes(user.userId) && user.status !== 'DELETED') ?? [];
+  const selectedUsers = filteredUsers.filter((user) => selectedUserIds.includes(user.userId) && user.status !== 'DELETED');
+  const policyLocked = mutating || policyResults.length > 0;
   const openPolicy = (users: TenantUser[], approvePending = false) => {
-    if (users.length === 0) return;
+    if (users.length === 0 || mutationLock.current) return;
     const current = users.length === 1 ? users[0] : undefined;
     const currentLimit = current?.tokenLimit;
     const nextUnit: QuotaUnit = currentLimit && currentLimit >= 1_000_000 && currentLimit % 1_000_000 === 0 ? 'M' : 'K';
     setQuotaUnit(nextUnit);
     setQuotaAmount(currentLimit === null || currentLimit === undefined ? undefined : currentLimit / (nextUnit === 'M' ? 1_000_000 : 1_000));
-    setQuotaUnlimited(currentLimit === null);
-    setPolicyModelIds(current?.allowedModelIds ?? []);
+    setQuotaUnlimited(!approvePending && currentLimit === null);
+    setPolicyModelIds(approvePending ? [] : current?.allowedModelIds ?? []);
+    setKeepPolicyQuota(!approvePending);
+    setKeepPolicyModels(!approvePending);
+    setPolicyResults([]);
     setPolicyApprovePending(approvePending);
-    setPolicyUsers(users);
+    setPolicyUsers(structuredClone(users));
+  };
+  const submitPolicy = async () => {
+    if (mutationLock.current) return;
+    mutationLock.current = true;
+    setMutating(true);
+    setMutationError(false);
+    const readUsers = async () => (await loadTenantUsers(token, AbortSignal.timeout(30_000), requestOptions)).users;
+    try {
+      const previous = await reconcilePolicyResults(policyResults, readUsers);
+      const targets = previous.length
+        ? previous.filter((result) => result.status === 'failed').map((result) => result.target)
+        : policyTargets(policyUsers, {
+            approvePending: policyApprovePending,
+            ...(keepPolicyQuota ? {} : { tokenLimit: quotaTokens(quotaAmount, quotaUnit, quotaUnlimited) }),
+            ...(keepPolicyModels ? {} : { allowedModelIds: policyModelIds }),
+          }, availableModelIds);
+      const next = await runPolicyBatch(targets,
+        (target) => updateTenantUser(token, AbortSignal.timeout(30_000), requestOptions, target.user.userId, target.input), readUsers);
+      const results = previous.length ? previous.map((result) =>
+        next.find((item) => item.target.user.userId === result.target.user.userId) ?? result) : next;
+      setPolicyResults(results);
+      const completed = results.filter((result) => result.status === 'success');
+      setSelectedUserIds((ids) => ids.filter((id) => !completed.some((result) => result.target.user.userId === id)));
+      setState((current) => current.kind !== 'ready' ? current : {
+        kind: 'ready', facts: { ...current.facts, users: current.facts.users.map((user) =>
+          completed.find((result) => result.user?.userId === user.userId)?.user ?? user) },
+      });
+    } catch {
+      setMutationError(true);
+    } finally {
+      mutationLock.current = false;
+      setMutating(false);
+    }
   };
   const createUser = () =>
     void mutate(async (signal) => {
@@ -405,7 +451,7 @@ export function App() {
         <div>
           <span>{copy.console}</span>
         </div>
-        <Button type='text' className='sign-out' onClick={signOut}>
+        <Button type='text' className='sign-out' disabled={mutating} onClick={signOut}>
           {copy.signOut}
         </Button>
       </aside>
@@ -500,12 +546,12 @@ export function App() {
                   value={userSearch}
                   placeholder={copy.searchUsers}
                   allowClear
-                  onChange={setUserSearch}
+                  onChange={(value) => { setUserSearch(value); setSelectedUserIds([]); }}
                 />
                 <Select
                   value={userStatusFilter}
                   aria-label={copy.userStatusFilter}
-                  onChange={(value) => setUserStatusFilter(value as UserStatusFilter)}
+                  onChange={(value) => { setUserStatusFilter(value as UserStatusFilter); setSelectedUserIds([]); }}
                   options={[
                     { label: copy.allStatuses, value: 'ALL' },
                     { label: copy.active, value: 'ACTIVE' },
@@ -535,14 +581,11 @@ export function App() {
                   type='primary'
                   disabled={pendingFilteredUsers.length === 0}
                   onClick={() => {
-                    setSelectedUserIds((current) => [
-                      ...new Set([...current, ...pendingFilteredUsers.map((user) => user.userId)]),
-                    ]);
+                    setSelectedUserIds(pendingFilteredUsers.map((user) => user.userId));
                     openPolicy(pendingFilteredUsers, true);
-                    setPolicyModelIds(availableModelIds);
                   }}
                 >
-                  {copy.approveAllPending}
+                  {copy.approveAllPending} ({pendingFilteredUsers.length})
                 </Button>
                 <Button
                   type='primary'
@@ -625,7 +668,7 @@ export function App() {
                               });
                             }}
                           >
-                            {user.status === 'ACTIVE' ? copy.suspend : user.status === 'PENDING_APPROVAL' ? copy.updateTokenLimit : copy.activate}
+                            {user.status === 'ACTIVE' ? copy.suspend : user.status === 'PENDING_APPROVAL' ? copy.confirmApprove : copy.activate}
                           </Button>
                           <Button
                             size='small'
@@ -1040,46 +1083,23 @@ export function App() {
         title={policyApprovePending ? copy.batchApprove : copy.updateTokenLimit}
         visible={policyUsers.length > 0}
         onCancel={() => {
+          if (mutationLock.current) return;
           setPolicyUsers([]);
+          setPolicyResults([]);
           setQuotaAmount(undefined);
           setPolicyModelIds([]);
           setPolicyApprovePending(false);
         }}
-        onOk={() =>
-          void mutate(async (signal) => {
-            const users = policyUsers.filter(
-              (user): user is TenantUser & { status: Exclude<AdminUserStatus, 'DELETED'> } =>
-                user.status !== 'DELETED'
-            );
-            const nextTokenLimit = quotaTokens(quotaAmount, quotaUnit, quotaUnlimited);
-            if (nextTokenLimit === undefined) return;
-            await Promise.all(
-              users.map((currentUser) =>
-                updateTenantUser(token, signal, requestOptions, currentUser.userId, {
-                  schemaVersion: 1,
-                  displayName: currentUser.displayName,
-                  roles: currentUser.roles,
-                  status:
-                    policyApprovePending && currentUser.status === 'PENDING_APPROVAL'
-                      ? 'ACTIVE'
-                      : currentUser.status,
-                  tokenLimit: nextTokenLimit,
-                  allowedModelIds: policyModelIds,
-                  expectedUpdatedAt: currentUser.updatedAt,
-                })
-              )
-            );
-            setSelectedUserIds((current) => current.filter((id) => !users.some((user) => user.userId === id)));
-            setPolicyUsers([]);
-            setQuotaAmount(undefined);
-            setPolicyModelIds([]);
-            setPolicyApprovePending(false);
-          })
-        }
-        okText={policyApprovePending ? copy.confirmApprove : copy.savePolicy}
+        onOk={() => void submitPolicy()}
+        okText={policyResults.length ? copy.retryUnfinished : policyApprovePending ? copy.confirmApprove : copy.savePolicy}
         okButtonProps={{
           loading: mutating,
-          disabled: quotaTokens(quotaAmount, quotaUnit, quotaUnlimited) === undefined || policyModelIds.length === 0,
+          disabled: policyResults.length > 0
+            ? !policyResults.some((result) => result.status === 'failed' || result.status === 'unknown')
+            : (keepPolicyQuota && keepPolicyModels) ||
+              (!keepPolicyQuota && quotaTokens(quotaAmount, quotaUnit, quotaUnlimited) === undefined) ||
+              (!keepPolicyModels && (policyModelIds.length === 0 ||
+                (policyApprovePending && policyModelIds.some((id) => !availableModelIds.includes(id))))),
         }}
         unmountOnExit
       >
@@ -1089,7 +1109,19 @@ export function App() {
             showIcon
             content={copy.policyUsers.replace('{count}', String(policyUsers.length))}
           />
+          <ul aria-live='polite'>
+            {policyUsers.map((user) => {
+              const result = policyResults.find((item) => item.target.user.userId === user.userId);
+              const label = result?.httpStatus === 401 ? copy.authFailed : result?.httpStatus === 403 ? copy.accessDenied
+                : result ? copy[`policyResult_${result.status}`] : '';
+              return <li key={user.userId}>{user.displayName} ({user.userId}){result && ` — ${label}`}</li>;
+            })}
+          </ul>
+          {policyResults.some((result) => result.status === 'conflict') && <Alert type='warning' content={copy.policyConflictNotice} />}
+          {mutationError && <Alert type='error' content={copy.mutationFailed} />}
+          <fieldset disabled={policyLocked} style={{ border: 0, padding: 0, margin: 0 }}>
           <label>{copy.tokenLimit}</label>
+          {!policyApprovePending && <Checkbox disabled={policyLocked} checked={keepPolicyQuota} onChange={setKeepPolicyQuota}>{copy.keepOriginal}</Checkbox>}
           <div className='quota-row'>
             <InputNumber
               value={quotaAmount}
@@ -1097,22 +1129,24 @@ export function App() {
               max={Number.MAX_SAFE_INTEGER / (quotaUnit === 'M' ? 1_000_000 : 1_000)}
               precision={3}
               placeholder={copy.tokenLimitOptional}
-              disabled={quotaUnlimited}
+              disabled={policyLocked || quotaUnlimited || keepPolicyQuota}
               onChange={setQuotaAmount}
               style={{ width: '100%' }}
             />
             <Select
               value={quotaUnit}
-              disabled={quotaUnlimited}
+              disabled={policyLocked || quotaUnlimited || keepPolicyQuota}
               onChange={(value) => setQuotaUnit(value as QuotaUnit)}
               options={[{ label: 'K', value: 'K' }, { label: 'M', value: 'M' }]}
             />
-            <Checkbox checked={quotaUnlimited} onChange={setQuotaUnlimited}>
+            <Checkbox disabled={policyLocked || keepPolicyQuota} checked={quotaUnlimited} onChange={setQuotaUnlimited}>
               {copy.tokenUnlimited}
             </Checkbox>
           </div>
           <label>{copy.allowedModels}</label>
+          {!policyApprovePending && <Checkbox disabled={policyLocked} checked={keepPolicyModels} onChange={setKeepPolicyModels}>{copy.keepOriginal}</Checkbox>}
           <Checkbox
+            disabled={policyLocked || keepPolicyModels}
             checked={availableModelIds.length > 0 && availableModelIds.every((id) => policyModelIds.includes(id))}
             indeterminate={policyModelIds.length > 0 && !availableModelIds.every((id) => policyModelIds.includes(id))}
             onChange={(checked) => setPolicyModelIds(checked ? availableModelIds : [])}
@@ -1120,14 +1154,16 @@ export function App() {
             {copy.selectAllModels}
           </Checkbox>
           <Select
+            disabled={policyLocked || keepPolicyModels}
             mode='multiple'
             value={policyModelIds}
             onChange={(value) => setPolicyModelIds(value as string[])}
-            options={(facts?.routes ?? []).filter((route) => route.published && route.enabled).map((route) => ({
+            options={(facts?.routes ?? []).filter((route) => (route.published && route.enabled) || policyModelIds.includes(route.routeId)).map((route) => ({
               label: route.label,
               value: route.routeId,
             }))}
           />
+          </fieldset>
         </div>
       </Modal>
 

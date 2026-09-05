@@ -69,10 +69,10 @@ test('user administration filters approval state and reuses the existing batch p
   assert.doesNotMatch(copy.source, /Runtime Registry/);
   assert.equal(copy.active, '有效');
   assert.equal(copy.pendingApproval, '待审批');
-  assert.equal(copy.approveAllPending, '全选待审批并配置模型');
+  assert.equal(copy.approveAllPending, '全选当前筛选内待审批并配置模型');
   assert.equal(copy.selectAllModels, '全选可用模型');
   assert.match(app, /userStatusFilter === 'ALL' \|\| user\.status === userStatusFilter/);
-  assert.match(app, /openPolicy\(pendingFilteredUsers, true\);\s*setPolicyModelIds\(availableModelIds\)/);
+  assert.match(app, /openPolicy\(pendingFilteredUsers, true\)/);
   assert.match(
     app,
     /title=\{policyApprovePending \? copy\.batchApprove : copy\.updateTokenLimit\}[\s\S]*?copy\.selectAllModels/
@@ -217,6 +217,7 @@ test('administrator password login reuses the same-origin Auth Gateway contract 
   assert.equal(call?.init?.method, 'POST');
   assert.deepEqual(JSON.parse(String(call?.init?.body)), {
     clientId: 'e-mate-admin',
+    clientVersion: '2.0.18',
     organization: 'example',
     user: 'admin@example.test',
     password: 'not-recorded',
@@ -269,6 +270,7 @@ test('model connectivity uses the authenticated same-origin Model Gateway and a 
     '/e-mate/model-api/v1/responses',
   ]);
   assert.equal(new Headers(calls[1]?.init?.headers).get('authorization'), `Bearer ${session.sessionToken}`);
+  assert.equal(new Headers(calls[0]?.init?.headers).get('x-e-mate-client-version'), '2.0.18');
   assert.equal(calls.some(({ input }) => input.includes(session.sessionToken)), false);
   assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
     model: 'gpt-5.6-sol',

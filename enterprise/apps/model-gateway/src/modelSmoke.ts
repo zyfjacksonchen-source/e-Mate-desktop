@@ -55,6 +55,13 @@ const routeContracts: readonly SmokeRouteContract[] = [
     httpPathname: '/v1',
   },
   {
+    id: 'gpt-6-astra',
+    apiMode: 'responses',
+    upstreamModelId: 'gpt-6-astra',
+    httpsBaseUrls: ['https://main-provider.ecorex.internal:18443/v1'],
+    httpPathname: '/v1',
+  },
+  {
     id: 'deepseek',
     apiMode: 'chat-completions',
     upstreamModelId: 'deepseek-v4-flash',
@@ -104,8 +111,9 @@ function record(value: unknown): Record<string, unknown> | null {
 function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelSmokeRoute> {
   const searchCredentialRoute = routes.find(({ id }) => id === 'deepseek-web-search');
   const callableRoutes = routes.filter(({ id }) => id !== 'deepseek-web-search');
+  const contracts = routeContracts.filter((contract) => contract.id !== 'gpt-6-astra' || routes.some((route) => route.id === contract.id));
   if (
-    routes.length !== routeContracts.length + (searchCredentialRoute ? 1 : 0) ||
+    routes.length !== contracts.length + (searchCredentialRoute ? 1 : 0) ||
     (searchCredentialRoute !== undefined &&
       (searchCredentialRoute.providerId !== 'deepseek-official' ||
         searchCredentialRoute.upstreamBaseUrl !== 'https://api.deepseek.com/anthropic/v1' ||
@@ -117,8 +125,8 @@ function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelS
     throw new ModelSmokeError('INVALID_CATALOG', searchCredentialRoute?.id);
   }
   const byId = new Map(callableRoutes.map((route) => [route.id, route]));
-  if (byId.size !== routeContracts.length) throw new ModelSmokeError('INVALID_CATALOG');
-  for (const contract of routeContracts) {
+  if (byId.size !== contracts.length) throw new ModelSmokeError('INVALID_CATALOG');
+  for (const contract of contracts) {
     const route = byId.get(contract.id);
     let upstream: URL;
     try {
@@ -289,7 +297,7 @@ async function smokeInference(
       max_output_tokens: Math.min(route.maxTokens, 256),
       ...(route.id === 'gpt-5.6-luna'
         ? { reasoning: { effort: 'high' } }
-        : route.id === 'gpt-5.6-sol'
+        : route.id === 'gpt-5.6-sol' || route.id === 'gpt-6-astra'
           ? { reasoning: { effort: 'medium' } }
           : {}),
     });
@@ -400,7 +408,8 @@ export async function runModelSmoke(options: {
   const randomId = options.randomId ?? randomUUID;
   const results: ModelSmokeResult[] = [];
   for (const contract of routeContracts) {
-    const route = routes.get(contract.id) as ModelSmokeRoute;
+    const route = routes.get(contract.id);
+    if (!route) continue;
     const localId = randomId();
     if (!evidencePattern.test(localId)) throw new ModelSmokeError('INVALID_CATALOG', route.id);
     // Smoke calls are intentionally sequential to cap cost and avoid provider bursts.

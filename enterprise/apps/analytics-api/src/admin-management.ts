@@ -32,7 +32,7 @@ import {
   type TenantUserList,
   type TenantUserUpdate,
 } from '@e-mate/admin-contract';
-import { AUTH_CREDENTIAL_SCHEMA_SQL, derivePasswordVerifier, normalizeLoginIdentifier } from '@e-mate/auth-credential';
+import { AUTH_CREDENTIAL_SCHEMA_SQL, derivePasswordVerifier, normalizeLoginIdentifier, isLoginIdentityConflict } from '@e-mate/auth-credential';
 import type { RuntimeRegistryPrincipal } from './runtime-registry.ts';
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -97,6 +97,19 @@ type ModelRoutePolicy = {
   apiKey?: string;
   keyUpdatedAt?: string;
 };
+
+function sameModelSet(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id) => right.includes(id));
+}
+
+function validateUserModelGrants(
+  available: readonly string[], allowed: readonly string[], previous: readonly string[], activating: boolean
+): void {
+  if (allowed.some((id) => !previous.includes(id) && !available.includes(id)) ||
+      (activating && (allowed.length === 0 || allowed.some((id) => !available.includes(id))))) {
+    throw new Error('Invalid allowed model policy');
+  }
+}
 
 type EncryptedRouteKey = {
   ciphertext: Buffer;
@@ -187,6 +200,7 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
     const input = parseTenantUserCreate(value);
     const users = this.#tenantUsers(tenantId);
     if (users.has(input.userId)) throw new AdminManagementError('CONFLICT');
+    validateUserModelGrants(this.#availableModelIds(tenantId), input.allowedModelIds, [], true);
     const timestamp = new Date(this.#now()).toISOString();
     const { initialPassword: _initialPassword, ...publicInput } = input;
     const user = parseTenantUser({
@@ -225,6 +239,8 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
     if (current.updatedAt !== input.expectedUpdatedAt) {
       throw new AdminManagementError('STALE_UPDATE');
     }
+    validateUserModelGrants(this.#availableModelIds(tenantId), input.allowedModelIds, current.allowedModelIds,
+      input.status === 'ACTIVE' && current.status !== 'ACTIVE');
     const { expectedUpdatedAt: _expectedUpdatedAt, ...update } = input;
     const user = parseTenantUser({
       ...current,
@@ -233,6 +249,13 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
     });
     users.set(userId, user);
     return user;
+  }
+
+  #availableModelIds(tenantId: string): string[] {
+    return this.#catalog.filter((route) => {
+      const policy = this.#routes.get(tenantId)?.get(route.routeId);
+      return (policy?.published ?? true) && (policy?.enabled ?? isDefaultEnabledModelRoute(route.routeId));
+    }).map((route) => route.routeId);
   }
 
   async deleteUser(
@@ -639,6 +662,18 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     );
   }
 
+  async #validateUserModels(client: PoolClient, tenantId: string, allowed: string[], previous: string[], activating: boolean): Promise<void> {
+    const result = await client.query<{ route_id: string; published: boolean; enabled: boolean }>(
+      'SELECT route_id, published, enabled FROM e_mate_tenant_model_route WHERE tenant_id = $1', [tenantId]
+    );
+    const policies = new Map(result.rows.map((row) => [row.route_id, row]));
+    const available = this.#catalog.filter((route) => {
+      const policy = policies.get(route.routeId);
+      return (policy?.published ?? true) && (policy?.enabled ?? isDefaultEnabledModelRoute(route.routeId));
+    }).map((route) => route.routeId);
+    validateUserModelGrants(available, allowed, previous, activating);
+  }
+
   async listUsers(principal: RuntimeRegistryPrincipal): Promise<TenantUserList> {
     const tenantId = identifier(principal.tenantId, 'tenant id');
     const result = await this.#pool.query<UserRow>(
@@ -661,6 +696,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
+      await this.#validateUserModels(client, tenantId, input.allowedModelIds, [], true);
       const result = await client.query<UserRow>(
         `
         INSERT INTO e_mate_tenant_user (
@@ -700,6 +736,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
       return userFromRow(row);
     } catch (error) {
       await rollback(client);
+      if (isLoginIdentityConflict(error)) throw new AdminManagementError('CONFLICT');
       throw error;
     } finally {
       client.release();
@@ -715,7 +752,6 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     const userId = identifier(userIdInput, 'user id');
     const input = parseAdminPasswordReset(value);
     const passwordVerifier = await derivePasswordVerifier(input.password);
-    const loginIdentifier = normalizeLoginIdentifier(userId);
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
@@ -732,6 +768,13 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
         await client.query('COMMIT');
         return false;
       }
+      const accounts = await client.query<{ login_identifier_normalized: string }>(
+        `SELECT login_identifier_normalized FROM e_mate_auth_password_credential WHERE tenant_id = $1 AND user_id = $2
+         UNION SELECT login_identifier_normalized FROM e_mate_auth_legacy_password_credential WHERE tenant_id = $1 AND user_id = $2`,
+        [tenantId, userId]
+      );
+      if (accounts.rows.length > 1) throw new AdminManagementError('CONFLICT');
+      const loginIdentifier = accounts.rows[0]?.login_identifier_normalized ?? normalizeLoginIdentifier(userId);
       await client.query(
         `
         INSERT INTO e_mate_auth_password_credential (
@@ -760,6 +803,11 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
           passwordVerifier.parallelization,
         ]
       );
+      await client.query(
+        `UPDATE e_mate_auth_credential_migration SET upgraded_at = COALESCE(upgraded_at, clock_timestamp())
+          WHERE tenant_id = $1 AND user_id = $2`, [tenantId, userId]
+      );
+      await client.query('DELETE FROM e_mate_auth_legacy_password_credential WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]);
       await client.query(
         `
         UPDATE e_mate_auth_session
@@ -821,6 +869,8 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
       if (current.updated_at.toISOString() !== input.expectedUpdatedAt) {
         throw new AdminManagementError('STALE_UPDATE');
       }
+      await this.#validateUserModels(client, tenantId, input.allowedModelIds, current.allowed_model_ids,
+        input.status === 'ACTIVE' && current.status !== 'ACTIVE');
       const result = await client.query<UserRow>(
         `
         UPDATE e_mate_tenant_user
@@ -836,7 +886,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
       if (!row) throw new Error('User update was unavailable');
       const sessionsRevoked =
         input.status !== 'ACTIVE' ||
-        JSON.stringify(current.allowed_model_ids) !== JSON.stringify(input.allowedModelIds);
+        !sameModelSet(current.allowed_model_ids, input.allowedModelIds);
       if (sessionsRevoked) {
         await client.query(
           `UPDATE e_mate_auth_session

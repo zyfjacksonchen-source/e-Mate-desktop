@@ -424,6 +424,15 @@ function principal(tenantId: string, userId: string, modelId = route.id): ModelG
   return { tenantId, userId, modelIds: [modelId] };
 }
 
+test('versionless API keys retain legacy grants and never receive Astra', async () => {
+  const calls: string[][] = [];
+  const policy = { authenticateClientCredential: async (_token: string, ids: string[]) => { calls.push(ids); return null; } };
+  await createProductionAuthenticator(async () => null, policy as never, {} as never, ['gpt-5.6-sol', 'gpt-6-astra'])('fixture-key');
+  assert.deepEqual(calls, [['gpt-5.6-sol']]);
+  assert.equal(await createProductionAuthenticator(async () => null, policy as never, {} as never, ['gpt-6-astra'])('fixture-key'), null);
+  assert.equal(calls.length, 1);
+});
+
 function completedSse(inputTokens: number, outputTokens: number, responseId = 'response-1'): Response {
   const event = {
     type: 'response.completed',
@@ -2454,6 +2463,52 @@ test('requires the default Luna route to support high reasoning', () => {
       }),
     /Invalid Model Gateway route/
   );
+});
+
+test('Astra uses Responses medium and cannot enable priority through a client request', async () => {
+  const astra: ModelGatewayRoute = { ...route, id: 'gpt-6-astra', upstreamModelId: 'gpt-6-astra', apiMode: 'responses' };
+  await withGateway(async (baseUrl, requests) => {
+    const response = await fetch(`${baseUrl}/v1/responses`, { method: 'POST', headers: responseHeaders(),
+      body: JSON.stringify({ model: astra.id, input: 'synthetic request', stream: true, store: false,
+        reasoning: { effort: 'high' }, service_tier: 'priority' }) });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(requests.length, 1);
+    const body = await requests[0]!.json() as Record<string, unknown>;
+    assert.equal(body.model, astra.id);
+    assert.deepEqual(body.reasoning, { effort: 'medium' });
+    assert.equal('service_tier' in body, false);
+  }, undefined, undefined, undefined, limits, astra, { isEnabled: async () => true });
+});
+
+test('runtime and public catalogs keep old clients usable while Astra is visible to 2.0.18 only', async () => {
+  const astra: ModelGatewayRoute = { ...route, id: 'gpt-6-astra', upstreamModelId: 'gpt-6-astra', apiMode: 'responses' };
+  const identity = { tenantId: 'tenant-a', userId: 'user-a', sessionId: 'fixture-session', modelIds: [route.id, astra.id] };
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await consentStore.accept(identity, consentInput);
+  const server = createModelGatewayServer({ routes: [route, astra], publicBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api',
+    authenticate: async () => identity, consentStore, tenantModelRoutePolicy: { isEnabled: async () => true },
+    usageStore: new InMemoryUsageStore(limits), usageKeyId: 'usage-2026', usagePrivateKey: privateKey });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = { authorization: `Bearer model.${'p'.repeat(32)}.signature` };
+  try {
+    for (const version of ['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17', '2.0.18']) {
+      const response = await fetch(`${baseUrl}/v1/runtime-models?client_version=${version}`, { headers });
+      assert.equal(response.status, 200);
+      const body = await response.json() as { models: Array<{ id: string }> };
+      assert.deepEqual(body.models.map(({ id }) => id), version === '2.0.18' ? [route.id, astra.id] : [route.id]);
+    }
+    for (const version of [undefined, '2.0.17', '2.0.18']) {
+      const response = await fetch(`${baseUrl}/v1/models`, { headers: { ...headers, ...(version ? { 'x-e-mate-client-version': version } : {}) } });
+      assert.equal(response.status, 200);
+      const body = await response.json() as { models: Array<{ id: string }> };
+      assert.deepEqual(body.models.map(({ id }) => id), version === '2.0.18' ? [route.id, astra.id] : [route.id]);
+    }
+  } finally { server.close(); await once(server, 'close'); }
 });
 
 test('allows a pinned HTTP upstream only with a route-local opt-in and keeps it server-side', async () => {

@@ -264,7 +264,7 @@ test(
     skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
   },
   async () => {
-    const { store, close } = await openPostgresAdminManagementStore(postgresUrl as string, []);
+    const { store, close } = await openPostgresAdminManagementStore(postgresUrl as string, [{ routeId: 'gpt-5.6-sol', label: 'Sol', provider: 'fixture' }]);
     const run = randomUUID();
     const tenantId = `tenant-password-${run}`;
     const userId = `user-${run}`;
@@ -384,7 +384,7 @@ test(
     skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
   },
   async () => {
-    const { store, close } = await openPostgresAdminManagementStore(postgresUrl as string, []);
+    const { store, close } = await openPostgresAdminManagementStore(postgresUrl as string, [{ routeId: 'gpt-5.6-sol', label: 'Sol', provider: 'fixture' }]);
     const run = randomUUID();
     const tenantId = `tenant-admin-${run}`;
     const userId = `user-${run}`;

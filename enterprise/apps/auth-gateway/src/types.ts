@@ -21,6 +21,7 @@ export type AuthenticationResult =
   | { ok: false; code: AuthErrorCode };
 
 export type PasswordAuthenticationInput = {
+  clientVersion?: string;
   tenantId: string;
   clientId: string;
   user: string;
@@ -28,6 +29,7 @@ export type PasswordAuthenticationInput = {
 };
 
 export type RefreshAuthenticationInput = {
+  clientVersion?: string;
   clientId: string;
   refreshToken: string;
   refreshRequestId: string;

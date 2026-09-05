@@ -21,10 +21,12 @@ const CHAT_MODELS = [
   'gpt-5.6-sol',
   'deepseek',
   'doubao-seed-2-0-pro-260215',
+  'gpt-6-astra',
 ]
 const RUNTIME_MODEL_CONTRACT = new Map([
   ['gpt-5.6-luna', { upstreamModelId: 'gpt-5.6-luna', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
   ['gpt-5.6-sol', { upstreamModelId: 'gpt-5.6-sol', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
+  ['gpt-6-astra', { upstreamModelId: 'gpt-6-astra', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
   ['deepseek', { upstreamModelId: 'deepseek-v4-flash', apiMode: 'chat-completions', provider: 'e-mate-enterprise-deepseek', credentialRef: MODEL_SESSION_REF }],
   ['doubao-seed-2-0-pro-260215', {
     upstreamModelId: 'doubao-seed-2-0-pro-260215',
@@ -765,6 +767,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         body: JSON.stringify({
           clientId,
           refreshToken: value.session.refreshToken,
+          clientVersion: '2.0.18',
           refreshRequestId: `refresh-v1-${createHash('sha256')
             .update('e-mate-refresh-request-v1\0', 'utf8')
             .update(value.session.refreshToken, 'utf8')
@@ -953,6 +956,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           clientId,
           organization,
           user: input.identifier,
+          clientVersion: '2.0.18',
           password: input.password,
         }),
       }, 'login'), modelRoot)

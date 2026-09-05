@@ -10,6 +10,7 @@ export const MODEL_POLICY_CHANNEL = '/emate.modelPolicy'
 const CHAT_MODELS = new Map([
   ['gpt-5.6-luna', { reasoning_effort: 'max' }],
   ['gpt-5.6-sol', { reasoning_effort: 'medium' }],
+  ['gpt-6-astra', { reasoning_effort: 'medium' }],
   ['deepseek', { reasoning_effort: 'max' }],
   ['doubao-seed-2-0-pro-260215', { reasoning_effort: 'medium' }],
 ])
@@ -440,6 +441,7 @@ function modelUnavailable(request, provider, model, message = `Model "${model}" 
 const RUNTIME_REASONING = new Map([
   ['gpt-5.6-luna', { max: 'high' }],
   ['gpt-5.6-sol', { medium: 'medium' }],
+  ['gpt-6-astra', { medium: 'medium' }],
   ['deepseek', { max: 'max' }],
   ['doubao-seed-2-0-pro-260215', { medium: 'medium' }],
 ])

@@ -154,6 +154,7 @@ test('remembered lease load is retryable and refresh retries reuse one opaque re
   const provider = createEnterpriseIdentityProvider(options(credentials, async (input, init) => {
     assert.equal(new URL(input).pathname.endsWith('/v1/auth/refresh'), true)
     const body = JSON.parse(String(init.body))
+    assert.equal(body.clientVersion, '2.0.18')
     refreshIds.push(body.refreshRequestId)
     refreshAttempt += 1
     if (refreshAttempt === 1) {
@@ -731,6 +732,20 @@ test('client and enterprise identity image policies expose only gpt-image-2-pro 
   assert.deepEqual(identityPolicy.allowed_model_ids, ['gpt-5.6-luna', 'gpt-image-2-pro'])
   assert.deepEqual(identityPolicy.allowed_model_ids.filter(id => id.startsWith('gpt-image-')), ['gpt-image-2-pro'])
   assert.equal('image_fallback_upstream_model_id' in identityPolicy, false)
+})
+
+test('Astra runtime policy requires medium and retains the existing default preference', async () => {
+  const { validateModelPolicy } = await loadModelPolicySource()
+  const { policyFor } = await loadEnterpriseProviderSource()
+  const remembered = JSON.parse(stored())
+  remembered.session.modelGateway.allowedModelIds = ['gpt-6-astra', 'deepseek']
+  const astra = policyFor(remembered, [{ id: 'gpt-6-astra' }])
+  assert.equal(astra.default_chat_model_id, 'gpt-6-astra')
+  assert.equal(astra.default_chat_reasoning_effort, 'medium')
+  assert.equal(validateModelPolicy(astra, 'tenant-test:user-a', NOW).default_chat_model_id, 'gpt-6-astra')
+  assert.throws(() => validateModelPolicy({ ...astra, default_chat_reasoning_effort: 'high' }, 'tenant-test:user-a', NOW))
+  const mixed = policyFor(remembered, [{ id: 'gpt-6-astra' }, { id: 'deepseek' }])
+  assert.equal(mixed.default_chat_model_id, 'deepseek')
 })
 
 test('identity credential generation fences a late runtime projection without permanently dropping models', async () => {
