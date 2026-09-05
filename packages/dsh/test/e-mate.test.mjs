@@ -2560,6 +2560,18 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(requests.length, requestsBeforeConcurrency + 2)
     assert.deepEqual(requestScopes.slice(-2), [requestScopes.at(-1), requestScopes.at(-1)])
 
+    const beforeLongConcurrency = requests.length
+    const responsesBeforeLongConcurrency = remoteCounter
+    const longWaitStartedAt = Date.now()
+    queuedGatewayOutcomes.push(...Array.from({ length: 10 }, () => admission('TENANT_CONCURRENCY_LIMITED')))
+    const admittedAfterRelease = await imagegen.execute({ prompt: 'Admit after a slot releases ten seconds later.' }, execution())
+    assert.equal(requests.length, beforeLongConcurrency + 11)
+    assert.equal(remoteCounter, responsesBeforeLongConcurrency + 1)
+    assert(Date.now() - longWaitStartedAt >= 10_000)
+    assert.deepEqual(requestScopes.slice(-11), Array(11).fill(requestScopes.at(-1)))
+    assert.equal(new Set(requestRawBodies.slice(-11).map(bytes => bytes.toString('hex'))).size, 1)
+    assert.equal(admittedAfterRelease.receipt.billing_status, 'recorded')
+
     const assertGatewayFailure = async ({ prompt, outcomes, billing = 'unknown', status = billing === 'unknown' ? 'unknown' : 'failed' }) => {
       const before = requests.length
       queuedGatewayOutcomes.push(...outcomes)
@@ -2578,6 +2590,17 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       billing: 'not-submitted',
     })
     assert.equal(capped.failure_code, 'http-429')
+    const beforeBudget = requests.length
+    const responsesBeforeBudget = remoteCounter
+    const budgetStartedAt = Date.now()
+    queuedGatewayOutcomes.push(...Array.from({ length: 31 }, () => admission('TENANT_CONCURRENCY_LIMITED')))
+    const exhaustedExecution = execution()
+    await assert.rejects(imagegen.execute({ prompt: 'Bound continuous concurrency polling to thirty seconds.' }, exhaustedExecution), /receipt status failed/u)
+    assert(requests.length > beforeBudget + 3 && requests.length <= beforeBudget + 31)
+    assert(Date.now() - budgetStartedAt >= 29_000)
+    assert.equal(remoteCounter, responsesBeforeBudget)
+    assert.equal(terminalReceipt(agent, exhaustedExecution.callId).billing_status, 'not-submitted')
+    queuedGatewayOutcomes.length = 0
     await assertGatewayFailure({
       prompt: 'Do not wait beyond the total admission deadline.',
       outcomes: [admission('TENANT_CONCURRENCY_LIMITED', 31_000)],
@@ -2586,7 +2609,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
 
     const abortWaitController = new AbortController()
     const beforeAbortWait = requests.length
-    queuedGatewayOutcomes.push(admission('TENANT_REQUEST_RATE_LIMITED', 1_000))
+    queuedGatewayOutcomes.push(admission('TENANT_CONCURRENCY_LIMITED', 1_000))
     const abortWaitExecution = { ...execution(), signal: abortWaitController.signal }
     const abortWait = imagegen.execute({ prompt: 'Abort during typed admission wait.' }, abortWaitExecution)
     await waitFor(() => requests.length === beforeAbortWait + 1 ? true : undefined, 'typed admission wait did not begin')

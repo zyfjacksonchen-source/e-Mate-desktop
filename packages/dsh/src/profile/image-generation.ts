@@ -75,7 +75,8 @@ const MAX_PACK_IMAGES = 100
 const MAX_PACK_BYTES = 100 * 1024 * 1024
 const IMAGE_TIMEOUT_MS = 610_000
 // Admission retries are deliberately local, fixed, and well inside the owning Tool timeout.
-const IMAGE_ADMISSION_MAX_ATTEMPTS = 3
+const IMAGE_ADMISSION_MAX_ATTEMPTS = 31
+const IMAGE_RATE_ADMISSION_MAX_ATTEMPTS = 3
 const IMAGE_ADMISSION_WAIT_BUDGET_MS = 30_000
 const MAX_ADMISSION_ERROR_BYTES = 16 * 1024
 const MIN_GATEWAY_RETRY_AFTER_MS = 1_000
@@ -982,8 +983,11 @@ function createImageClient({ request, root, attachments }) {
       }
       const error = admission.error
       const remaining = IMAGE_ADMISSION_WAIT_BUDGET_MS - (Date.now() - startedAt)
-      if (!error.retryable || attempt === IMAGE_ADMISSION_MAX_ATTEMPTS || error.retryAfterMs > remaining) throw error
+      const maximumAttempts = error.code === 'TENANT_CONCURRENCY_LIMITED'
+        ? IMAGE_ADMISSION_MAX_ATTEMPTS : IMAGE_RATE_ADMISSION_MAX_ATTEMPTS
+      if (!error.retryable || attempt >= maximumAttempts || error.retryAfterMs > remaining) throw error
       await wait(error.retryAfterMs, undefined, { signal })
+      if (Date.now() - startedAt >= IMAGE_ADMISSION_WAIT_BUDGET_MS) throw error
     }
     if (!exactKeys(value, ['id', 'data', 'usage']) || typeof value.id !== 'string' || !IDENTIFIER.test(value.id)
       || !Array.isArray(value.data) || value.data.length !== 1 || !isRecord(value.usage)) {

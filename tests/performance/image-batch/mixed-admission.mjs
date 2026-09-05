@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import assert from 'node:assert/strict'
 import { InMemoryUsageStore, InvocationAdmissionError } from '../../../enterprise/apps/model-gateway/src/server.ts'
 import { normalizeImageBatchRequest } from '../../../packages/dsh/src/profile/image-batch.ts'
 
@@ -15,7 +16,7 @@ export async function measureMixedAdmission() {
   }
   const waitBudgetMs = bound('IMAGE_ADMISSION_WAIT_BUDGET_MS')
   const maximumAttempts = bound('IMAGE_ADMISSION_MAX_ATTEMPTS')
-  const fact = id => ({ tenantId: 'fixture-tenant', userId: 'fixture-user', taskId: id, traceId: id,
+  const fact = (id, imageTraffic = 'batch') => ({ tenantId: 'fixture-tenant', userId: 'fixture-user', taskId: id, traceId: id, imageTraffic,
     modelId: 'gpt-image-2-pro', providerId: 'fixture-provider', requestDigest: 'd'.repeat(43), routeFingerprint: 'f'.repeat(43) })
   const defaultConcurrency = normalizeImageBatchRequest({ tasks: [{ prompt: 'one' }, { prompt: 'two' }] }).concurrency
   const measure = async concurrency => {
@@ -23,20 +24,25 @@ export async function measureMixedAdmission() {
     const store = new InMemoryUsageStore({ tenantRequestsPerMinute: 1000, tenantBurst: 1000, tenantMaxConcurrent: 4, invocationLeaseMs: 600_000 }, () => clock)
     const prepared = []
     for (let index = 0; index < concurrency; index += 1) prepared.push(await store.prepare(fact(`batch-${index}`)))
-    const admitSingle = async () => {
-      try { return { status: (await store.prepare(fact('direct-single'))).status, retry_after_ms: null } }
+    const admit = async value => {
+      try { return { status: (await store.prepare(value)).status, retry_after_ms: null } }
       catch (error) {
         if (!(error instanceof InvocationAdmissionError)) throw error
         return { status: error.code, retry_after_ms: error.retryAfterMs }
       }
     }
-    const first = await admitSingle()
+    const first = await admit(fact('direct-single', 'single'))
     clock = 10_000
     await store.complete(prepared[0].invocationId, { ...fact('batch-0'), providerResponseId: 'fixture-result',
       inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 })
-    const refill = await store.prepare(fact('batch-refill'))
-    const afterRefill = await admitSingle()
+    const refill = await admit(fact('batch-refill'))
+    const afterRefill = await admit(fact('direct-single', 'single'))
+    assert.equal(first.status, concurrency === 4 ? 'TENANT_CONCURRENCY_LIMITED' : 'STARTED')
+    assert.equal(refill.status, concurrency === 4 ? 'TENANT_CONCURRENCY_LIMITED' : 'STARTED')
+    assert.equal(afterRefill.status, concurrency === 4 ? 'STARTED' : 'PENDING')
+    assert(first.retry_after_ms === null || first.retry_after_ms * (maximumAttempts - 1) >= waitBudgetMs)
     return { batch_concurrency: concurrency, first_single: first, batch_refill: refill.status, single_after_refill: afterRefill,
+      slot_released_at_ms: clock,
       first_hint_exceeds_local_wait_budget: first.retry_after_ms !== null && first.retry_after_ms > waitBudgetMs }
   }
   return { ticket: 'EM218-502', claim: 'local-in-memory-admission-diagnostic-not-provider-not-production-not-fairness-acceptance',

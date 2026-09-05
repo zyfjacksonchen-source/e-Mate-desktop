@@ -9,6 +9,8 @@ import {
 import { TASK_SCENARIOS } from '@e-mate/monitoring-contract';
 import {
   InvocationAdmissionError,
+  IMAGE_ADMISSION_RETRY_MS,
+  IMAGE_SINGLE_WAIT_TTL_MS,
   InvocationRequestConflictError,
   AuditTaskConflictError,
   AuditUsageConflictError,
@@ -111,6 +113,7 @@ type TaskAuditFactRow = {
 type QuotaRow = {
   tokens: string;
   last_refill_at: Date;
+  single_image_wait_until: Date | null;
 };
 
 type LockedQuota = QuotaRow & { database_now: Date };
@@ -155,6 +158,9 @@ function validateInvocation(value: InvocationFact): InvocationFact {
   if (!/^[A-Za-z0-9_-]{43}$/.test(value.requestDigest) || !/^[A-Za-z0-9_-]{43}$/.test(value.routeFingerprint)) {
     throw new Error('Invalid request digest');
   }
+  if (value.imageTraffic !== undefined && value.imageTraffic !== 'single' && value.imageTraffic !== 'batch') {
+    throw new Error('Invalid image traffic');
+  }
   return {
     tenantId: identifier(value.tenantId, 'tenant id'),
     userId: identifier(value.userId, 'user id'),
@@ -164,6 +170,7 @@ function validateInvocation(value: InvocationFact): InvocationFact {
     providerId: identifier(value.providerId, 'provider id'),
     requestDigest: value.requestDigest,
     routeFingerprint: value.routeFingerprint,
+    ...(value.imageTraffic === undefined ? {} : { imageTraffic: value.imageTraffic }),
   };
 }
 
@@ -363,7 +370,7 @@ export class PostgresUsageStore implements UsageStore {
     );
     const result = await client.query<QuotaRow>(
       `
-      SELECT tokens, last_refill_at
+      SELECT tokens, last_refill_at, single_image_wait_until
         FROM e_mate_model_quota_state
        WHERE tenant_id = $1
        FOR UPDATE
@@ -504,6 +511,8 @@ export class PostgresUsageStore implements UsageStore {
         tokens numeric(30, 12) NOT NULL CHECK (tokens >= 0),
         last_refill_at timestamptz NOT NULL
       );
+      ALTER TABLE e_mate_model_quota_state
+        ADD COLUMN IF NOT EXISTS single_image_wait_until timestamptz;
       DO $$
       BEGIN
         IF NOT EXISTS (
@@ -652,6 +661,7 @@ export class PostgresUsageStore implements UsageStore {
   async prepare(value: InvocationFact): Promise<PreparedInvocation> {
     const fact = validateInvocation(value);
     const client = await this.#pool.connect();
+    let singleImageWaiting = false;
     try {
       await client.query('BEGIN');
       const quota = await this.#lockQuota(client, fact.tenantId);
@@ -815,11 +825,18 @@ export class PostgresUsageStore implements UsageStore {
         throw new Error('Invalid active invocation count');
       }
       if (activeCount >= this.#limits.tenantMaxConcurrent) {
+        singleImageWaiting = fact.imageTraffic === 'single';
         const earliest = active.rows[0]?.earliest_expiry?.getTime();
         throw new InvocationAdmissionError(
           'TENANT_CONCURRENCY_LIMITED',
-          typeof earliest === 'number' ? earliest - admissionNow.getTime() : this.#limits.invocationLeaseMs
+          fact.imageTraffic !== undefined ? IMAGE_ADMISSION_RETRY_MS
+            : typeof earliest === 'number' ? earliest - admissionNow.getTime() : this.#limits.invocationLeaseMs
         );
+      }
+      if (fact.imageTraffic === 'batch'
+        && (quota.single_image_wait_until?.getTime() ?? 0) > admissionNow.getTime()
+        && activeCount === this.#limits.tenantMaxConcurrent - 1) {
+        throw new InvocationAdmissionError('TENANT_CONCURRENCY_LIMITED', IMAGE_ADMISSION_RETRY_MS);
       }
       const elapsed = admissionNow.getTime() - quota.last_refill_at.getTime();
       const tokens = Math.min(
@@ -838,10 +855,14 @@ export class PostgresUsageStore implements UsageStore {
       await client.query(
         `
         UPDATE e_mate_model_quota_state
-           SET tokens = $2, last_refill_at = $3
+           SET tokens = $2, last_refill_at = $3,
+               single_image_wait_until = CASE
+                 WHEN $4 OR single_image_wait_until <= $3 THEN NULL
+                 ELSE single_image_wait_until
+               END
          WHERE tenant_id = $1
       `,
-        [fact.tenantId, tokens - 1, admissionNow]
+        [fact.tenantId, tokens - 1, admissionNow, fact.imageTraffic === 'single']
       );
       if (rejected.rows[0]) {
         await client.query(
@@ -894,6 +915,19 @@ export class PostgresUsageStore implements UsageStore {
       return { status: 'STARTED', invocationId };
     } catch (error) {
       await rollback(client);
+      if (singleImageWaiting) {
+        // The rejected prepare must leave no task journal or token debit. Publish only the
+        // bounded hint on the existing tenant quota row before returning the admission 429.
+        await client.query(
+          `UPDATE e_mate_model_quota_state
+              SET single_image_wait_until = CASE
+                WHEN single_image_wait_until > clock_timestamp() THEN single_image_wait_until
+                ELSE clock_timestamp() + ($2::double precision * interval '1 millisecond')
+              END
+            WHERE tenant_id = $1`,
+          [fact.tenantId, IMAGE_SINGLE_WAIT_TTL_MS]
+        );
+      }
       throw error;
     } finally {
       client.release();

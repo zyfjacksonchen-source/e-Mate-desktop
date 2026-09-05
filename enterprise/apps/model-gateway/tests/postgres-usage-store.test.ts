@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
+import { setTimeout as wait } from 'node:timers/promises';
+import { Pool } from 'pg';
+import {
+  InMemoryUsageStore, InvocationAdmissionError,
+  type InvocationFact, type UsageStore,
+} from '../src/server.ts';
 import {
   parseUsageActivityQuery,
   PostgresUsageStore,
@@ -101,4 +108,169 @@ test('reconciles an overlapping UTC activity range with the compatible weekly pr
   assert.equal(BigInt(activity.periodTotal), BigInt(weekly.totalTokens));
   assert.equal(statements.length, 2);
   assert.equal(statements.every(statement => statement.includes('e_mate_model_usage_attempt')), true);
+});
+
+const imageLimits = {
+  tenantRequestsPerMinute: 1_000, tenantBurst: 1_000,
+  tenantMaxConcurrent: 4, invocationLeaseMs: 600_000,
+};
+const imageFact = (taskId: string, imageTraffic: InvocationFact['imageTraffic'] = 'batch', tenantId = 'tenant-a'): InvocationFact => ({
+  tenantId, userId: 'user-a', taskId, traceId: taskId,
+  modelId: 'gpt-image-2-pro', providerId: 'image-provider',
+  requestDigest: 'd'.repeat(43), routeFingerprint: 'f'.repeat(43),
+  ...(imageTraffic === undefined ? {} : { imageTraffic }),
+});
+const imageUsage = (fact: InvocationFact) => ({
+  ...fact, providerResponseId: `result-${fact.taskId}`,
+  inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0,
+});
+const imagePrincipal = (tenantId = 'tenant-a') => ({ tenantId, userId: 'user-a', modelIds: ['gpt-image-2-pro'] });
+const concurrencyDenied = (operation: Promise<unknown>) => assert.rejects(operation, (error: unknown) => {
+  assert(error instanceof InvocationAdmissionError);
+  assert.equal(error.code, 'TENANT_CONCURRENCY_LIMITED');
+  assert.equal(error.retryAfterMs, 1_000);
+  return true;
+});
+
+async function mixedImageAdmission(store: UsageStore, releaseAfterTenSeconds: () => Promise<void>) {
+  // All four slots remain usable until a direct single actually waits.
+  const batch = await Promise.all(Array.from({ length: 4 }, (_, index) => store.prepare(imageFact(`full-${index}`))));
+  assert(batch.every(value => value.status === 'STARTED'));
+  await concurrencyDenied(store.prepare(imageFact('waiting-single', 'single')));
+  await concurrencyDenied(store.prepare(imageFact('waiting-single', 'single')));
+  // Accepted replays must not enter admission or consume more tokens.
+  assert.equal((await store.prepare(imageFact('full-1'))).status, 'PENDING');
+  const otherTenant = await Promise.all(Array.from({ length: 4 }, (_, index) => store.prepare(imageFact(`isolated-${index}`, 'batch', 'tenant-b'))));
+  assert(otherTenant.every(value => value.status === 'STARTED'));
+  await releaseAfterTenSeconds();
+  await store.complete(batch[0]!.invocationId, imageUsage(imageFact('full-0')));
+  await concurrencyDenied(store.prepare(imageFact('batch-refill')));
+  const single = await store.prepare(imageFact('waiting-single', 'single'));
+  assert.equal(single.status, 'STARTED');
+  assert.equal((await store.prepare(imageFact('waiting-single', 'single'))).status, 'PENDING');
+  await store.complete(single.invocationId, imageUsage(imageFact('waiting-single', 'single')));
+  await store.complete(single.invocationId, imageUsage(imageFact('waiting-single', 'single')));
+  assert.equal((await store.prepare(imageFact('waiting-single', 'single'))).status, 'RECORDED');
+  assert.equal((await store.currentAccountUsage(imagePrincipal())).totalTokens, 4);
+  assert.equal((await store.prepare(imageFact('batch-refill'))).status, 'STARTED', 'admitted single clears the hint');
+}
+
+test('in-memory image admission reserves only the last slot and expires cancelled waits without billing', async () => {
+  let now = 0;
+  const store = new InMemoryUsageStore(imageLimits, () => now);
+  await mixedImageAdmission(store, async () => { now = 10_000; });
+  await concurrencyDenied(store.prepare(imageFact('cancelled-single', 'single')));
+  assert.equal(await store.finalize(imagePrincipal(), 'cancelled-single'), null);
+  const full = await store.prepare(imageFact('full-1'));
+  await store.complete(full.invocationId, imageUsage(imageFact('full-1')));
+  now = 39_999;
+  await concurrencyDenied(store.prepare(imageFact('after-cancel')));
+  now = 40_000;
+  assert.equal((await store.prepare(imageFact('after-cancel'))).status, 'STARTED');
+  assert.equal((await store.currentAccountUsage(imagePrincipal())).totalTokens, 6);
+
+  await concurrencyDenied(store.prepare(imageFact('another-single', 'single')));
+  const another = await store.prepare(imageFact('full-2'));
+  await store.complete(another.invocationId, imageUsage(imageFact('full-2')));
+  const ordinary = { ...imageFact('ordinary'), modelId: 'gpt-5.6-sol' };
+  delete ordinary.imageTraffic;
+  assert.equal((await store.prepare(ordinary)).status, 'STARTED', 'ordinary model admission is unchanged');
+  await assert.rejects(store.prepare({ ...ordinary, taskId: 'ordinary-full', traceId: 'ordinary-full' }), (error: unknown) => {
+    assert(error instanceof InvocationAdmissionError);
+    assert.equal(error.retryAfterMs, 560_000);
+    return true;
+  });
+});
+
+test('image concurrency waiting does not bypass the in-memory request token bucket', async () => {
+  const store = new InMemoryUsageStore({ ...imageLimits, tenantBurst: 4, tenantRequestsPerMinute: 1 }, () => 0);
+  const full = await Promise.all(Array.from({ length: 4 }, (_, index) => store.prepare(imageFact(`rate-${index}`))));
+  await concurrencyDenied(store.prepare(imageFact('rate-single', 'single')));
+  await store.complete(full[0]!.invocationId, imageUsage(imageFact('rate-0')));
+  await assert.rejects(store.prepare(imageFact('rate-single', 'single')), (error: unknown) => {
+    assert(error instanceof InvocationAdmissionError);
+    assert.equal(error.code, 'TENANT_REQUEST_RATE_LIMITED');
+    assert.equal(error.retryAfterMs, 60_000);
+    return true;
+  });
+});
+
+test('a pending single still permits batch refill when more than one tenant slot is free', async () => {
+  const store = new InMemoryUsageStore(imageLimits, () => 0);
+  const facts = Array.from({ length: 4 }, (_, index) => imageFact(`slots-${index}`));
+  const full = await Promise.all(facts.map(fact => store.prepare(fact)));
+  await concurrencyDenied(store.prepare(imageFact('slots-single', 'single')));
+  for (const index of [0, 1]) await store.reject(imagePrincipal(), facts[index]!.taskId, full[index]!.invocationId);
+  assert.equal((await store.prepare(imageFact('slots-refill'))).status, 'STARTED');
+  await concurrencyDenied(store.prepare(imageFact('slots-last')));
+  assert.equal((await store.prepare(imageFact('slots-single', 'single'))).status, 'STARTED');
+});
+
+const imageDatabaseUrl = process.env.IMAGE_ADMISSION_TEST_DATABASE_URL;
+test('real Postgres image admission preserves rollback, fairness, TTL, isolation and exactly-once accounting', {
+  skip: imageDatabaseUrl === undefined ? 'requires the isolated image-admission PostgreSQL database' : false,
+}, async t => {
+  assert.equal(imageDatabaseUrl, 'postgresql://postgres@127.0.0.1:65432/emate218');
+  const schema = `ia_${randomUUID().replaceAll('-', '')}`;
+  const admin = new Pool({ connectionString: imageDatabaseUrl });
+  const pool = new Pool({ connectionString: imageDatabaseUrl, options: `-c search_path=${schema}`, max: 8 });
+  let schemaCreated = false;
+  try {
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    schemaCreated = true;
+    await pool.query(`CREATE TABLE e_mate_tenant_user (tenant_id text, user_id text, token_limit bigint)`);
+    await pool.query(`INSERT INTO e_mate_tenant_user VALUES ('tenant-a','user-a',NULL), ('tenant-b','user-a',NULL), ('tenant-rate','user-a',NULL)`);
+    const store = new PostgresUsageStore(pool, imageLimits);
+    await store.initialize();
+    await store.initialize(); // Existing installations and repeat initialization keep the quota row.
+    let firstHint: Date;
+    await mixedImageAdmission(store, async () => {
+      const rejected = await pool.query(`SELECT count(*) FROM e_mate_model_usage_task WHERE task_id = 'waiting-single'`);
+      assert.equal(rejected.rows[0].count, '0', 'denied prepare rolls back its task journal');
+      const quota = await pool.query(`SELECT tokens, single_image_wait_until, extract(epoch FROM (single_image_wait_until - clock_timestamp())) AS remaining FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`);
+      firstHint = quota.rows[0].single_image_wait_until;
+      assert(Number(quota.rows[0].remaining) > 29 && Number(quota.rows[0].remaining) <= 30);
+      const tokensBefore = quota.rows[0].tokens;
+      await concurrencyDenied(store.prepare(imageFact('waiting-single', 'single')));
+      const unchanged = await pool.query(`SELECT tokens, single_image_wait_until FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`);
+      assert.equal(unchanged.rows[0].tokens, tokensBefore);
+      assert.equal(unchanged.rows[0].single_image_wait_until.getTime(), firstHint.getTime(), 'polling does not extend an active TTL');
+      await wait(10_000);
+    });
+    assert.equal((await pool.query(`SELECT single_image_wait_until FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`)).rows[0].single_image_wait_until, null);
+    await concurrencyDenied(store.prepare(imageFact('cancelled-single', 'single')));
+    assert.equal((await pool.query(`SELECT count(*) FROM e_mate_model_usage_task WHERE task_id = 'cancelled-single'`)).rows[0].count, '0');
+    const full = await store.prepare(imageFact('full-1'));
+    await store.complete(full.invocationId, imageUsage(imageFact('full-1')));
+    await concurrencyDenied(store.prepare(imageFact('after-cancel')));
+    // Advance only this isolated row's hint across expiry; the production clock stays database-owned.
+    await pool.query(`UPDATE e_mate_model_quota_state SET single_image_wait_until = clock_timestamp() - interval '1 millisecond' WHERE tenant_id = 'tenant-a'`);
+    assert.equal((await store.prepare(imageFact('after-cancel'))).status, 'STARTED');
+    assert.equal((await pool.query(`SELECT single_image_wait_until FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`)).rows[0].single_image_wait_until, null);
+    assert.equal((await store.currentAccountUsage(imagePrincipal())).totalTokens, 6);
+
+    const rateStore = new PostgresUsageStore(pool, { ...imageLimits, tenantBurst: 4, tenantRequestsPerMinute: 1 });
+    const rateFacts = Array.from({ length: 4 }, (_, index) => imageFact(`rate-${index}`, 'batch', 'tenant-rate'));
+    const fullRate = await Promise.all(rateFacts.map(fact => rateStore.prepare(fact)));
+    const singleRate = imageFact('rate-single', 'single', 'tenant-rate');
+    await concurrencyDenied(rateStore.prepare(singleRate));
+    await rateStore.complete(fullRate[0]!.invocationId, imageUsage(rateFacts[0]!));
+    await assert.rejects(rateStore.prepare(singleRate), (error: unknown) => {
+      assert(error instanceof InvocationAdmissionError);
+      assert.equal(error.code, 'TENANT_REQUEST_RATE_LIMITED');
+      assert(error.retryAfterMs > 50_000 && error.retryAfterMs <= 60_000);
+      return true;
+    });
+    await pool.query(`UPDATE e_mate_tenant_user SET token_limit = 0 WHERE tenant_id = 'tenant-rate'`);
+    await assert.rejects(rateStore.prepare(singleRate), (error: unknown) => {
+      assert(error instanceof InvocationAdmissionError);
+      assert.equal(error.code, 'USER_TOKEN_LIMIT_REACHED');
+      return true;
+    });
+    t.diagnostic(JSON.stringify({ schema, release_after_ms: 10_000, batch_refill: 'TENANT_CONCURRENCY_LIMITED', single: 'STARTED', rejected_task_rows: 0, billed_tokens_after_cancel: 6, provider_calls: 0 }));
+  } finally {
+    await pool.end();
+    if (schemaCreated) await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+    await admin.end();
+  }
 });

@@ -157,7 +157,11 @@ export type InvocationFact = Pick<
 > & {
   requestDigest: string;
   routeFingerprint: string;
+  imageTraffic?: 'single' | 'batch';
 };
+
+export const IMAGE_ADMISSION_RETRY_MS = 1_000;
+export const IMAGE_SINGLE_WAIT_TTL_MS = 30_000;
 
 export type PreparedInvocation = {
   status: 'STARTED' | 'PENDING' | 'RECORDED';
@@ -322,6 +326,7 @@ type InMemoryUsageEntry = {
 type InMemoryQuotaState = {
   tokens: number;
   lastRefillAt: number;
+  singleImageWaitUntil?: number;
 };
 
 export function validateInvocationLimits(value: InvocationLimits): InvocationLimits {
@@ -370,7 +375,8 @@ function normalizeInvocationFact(value: InvocationFact): InvocationFact {
     !identifierPattern.test(value.modelId) ||
     !identifierPattern.test(value.providerId) ||
     !/^[A-Za-z0-9_-]{43}$/.test(value.requestDigest) ||
-    !/^[A-Za-z0-9_-]{43}$/.test(value.routeFingerprint)
+    !/^[A-Za-z0-9_-]{43}$/.test(value.routeFingerprint) ||
+    (value.imageTraffic !== undefined && value.imageTraffic !== 'single' && value.imageTraffic !== 'batch')
   ) {
     throw new Error('Invalid invocation fact');
   }
@@ -514,7 +520,7 @@ export class InMemoryUsageStore implements UsageStore {
       : undefined;
     const invocationId = rejected?.[0] ?? randomUUID();
     const now = this.#tenantNow(fact.tenantId);
-    const quota = this.#quota.get(fact.tenantId) ?? {
+    const quota: InMemoryQuotaState = this.#quota.get(fact.tenantId) ?? {
       tokens: this.#limits.tenantBurst,
       lastRefillAt: now,
     };
@@ -524,6 +530,9 @@ export class InMemoryUsageStore implements UsageStore {
       quota.tokens + (elapsed * this.#limits.tenantRequestsPerMinute) / 60_000
     );
     quota.lastRefillAt = now;
+    if (quota.singleImageWaitUntil !== undefined && quota.singleImageWaitUntil <= now) {
+      delete quota.singleImageWaitUntil;
+    }
     const active = [...this.#facts.values()].reduce(
       (total, current) =>
         current.scope.tenantId !== fact.tenantId
@@ -536,6 +545,13 @@ export class InMemoryUsageStore implements UsageStore {
       0
     );
     if (active >= this.#limits.tenantMaxConcurrent) {
+      if (fact.imageTraffic === 'single') {
+        quota.singleImageWaitUntil ??= now + IMAGE_SINGLE_WAIT_TTL_MS;
+        this.#quota.set(fact.tenantId, quota);
+      }
+      if (fact.imageTraffic !== undefined) {
+        throw new InvocationAdmissionError('TENANT_CONCURRENCY_LIMITED', IMAGE_ADMISSION_RETRY_MS);
+      }
       const earliest = Math.min(
         ...[...this.#facts.values()].flatMap((current) =>
           current.scope.tenantId !== fact.tenantId
@@ -550,6 +566,10 @@ export class InMemoryUsageStore implements UsageStore {
       );
       throw new InvocationAdmissionError('TENANT_CONCURRENCY_LIMITED', earliest - now);
     }
+    if (fact.imageTraffic === 'batch' && quota.singleImageWaitUntil !== undefined
+      && active === this.#limits.tenantMaxConcurrent - 1) {
+      throw new InvocationAdmissionError('TENANT_CONCURRENCY_LIMITED', IMAGE_ADMISSION_RETRY_MS);
+    }
     if (quota.tokens < 1) {
       throw new InvocationAdmissionError(
         'TENANT_REQUEST_RATE_LIMITED',
@@ -557,6 +577,7 @@ export class InMemoryUsageStore implements UsageStore {
       );
     }
     quota.tokens -= 1;
+    if (fact.imageTraffic === 'single') delete quota.singleImageWaitUntil;
     this.#quota.set(fact.tenantId, quota);
     if (!entry) {
       entry = {
@@ -2686,6 +2707,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           providerId: route.providerId,
           requestDigest: requestDigest.digest('base64url'),
           routeFingerprint,
+          imageTraffic: correlation.batch_id === undefined ? 'single' : 'batch',
         };
         let prepared: PreparedInvocation;
         try {
