@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { canonicalAllocationBytes, projectManifest, protocolConstants, validateAndAnalyzeStudy, validateManifest } from './noninferiority-protocol.mjs'
+import { canonicalAllocationBytes, createOpenManifest, projectManifest, protocolConstants, validateAndAnalyzeStudy, validateManifest } from './noninferiority-protocol.mjs'
 
 const MANIFEST_URL = new URL('../../../docs/2.0.17/evidence-manifests/quality.json', import.meta.url)
 const hex = value => createHash('sha256').update(value).digest('hex')
@@ -240,4 +240,28 @@ test('manifest rejects partial OPEN and incomplete or threshold-missing PASS pro
     value => { value.result.protocol_checks.matched_blind_evaluators = false },
     value => { value.result.protocol_checks.scores_complete_and_finite = false },
   ]) { const value = clone(complete); mutate(value); assert.throws(() => validateManifest(value, encoded.raw)) }
+})
+
+
+test('2.0.18 accepts 30 balanced pairs across six categories and cannot relabel historical evidence', () => {
+  const value = study({ count: 30 })
+  value.provenance.version = '2.0.18'
+  value.protocol.minimum_pairs = 30
+  // Five pairs per category need opposite extra-side allocation in alternate categories.
+  for (const pair of value.pairs) if (categories.indexOf(pair.category) % 2 === 1) {
+    const previous = pair.allocation.A
+    pair.allocation.A = pair.allocation.B; pair.allocation.B = previous
+  }
+  sealAllocations(value)
+  const { raw, descriptor } = evidence(value)
+  const pass = projectManifest(createOpenManifest(), raw, descriptor)
+  assert.equal(pass.ticket, 'EM218-503')
+  assert.equal(pass.result.pair_count, 30)
+  assert.equal(pass.result.overall.mean, 0)
+  assert.equal(pass.result.overall.ci95.lower, 0)
+  const old = evidence(study())
+  assert.equal(validateAndAnalyzeStudy(old.raw, old.descriptor).provenance.version, '2.0.17')
+  assert.throws(() => projectManifest(createOpenManifest(), old.raw, old.descriptor), /release identities differ/u)
+  const mislabeled = structuredClone(value); mislabeled.provenance.version = '2.0.17'
+  assert.throws(() => analyze(mislabeled), /pair bounds/u)
 })

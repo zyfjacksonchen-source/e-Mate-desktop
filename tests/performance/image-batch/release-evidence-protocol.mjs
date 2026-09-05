@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto'
 
-export const TICKET = 'EM217-502'
+import { RELEASE_VERSION, ticketFor, versionFor } from './release-identity.mjs'
+export { RELEASE_VERSION }
+export const TICKET = ticketFor(RELEASE_VERSION, '502')
 export const CLAIM = 'image-batch-release-performance-v1'
 export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
 export const DESKTOP_REFERENCE = '6074088f5b660206e404b3591fab51fb99c69add'
 export const BOOTSTRAP_RESAMPLES = 10_000
+// Retain the statistical protocol seed across releases so old percentile evidence is reproducible.
 const BOOTSTRAP_SEED = 'EM217-502-deterministic-bootstrap-percentile-v1'
 const BOOTSTRAP_SEED_SHA256 = sha256(BOOTSTRAP_SEED)
 const MAX_RAW_BYTES = 4 * 1024 * 1024
@@ -13,7 +16,7 @@ const COMMIT = /^[0-9a-f]{40}$/u
 const LEGAL_TERMINALS = ['completed', 'failed', 'cancelled', 'unknown', 'interrupted']
 const LAYERS = ['local-test-provider', 'staging-provider', 'production-provider', 'macos-gui']
 
-export const GATE_SPECS = Object.freeze({
+const LEGACY_GATE_SPECS = Object.freeze({
   ui_first_visible_p50_seconds: ['max', 75],
   ui_first_visible_p95_seconds: ['max', 120],
   relative_same_round_direct_single_p95_seconds: ['max', 10],
@@ -27,7 +30,11 @@ export const GATE_SPECS = Object.freeze({
   successful_image_retention_rate: ['exact', 1],
 })
 
-function fail(message) { throw new Error(`EM217-502 evidence invalid: ${message}`) }
+export const GATE_SPECS = Object.freeze({ ...LEGACY_GATE_SPECS, effective_image_success_rate: ['min-point', 0.95], duplicate_provider_billing: ['exact', 0] })
+const gateSpecs = ticket => versionFor(ticket, '502') === RELEASE_VERSION ? GATE_SPECS : LEGACY_GATE_SPECS
+const evidenceTicket = value => ticketFor(value.provenance.version, '502')
+
+function fail(message) { throw new Error(`image-batch evidence invalid: ${message}`) }
 function require(condition, message) { if (!condition) fail(message) }
 function record(value, label) {
   require(value !== null && typeof value === 'object' && !Array.isArray(value), `${label} must be an object`)
@@ -92,7 +99,7 @@ function provenance(value, label) {
   commit(value.emate_commit, `${label}.emate_commit`)
   require(value.harness_commit === HARNESS_COMMIT, `${label}.harness_commit changed`)
   require(value.desktop_reference === DESKTOP_REFERENCE, `${label}.desktop_reference changed`)
-  require(value.version === '2.0.17', `${label}.version changed`)
+  ticketFor(value.version, '502')
   return value
 }
 
@@ -110,7 +117,7 @@ function validateLocal(value, expectedProvenance) {
   timestamp(value.measured_at, 'local.measured_at')
   require(value.source_state === 'CLEAN', 'local source evidence requires a clean committed tree')
   const report = value
-  require(report.schema_version === 2 && report.ticket === TICKET, 'local report identity mismatch')
+  require(report.schema_version === 2 && report.ticket === evidenceTicket(report), 'local report identity mismatch')
   require(report.claim === 'local-source-only-not-provider-latency-not-ui-first-visible-not-direct-single-image-evidence', 'local report claim mismatch')
   integer(report.batches, 'local.report.batches', 100); integer(report.tasks, 'local.report.tasks', report.batches * 4)
   integer(report.fully_successful_batches, 'local.report.fully_successful_batches')
@@ -140,7 +147,7 @@ function validateLocal(value, expectedProvenance) {
 
 export function validateProviderLayerEvidence(value, layer, expectedProvenance) {
   exactKeys(value, ['schema_version', 'ticket', 'claim', 'environment', 'provenance', 'measured_at', 'fixed_set_sha256', 'runs', 'typed_429_retry_probe'], layer)
-  require(value.schema_version === 1 && value.ticket === TICKET && value.claim === 'real-provider-gateway-layer-v1', `${layer} identity mismatch`)
+  require(value.schema_version === 1 && value.ticket === evidenceTicket(value) && value.claim === 'real-provider-gateway-layer-v1', `${layer} identity mismatch`)
   environment(value.environment, `${layer}-provider`, `${layer}.environment`)
   provenance(value.provenance, `${layer}.provenance`); same(value.provenance, expectedProvenance, `${layer} provenance`)
   timestamp(value.measured_at, `${layer}.measured_at`)
@@ -173,7 +180,7 @@ export function validateProviderLayerEvidence(value, layer, expectedProvenance) 
 
 export function validateGuiEvidence(value, expectedProvenance) {
   exactKeys(value, ['schema_version', 'ticket', 'claim', 'environment', 'provenance', 'measured_at', 'fixed_set_sha256', 'batches'], 'macos_gui')
-  require(value.schema_version === 1 && value.ticket === TICKET && value.claim === 'macos-gui-image-batch-performance-v1', 'macos GUI identity mismatch')
+  require(value.schema_version === 1 && value.ticket === evidenceTicket(value) && value.claim === 'macos-gui-image-batch-performance-v1', 'macos GUI identity mismatch')
   environment(value.environment, 'macos-gui', 'macos_gui.environment')
   provenance(value.provenance, 'macos_gui.provenance'); same(value.provenance, expectedProvenance, 'macos GUI provenance')
   timestamp(value.measured_at, 'macos_gui.measured_at')
@@ -182,7 +189,7 @@ export function validateGuiEvidence(value, expectedProvenance) {
   const counts = { 4: 0, 5: 0, 8: 0 }
   const seen = new Set()
   for (const batch of value.batches) {
-    exactKeys(batch, ['sample', 'task_count', 'first_visible_ms', 'all_terminal_ms', 'direct_single_ms', 'terminal_counts', 'successful_images', 'retained_successful_images', 'provider_submission_counts'], 'macos GUI batch')
+    exactKeys(batch, ['sample', 'task_count', 'first_visible_ms', 'all_terminal_ms', 'direct_single_ms', 'terminal_counts', 'successful_images', 'retained_successful_images', 'provider_submission_counts', ...(value.provenance.version === RELEASE_VERSION ? ['provider_billing_counts'] : [])], 'macos GUI batch')
     integer(batch.sample, 'macos GUI sample', 1); require(!seen.has(batch.sample), 'macos GUI sample IDs must be unique'); seen.add(batch.sample)
     require([4, 5, 8].includes(batch.task_count), 'macos GUI task_count must be 4, 5, or 8'); counts[batch.task_count] += 1
     for (const key of ['first_visible_ms', 'all_terminal_ms', 'direct_single_ms']) finite(batch[key], `macos GUI ${key}`)
@@ -196,6 +203,13 @@ export function validateGuiEvidence(value, expectedProvenance) {
     require(batch.retained_successful_images <= batch.successful_images, 'macos GUI retained count exceeds successes')
     require(Array.isArray(batch.provider_submission_counts) && batch.provider_submission_counts.length === batch.task_count, 'macos GUI provider submission counts mismatch')
     batch.provider_submission_counts.forEach((count, index) => integer(count, `macos GUI provider_submission_counts[${index}]`))
+    if (value.provenance.version === RELEASE_VERSION) {
+      require(Array.isArray(batch.provider_billing_counts) && batch.provider_billing_counts.length === batch.task_count, 'macos GUI provider billing counts mismatch')
+      batch.provider_billing_counts.forEach((count, index) => {
+        integer(count, `macos GUI provider_billing_counts[${index}]`)
+        require(count <= 1, 'duplicate provider billing observed')
+      })
+    }
     require(batch.provider_submission_counts.reduce((sum, count) => sum + count, 0) >= batch.successful_images, 'macos GUI successful tasks require observed provider submissions')
   }
   require(counts[4] >= 20 && counts[5] >= 20 && counts[8] >= 1, 'macos GUI needs >=20 four-image, >=20 five-image, and >=1 eight-image batches')
@@ -209,7 +223,7 @@ export function validateRawEvidence(raw, descriptor) {
   let value
   try { value = JSON.parse(exact.text) } catch { fail('raw evidence is not JSON') }
   exactKeys(value, ['schema_version', 'ticket', 'claim', 'protocol', 'provenance', 'local', 'staging', 'production', 'macos_gui'], 'raw evidence')
-  require(value.schema_version === 1 && value.ticket === TICKET && value.claim === CLAIM, 'raw evidence identity mismatch')
+  require(value.schema_version === 1 && value.ticket === evidenceTicket(value) && value.claim === CLAIM, 'raw evidence identity mismatch')
   exactKeys(value.protocol, ['percentile', 'percentile_ci', 'bootstrap_resamples', 'bootstrap_seed_sha256', 'legal_terminal_ci', 'minimum_fixed_set_batches', 'minimum_per_sized_batch', 'confidence'], 'protocol')
   same(value.protocol, {
     percentile: 'nearest-rank', percentile_ci: 'deterministic-bootstrap-percentile-v1', bootstrap_resamples: BOOTSTRAP_RESAMPLES,
@@ -279,9 +293,10 @@ function summarizeRaw(value) {
     totals.total += Object.values(batch.terminal_counts).reduce((sum, count) => sum + count, 0)
     totals.successful += batch.successful_images
     totals.retained += batch.retained_successful_images
+    totals.billingDuplicates += (batch.provider_billing_counts ?? []).reduce((sum, count) => sum + Math.max(0, count - 1), 0)
     totals.duplicates += batch.provider_submission_counts.reduce((sum, count) => sum + Math.max(0, count - 1), 0)
     return totals
-  }, { legal: 0, total: 0, successful: 0, retained: 0, duplicates: 0 })
+  }, { legal: 0, total: 0, successful: 0, retained: 0, duplicates: 0, billingDuplicates: 0 })
   require(terminal.successful > 0, 'macOS GUI has no successful image')
   const gates = {
     ui_first_visible_p50_seconds: bootstrapQuantile(first, 0.5, 'ui-first-p50'),
@@ -294,15 +309,17 @@ function summarizeRaw(value) {
     typed_429_retry_probe_pass: { value: 1, ci95: { lower: 1, upper: 1 } },
     duplicate_provider_generation: { value: terminal.duplicates, ci95: { lower: terminal.duplicates, upper: terminal.duplicates } },
     legal_terminal_rate: wilson(terminal.legal, terminal.total),
+    ...(value.provenance.version === RELEASE_VERSION ? { effective_image_success_rate: wilson(terminal.successful, terminal.total), duplicate_provider_billing: { value: terminal.billingDuplicates, ci95: { lower: terminal.billingDuplicates, upper: terminal.billingDuplicates } } } : {}),
     successful_image_retention_rate: {
       value: terminal.retained / terminal.successful,
       ci95: { lower: terminal.retained / terminal.successful, upper: terminal.retained / terminal.successful },
     },
   }
-  for (const [name, [comparison, threshold]] of Object.entries(GATE_SPECS)) {
+  for (const [name, [comparison, threshold]] of Object.entries(gateSpecs(value.ticket))) {
     const gate = gates[name]
     require(comparison === 'max' ? gate.ci95.upper <= threshold
-      : comparison === 'min' ? gate.ci95.lower >= threshold
+      : comparison === 'min-point' ? gate.value >= threshold
+        : comparison === 'min' ? gate.ci95.lower >= threshold
         : gate.value === threshold && gate.ci95.lower === threshold && gate.ci95.upper === threshold,
     `${name} failed its release threshold`)
   }
@@ -311,14 +328,14 @@ function summarizeRaw(value) {
 
 function openManifest(value) {
   exactKeys(value, ['schema_version', 'ticket', 'claim', 'release_gate', 'local', 'staging', 'production', 'external_raw_evidence', 'macos_gui_first_visible', 'release_evidence'], 'manifest')
-  require(value.schema_version === 2 && value.ticket === TICKET && value.claim === CLAIM, 'manifest identity mismatch')
+  require(value.schema_version === 2 && versionFor(value.ticket, '502') && value.claim === CLAIM, 'manifest identity mismatch')
   require(value.release_gate === 'OPEN', 'projection requires an OPEN manifest')
   for (const name of ['local', 'staging', 'production', 'macos_gui_first_visible']) {
     same(value[name], { status: 'OPEN', environment: null, result: null, raw_evidence: { uri: null, sha256: null } }, `${name} OPEN state`)
   }
   same(value.external_raw_evidence, { status: 'OPEN', uri: null, sha256: null }, 'external raw OPEN state')
-  require(Object.keys(value.release_evidence).sort().join('|') === Object.keys(GATE_SPECS).sort().join('|'), 'manifest gate keys mismatch')
-  for (const [name, [comparison, threshold]] of Object.entries(GATE_SPECS)) {
+  require(Object.keys(value.release_evidence).sort().join('|') === Object.keys(gateSpecs(value.ticket)).sort().join('|'), 'manifest gate keys mismatch')
+  for (const [name, [comparison, threshold]] of Object.entries(gateSpecs(value.ticket))) {
     same(value.release_evidence[name], { comparison, threshold, status: 'OPEN', value: null, ci95: null, raw_evidence: { uri: null, sha256: null } }, `${name} OPEN state`)
   }
   scanSensitive(value)
@@ -326,6 +343,7 @@ function openManifest(value) {
 }
 
 function expectedPass(open, value, descriptor) {
+  require(open.ticket === value.ticket, 'manifest and raw evidence release identities differ')
   const gates = summarizeRaw(value)
   const entry = (environmentLabel, sampleCount, measuredAt) => ({
     status: 'PASS', environment: environmentLabel,
@@ -339,7 +357,7 @@ function expectedPass(open, value, descriptor) {
     production: entry('production-provider', value.production.runs.length, value.production.measured_at),
     external_raw_evidence: { status: 'PASS', ...descriptor },
     macos_gui_first_visible: entry('macos-gui-production', value.macos_gui.batches.length, value.macos_gui.measured_at),
-    release_evidence: Object.fromEntries(Object.entries(GATE_SPECS).map(([name, [comparison, threshold]]) => [name, {
+    release_evidence: Object.fromEntries(Object.entries(gateSpecs(value.ticket)).map(([name, [comparison, threshold]]) => [name, {
       comparison, threshold, status: 'PASS', value: gates[name].value, ci95: gates[name].ci95, raw_evidence: { ...descriptor },
     }])),
   }
@@ -362,7 +380,7 @@ export function validateManifest(manifest, raw) {
   open.release_gate = 'OPEN'
   for (const name of ['local', 'staging', 'production', 'macos_gui_first_visible']) open[name] = { status: 'OPEN', environment: null, result: null, raw_evidence: { uri: null, sha256: null } }
   open.external_raw_evidence = { status: 'OPEN', uri: null, sha256: null }
-  for (const [name, [comparison, threshold]] of Object.entries(GATE_SPECS)) open.release_evidence[name] = { comparison, threshold, status: 'OPEN', value: null, ci95: null, raw_evidence: { uri: null, sha256: null } }
+  for (const [name, [comparison, threshold]] of Object.entries(gateSpecs(manifest.ticket))) open.release_evidence[name] = { comparison, threshold, status: 'OPEN', value: null, ci95: null, raw_evidence: { uri: null, sha256: null } }
   openManifest(open)
   same(manifest, expectedPass(open, value, descriptor), 'PASS manifest projection')
   scanSensitive(manifest)
@@ -372,3 +390,13 @@ export function validateManifest(manifest, raw) {
 export const protocolConstants = Object.freeze({
   BOOTSTRAP_SEED_SHA256, LAYERS, LEGAL_TERMINALS, MAX_RAW_BYTES,
 })
+
+export function createOpenManifest() {
+  const empty = () => ({ status: 'OPEN', environment: null, result: null, raw_evidence: { uri: null, sha256: null } })
+  return openManifest({ schema_version: 2, ticket: TICKET, claim: CLAIM, release_gate: 'OPEN',
+    local: empty(), staging: empty(), production: empty(), macos_gui_first_visible: empty(),
+    external_raw_evidence: { status: 'OPEN', uri: null, sha256: null },
+    release_evidence: Object.fromEntries(Object.entries(GATE_SPECS).map(([name, [comparison, threshold]]) => [name,
+      { comparison, threshold, status: 'OPEN', value: null, ci95: null, raw_evidence: { uri: null, sha256: null } }])),
+  })
+}

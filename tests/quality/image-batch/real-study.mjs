@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { RELEASE_VERSION, ticketFor, minimumQualityPairs } from '../../performance/image-batch/release-identity.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -6,7 +7,7 @@ import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   DESKTOP_REFERENCE, HARNESS_COMMIT, applicableDimensions, canonicalAllocationBytes, projectManifest,
-  protocolConstants, validateAndAnalyzeStudy,
+  protocolConstants, validateAndAnalyzeStudy, createOpenManifest,
 } from './noninferiority-protocol.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
@@ -15,7 +16,7 @@ const SHA256 = /^[0-9a-f]{64}$/u
 const CATEGORIES = protocolConstants.CATEGORIES
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 const sha256 = value => createHash('sha256').update(value).digest('hex')
-const fail = message => { throw new Error(`EM217-503 real study: ${message}`) }
+const fail = message => { throw new Error(`EM218-503 real study: ${message}`) }
 const requireValue = (condition, message) => { if (!condition) fail(message) }
 const exactKeys = (value, keys, label) => {
   requireValue(value && typeof value === 'object' && !Array.isArray(value), `${label} must be an object`)
@@ -47,7 +48,7 @@ function sourceContext(env = process.env, tokenRequired = false) {
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
   return {
     root, token, upstreamModel,
-    provenance: { emate_commit: commit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: '2.0.17' },
+    provenance: { emate_commit: commit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: RELEASE_VERSION },
     environment: { layer: 'production-provider', environment_name_sha256: sha256(environmentName), gateway_origin_sha256: sha256(root.href), deployment_fingerprint_sha256: deployment },
   }
 }
@@ -102,7 +103,7 @@ export function prepareStudy(input, seed, context) {
   requireValue(input.schema_version === 1, 'case input schema mismatch')
   hash(input.evaluator_protocol_commitment_sha256, 'evaluator protocol commitment')
   requireValue(typeof seed === 'string' && /^[0-9a-f]{64}$/u.test(seed), 'seed must be 32-byte lowercase hex')
-  requireValue(Array.isArray(input.cases) && input.cases.length >= 50 && input.cases.length <= 1000, 'study requires 50..1000 cases')
+  requireValue(Array.isArray(input.cases) && input.cases.length >= minimumQualityPairs(context.provenance.version) && input.cases.length <= 1000, 'study requires 30..1000 cases for 2.0.18 (50 for historical 2.0.17)')
   const ids = new Set()
   const counts = Object.fromEntries(CATEGORIES.map(category => [category, 0]))
   const cases = input.cases.map((value, index) => {
@@ -125,7 +126,7 @@ export function prepareStudy(input, seed, context) {
   const stateCases = cases.map(value => ({ ...value, allocation: allocations.get(value.pair_id) }))
   const allocationManifest = sha256(canonicalAllocationBytes(stateCases))
   return {
-    schema_version: 1, ticket: 'EM217-503', created_at: new Date().toISOString(), provenance: context.provenance,
+    schema_version: 1, ticket: ticketFor(context.provenance.version, '503'), created_at: new Date().toISOString(), provenance: context.provenance,
     environment: context.environment, upstream_model: context.upstreamModel,
     evaluator_protocol_commitment_sha256: input.evaluator_protocol_commitment_sha256,
     seed, seed_commitment_sha256: sha256(seed), allocation_manifest_sha256: allocationManifest,
@@ -136,7 +137,7 @@ export function prepareStudy(input, seed, context) {
 function stateShape(state) {
   exactKeys(state, ['schema_version', 'ticket', 'created_at', 'provenance', 'environment', 'upstream_model', 'evaluator_protocol_commitment_sha256',
     'seed', 'seed_commitment_sha256', 'allocation_manifest_sha256', 'allocations_created_before_collection', 'cases'], 'precommit state')
-  requireValue(state.schema_version === 1 && state.ticket === 'EM217-503' && state.allocations_created_before_collection === true, 'precommit state identity mismatch')
+  requireValue(state.schema_version === 1 && state.ticket === ticketFor(state.provenance.version, '503') && state.allocations_created_before_collection === true, 'precommit state identity mismatch')
   hash(state.evaluator_protocol_commitment_sha256, 'evaluator protocol commitment'); hash(state.seed_commitment_sha256, 'seed commitment'); hash(state.allocation_manifest_sha256, 'allocation manifest')
   requireValue(sha256(state.seed) === state.seed_commitment_sha256 && sha256(canonicalAllocationBytes(state.cases)) === state.allocation_manifest_sha256, 'precommit state commitments mismatch')
   return state
@@ -218,8 +219,20 @@ export async function collectStudy(state, precommitSha256, context, outputDirect
   const artifacts = new Map()
   for (const [groupIndex, group] of groups(controlledCases).entries()) {
     const batchId = `sha256:${sha256(`${precommitSha256}\0batch\0${groupIndex + 1}`)}`
-    const batch = () => Promise.all(group.map((value, index) => generate(context, value, scope(`${precommitSha256}\0${value.pair_id}\0batch`, batchId, index + 1), fetchImpl)))
-    const single = () => Promise.all(group.map(value => generate(context, value, scope(`${precommitSha256}\0${value.pair_id}\0single`), fetchImpl)))
+    const collect = async condition => {
+      const results = await Promise.allSettled(group.map(async (value, index) => {
+        const result = await generate(context, value, scope(`${precommitSha256}\0${value.pair_id}\0${condition}`, condition === 'batch' ? batchId : undefined, index + 1), fetchImpl)
+        const side = value.allocation.A === condition ? 'A' : 'B'
+        const path = resolve(outputDirectory, `${value.pair_id}-${side}.${result.extension}`)
+        writeFileSync(path, result.bytes, { flag: 'wx', mode: 0o600, flush: true })
+        return { ...result, path }
+      }))
+      const failed = results.find(result => result.status === 'rejected')
+      if (failed) throw failed.reason
+      return results.map(result => result.value)
+    }
+    const batch = () => collect('batch')
+    const single = () => collect('single')
     const batchFirst = parseInt(sha256(`${state.seed}\0order\0${groupIndex + 1}`).slice(0, 2), 16) % 2 === 0
     const first = await (batchFirst ? batch() : single()); const second = await (batchFirst ? single() : batch())
     const batchResults = batchFirst ? first : second; const singleResults = batchFirst ? second : first
@@ -228,9 +241,7 @@ export async function collectStudy(state, precommitSha256, context, outputDirect
       const sides = {}
       for (const side of ['A', 'B']) {
         const result = byCondition[value.allocation[side]]
-        const path = resolve(outputDirectory, `${value.pair_id}-${side}.${result.extension}`)
-        writeFileSync(path, result.bytes, { flag: 'wx', mode: 0o600 })
-        sides[side] = { path, sha256: sha256(result.bytes) }
+        sides[side] = { path: result.path, sha256: sha256(result.bytes) }
       }
       artifacts.set(value.pair_id, {
         references: value.references.map(reference => ({ path: reference.path, media_type: reference.media_type, sha256: reference.sha256 })),
@@ -240,7 +251,7 @@ export async function collectStudy(state, precommitSha256, context, outputDirect
     }
   }
   return {
-    schema_version: 1, ticket: 'EM217-503', evaluator_protocol_commitment_sha256: state.evaluator_protocol_commitment_sha256,
+    schema_version: 1, ticket: state.ticket, evaluator_protocol_commitment_sha256: state.evaluator_protocol_commitment_sha256,
     precommit_sha256: precommitSha256,
     pairs: state.cases.map(value => ({ pair_id: value.pair_id, category: value.category, prompt: value.prompt, ...artifacts.get(value.pair_id) })),
   }
@@ -256,7 +267,7 @@ export function evaluatorHash(evaluator) {
 export function finalizeStudy(state, precommitSha256, packet, scoreSheets) {
   stateShape(state); hash(precommitSha256, 'precommit file hash')
   exactKeys(packet, ['schema_version', 'ticket', 'evaluator_protocol_commitment_sha256', 'precommit_sha256', 'pairs'], 'blind packet')
-  requireValue(packet.schema_version === 1 && packet.ticket === 'EM217-503' && packet.precommit_sha256 === precommitSha256
+  requireValue(packet.schema_version === 1 && packet.ticket === state.ticket && packet.precommit_sha256 === precommitSha256
     && packet.evaluator_protocol_commitment_sha256 === state.evaluator_protocol_commitment_sha256, 'blind packet commitment mismatch')
   requireValue(Array.isArray(packet.pairs) && packet.pairs.length === state.cases.length, 'blind packet pair count mismatch')
   const blindById = new Map(packet.pairs.map(value => [value.pair_id, value]))
@@ -329,7 +340,7 @@ export function finalizeStudy(state, precommitSha256, packet, scoreSheets) {
   const record = {
     schema_version: 1, provenance: state.provenance, environment: state.environment,
     protocol: {
-      minimum_pairs: 50, maximum_pairs: 1000, minimum_per_category: 5, categories: [...CATEGORIES], dimensions: [...protocolConstants.ALL_DIMENSIONS],
+      minimum_pairs: minimumQualityPairs(state.provenance.version), maximum_pairs: 1000, minimum_per_category: 5, categories: [...CATEGORIES], dimensions: [...protocolConstants.ALL_DIMENSIONS],
       category_dimensions: Object.fromEntries(CATEGORIES.map(category => [category, applicableDimensions(category)])),
       overall_mean_margin: protocolConstants.OVERALL_MEAN_MARGIN, ci_lower_margin: protocolConstants.CI_LOWER_MARGIN,
       ci95: { method: 'normal-sample-sd-two-sided', critical_value: protocolConstants.CI_CRITICAL_VALUE },
@@ -348,33 +359,34 @@ function writeNew(path, value) { writeFileSync(path, value, { flag: 'wx', mode: 
 
 async function main() {
   const [command, ...args] = process.argv.slice(2)
-  if (command === 'prepare') {
+  if (command === 'open' && args.length === 1) writeNew(args[0], JSON.stringify(createOpenManifest(), null, 2) + '\n')
+  else if (command === 'prepare') {
     const [inputPath, statePath] = args; if (!statePath) fail('usage: real-study.mjs prepare CASES_JSON PRIVATE_STATE_OUT')
     const state = prepareStudy(JSON.parse(readFileSync(inputPath, 'utf8')), randomBytes(32).toString('hex'), sourceContext())
     const raw = JSON.stringify(state) + '\n'; writeNew(statePath, raw)
-    process.stdout.write(`${JSON.stringify({ ticket: 'EM217-503', status: 'PRECOMMITTED', pairs: state.cases.length, precommit_sha256: sha256(raw), allocation_manifest_sha256: state.allocation_manifest_sha256 })}\n`)
+    process.stdout.write(`${JSON.stringify({ ticket: ticketFor(RELEASE_VERSION, '503'), status: 'PRECOMMITTED', pairs: state.cases.length, precommit_sha256: sha256(raw), allocation_manifest_sha256: state.allocation_manifest_sha256 })}\n`)
   } else if (command === 'collect') {
     const [statePath, outputDirectory, packetPath] = args; if (!packetPath) fail('usage: real-study.mjs collect PRIVATE_STATE OUTPUT_DIRECTORY BLIND_PACKET_OUT')
     const stateRaw = readFileSync(statePath); const expected = process.env.EMATE_EVIDENCE_PRECOMMIT_SHA256
     hash(expected, 'EMATE_EVIDENCE_PRECOMMIT_SHA256'); requireValue(sha256(stateRaw) === expected, 'private state bytes do not match the precommit')
     const packet = await collectStudy(JSON.parse(stateRaw), expected, sourceContext(process.env, true), outputDirectory)
     const raw = JSON.stringify(packet) + '\n'; writeNew(packetPath, raw)
-    process.stdout.write(`${JSON.stringify({ ticket: 'EM217-503', status: 'BLIND_PACKET_READY', pairs: packet.pairs.length, blind_packet_sha256: sha256(raw) })}\n`)
+    process.stdout.write(`${JSON.stringify({ ticket: ticketFor(RELEASE_VERSION, '503'), status: 'BLIND_PACKET_READY', pairs: packet.pairs.length, blind_packet_sha256: sha256(raw) })}\n`)
   } else if (command === 'finalize') {
     const [statePath, packetPath, outputPath, ...scorePaths] = args; if (!outputPath || scorePaths.length < 1) fail('usage: real-study.mjs finalize PRIVATE_STATE BLIND_PACKET RAW_OUT SCORE_JSON...')
     const stateRaw = readFileSync(statePath); const expected = process.env.EMATE_EVIDENCE_PRECOMMIT_SHA256
     hash(expected, 'EMATE_EVIDENCE_PRECOMMIT_SHA256'); requireValue(sha256(stateRaw) === expected, 'private state bytes do not match the precommit')
     const result = finalizeStudy(JSON.parse(stateRaw), expected, JSON.parse(readFileSync(packetPath, 'utf8')), scorePaths.map(path => JSON.parse(readFileSync(path, 'utf8'))))
     writeNew(outputPath, result.raw)
-    process.stdout.write(`${JSON.stringify({ ticket: 'EM217-503', status: result.analysis.status, pairs: result.analysis.pair_count, raw_sha256: sha256(result.raw) })}\n`)
+    process.stdout.write(`${JSON.stringify({ ticket: ticketFor(result.analysis.provenance.version, '503'), status: result.analysis.status, pairs: result.analysis.pair_count, raw_sha256: sha256(result.raw) })}\n`)
     if (result.analysis.status !== 'PASS') process.exitCode = 1
   } else if (command === 'project') {
     const [rawPath, uri, openPath, outputPath] = args; if (!outputPath) fail('usage: real-study.mjs project RAW HTTPS_URI OPEN_MANIFEST PASS_OUT')
     const raw = readFileSync(rawPath); const descriptor = { uri, sha256: sha256(raw) }
     const manifest = projectManifest(JSON.parse(readFileSync(openPath, 'utf8')), raw, descriptor)
     writeNew(outputPath, `${JSON.stringify(manifest, null, 2)}\n`)
-    process.stdout.write(`${JSON.stringify({ ticket: 'EM217-503', status: 'PASS', raw_sha256: descriptor.sha256 })}\n`)
-  } else fail('usage: real-study.mjs <prepare|collect|finalize|project> ...')
+    process.stdout.write(`${JSON.stringify({ ticket: manifest.ticket, status: 'PASS', raw_sha256: descriptor.sha256 })}\n`)
+  } else fail('usage: real-study.mjs <open|prepare|collect|finalize|project> ...')
 }
 
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) main().catch(error => { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1 })

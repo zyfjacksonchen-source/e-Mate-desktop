@@ -88,3 +88,22 @@ test('configuration keeps credentials in env and rejects aliased or uncontrolled
   assert.throws(() => readConfiguration({ ...base, EMATE_EVIDENCE_GATEWAY_URL: 'http://production.example/v1' }))
   assert.throws(() => readConfiguration({ ...base, EMATE_EVIDENCE_LAYER: 'staging' }), /429 probe is required/u)
 })
+
+test('2.0.18 runner requires output retention before calls and retains each successful response', async () => {
+  const current = config('production', false)
+  current.provenance = { ...provenance, version: '2.0.18' }
+  let calls = 0
+  const fetchImpl = async () => success(++calls)
+  await assert.rejects(runProviderBenchmark(current, prompts, fetchImpl), /durable private output retention/u)
+  assert.equal(calls, 0)
+  const retained = new Map()
+  current.retainImage = (taskId, image) => {
+    assert.equal(retained.has(taskId), false)
+    assert.equal(image.digest, digest(image.bytes))
+    retained.set(taskId, Buffer.from(image.bytes))
+  }
+  const report = await runProviderBenchmark(current, prompts, fetchImpl)
+  assert.equal(report.ticket, 'EM218-502')
+  assert.equal(retained.size, 20)
+  assert.deepEqual(report.runs.map(run => run.retained_success_count), [4, 5, 8])
+})

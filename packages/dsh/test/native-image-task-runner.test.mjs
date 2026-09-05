@@ -626,3 +626,64 @@ test('public activation has one registration, Tool Search aliases, audit trust, 
   assert.match(search, /^\s+- image_batch$/mu)
   assert.match(search, /image_batch:[\s\S]*批量生图[\s\S]*生成多张图片/u)
 })
+
+test('one parent persistence failure does not abort or dispose another active batch', async () => {
+  const parents = ['broken', 'healthy'].map(id => ({ id, session: session(id) }))
+  let releaseBrokenLink
+  const brokenLink = new Promise(resolve => { releaseBrokenLink = resolve })
+  let healthyOpened
+  const opened = new Promise(resolve => { healthyOpened = resolve })
+  const runs = []
+  let runtime
+  const ctx = {
+    effect() {},
+    sessions: { async flush(current) {
+      if (current.header.id === 'broken' && current.events.at(-1)?.data.kind === 'task-linked') {
+        await brokenLink
+        return false
+      }
+      return true
+    } },
+    emateModelPolicy: { async assertModel() {} },
+    jobs: { get() { throw new Error('no Job was submitted') } },
+    subagents: {
+      getProvider: () => ({ inheritsParentContext: false, capabilities: { toolFilter: true, persona: true } }),
+      async start(_name, request) {
+        const childId = `child-${request.parent.id}-${runs.length}`
+        const child = { id: childId, session: session(childId, { origin: 'subagent', parentSession: request.parent.id }) }
+        child.session.append('subagent/descriptor', { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label })
+        const args = JSON.parse(request.prompt[0].text.split('\n')[2])
+        let disposed = false
+        const result = (async () => {
+          await runtime.claim(child, args)
+          if (request.parent.id === 'healthy') healthyOpened()
+          if (!request.signal.aborted) await new Promise(resolve => request.signal.addEventListener('abort', resolve, { once: true }))
+        })()
+        const run = { id: child.id, localAgent: child, result, signal: request.signal,
+          get disposed() { return disposed }, async dispose() { disposed = true; await result.catch(() => {}) } }
+        runs.push(run)
+        return run
+      },
+    },
+  }
+  runtime = createNativeImageTaskRuntime(ctx)
+  const broken = runtime.execute({ tasks: [{ prompt: 'one' }, { prompt: 'two' }], concurrency: 1 },
+    { agent: parents[0], callId: 'call', signal: new AbortController().signal })
+  const brokenRejected = assert.rejects(broken, /flush did not reach durable storage/u)
+  const controller = new AbortController()
+  const healthy = runtime.execute({ tasks: [{ prompt: 'three' }, { prompt: 'four' }], concurrency: 2 },
+    { agent: parents[1], callId: 'call', signal: controller.signal })
+  const healthyRejected = assert.rejects(healthy)
+  await opened
+  releaseBrokenLink()
+  await brokenRejected
+  const independent = runs.find(run => run.id.startsWith('child-healthy-'))
+  try {
+    assert.equal(independent.signal.aborted, false)
+    assert.equal(independent.disposed, false)
+  } finally {
+    controller.abort(new Error('test cleanup'))
+    await healthyRejected
+  }
+  assert.equal(independent.disposed, true)
+})

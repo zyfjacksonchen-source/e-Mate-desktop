@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { RELEASE_VERSION, ticketFor } from './release-identity.mjs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { performance } from 'node:perf_hooks'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,7 +15,7 @@ const SIZES = [4, 5, 8]
 const SHA256 = /^[0-9a-f]{64}$/u
 
 const sha256 = value => createHash('sha256').update(value).digest('hex')
-const fail = message => { throw new Error(`EM217-502 real provider benchmark: ${message}`) }
+const fail = message => { throw new Error(`EM218-502 real provider benchmark: ${message}`) }
 const requireValue = (condition, message) => { if (!condition) fail(message) }
 
 function gatewayRoot(value) {
@@ -80,7 +81,7 @@ function validImage(value) {
   const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
   const webp = bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP'
   requireValue(png || jpeg || webp, 'gateway result is not PNG, JPEG, or WebP')
-  return { responseId: value.id, digest: sha256(bytes) }
+  return { responseId: value.id, digest: sha256(bytes), bytes, extension: png ? 'png' : jpeg ? 'jpg' : 'webp' }
 }
 
 function scope(seed, batchId, ordinal) {
@@ -114,7 +115,8 @@ async function requestImage(config, prompt, requestScope, fetchImpl = fetch, now
   if (response.status === 429) return { status: 'rate-limited', elapsed, value, response, body, requestScope }
   if (!response.ok) return { status: 'failed', elapsed }
   const image = validImage(value)
-  return { status: 'completed', elapsed, ...image }
+  if (config.retainImage !== undefined) await config.retainImage(requestScope.taskId, image)
+  return { status: 'completed', elapsed, digest: image.digest, responseId: image.responseId }
 }
 
 async function typed429Probe(config, prompts, fetchImpl) {
@@ -146,6 +148,7 @@ async function mapLimit(values, limit, action) {
 }
 
 export async function runProviderBenchmark(config, prompts, fetchImpl = fetch, now = () => performance.now()) {
+  requireValue(config.provenance.version !== RELEASE_VERSION || typeof config.retainImage === 'function', '2.0.18 evidence requires durable private output retention')
   let offset = 0
   const schedule = Array.from({ length: config.runs }, (_, index) => {
     const taskCount = SIZES[index % SIZES.length]
@@ -175,7 +178,7 @@ export async function runProviderBenchmark(config, prompts, fetchImpl = fetch, n
     })
   }
   const report = {
-    schema_version: 1, ticket: 'EM217-502', claim: 'real-provider-gateway-layer-v1',
+    schema_version: 1, ticket: ticketFor(config.provenance.version, '502'), claim: 'real-provider-gateway-layer-v1',
     environment: { layer: `${config.layer}-provider`, environment_name_sha256: sha256(config.environmentName), gateway_origin_sha256: sha256(config.root.href), deployment_fingerprint_sha256: config.deployment },
     provenance: config.provenance, measured_at: new Date().toISOString(), fixed_set_sha256: fixedSetSha256,
     runs, typed_429_retry_probe: await typed429Probe(config, prompts, fetchImpl),
@@ -188,8 +191,17 @@ async function main() {
   const dirty = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=no'], { cwd: ROOT, encoding: 'utf8' }).trim()
   requireValue(dirty === '', 'real evidence requires a clean committed worktree')
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
-  config.provenance = { emate_commit: commit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: '2.0.17' }
-  const report = await runProviderBenchmark(config, privatePrompts(config.promptsFile, config.runs))
+  config.provenance = { emate_commit: commit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: RELEASE_VERSION }
+  const prompts = privatePrompts(config.promptsFile, config.runs)
+  const outputDirectory = `${config.output}.images`
+  // Exclusive directory creation prevents replay after partial or unknown provider outcomes.
+  mkdirSync(outputDirectory, { mode: 0o700 })
+  config.retainImage = (taskId, image) => {
+    const path = resolve(outputDirectory, `${sha256(taskId)}.${image.extension}`)
+    writeFileSync(path, image.bytes, { flag: 'wx', mode: 0o600, flush: true })
+    requireValue(sha256(readFileSync(path)) === image.digest, 'private image readback hash mismatch')
+  }
+  const report = await runProviderBenchmark(config, prompts)
   const bytes = JSON.stringify(report) + '\n'
   writeFileSync(config.output, bytes, { flag: 'wx', mode: 0o600 })
   process.stdout.write(`${JSON.stringify({ ticket: report.ticket, layer: config.layer, runs: report.runs.length, fixed_set_sha256: report.fixed_set_sha256, raw_sha256: sha256(bytes) })}\n`)

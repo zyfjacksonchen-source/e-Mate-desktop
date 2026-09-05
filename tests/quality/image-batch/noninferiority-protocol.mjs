@@ -1,3 +1,6 @@
+import { RELEASE_VERSION, ticketFor, versionFor, minimumQualityPairs } from '../../performance/image-batch/release-identity.mjs'
+export { RELEASE_VERSION }
+export const TICKET = ticketFor(RELEASE_VERSION, '503')
 import { createHash } from 'node:crypto'
 
 const CATEGORIES = Object.freeze(['person', 'text', 'product', 'scene', 'style', 'reference-edit'])
@@ -48,7 +51,7 @@ function evidenceDescriptor(value, label = 'raw evidence') {
 function provenance(value) {
   exactKeys(value, ['emate_commit', 'harness_commit', 'desktop_reference', 'version'], 'provenance')
   commit(value.emate_commit, 'e-Mate commit')
-  require(value.harness_commit === HARNESS_COMMIT && value.desktop_reference === DESKTOP_REFERENCE && value.version === '2.0.17', 'release provenance mismatch')
+  require(value.harness_commit === HARNESS_COMMIT && value.desktop_reference === DESKTOP_REFERENCE && Boolean(ticketFor(value.version, '503')), 'release provenance mismatch')
 }
 function environment(value) {
   exactKeys(value, ['layer', 'environment_name_sha256', 'gateway_origin_sha256', 'deployment_fingerprint_sha256'], 'environment')
@@ -114,7 +117,7 @@ export function validateAndAnalyzeStudy(raw, descriptor) {
   environment(record.environment)
   const protocol = record.protocol
   exactKeys(protocol, ['minimum_pairs', 'maximum_pairs', 'minimum_per_category', 'categories', 'dimensions', 'category_dimensions', 'overall_mean_margin', 'ci_lower_margin', 'ci95', 'blinding', 'randomization'], 'protocol')
-  require(protocol.minimum_pairs === 50 && protocol.maximum_pairs === MAX_PAIRS, 'pair bounds must be predeclared as 50..1000')
+  require(protocol.minimum_pairs === minimumQualityPairs(record.provenance.version) && protocol.maximum_pairs === MAX_PAIRS, 'pair bounds must match the declared release protocol')
   require(Number.isInteger(protocol.minimum_per_category) && protocol.minimum_per_category >= 5, 'minimum per category must be at least 5')
   require(sameArray(protocol.categories, CATEGORIES), 'six categories must be predeclared')
   require(sameArray(protocol.dimensions, ALL_DIMENSIONS), 'score dimensions must be predeclared')
@@ -132,7 +135,7 @@ export function validateAndAnalyzeStudy(raw, descriptor) {
   hash(protocol.randomization.seed_commitment_sha256, 'seed commitment') // Opaque precommitment only; this does not claim the seed was audited.
   hash(protocol.randomization.allocation_manifest_sha256, 'allocation manifest hash')
 
-  require(Array.isArray(record.pairs) && record.pairs.length >= protocol.minimum_pairs && record.pairs.length <= protocol.maximum_pairs, 'pair count must be within 50..1000')
+  require(Array.isArray(record.pairs) && record.pairs.length >= protocol.minimum_pairs && record.pairs.length <= protocol.maximum_pairs, `pair count must be within ${protocol.minimum_pairs}..1000`)
   const pairIds = new Set()
   const allocationCommitments = new Set()
   const categoryCounts = Object.fromEntries(CATEGORIES.map(category => [category, 0]))
@@ -238,7 +241,7 @@ export function validateAndAnalyzeStudy(raw, descriptor) {
 
 export function validateManifest(manifest, raw) {
   exactKeys(manifest, ['schema_version', 'ticket', 'claim', 'status', 'provenance', 'environment', 'raw_evidence', 'result', 'release_gate'], 'manifest')
-  require(manifest.schema_version === 1 && manifest.ticket === 'EM217-503', 'manifest identity mismatch')
+  require(manifest.schema_version === 1 && Boolean(versionFor(manifest.ticket, '503')), 'manifest identity mismatch')
   require(manifest.claim === 'quality-noninferiority-blind-paired-study', 'manifest claim mismatch')
   exactKeys(manifest.raw_evidence, ['uri', 'sha256'], 'manifest raw evidence')
   if (manifest.status === 'OPEN') {
@@ -251,13 +254,14 @@ export function validateManifest(manifest, raw) {
   evidenceDescriptor(manifest.raw_evidence, 'manifest raw evidence')
   require(raw !== undefined, 'PASS manifest requires exact raw evidence bytes')
   const analysis = validateAndAnalyzeStudy(raw, manifest.raw_evidence)
+  require(manifest.ticket === ticketFor(analysis.provenance.version, '503'), 'manifest and raw evidence release identities differ')
   require(analysis.status === 'PASS', 'PASS raw evidence failed its release thresholds')
   provenance(manifest.provenance); environment(manifest.environment)
   require(JSON.stringify(manifest.provenance) === JSON.stringify(analysis.provenance), 'manifest provenance does not match raw evidence')
   require(JSON.stringify(manifest.environment) === JSON.stringify(analysis.environment), 'manifest environment does not match raw evidence')
   const result = manifest.result
   exactKeys(result, ['pair_count', 'overall', 'categories', 'protocol_checks'], 'manifest result')
-  require(Number.isInteger(result.pair_count) && result.pair_count >= 50 && result.pair_count <= MAX_PAIRS, 'PASS requires 50..1000 pairs')
+  require(Number.isInteger(result.pair_count) && result.pair_count >= minimumQualityPairs(analysis.provenance.version) && result.pair_count <= MAX_PAIRS, 'PASS pair count must match the release protocol')
   const validateSummary = (summary, label, minimum) => {
     exactKeys(summary, ['n', 'mean', 'ci95'], label)
     exactKeys(summary.ci95, ['lower', 'upper'], label + ' CI')
@@ -266,7 +270,7 @@ export function validateManifest(manifest, raw) {
     require(summary.ci95.lower <= summary.mean && summary.mean <= summary.ci95.upper, label + ' CI ordering is invalid')
     require(summary.mean >= OVERALL_MEAN_MARGIN && summary.ci95.lower >= CI_LOWER_MARGIN, label + ' is inferior')
   }
-  validateSummary(result.overall, 'overall', 50)
+  validateSummary(result.overall, 'overall', minimumQualityPairs(analysis.provenance.version))
   require(result.overall.n === result.pair_count, 'overall n must equal pair count')
   exactKeys(result.categories, CATEGORIES, 'manifest categories')
   let categoryN = 0
@@ -302,3 +306,8 @@ export function projectManifest(openManifest, raw, descriptor) {
 }
 
 export const protocolConstants = Object.freeze({ CATEGORIES, ALL_DIMENSIONS, CI_CRITICAL_VALUE, OVERALL_MEAN_MARGIN, CI_LOWER_MARGIN, MAX_RAW_BYTES, MAX_PAIRS })
+
+export function createOpenManifest() {
+  return validateManifest({ schema_version: 1, ticket: TICKET, claim: 'quality-noninferiority-blind-paired-study',
+    status: 'OPEN', provenance: null, environment: null, raw_evidence: { uri: null, sha256: null }, result: null, release_gate: 'OPEN' })
+}

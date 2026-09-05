@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
 
 export const SCHEMA_VERSION = 1
-export const TICKET = 'EM217-108'
+import { RELEASE_VERSION, ticketFor, versionFor } from '../image-batch/release-identity.mjs'
+export { RELEASE_VERSION }
+export const TICKET = ticketFor(RELEASE_VERSION, '108')
+const evidenceContract = ticket => versionFor(ticket, '108') === RELEASE_VERSION ? 'tests/performance/image-single/protocol.mjs' : 'docs/2.0.17/contracts/single-image-latency.md'
 export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
 export const DESKTOP_REFERENCE = '6074088f5b660206e404b3591fab51fb99c69add'
 export const MODEL = 'gpt-image-2-pro'
@@ -249,7 +252,7 @@ function validateAdmissionRetryProbe(probe, fixtures) {
 
 export function validateWorkerReport(report) {
   exactKeys(report, ['schema_version', 'ticket', 'claim', 'repetition', 'protocol', 'provenance', 'runtime', 'model', 'attachment_limits', 'fixtures', 'prompt_sha256', 'request_body_sha256', 'network_calls', 'scenarios', 'admission_retry_probe', 'pass'], 'worker')
-  expect(report.schema_version === 1 && report.ticket === TICKET && report.claim === CLAIM, 'worker identity')
+  expect(report.schema_version === 1 && Boolean(versionFor(report.ticket, '108')) && report.claim === CLAIM, 'worker identity')
   integer(report.repetition, 'worker.repetition', 1)
   expect(report.repetition <= REPETITIONS, 'worker repetition bound')
   exactKeys(report.protocol, ['fake_delay_ms', 'repetitions', 'clock', 'percentile', 'ordering', 'filesystem'], 'worker.protocol')
@@ -294,10 +297,11 @@ export function validateWorkerReport(report) {
 
 export function validateAggregate(report) {
   exactKeys(report, ['schema_version', 'ticket', 'claim', 'repetitions', 'all_repetitions_pass'], 'aggregate')
-  expect(report.schema_version === 1 && report.ticket === TICKET && report.claim === CLAIM, 'aggregate identity')
+  expect(report.schema_version === 1 && Boolean(versionFor(report.ticket, '108')) && report.claim === CLAIM, 'aggregate identity')
   expect(Array.isArray(report.repetitions) && report.repetitions.length === 3, 'aggregate must contain exactly three repetitions')
   report.repetitions.forEach((entry, index) => {
     validateWorkerReport(entry)
+    expect(entry.ticket === report.ticket, 'aggregate release identities differ')
     expect(entry.repetition === index + 1, 'aggregate repetition order')
   })
   const first = report.repetitions[0]
@@ -375,9 +379,9 @@ export function createSourcePassManifest(aggregate, externalUri, rawAggregate) {
   const projected = aggregateManifestProjection(aggregate)
   const manifest = {
     schema_version: 1,
-    ticket: TICKET,
+    ticket: aggregate.ticket,
     status: 'SOURCE_PASS',
-    contract: 'docs/2.0.17/contracts/single-image-latency.md',
+    contract: evidenceContract(aggregate.ticket),
     claim: CLAIM,
     protocol: { fake_delay_ms: 25, fresh_processes: 3, percentile: 'nearest-rank-per-repetition', all_repetitions_must_pass: true },
     provenance: projected.provenance,
@@ -393,11 +397,11 @@ export function validateGuiEvidence(rawGui, descriptor) {
   evidenceDescriptor(descriptor.uri, descriptor.sha256, 'GUI evidence')
   const value = exactRaw(rawGui, descriptor.sha256, 'GUI evidence')
   exactKeys(value, ['schema_version', 'ticket', 'claim', 'protocol', 'provenance', 'environment', 'measured_at', 'samples', 'p95_ms'], 'GUI evidence')
-  expect(value.schema_version === 1 && value.ticket === TICKET && value.claim === 'macos-dev-cached-terminal-projection-first-visible-v1', 'GUI evidence identity')
+  expect(value.schema_version === 1 && Boolean(versionFor(value.ticket, '108')) && value.claim === 'macos-dev-cached-terminal-projection-first-visible-v1', 'GUI evidence identity')
   expect(JSON.stringify(value.protocol) === JSON.stringify({ clock: 'performance.now monotonic', stimulus: 'cached-local-bytes', start: 'terminal-projection-handoff', end: 'first-visible-image', percentile: 'nearest-rank', minimum_samples: 100, p95_limit_ms: 500 }), 'GUI evidence protocol')
   exactKeys(value.provenance, ['emate_commit', 'harness_commit', 'desktop_reference', 'version'], 'GUI evidence provenance')
   gitCommit(value.provenance.emate_commit, 'GUI evidence provenance commit')
-  expect(value.provenance.harness_commit === HARNESS_COMMIT && value.provenance.desktop_reference === DESKTOP_REFERENCE && value.provenance.version === '2.0.17', 'GUI evidence provenance mismatch')
+  expect(value.provenance.harness_commit === HARNESS_COMMIT && value.provenance.desktop_reference === DESKTOP_REFERENCE && value.provenance.version === versionFor(value.ticket, '108'), 'GUI evidence provenance mismatch')
   exactKeys(value.environment, ['class', 'machine_sha256', 'app_bundle_sha256'], 'GUI evidence environment')
   expect(value.environment.class === 'macos-app-directory-dev', 'GUI evidence must remain macOS app-directory/dev')
   hash(value.environment.machine_sha256, 'GUI evidence machine hash'); hash(value.environment.app_bundle_sha256, 'GUI evidence app bundle hash')
@@ -419,7 +423,7 @@ export function createPassManifest(aggregate, sourceUri, rawAggregate, rawGui, g
   const manifest = createSourcePassManifest(aggregate, sourceUri, rawAggregate)
   const guiDescriptor = { uri: guiUri, sha256: sha256(typeof rawGui === 'string' ? Buffer.from(rawGui) : rawGui) }
   const gui = validateGuiEvidence(rawGui, guiDescriptor)
-  expect(gui.provenance.emate_commit === manifest.provenance.emate_commit, 'GUI and source evidence commits differ')
+  expect(gui.ticket === manifest.ticket && gui.provenance.emate_commit === manifest.provenance.emate_commit, 'GUI and source evidence identities or commits differ')
   manifest.status = 'PASS'
   manifest.gui_first_visible = { status: 'PASS', environment: gui.environment, p95_limit_ms: 500, p95_ms: gui.p95_ms,
     sample_count: gui.samples.length, evidence_uri: guiUri, sha256: guiDescriptor.sha256 }
@@ -429,8 +433,8 @@ export function createPassManifest(aggregate, sourceUri, rawAggregate, rawGui, g
 
 export function validateManifest(manifest, rawAggregate, rawGui) {
   exactKeys(manifest, ['schema_version', 'ticket', 'status', 'contract', 'claim', 'protocol', 'provenance', 'results', 'external_raw', 'gui_first_visible'], 'manifest')
-  expect(manifest.schema_version === 1 && manifest.ticket === TICKET && manifest.claim === CLAIM, 'manifest identity')
-  expect(manifest.contract === 'docs/2.0.17/contracts/single-image-latency.md', 'manifest contract path')
+  expect(manifest.schema_version === 1 && Boolean(versionFor(manifest.ticket, '108')) && manifest.claim === CLAIM, 'manifest identity')
+  expect(manifest.contract === evidenceContract(manifest.ticket), 'manifest contract path')
   expect(['OPEN', 'SOURCE_PASS', 'PASS'].includes(manifest.status), 'manifest status')
   expect(JSON.stringify(manifest.protocol) === JSON.stringify({ fake_delay_ms: 25, fresh_processes: 3, percentile: 'nearest-rank-per-repetition', all_repetitions_must_pass: true }), 'manifest protocol')
   exactKeys(manifest.external_raw, ['uri', 'sha256'], 'manifest.external_raw')
@@ -448,6 +452,7 @@ export function validateManifest(manifest, rawAggregate, rawGui) {
     expect(typeof rawAggregate === 'string' || rawAggregate instanceof Uint8Array, 'SOURCE_PASS manifest requires the exact raw aggregate bytes')
     const aggregate = exactRaw(rawAggregate, manifest.external_raw.sha256, 'manifest external')
     validateAggregate(aggregate)
+    expect(aggregate.ticket === manifest.ticket, 'manifest and raw evidence release identities differ')
     expect(aggregate.all_repetitions_pass === true, 'manifest raw aggregate did not pass every repetition')
     const expected = aggregateManifestProjection(aggregate)
     expect(JSON.stringify(manifest.provenance) === JSON.stringify(expected.provenance), 'manifest provenance does not match raw aggregate')
@@ -457,11 +462,18 @@ export function validateManifest(manifest, rawAggregate, rawGui) {
       expect(manifest.gui_first_visible.status === 'PASS' && manifest.gui_first_visible.p95_limit_ms === 500, 'PASS requires GUI evidence')
       const descriptor = { uri: manifest.gui_first_visible.evidence_uri, sha256: manifest.gui_first_visible.sha256 }
       const gui = validateGuiEvidence(rawGui, descriptor)
-      expect(gui.provenance.emate_commit === manifest.provenance.emate_commit, 'GUI and source evidence commits differ')
+      expect(gui.ticket === manifest.ticket && gui.provenance.emate_commit === manifest.provenance.emate_commit, 'GUI and source evidence identities or commits differ')
       expect(JSON.stringify(manifest.gui_first_visible) === JSON.stringify({ status: 'PASS', environment: gui.environment, p95_limit_ms: 500,
         p95_ms: gui.p95_ms, sample_count: gui.samples.length, evidence_uri: descriptor.uri, sha256: descriptor.sha256 }), 'manifest GUI projection mismatch')
     }
   }
   rejectSensitiveKeys(manifest)
   return manifest
+}
+
+export function createOpenManifest() {
+  return validateManifest({ schema_version: 1, ticket: TICKET, status: 'OPEN', contract: evidenceContract(TICKET), claim: CLAIM,
+    protocol: { fake_delay_ms: 25, fresh_processes: 3, percentile: 'nearest-rank-per-repetition', all_repetitions_must_pass: true },
+    provenance: null, results: null, external_raw: { uri: null, sha256: null },
+    gui_first_visible: { status: 'OPEN', environment: null, p95_limit_ms: 500, p95_ms: null, sample_count: null, evidence_uri: null, sha256: null } })
 }

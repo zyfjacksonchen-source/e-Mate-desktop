@@ -15,7 +15,7 @@ import dgram from 'node:dgram'
 import { syncBuiltinESMExports } from 'node:module'
 import {
   ATTACHMENT_LIMITS, CLAIM, COMPARISON_SCENARIOS, FAKE_DELAY_MS, HARNESS_COMMIT, HISTORY_SCENARIO,
-  MODEL, NORMALIZED_PROMPT, REPETITIONS, REQUEST_BODY, SCHEMA_VERSION, TICKET,
+  MODEL, NORMALIZED_PROMPT, REPETITIONS, REQUEST_BODY, SCHEMA_VERSION, TICKET, RELEASE_VERSION,
   comparisonSummary, historySummary, sha256, validateDirectMeasurement, validateLowerMeasurement, validateWorkerReport,
 } from './protocol.mjs'
 import { SMALL_PNG, createExactMaxPng, imageResponseBody } from './fixtures.mjs'
@@ -42,7 +42,7 @@ const REQUIRED_BUILT = ['imageGenerationBundle', 'cordis', 'agent', 'session', '
 function prerequisiteError() {
   const missing = REQUIRED_BUILT.map(key => PATHS[key]).filter(path => !existsSync(path))
   if (missing.length === 0) return undefined
-  return new Error('EM217-108 benchmark prerequisites are absent: ' + missing.map(path => path.slice(ROOT.length + 1)).join(', ')
+  return new Error('EM218-108 benchmark prerequisites are absent: ' + missing.map(path => path.slice(ROOT.length + 1)).join(', ')
     + '. Run only the main-agent-authorized existing Harness/e-Mate build prerequisites; this benchmark never installs or builds them.')
 }
 function fileSha256(path) { return createHash('sha256').update(readFileSync(path)).digest('hex') }
@@ -54,14 +54,14 @@ function installNetworkGuard() {
   const block = (target, key) => {
     const original = target[key]
     originals.push(() => { target[key] = original })
-    target[key] = () => { networkCalls += 1; throw new Error('EM217-108 benchmark forbids network access: ' + key) }
+    target[key] = () => { networkCalls += 1; throw new Error('EM218-108 benchmark forbids network access: ' + key) }
   }
   for (const [target, keys] of [
     [net, ['connect', 'createConnection']], [tls, ['connect']], [http, ['request', 'get']], [https, ['request', 'get']],
     [dns, ['lookup', 'resolve', 'resolve4', 'resolve6']], [dgram, ['createSocket']],
   ]) for (const key of keys) block(target, key)
   const originalFetch = globalThis.fetch
-  globalThis.fetch = () => { networkCalls += 1; throw new Error('EM217-108 benchmark forbids fetch') }
+  globalThis.fetch = () => { networkCalls += 1; throw new Error('EM218-108 benchmark forbids fetch') }
   syncBuiltinESMExports()
   return () => {
     for (const restore of originals.reverse()) restore()
@@ -92,7 +92,7 @@ function writeBinding(root, dshHome) {
   const zod = realpathSync(PATHS.zod)
   const path = join(root, 'runtime-binding.json')
   writeFileSync(path, JSON.stringify({
-    schema_version: 1, product: 'e-Mate', version: '2.0.17', dsh_home: dshHome, harness_commit: HARNESS_COMMIT,
+    schema_version: 1, product: 'e-Mate', version: RELEASE_VERSION, dsh_home: dshHome, harness_commit: HARNESS_COMMIT,
     tools_module: PATHS.tools, tools_module_sha256: fileSha256(PATHS.tools),
     llm_module: PATHS.llm, llm_module_sha256: fileSha256(PATHS.llm),
     storage_domain_module: PATHS.storage, storage_domain_module_sha256: fileSha256(PATHS.storage),

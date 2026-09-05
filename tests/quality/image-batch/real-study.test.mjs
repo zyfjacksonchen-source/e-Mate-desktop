@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
@@ -14,7 +14,7 @@ const categories = protocolConstants.CATEGORIES
 function context() {
   return {
     root: new URL('https://production.example/v1'), token: 'private-session-token-value', upstreamModel: 'upstream-image-model',
-    provenance: { emate_commit: 'a'.repeat(40), harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d', desktop_reference: '6074088f5b660206e404b3591fab51fb99c69add', version: '2.0.17' },
+    provenance: { emate_commit: 'a'.repeat(40), harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d', desktop_reference: '6074088f5b660206e404b3591fab51fb99c69add', version: '2.0.18' },
     environment: { layer: 'production-provider', environment_name_sha256: hash('production'), gateway_origin_sha256: hash('https://production.example/v1'), deployment_fingerprint_sha256: hash('deployment') },
   }
 }
@@ -30,7 +30,7 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
     const reference = join(temporary, 'reference.png'); writeFileSync(reference, png, { mode: 0o600 })
     const input = {
       schema_version: 1, evaluator_protocol_commitment_sha256: hash('evaluator protocol v1'),
-      cases: Array.from({ length: 60 }, (_, index) => {
+      cases: Array.from({ length: 30 }, (_, index) => {
         const category = categories[index % categories.length]
         return { pair_id: `pair-${String(index + 1).padStart(3, '0')}`, category,
           prompt: `private test prompt ${index + 1}`, references: category === 'reference-edit' ? Array(index === categories.indexOf('reference-edit') ? 8 : 1).fill(reference) : [] }
@@ -57,7 +57,7 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
       }
       return new Response(JSON.stringify({ id: `result-${calls}`, data: [{ b64_json: png.toString('base64') }], usage: {} }), { status: 200, headers: { 'content-type': 'application/json' } })
     })
-    assert.equal(calls, 120)
+    assert.equal(calls, 60)
     assert([...seenBatch.values()].every(ordinals => ordinals.length >= 2 && ordinals.length <= 4 && ordinals.every((ordinal, index) => ordinal === index + 1)))
     assert.equal(Object.hasOwn(packet.pairs[0], 'allocation'), false)
     assert.equal(Object.hasOwn(packet.pairs[0], 'condition'), false)
@@ -134,7 +134,7 @@ test('collection fails closed when a precommitted source reference changes', asy
   try {
     const reference = join(temporary, 'source.png'); writeFileSync(reference, png)
     const input = { schema_version: 1, evaluator_protocol_commitment_sha256: hash('protocol'),
-      cases: Array.from({ length: 60 }, (_, index) => {
+      cases: Array.from({ length: 30 }, (_, index) => {
         const category = categories[index % categories.length]
         return { pair_id: `pair-${index + 1}`, category, prompt: `prompt ${index + 1}`, references: category === 'reference-edit' ? [reference] : [] }
       }) }
@@ -150,4 +150,32 @@ test('prepare rejects category gaps and reference edits without an actual refere
   const base = { schema_version: 1, evaluator_protocol_commitment_sha256: hash('protocol'),
     cases: Array.from({ length: 50 }, (_, index) => ({ pair_id: `pair-${index + 1}`, category: categories[index % categories.length], prompt: 'private', references: [] })) }
   assert.throws(() => prepareStudy(base, '2'.repeat(64), context()), /reference\/category mismatch|at least five/u)
+})
+
+test('partial provider failure retains successful siblings immediately and refuses automatic replay', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'emate-quality-partial-'))
+  try {
+    const reference = join(temporary, 'reference.png'); writeFileSync(reference, png)
+    const input = { schema_version: 1, evaluator_protocol_commitment_sha256: hash('protocol'),
+      cases: Array.from({ length: 30 }, (_, index) => {
+        const category = categories[index % categories.length]
+        return { pair_id: `pair-${index + 1}`, category, prompt: `prompt ${index + 1}`, references: category === 'reference-edit' ? [reference] : [] }
+      }) }
+    const state = prepareStudy(input, '4'.repeat(64), context())
+    const precommit = hash(JSON.stringify(state) + '\n')
+    const output = join(temporary, 'outputs')
+    let calls = 0
+    const fetchImpl = async () => {
+      calls += 1
+      if (calls === 2) throw new Error('unknown provider outcome')
+      return new Response(JSON.stringify({ id: `result-${calls}`, data: [{ b64_json: png.toString('base64') }], usage: {} }), { status: 200 })
+    }
+    await assert.rejects(collectStudy(state, precommit, context(), output, fetchImpl), /outcome is unknown/u)
+    assert.equal(calls, 4)
+    const retained = readdirSync(output).filter(name => /^pair-/u.test(name))
+    assert.equal(retained.length, 3)
+    for (const name of retained) assert.deepEqual(readFileSync(join(output, name)), png)
+    await assert.rejects(collectStudy(state, precommit, context(), output, fetchImpl), /EEXIST/u)
+    assert.equal(calls, 4)
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
 })

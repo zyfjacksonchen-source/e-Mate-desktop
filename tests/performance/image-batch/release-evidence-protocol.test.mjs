@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { CLAIM, DESKTOP_REFERENCE, HARNESS_COMMIT, projectManifest, validateManifest, validateRawEvidence } from './release-evidence-protocol.mjs'
+import { CLAIM, DESKTOP_REFERENCE, HARNESS_COMMIT, createOpenManifest, projectManifest, validateManifest, validateRawEvidence } from './release-evidence-protocol.mjs'
 
 const MANIFEST = new URL('../../../docs/2.0.17/evidence-manifests/performance.json', import.meta.url)
 const digest = value => createHash('sha256').update(value).digest('hex')
@@ -65,6 +65,44 @@ function encoded(value = validStudy()) {
   const sha256 = digest(raw)
   return { raw, descriptor: { uri: `https://evidence.example/immutable/em217-502/${sha256}.json`, sha256 } }
 }
+
+function currentStudy() {
+  const value = validStudy()
+  value.provenance.version = '2.0.18'
+  for (const layer of [value, value.local, value.staging, value.production, value.macos_gui]) layer.ticket = 'EM218-502'
+  for (const batch of value.macos_gui.batches) batch.provider_billing_counts = Array(batch.task_count).fill(1)
+  return value
+}
+
+test('2.0.18 enforces effective success separately from legal terminal and retains old evidence identity', () => {
+  const current = currentStudy()
+  const { raw, descriptor } = encoded(current)
+  const pass = projectManifest(createOpenManifest(), raw, descriptor)
+  assert.equal(pass.ticket, 'EM218-502')
+  assert.equal(pass.release_evidence.effective_image_success_rate.value, 1)
+  assert.strictEqual(validateManifest(pass, raw), pass)
+  const historical = encoded()
+  assert.equal(validateRawEvidence(historical.raw, historical.descriptor).ticket, 'EM217-502')
+  assert.throws(() => projectManifest(createOpenManifest(), historical.raw, historical.descriptor), /release identities differ/u)
+  for (const batch of current.macos_gui.batches) {
+    batch.terminal_counts.completed -= 1; batch.terminal_counts.failed += 1
+    batch.successful_images -= 1; batch.retained_successful_images -= 1
+  }
+  const failure = encoded(current)
+  assert.throws(() => projectManifest(createOpenManifest(), failure.raw, failure.descriptor), /effective_image_success_rate failed/u)
+})
+
+test('2.0.18 requires observed billing counts and rejects duplicate charges or mixed identities', () => {
+  for (const mutate of [
+    value => { delete value.macos_gui.batches[0].provider_billing_counts },
+    value => { value.macos_gui.batches[0].provider_billing_counts[0] = 2 },
+    value => { value.production.ticket = 'EM217-502' },
+  ]) {
+    const value = currentStudy(); mutate(value)
+    const { raw, descriptor } = encoded(value)
+    assert.throws(() => validateRawEvidence(raw, descriptor))
+  }
+})
 
 test('only exact multi-environment raw bytes project a complete PASS manifest', () => {
   const open = JSON.parse(readFileSync(MANIFEST, 'utf8'))

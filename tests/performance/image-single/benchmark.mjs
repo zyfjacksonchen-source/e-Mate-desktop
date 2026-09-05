@@ -28,7 +28,7 @@ const WORKER_TIMEOUT_MS = 30 * 60 * 1000
 export function assertBuiltPrerequisites(paths = BUILT_PREREQUISITES) {
   const missing = paths.filter(path => !existsSync(resolve(ROOT, path)))
   if (missing.length > 0) {
-    throw new Error('EM217-108 benchmark prerequisites are absent: ' + missing.join(', ')
+    throw new Error('EM218-108 benchmark prerequisites are absent: ' + missing.join(', ')
       + '. Run only the main-agent-authorized existing Harness/e-Mate build prerequisites; benchmark.mjs never installs or builds them.')
   }
 }
@@ -46,12 +46,12 @@ function newestSourceMtime(directory) {
 
 export function assertExactBuiltProvenance() {
   const dirty = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: ROOT, encoding: 'utf8' }).trim()
-  if (dirty !== '') throw new Error('EM217-108 full benchmark requires a clean committed worktree; uncommitted or untracked source cannot be attributed to HEAD')
+  if (dirty !== '') throw new Error('EM218-108 full benchmark requires a clean committed worktree; uncommitted or untracked source cannot be attributed to HEAD')
   verifyHarnessBuildReceipt(ROOT)
   const bundle = join(ROOT, 'packages/dsh/profile/plugins/image-generation.js')
   const newestSource = newestSourceMtime(join(ROOT, 'packages/dsh/src/profile'))
   if (statSync(bundle).mtimeMs < newestSource) {
-    throw new Error('EM217-108 assembled image-generation bundle is older than product source; run the authorized @e-mate/dsh build before benchmarking')
+    throw new Error('EM218-108 assembled image-generation bundle is older than product source; run the authorized @e-mate/dsh build before benchmarking')
   }
 }
 
@@ -97,7 +97,7 @@ function runWorker(repetition, commit) {
     let settled = false
     const timer = setTimeout(() => {
       child.kill('SIGKILL')
-      rejectOnce(new Error('EM217-108 worker ' + repetition + ' exceeded the 30-minute protocol deadline'))
+      rejectOnce(new Error('EM218-108 worker ' + repetition + ' exceeded the 30-minute protocol deadline'))
     }, WORKER_TIMEOUT_MS)
     timer.unref()
     const rejectOnce = error => { if (!settled) { settled = true; clearTimeout(timer); rejectWorker(error) } }
@@ -105,7 +105,7 @@ function runWorker(repetition, commit) {
       outputBytes += chunk.byteLength
       if (outputBytes > MAX_WORKER_JSON_BYTES) {
         child.kill('SIGKILL')
-        rejectOnce(new Error('EM217-108 worker JSON exceeded 2 MiB'))
+        rejectOnce(new Error('EM218-108 worker JSON exceeded 2 MiB'))
       } else output.push(chunk)
     })
     child.stderr.on('data', chunk => {
@@ -116,7 +116,7 @@ function runWorker(repetition, commit) {
     child.once('close', code => {
       if (settled) return
       if (code !== 0) {
-        rejectOnce(new Error('EM217-108 worker ' + repetition + ' failed: ' + Buffer.concat(errors).toString('utf8').trim()))
+        rejectOnce(new Error('EM218-108 worker ' + repetition + ' failed: ' + Buffer.concat(errors).toString('utf8').trim()))
         return
       }
       try {
@@ -125,7 +125,7 @@ function runWorker(repetition, commit) {
         clearTimeout(timer)
         resolveWorker(parsed)
       } catch (error) {
-        rejectOnce(new Error('EM217-108 worker ' + repetition + ' returned invalid JSON', { cause: error }))
+        rejectOnce(new Error('EM218-108 worker ' + repetition + ' returned invalid JSON', { cause: error }))
       }
     })
   })
@@ -140,7 +140,7 @@ async function fullBenchmark() {
   for (let repetition = 1; repetition <= REPETITIONS; repetition += 1) repetitions.push(await runWorker(repetition, commit))
   const aggregate = { schema_version: 1, ticket: TICKET, claim: CLAIM, repetitions, all_repetitions_pass: repetitions.every(entry => entry.pass) }
   validateAggregate(aggregate)
-  const directory = join(ROOT, 'work/em217-108/image-single')
+  const directory = join(ROOT, 'work/em218-108/image-single')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const raw = Buffer.from(JSON.stringify(aggregate) + '\n')
   const rawPath = join(directory, 'raw-' + commit.slice(0, 12) + '-' + String(Date.now()) + '.json')

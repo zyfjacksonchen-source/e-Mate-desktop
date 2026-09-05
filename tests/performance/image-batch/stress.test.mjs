@@ -9,10 +9,10 @@ import test from 'node:test'
 import { imageBatchProjectionDefinition } from '../../../packages/dsh/src/profile/image-batch-events.ts'
 import { readDurableImageBatchResult } from '../../../packages/dsh/src/profile/image-batch-recovery.ts'
 import { createNativeImageTaskRuntime } from '../../../packages/dsh/src/profile/native-image-task-runner.ts'
-import { CLAIM as RELEASE_CLAIM, DESKTOP_REFERENCE, HARNESS_COMMIT, validateManifest } from './release-evidence-protocol.mjs'
+import { CLAIM as RELEASE_CLAIM, RELEASE_VERSION, TICKET, DESKTOP_REFERENCE, HARNESS_COMMIT, validateManifest } from './release-evidence-protocol.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
-const RAW_RELATIVE_PATH = 'work/em217-502/performance-image-batch-raw.json'
+const RAW_RELATIVE_PATH = 'work/em218-502/performance-image-batch-raw.json'
 const MANIFEST_PATH = new URL('../../../docs/2.0.17/evidence-manifests/performance.json', import.meta.url)
 const LEGAL_TERMINALS = new Set(['completed', 'failed', 'cancelled', 'unknown', 'interrupted'])
 const chain = new Proxy(function () { return chain }, { get: () => chain, apply: () => chain })
@@ -312,13 +312,13 @@ test('120 complete native batches preserve terminal, receipt, identity, concurre
   const emateCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
   const sourceState = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=no'], { cwd: ROOT, encoding: 'utf8' }).trim() === '' ? 'CLEAN' : 'DIRTY'
   const digest = value => createHash('sha256').update(value).digest('hex')
-  benchmarkReport = { schema_version: 2, ticket: 'EM217-502',
+  benchmarkReport = { schema_version: 2, ticket: TICKET,
     claim: 'local-source-only-not-provider-latency-not-ui-first-visible-not-direct-single-image-evidence',
     environment: {
       layer: 'local-test-provider', environment_name_sha256: digest('local-test-provider'),
       gateway_origin_sha256: digest('no-gateway-local-fixture'), deployment_fingerprint_sha256: digest(emateCommit),
     },
-    provenance: { emate_commit: emateCommit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: '2.0.17' },
+    provenance: { emate_commit: emateCommit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: RELEASE_VERSION },
     measured_at: new Date().toISOString(), source_state: sourceState,
     batches: samples.length, tasks: taskTotal, fully_successful_batches: fullySuccessfulBatches, runtime_ms: runtimeMs,
     provider_calls: providerTotal, typed_429_retry_probe: 'OPEN',

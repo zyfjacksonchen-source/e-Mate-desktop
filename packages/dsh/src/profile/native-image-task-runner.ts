@@ -291,10 +291,11 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
 
     let state: ImageBatchReducerState | undefined
     let fatal: unknown
+    const batchActive = () => [...active].filter(gate => gate.parentSessionId === sessionId && gate.parentCallId === callId)
     const failFatal = (reason: unknown) => {
       if (fatal !== undefined) return
       fatal = reason
-      abortAll(reason)
+      for (const gate of batchActive()) abort(gate, reason)
     }
     const base = () => ({ schema_version: 1 as const,
       event_id: imageBatchEventId(sessionId, callId, (state?.accepted_events.length ?? 0) + 1),
@@ -462,8 +463,8 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
       }
     }))
     if (fatal !== undefined) {
-      abortAll(fatal)
-      await Promise.allSettled([...active].map(cleanup))
+      for (const gate of batchActive()) abort(gate, fatal)
+      await Promise.allSettled(batchActive().map(cleanup))
       throw fatal
     }
     for (const task of request.tasks) await stopQueued(task, exec.signal.aborted ? 'cancelled' : 'not-submitted')

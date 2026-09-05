@@ -8,7 +8,7 @@ import test from 'node:test'
 import {
   ATTACHMENT_LIMITS, CLAIM, COMPARISON_SCENARIOS, DESKTOP_REFERENCE, HARNESS_COMMIT, HISTORY_SCENARIO, NORMALIZED_PROMPT, REQUEST_BODY,
   SCENARIO_NAMES, comparisonSummary, historySummary, nearestRank, sha256,
-  createPassManifest, createSourcePassManifest, validateAggregate, validateDirectMeasurement, validateDirectProductSource,
+  createOpenManifest, createPassManifest, createSourcePassManifest, validateAggregate, validateDirectMeasurement, validateDirectProductSource,
   validateGuiEvidence, validateManifest, validateWorkerReport,
 } from './protocol.mjs'
 import { crc32 } from 'node:zlib'
@@ -330,4 +330,19 @@ test('source-only smoke requires no build while full benchmark prerequisite fail
   assert.match(parentSource, /verifyHarnessBuildReceipt\(ROOT\)/u)
   assert.match(parentSource, /WORKER_TIMEOUT_MS = 30 \* 60 \* 1000/u)
   assert.throws(() => assertBuiltPrerequisites(['definitely/missing/built-output.js']), /prerequisites are absent.*never installs or builds/u)
+})
+
+test('current single evidence preserves EM218 identity and cannot mix historical worker or GUI results', () => {
+  const value = aggregate()
+  value.ticket = 'EM218-108'
+  value.repetitions.forEach(entry => { entry.ticket = value.ticket })
+  const raw = JSON.stringify(value)
+  const source = createSourcePassManifest(value, `https://evidence.invalid/${sha256(raw)}.json`, raw)
+  assert.equal(createOpenManifest().ticket, 'EM218-108')
+  assert.equal(source.ticket, 'EM218-108')
+  assert.equal(source.contract, 'tests/performance/image-single/protocol.mjs')
+  const mixed = structuredClone(value); mixed.repetitions[0].ticket = 'EM217-108'
+  assert.throws(() => validateAggregate(mixed), /release identities differ/u)
+  const historicalGui = guiEvidence()
+  assert.throws(() => createPassManifest(value, source.external_raw.uri, raw, historicalGui.raw, historicalGui.descriptor.uri), /identities or commits differ/u)
 })
