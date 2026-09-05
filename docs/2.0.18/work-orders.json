@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "version": "2.0.18",
+  "baseline": "87b47114ff30882d2895682e74d02eb6307b9dbc",
+  "original_task": "01a06a78-3914-7483-a761-0297705a492a",
+  "prior_orders": [
+    {
+      "id": "EM217-000",
+      "title": "冻结 2.0.17 精确基线与执行清单",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-001",
+      "title": "复现生产并发生图并建立可重复基准",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-002",
+      "title": "批准 Image Batch ADR 与追加式事件协议",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-003",
+      "title": "建立 pinned deepseek-harness-desktop 原生架构来源矩阵",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-004",
+      "title": "冻结全功能非回退验收清单",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-101",
+      "title": "实现内部 image_batch 请求规范化、ID 与 schema",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-102",
+      "title": "实现批次追加式事件、状态机与父 Session 投影",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-103",
+      "title": "原子激活可用的 pinned-spawn new-image image_batch",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-104",
+      "title": "实现有界并发、槽位补充与公平取消",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-105",
+      "title": "启用 source-task 路由并锁定提示词与参数保真",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-106",
+      "title": "实现精确 receipt 关联与合法部分终态",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-107",
+      "title": "实现重启恢复、结果汇总与旧会话只读兼容",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-108",
+      "title": "约束单图本地链路时延并防止层级累积",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-109",
+      "title": "删除图像生成与编辑确认流程",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-201",
+      "title": "证明并按缺口加固现有网关幂等账本",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-202",
+      "title": "证明安全 typed pre-provider 重试或 receipt reacquire",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-203",
+      "title": "证明并按缺口加固现有网关 admission control",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-204",
+      "title": "补齐图像全链路时延与失败分类遥测",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-205",
+      "title": "证明并按缺口加固现有 exactly-once usage 与审计",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-206",
+      "title": "解耦本地启动并加固企业模型断连认证与恢复",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-301",
+      "title": "建立 batch projection 的官方 Web Client 读取层",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-302",
+      "title": "在开放中的 turn 内逐张呈现批次进度",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-303",
+      "title": "让同一组件原位收敛为唯一最终 Gallery",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-304",
+      "title": "实现部分失败、取消和显式单项重试 UX",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-305",
+      "title": "实现刷新/重启恢复与旧会话读取兼容",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-306",
+      "title": "完成批次 UI 性能、可访问性与大图内存治理",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-307",
+      "title": "统一普通文件导入失败与全类型安全边界",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-401",
+      "title": "锁定 pinned deepseek-harness-desktop 来源与执行顺序",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-402",
+      "title": "对齐 ElectronShellGeneration 的单代资源所有权",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-403",
+      "title": "对齐 ElectronPlatformStrategy 并收敛平台分支",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-404",
+      "title": "审计并对齐 Cordis inject/effect 与插件销毁顺序",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-405",
+      "title": "清除非原生 Renderer bridge 与重复 IPC 所有权",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-406",
+      "title": "对齐 desktopProfiles/desktopPnpm 服务边界与插件安装路径",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-407",
+      "title": "在全部 Source Gate 后更新 2.0.17 版本与基线合同",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-408",
+      "title": "native Windows Computer Use plugin integration",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-501",
+      "title": "补齐单元、契约、状态机与属性测试",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-502",
+      "title": "执行 4/5/8 图并发稳定性与性能压测",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-503",
+      "title": "完成单图与批图质量非劣性盲测",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-504",
+      "title": "macOS 真实 Computer Use 全功能验证",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-505",
+      "title": "Windows 登录态 Codex Remote 真实 Computer Use 验证",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-506",
+      "title": "验证更新、精确回滚、数据持久化与跨启动兼容",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    },
+    {
+      "id": "EM217-507",
+      "title": "完成候选、安装态、公开生产证据与分环发布",
+      "reconciliation": "RECHECK",
+      "source_evidence": [],
+      "installed_evidence": []
+    }
+  ],
+  "workstreams": [
+    {
+      "id": "legacy",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "enterprise",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "computer-use",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "images",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "canvas",
+      "status": "OPEN"
+    },
+    {
+      "id": "pet",
+      "status": "OPEN"
+    },
+    {
+      "id": "astra",
+      "status": "OPEN"
+    },
+    {
+      "id": "external-connections",
+      "status": "OPEN"
+    },
+    {
+      "id": "skill-hub",
+      "status": "OPEN"
+    },
+    {
+      "id": "full-review",
+      "status": "OPEN"
+    },
+    {
+      "id": "dual-platform-release",
+      "status": "OPEN"
+    }
+  ]
+}
