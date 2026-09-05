@@ -1,5 +1,6 @@
 ARG NODE_IMAGE=node@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
 ARG BUN_IMAGE=oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
+ARG MIGRATION_NODE_IMAGE=node@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
 
 FROM ${NODE_IMAGE} AS build
 WORKDIR /app
@@ -59,7 +60,12 @@ EXPOSE 8788
 CMD ["bun", "apps/skill-hub-service/src/server.ts"]
 
 # The importer uses Node's restricted SQLite reader; serving stays on the pinned Bun runtime.
-FROM build AS skill-hub-migrate
+FROM ${MIGRATION_NODE_IMAGE} AS skill-hub-migrate
 ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build --chown=10001:0 /app/node_modules ./node_modules
+COPY --from=build --chown=10001:0 /app/apps/skill-hub-service ./apps/skill-hub-service
+COPY --from=build --chown=10001:0 /app/apps/skill-hub-worker ./apps/skill-hub-worker
 USER 10001:0
+RUN node --input-type=module -e "import { DatabaseSync } from 'node:sqlite'; if (typeof DatabaseSync.prototype.setAuthorizer !== 'function') throw new Error('Restricted SQLite reader is unavailable')"
 ENTRYPOINT ["node", "--experimental-strip-types", "apps/skill-hub-service/src/migrate.ts"]
