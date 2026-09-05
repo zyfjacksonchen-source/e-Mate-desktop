@@ -141,7 +141,7 @@ export function imageBatchParameters() {
   return {
     tasks: {
       type: 'array', required: true,
-      description: 'Two to eight ordered independent new-image tasks.',
+      description: 'Two to eight ordered independent image outputs, including explicitly sourced edits or fusion; dependent outputs must run serially.',
       items: {
         type: 'object', additionalProperties: false,
         properties: {

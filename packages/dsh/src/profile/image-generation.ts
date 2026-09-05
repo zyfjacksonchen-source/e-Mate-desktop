@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { IMAGE_PROMPT_GUIDANCE } from './image-prompt-guidance.ts'
 import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { setTimeout as wait } from 'node:timers/promises'
@@ -1221,7 +1222,7 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2-pro route. For two or more mutually independent new images, use image_batch once and do not call imagegen directly. A native image_batch child may call imagegen exactly once with its exact admitted arguments. For an edit, copy the exact sha256: current-session image attachment ID into image_url; never pass a Job ID, request ID, or URL. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
+    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2-pro route. For two or more mutually independent image outputs, use image_batch once and do not call imagegen directly. A native image_batch child may call imagegen exactly once with its exact admitted arguments. image_url accepts only exact current-session sha256: image attachment IDs, never Job/request IDs or URLs; ordered multiple references belong to one output and their roles must be explicit. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.\n\n' + IMAGE_PROMPT_GUIDANCE,
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
