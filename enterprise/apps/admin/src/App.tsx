@@ -1109,7 +1109,7 @@ export function App() {
             showIcon
             content={copy.policyUsers.replace('{count}', String(policyUsers.length))}
           />
-          <ul aria-live='polite'>
+          <ul aria-live='polite' style={{ maxHeight: 180, overflowY: 'auto' }}>
             {policyUsers.map((user) => {
               const result = policyResults.find((item) => item.target.user.userId === user.userId);
               const label = result?.httpStatus === 401 ? copy.authFailed : result?.httpStatus === 403 ? copy.accessDenied
@@ -1119,7 +1119,7 @@ export function App() {
           </ul>
           {policyResults.some((result) => result.status === 'conflict') && <Alert type='warning' content={copy.policyConflictNotice} />}
           {mutationError && <Alert type='error' content={copy.mutationFailed} />}
-          <fieldset disabled={policyLocked} style={{ border: 0, padding: 0, margin: 0 }}>
+          <fieldset className='modal-fields' disabled={policyLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <label>{copy.tokenLimit}</label>
           {!policyApprovePending && <Checkbox disabled={policyLocked} checked={keepPolicyQuota} onChange={setKeepPolicyQuota}>{copy.keepOriginal}</Checkbox>}
           <div className='quota-row'>
