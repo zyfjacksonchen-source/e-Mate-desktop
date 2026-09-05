@@ -136,13 +136,17 @@ async function mixedImageAdmission(store: UsageStore, releaseAfterTenSeconds: ()
   // All four slots remain usable until a direct single actually waits.
   const batch = await Promise.all(Array.from({ length: 4 }, (_, index) => store.prepare(imageFact(`full-${index}`))));
   assert(batch.every(value => value.status === 'STARTED'));
-  await concurrencyDenied(store.prepare(imageFact('waiting-single', 'single')));
-  await concurrencyDenied(store.prepare(imageFact('waiting-single', 'single')));
   // Accepted replays must not enter admission or consume more tokens.
   assert.equal((await store.prepare(imageFact('full-1'))).status, 'PENDING');
-  const otherTenant = await Promise.all(Array.from({ length: 4 }, (_, index) => store.prepare(imageFact(`isolated-${index}`, 'batch', 'tenant-b'))));
+  const otherTenant = await Promise.all(Array.from({ length: 3 }, (_, index) => store.prepare(imageFact(`isolated-${index}`, 'batch', 'tenant-b'))));
   assert(otherTenant.every(value => value.status === 'STARTED'));
-  await releaseAfterTenSeconds();
+  await concurrencyDenied(store.prepare(imageFact('waiting-single', 'single')));
+  await Promise.all([
+    releaseAfterTenSeconds(),
+    store.prepare(imageFact('isolated-last', 'batch', 'tenant-b')).then(value => {
+      assert.equal(value.status, 'STARTED', 'another tenant keeps its last slot while the single waits');
+    }),
+  ]);
   await store.complete(batch[0]!.invocationId, imageUsage(imageFact('full-0')));
   await concurrencyDenied(store.prepare(imageFact('batch-refill')));
   const single = await store.prepare(imageFact('waiting-single', 'single'));
@@ -223,23 +227,47 @@ test('real Postgres image admission preserves rollback, fairness, TTL, isolation
     const store = new PostgresUsageStore(pool, imageLimits);
     await store.initialize();
     await store.initialize(); // Existing installations and repeat initialization keep the quota row.
-    let firstHint: Date;
+    // Observe the production UPDATE inside its own database statement. A later client
+    // round trip measures the remaining TTL, not the duration that was actually granted.
+    await pool.query(`
+      CREATE TABLE image_hint_observation (
+        tenant_id text, hint_until timestamptz, started_at timestamptz, observed_at timestamptz
+      );
+      CREATE FUNCTION observe_image_hint() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        INSERT INTO image_hint_observation
+          VALUES (NEW.tenant_id, NEW.single_image_wait_until, statement_timestamp(), clock_timestamp());
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER observe_image_hint AFTER UPDATE OF single_image_wait_until ON e_mate_model_quota_state
+        FOR EACH ROW WHEN (NEW.single_image_wait_until > COALESCE(OLD.single_image_wait_until, '-infinity'::timestamptz))
+        EXECUTE FUNCTION observe_image_hint();
+    `);
+    let ttlBounds: { minimum_ms: string; maximum_ms: string } | undefined;
     await mixedImageAdmission(store, async () => {
-      const rejected = await pool.query(`SELECT count(*) FROM e_mate_model_usage_task WHERE task_id = 'waiting-single'`);
-      assert.equal(rejected.rows[0].count, '0', 'denied prepare rolls back its task journal');
-      const quota = await pool.query(`SELECT tokens, single_image_wait_until, extract(epoch FROM (single_image_wait_until - clock_timestamp())) AS remaining FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`);
-      firstHint = quota.rows[0].single_image_wait_until;
-      assert(Number(quota.rows[0].remaining) > 29 && Number(quota.rows[0].remaining) <= 30);
-      const tokensBefore = quota.rows[0].tokens;
-      await concurrencyDenied(store.prepare(imageFact('waiting-single', 'single')));
-      const unchanged = await pool.query(`SELECT tokens, single_image_wait_until FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`);
-      assert.equal(unchanged.rows[0].tokens, tokensBefore);
-      assert.equal(unchanged.rows[0].single_image_wait_until.getTime(), firstHint.getTime(), 'polling does not extend an active TTL');
+      const observed = await pool.query(`
+        SELECT hint_until BETWEEN started_at + interval '30 seconds' AND observed_at + interval '30 seconds' AS ttl_is_30_seconds,
+               (extract(epoch FROM (hint_until - observed_at)) * 1000)::text AS minimum_ms,
+               (extract(epoch FROM (hint_until - started_at)) * 1000)::text AS maximum_ms,
+               (SELECT count(*) FROM e_mate_model_usage_task WHERE task_id = 'waiting-single') AS rejected_task_rows
+          FROM image_hint_observation WHERE tenant_id = 'tenant-a'
+      `);
+      assert.equal(observed.rows.length, 1);
+      assert.equal(observed.rows[0].rejected_task_rows, '0', 'denied prepare rolls back its task journal');
+      assert.equal(observed.rows[0].ttl_is_30_seconds, true, 'the hint must grant exactly 30 seconds within its database UPDATE');
+      ttlBounds = { minimum_ms: observed.rows[0].minimum_ms, maximum_ms: observed.rows[0].maximum_ms };
       await wait(10_000);
     });
     assert.equal((await pool.query(`SELECT single_image_wait_until FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`)).rows[0].single_image_wait_until, null);
     await concurrencyDenied(store.prepare(imageFact('cancelled-single', 'single')));
-    assert.equal((await pool.query(`SELECT count(*) FROM e_mate_model_usage_task WHERE task_id = 'cancelled-single'`)).rows[0].count, '0');
+    const beforePoll = await pool.query(`SELECT tokens, single_image_wait_until,
+      (SELECT count(*) FROM e_mate_model_usage_task WHERE task_id = 'cancelled-single') AS rejected_task_rows
+      FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`);
+    assert.equal(beforePoll.rows[0].rejected_task_rows, '0');
+    await concurrencyDenied(store.prepare(imageFact('cancelled-single', 'single')));
+    const afterPoll = await pool.query(`SELECT tokens, single_image_wait_until FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-a'`);
+    assert.equal(afterPoll.rows[0].tokens, beforePoll.rows[0].tokens);
+    assert.equal(afterPoll.rows[0].single_image_wait_until.getTime(), beforePoll.rows[0].single_image_wait_until.getTime(), 'polling does not extend an active TTL');
     const full = await store.prepare(imageFact('full-1'));
     await store.complete(full.invocationId, imageUsage(imageFact('full-1')));
     await concurrencyDenied(store.prepare(imageFact('after-cancel')));
@@ -255,19 +283,34 @@ test('real Postgres image admission preserves rollback, fairness, TTL, isolation
     const singleRate = imageFact('rate-single', 'single', 'tenant-rate');
     await concurrencyDenied(rateStore.prepare(singleRate));
     await rateStore.complete(fullRate[0]!.invocationId, imageUsage(rateFacts[0]!));
+    const rateHintAtDatabaseNow = async () => {
+      const result = await pool.query(`
+        SELECT ceil(greatest(1000, (1 - tokens) * 60000 -
+          greatest(0, extract(epoch FROM (clock_timestamp() - last_refill_at)) * 1000))) AS retry_after_ms
+          FROM e_mate_model_quota_state WHERE tenant_id = 'tenant-rate'
+      `);
+      return Number(result.rows[0].retry_after_ms);
+    };
+    const rateHintBefore = await rateHintAtDatabaseNow();
+    let rateHint: number | undefined;
     await assert.rejects(rateStore.prepare(singleRate), (error: unknown) => {
       assert(error instanceof InvocationAdmissionError);
       assert.equal(error.code, 'TENANT_REQUEST_RATE_LIMITED');
-      assert(error.retryAfterMs > 50_000 && error.retryAfterMs <= 60_000);
+      rateHint = error.retryAfterMs;
       return true;
     });
+    const rateHintAfter = await rateHintAtDatabaseNow();
+    assert(rateHint !== undefined && rateHintAfter <= rateHint && rateHint <= rateHintBefore,
+      'rate hint must match the unchanged token bucket between the database clock reads');
     await pool.query(`UPDATE e_mate_tenant_user SET token_limit = 0 WHERE tenant_id = 'tenant-rate'`);
     await assert.rejects(rateStore.prepare(singleRate), (error: unknown) => {
       assert(error instanceof InvocationAdmissionError);
       assert.equal(error.code, 'USER_TOKEN_LIMIT_REACHED');
       return true;
     });
-    t.diagnostic(JSON.stringify({ schema, release_after_ms: 10_000, batch_refill: 'TENANT_CONCURRENCY_LIMITED', single: 'STARTED', rejected_task_rows: 0, billed_tokens_after_cancel: 6, provider_calls: 0 }));
+    t.diagnostic(JSON.stringify({ schema, ttl_bounds_ms: ttlBounds, rate_hint_ms: rateHint,
+      rate_hint_bounds_ms: { minimum: rateHintAfter, maximum: rateHintBefore },
+      release_after_ms: 10_000, batch_refill: 'TENANT_CONCURRENCY_LIMITED', single: 'STARTED', rejected_task_rows: 0, billed_tokens_after_cancel: 6, provider_calls: 0 }));
   } finally {
     await pool.end();
     if (schemaCreated) await admin.query(`DROP SCHEMA ${schema} CASCADE`);
