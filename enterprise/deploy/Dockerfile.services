@@ -46,3 +46,20 @@ USER 10001:0
 RUN bun -e "await import('./apps/auth-gateway/dist/production.js')"
 EXPOSE 4192
 CMD ["bun", "apps/auth-gateway/dist/start.js"]
+
+FROM ${BUN_IMAGE} AS skill-hub
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build --chown=10001:0 /app/node_modules ./node_modules
+COPY --from=build --chown=10001:0 /app/apps/skill-hub-service ./apps/skill-hub-service
+COPY --from=build --chown=10001:0 /app/apps/skill-hub-worker ./apps/skill-hub-worker
+USER 10001:0
+RUN bun -e "await import('./apps/skill-hub-service/src/server.ts')"
+EXPOSE 8788
+CMD ["bun", "apps/skill-hub-service/src/server.ts"]
+
+# The importer uses Node's restricted SQLite reader; serving stays on the pinned Bun runtime.
+FROM build AS skill-hub-migrate
+ENV NODE_ENV=production
+USER 10001:0
+ENTRYPOINT ["node", "--experimental-strip-types", "apps/skill-hub-service/src/migrate.ts"]
