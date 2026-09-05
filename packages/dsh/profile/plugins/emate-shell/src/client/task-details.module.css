@@ -1,0 +1,11 @@
+.root { padding: 18px; overflow: auto; color: var(--dsw-alias-label-primary); }
+.root header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.root h2 { font-size: 18px; overflow-wrap: anywhere; }
+.root h3 { margin-top: 24px; font-size: 14px; }
+.root p, .root li { font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.root ul { padding-left: 20px; }
+.root li span { color: var(--dsw-alias-label-secondary); }
+.root dl { display: grid; grid-template-columns: 1fr auto; gap: 10px; font-size: 13px; }
+.root dd { margin: 0; }
+.root button { padding: 6px 10px; border: 1px solid var(--dsw-alias-border-primary, #8885); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.root button:focus-visible { outline: 2px solid var(--dsw-alias-label-primary); outline-offset: 2px; }

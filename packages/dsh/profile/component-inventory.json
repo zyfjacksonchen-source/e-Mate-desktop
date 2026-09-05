@@ -8,6 +8,18 @@
       "cli": false
     },
     {
+      "id": "@e-mate/dsh-plugin-canvas",
+      "root": "packages/dsh-plugin-canvas",
+      "desktop": "bundled-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-pet",
+      "root": "packages/dsh-plugin-pet",
+      "desktop": "bundled-profile",
+      "cli": true
+    },
+    {
       "id": "@e-mate/dsh-plugin-skill-hub",
       "root": "packages/dsh-plugin-skill-hub",
       "desktop": "bundled-profile",

@@ -118,6 +118,12 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.galleryActions .canvasAction {
+  width: auto;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
 .galleryActions button:disabled,
 .galleryPager button:disabled {
   opacity: 0.35;
@@ -241,6 +247,15 @@
   height: 10px;
   border: 1.5px solid currentcolor;
   border-radius: 3px;
+}
+
+.imageCanvasAction {
+  right: auto;
+  left: 10px;
+}
+
+.imageAction:disabled {
+  cursor: default;
 }
 
 .imageAction i::before {

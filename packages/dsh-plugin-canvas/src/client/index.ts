@@ -20,6 +20,12 @@ export function apply(ctx: any): void {
     return loading
   }
   const service: CanvasClientService = {
+    async leave() {
+      await leave?.()
+      generation += 1
+      disposePanel?.()
+      disposePanel = undefined
+    },
     async open(sessionId: string, options: CanvasOpenOptions = {}) {
       await leave?.()
       const current = ++generation
@@ -32,6 +38,7 @@ export function apply(ctx: any): void {
         owner_session_id: options.attachment.ownerSessionId, attachment_id: options.attachment.attachmentId,
       }) : undefined
       if (current !== generation) return
+      ctx.get?.('ematePetDetails')?.release()
       disposePanel?.()
       disposePanel = ctx.slots.register({ name: 'details', id: 'e-mate-canvas', priority: -2,
         inject: () => ({ bridge, initialProjectId: options.projectId ?? 'main', initialAsset: asset }),

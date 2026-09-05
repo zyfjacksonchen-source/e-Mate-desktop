@@ -62,6 +62,7 @@ import {
   SettingsTrigger,
 } from './settings-chrome.tsx'
 import { ThinkingStatusBranding } from './thinking-status.tsx'
+import { registerPetTaskDetails } from './task-details.tsx'
 
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
@@ -88,6 +89,11 @@ function imageGalleryInjected(ctx: any, sessionId: string, notice: GalleryNotice
   return {
     loadImage: (attachment: any, ownerSessionId = sessionId) =>
       ctx.conversation.resolveImage(ownerSessionId, attachment),
+    addImageToCanvas: async (attachment: any, ownerSessionId = sessionId) => {
+      const canvas = ctx.get('emateCanvas')
+      if (!canvas) throw new Error('画布尚未就绪，请稍后重试。')
+      await canvas.insertAttachment(sessionId, ownerSessionId, attachment.attachmentId)
+    },
     addImageToDraft: async (attachment: any, ownerSessionId = sessionId) => {
       const target = ctx.sessions.binding(sessionId)?.session
       if (target === undefined) throw new Error('当前会话不可用，未添加图片。')
@@ -454,6 +460,7 @@ export async function prepareSchedulePromptFromRoute(
 }
 
 export function apply(ctx: any): void {
+  registerPetTaskDetails(ctx, createTransientGalleryNotice(ctx))
   const messageMode = registerMessageModeSettings(ctx)
   registerActivityFold(ctx, messageMode)
   registerComputerUseTrigger(ctx)

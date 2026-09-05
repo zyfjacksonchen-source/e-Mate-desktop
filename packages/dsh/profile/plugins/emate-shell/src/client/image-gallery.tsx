@@ -622,6 +622,7 @@ interface InputSnapshot {
 }
 
 interface ArtifactTerminalProps extends TurnTailOwnerProps {
+  readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly matched: ArtifactTerminalMatch
   readonly sessionId: string
   readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
@@ -639,6 +640,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
 }
 
 interface ImageGalleryViewProps {
+  readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly sessionId: string
   readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
   readonly useSessions: <T>(
@@ -717,7 +719,7 @@ function galleryItemIdentity(item: ImageGalleryItem): string {
 
 /** Native conversation.view reader over the same durable receipts used by the Turn tail. */
 export function ImageGalleryView({
-  sessionId, useSession, useSessions, useInput, useProjection, loadImage, addImageToDraft, draftBytes, notify, runResource,
+  sessionId, useSession, useSessions, useInput, useProjection, loadImage, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource,
 }: ImageGalleryViewProps) {
   const snapshot = useSession(value => value)
   const sessions = useSessions(value => value)
@@ -832,6 +834,11 @@ export function ImageGalleryView({
                   <span>{item.source === undefined ? '' : `来自子任务：${item.source.label} · `}{galleryOperation[item.operation]} · {galleryStatus[item.status]}</span>
                 </div>
                 <div className={css.galleryActions}>
+                  {addImageToCanvas && <button type="button" className={css.canvasAction}
+                    aria-label={`加入画布：${label}`} title="加入画布" disabled={item.status === 'review-required'}
+                    onClick={() => { void addImageToCanvas(attachment, item.source?.sessionId).catch(() => {
+                      notify('error', '图片未能加入画布，请确认附件仍可用。')
+                    }) }}>加入画布</button>}
                   <button type="button" aria-label={`复制图像：${label}`} title="复制图像"
                     onClick={() => { imageAction(item, 'copy-image') }}><IconCopyOutline16 /></button>
                   <button type="button" aria-label={`下载副本：${label}`} title="下载副本"
@@ -907,7 +914,8 @@ function Menu({ state, menuRef, buttonRefs, close, activate }: {
   </div>
 }
 
-function ImageTerminal({ items, loadImage, openMenu }: {
+function ImageTerminal({ items, loadImage, openMenu, addToCanvas }: {
+  readonly addToCanvas?: (item: ImageGalleryItem) => void
   readonly items: readonly ImageGalleryItem[]
   readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
   readonly openMenu: (target: MenuTarget, source: HTMLElement | { clientX: number; clientY: number }) => void
@@ -941,6 +949,9 @@ function ImageTerminal({ items, loadImage, openMenu }: {
           <MessageImage attachment={item.attachment}
             load={value => loadImage(value, item.source?.sessionId)} variant="tile" labels={imageLabels} />
           {item.status === 'review-required' && <span className={css.status}>待确认</span>}
+          {addToCanvas && <button type="button" className={`${css.imageAction} ${css.imageCanvasAction}`}
+            disabled={item.status === 'review-required'} aria-label={`加入画布：${galleryAttachmentName(item.attachment)}`}
+            onClick={() => { addToCanvas(item) }}>加入画布</button>}
           <button
             type="button"
             className={css.imageAction}
@@ -1028,7 +1039,7 @@ export function ArtifactTerminal(props: ArtifactTerminalProps) {
 /** Render hidden image receipts, native deliverables, and optional exact batch progress. */
 function ArtifactTerminalBody({
   matched, sessionId, turn, useSession, useSessions, useInput, useProjection,
-  openFile, loadImage, prepareImageRetry, addImageToDraft, draftBytes, notify, runResource,
+  openFile, loadImage, prepareImageRetry, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource,
   batches, batchChildIds,
 }: ArtifactTerminalBodyProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -1139,7 +1150,13 @@ function ArtifactTerminalBody({
       useSessions={useSessions}
       loadImage={loadImage}
     />}
-    <ImageTerminal items={items} loadImage={loadImage} openMenu={openMenu} />
+    <ImageTerminal items={items} loadImage={loadImage} openMenu={openMenu}
+      {...addImageToCanvas ? { addToCanvas: (item: ImageGalleryItem) => {
+        if (!item.attachment || item.status === 'review-required') return
+        void addImageToCanvas(item.attachment, item.source?.sessionId).catch(() => {
+          notify('error', '图片未能加入画布，请确认附件仍可用。')
+        })
+      } } : {}} />
     <FileTerminal paths={matched.paths} openFile={openFile} openMenu={openMenu} />
     {menu !== null && <Menu
       state={menu}

@@ -230,6 +230,8 @@ test('managed profile installation is idempotent', () => {
     const profileManifest = JSON.parse(manifest)
     assert.equal(profileManifest.type, 'module')
     const pluginPackages = [
+      '@e-mate/dsh-plugin-canvas',
+      '@e-mate/dsh-plugin-pet',
       '@e-mate/dsh-plugin-skill-hub',
       '@e-mate/dsh-plugin-better-sidebar',
       '@e-mate/dsh-plugin-cdp',

@@ -255,6 +255,29 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
 }
 
 describe('completed artifact terminal', () => {
+  it('sends the real image attachment to the canvas without reading a preview or modifying drafts', async () => {
+    const item = parseImageOutputReceipt(receipt())!
+    const addImageToCanvas = vi.fn(async () => {})
+    const props = terminalProps([hidden(item)], undefined, { addImageToCanvas })
+    render(<ArtifactTerminal {...props as any} />)
+    fireEvent.click(screen.getByRole('button', { name: /加入画布：/ }))
+    await waitFor(() => expect(addImageToCanvas).toHaveBeenCalledWith(attachment, undefined))
+    expect(props.loadImage).not.toHaveBeenCalled()
+    expect(props.addImageToDraft).not.toHaveBeenCalled()
+    expect(props.runResource).not.toHaveBeenCalled()
+  })
+
+  it('keeps the gallery image after a failed canvas insertion and reports that failure', async () => {
+    const item = parseImageOutputReceipt(receipt())!
+    const addImageToCanvas = vi.fn(async () => { throw new Error('missing attachment') })
+    const props = galleryProps('session-1', [hidden(item)], { addImageToCanvas })
+    render(<ImageGalleryView {...props as any} />)
+    fireEvent.click(screen.getByRole('button', { name: /加入画布：/ }))
+    await waitFor(() => expect(props.notify).toHaveBeenCalledWith('error', '图片未能加入画布，请确认附件仍可用。'))
+    expect(screen.getByRole('button', { name: /加入画布：/ })).toBeTruthy()
+    expect(props.addImageToDraft).not.toHaveBeenCalled()
+  })
+
   it('registers one native conversation.view Gallery Tab', async () => {
     const runtime = await SlotTestRuntime.create()
     await runtime.root.declare({

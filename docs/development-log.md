@@ -13,3 +13,11 @@
 - Independent source baseline `87b47114ff30882d2895682e74d02eb6307b9dbc`; execution and acceptance are recorded in `docs/2.0.18/execution.md` and `work-orders.json`.
 - Main agent owns integration and all native/production gates; enterprise, Computer Use and image development have isolated first-wave worktrees.
 - Source capabilities and older local receipts are not new installed or production acceptance. All final gates remain OPEN.
+
+## 2026-09-06: image guidance and native workspace integration
+
+- Adopted the installed Codex imagegen skill's reference roles, edit invariants, concise prompt shaping, semantic output checks and non-destructive project delivery in native image Tool guidance. Removed obsolete instructions that excluded batch edits; admitted request bytes and zero-confirmation routing are unchanged.
+- Waiting single-image requests now receive a bounded share of existing tenant admission capacity. Real isolated PostgreSQL verified the 30-second hint, rollback, cancellation, tenant isolation and accounting; the single-image local-overhead benchmark passed. These are not real-provider quality or latency results.
+- Registered canvas and pet in the managed Profile inventory. Gallery and turn-result buttons pass the exact native attachment identity to the canvas. Pet opens read-only facts in the native details seat; switching from canvas first flushes its pending save and preserves conflicts.
+- Skill Hub source now shares its existing Worker business core with the PostgreSQL/filesystem service. Real export rehearsal exposed and fixed the Node 22 importer mismatch and verified legacy version-sort compatibility. Original D1/ZIP bytes and author key remain preserved; production cutover is not complete.
+- Focused Shell/gallery/task-details checks and the integrated source build passed. Desktop's full test pass is still pending recheck after an icon-test timeout under parallel build load; the isolated icon test passed. Pet direction artwork and the 30 office scenes remain under acceptance. No 2.0.18 installed or public-release gate is closed by these changes.
