@@ -36,16 +36,22 @@ if (process.platform === 'darwin') {
   for (const name of (await readdir(sourceDirectory)).filter(name => name.endsWith('.swift')).sort()) {
     sourceHash.update(name).update('\0').update(await readFile(join(sourceDirectory, name))).update('\0')
   }
-  const before = JSON.parse(await readFile(join(root, 'native/macos/manifest.json'), 'utf8'))
-  if (before.sourceSha256 !== sourceHash.digest('hex')) {
+  const sourceDigest = sourceHash.digest('hex')
+  let before
+  try { before = JSON.parse(await readFile(join(root, 'native/macos/manifest.json'), 'utf8')) }
+  catch (error) { if (error.code !== 'ENOENT') throw error }
+  if (before?.sourceSha256 !== sourceDigest) {
     const built = spawnSync(process.execPath, [join(root, 'scripts/build-native.mjs'), '--helper-only'], { cwd: root, encoding: 'utf8', stdio: 'pipe' })
     if (built.status !== 0) throw new Error(`native helper build failed:\n${built.stdout}${built.stderr}`)
   }
   const helper = join(root, 'native/macos/bin/dsh-computer-use-helper')
   const nativeManifestPath = join(root, 'native/macos/manifest.json')
   const nativeManifest = JSON.parse(await readFile(nativeManifestPath, 'utf8'))
-  nativeManifest.binary.sha256 = createHash('sha256').update(await readFile(helper)).digest('hex')
-  await writeFile(nativeManifestPath, `${JSON.stringify(nativeManifest, null, 2)}\n`)
+  if (nativeManifest.schemaVersion !== 1 || nativeManifest.sourceSha256 !== sourceDigest
+    || nativeManifest.binary?.path !== 'bin/dsh-computer-use-helper'
+    || nativeManifest.binary.sha256 !== createHash('sha256').update(await readFile(helper)).digest('hex')) {
+    throw new Error('macOS helper source/binary integrity manifest mismatch')
+  }
 }
 let client = await readText(join(root, 'lib/client.js'))
 client = client.replaceAll('@anionex/dsh-computer-use', '@e-mate/dsh-plugin-computer-use')
