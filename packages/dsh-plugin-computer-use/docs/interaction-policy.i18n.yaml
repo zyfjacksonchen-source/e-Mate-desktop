@@ -1,4 +1,4 @@
 # Bilingual-pair consistency record. Both languages carry equal authority.
 # Recompute these git blob hashes after confirming the two documents say the same thing.
-interaction-policy.md: 9a94efe2feffc42cb8278f53f1ab9a3488210b3f
-interaction-policy.zh.md: 32fc338825fefcc9ace1876e2bab79c347a4ef1b
+interaction-policy.md: 8432140172bb3dc8ee9fec32c7e75f3898af975f
+interaction-policy.zh.md: cba0db137c934d230a9f6dad526033edc5af5d44

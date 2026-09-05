@@ -12,11 +12,11 @@ interaction:
   keyboardPolicy: preserve
   pointerInputPolicy: targeted
   cursorVisualization: !!js "process.platform === 'win32' ? 'hidden' : 'visible'"
-  cursorMotionMs: 180
+  cursorMotionMs: 0
   cursorAutoHideMs: 0
 ```
 
-`preserve` 表示指针与键盘动作都不请求前台激活。Bundle 默认的 `keyboardPolicy: preserve` 会在 macOS 上把键盘 fallback 定向投递给选定 pid 而不激活，只有接受后台键盘事件的应用才可靠。Windows 可在后台执行语义化 UI Automation value 操作，但当目标不在前台时，raw keyboard fallback 会 fail closed，绝不会把激活作为 fallback。`targeted` 表示鼠标、拖拽和滚轮事件只能投递给准确的已观察进程与窗口。`visible` 开启独立 Agent 光标，其移动与自动隐藏时长同样归宿主所有。模型不能通过 Tool 参数修改任何交互策略。
+`preserve` 表示指针与键盘动作都不请求前台激活。Bundle 默认的 `keyboardPolicy: preserve` 会在 macOS 上把键盘 fallback 定向投递给选定 pid 而不激活，只有接受后台键盘事件的应用才可靠。Windows 在后台优先使用 UI Automation 的 Invoke、Value、Toggle、SelectionItem、ExpandCollapse 和 Scroll 语义操作。精确校验的原生 Edit/RichEdit 控件可接收定向文本和有限导航键，部分原生控件可接收定向滚动消息。不支持的后台 raw keyboard、剪贴板快捷键和后台原始指针/拖拽会在输入前被拒绝，绝不会把激活作为 fallback。`targeted` 表示鼠标、拖拽和滚轮事件只能投递给准确的已观察进程与窗口。`visible` 开启独立 Agent 光标，其移动与自动隐藏时长同样归宿主所有。模型不能通过 Tool 参数修改任何交互策略。
 
 这是一项输入路由属性，并不是只要拿到 Accessibility 权限就自然成立。Accessibility 授予语义化 UI 访问能力；真正避免抢前台的是优先使用语义化 Accessibility 操作，并用进程/窗口定向 fallback 代替系统光标。
 
@@ -63,7 +63,8 @@ resolution?: {
 | 通过 selected-text 赋值的 `type-text` | 不激活 | 无 | 当前 focused element 接受时允许 |
 | macOS `type-text` 键盘 fallback | `keyboardPolicy: preserve` 不激活；`keyboardPolicy: activate` 激活 | 目标 pid | 目标应用接受后台键盘事件时允许 |
 | macOS `press-key` | `keyboardPolicy: preserve` 不激活；`keyboardPolicy: activate` 激活 | 目标 pid | 目标应用接受后台键盘事件时允许 |
-| Windows raw `type-text` 或 `press-key` fallback | shipped `keyboardPolicy: preserve` 下不激活 | 目标 HWND | 仅当目标已在前台时允许；否则在输入前拒绝 |
+| Windows `type-text` 或有限导航键 | 不激活 | 精确校验的原生 Edit/RichEdit HWND | 可在后台投递；不支持的键盘和剪贴板快捷键拒绝 |
+| Windows 后台 click / scroll | 不激活 | UIA 模式或定向原生滚动消息 | 目标不支持该路径则拒绝；原始后台拖拽拒绝 |
 | 坐标点击或元素 frame fallback | 不激活 | 目标 pid + window | `pointerInputPolicy: targeted` 时允许 |
 | 滚动 | 不激活 | 目标 pid + window | `pointerInputPolicy: targeted` 时允许 |
 | 拖拽 | 不激活 | 目标 pid + window | `pointerInputPolicy: targeted` 时允许 |
@@ -126,7 +127,7 @@ Helper 不会先移动系统光标再尝试恢复。那种设计仍会打断用�
 - fixture 记录每次 `applicationDidBecomeActive` 回调，默认路径不得增加 `activationCount`；
 - 独立 native monitor 会在 click、scroll 与 drag 整个动作期间每毫秒采样系统光标和前台 pid，所有采样都必须保持不变；
 - 后台 `AXPress`、Accessibility value/action、selected-text 输入与 pid 定向按键都能修改 fixture 且不激活它；
-- Windows 源码合同要求 shipped `keyboardPolicy: preserve`，目标在后台时会在 `SetForegroundWindow` 前拒绝 raw keyboard fallback；
+- Windows 源码合同要求 shipped `keyboardPolicy: preserve`，定向键盘限定为准确校验的原生 Edit/RichEdit 控件，不支持的输入和后台原始指针操作在输入前拒绝；
 - native fixture 会插入无害 sibling 并重建一个带唯一 identifier 的 checkbox，证明原始 locator 已 stale，而 `AXIdentifier` resolution 仍只找到一个目标；
 - 目标进程 click 与 scroll 各只被观察到一次；drag 只产生一组 down/up gesture；目标始终不是前台应用；
 - `pointerInputPolicy: deny` 会在任何目标指针事件发出前拒绝 click fallback、scroll 与 drag；
@@ -135,9 +136,15 @@ Helper 不会先移动系统光标再尝试恢复。那种设计仍会打断用�
 ## 已知限制
 
 - 目标进程指针投递不如语义化 Accessibility 普适。自定义 canvas、游戏、强化输入 surface 或未来 macOS 变化可能拒绝该路由。
-- macOS 后台键盘投递取决于目标应用；在 shipped preserve 策略下，Windows raw keyboard fallback 对后台目标不可用，并会 fail closed 而不是激活目标。
+- macOS 后台键盘投递取决于目标应用。Windows 后台原始指针/拖拽、自定义/WebView 键盘和剪贴板快捷键不可用；原生 Edit/RichEdit 文本及有限导航键、UIA 语义操作和有限原生滚动可在后台定向执行。
 - 点击点必须落在选定应用的某个屏幕内窗口里；最小化、完全隐藏或无窗口目标会 fail closed。
 - `focusPolicy: activate` 与 `keyboardPolicy: activate` 会有意打断前台工作，只作为操作方显式选择的兼容模式。
 - 目标应用可能因接受动作而自行改变 activation 或 focus；helper 不承诺控制应用内部副作用。
 - Agent 光标只属于当前 Space 和准确已观察窗口。`cursorAutoHideMs: 0` 会让它持续显示，直到绑定窗口变化、收到新的 hide 命令或 helper 被释放。
 - Stable handle 当前只使用准确 locator、provider-native identifier 与严格 semantic identity。Semantic-spatial rebind 和 provider-native visual hit-test 留作后续；仅凭 vision 得到的坐标永远不是已验证目标。
+
+## Helper 生命周期和截图
+
+Windows 在原生 subprocess owner 内懒启动一个私有 PowerShell 子进程，逐 generation 校验哈希并握手，随后串行交换带准确请求 ID 的有界 JSONL。取消、超时、协议错误和 dispose 必须终止并回收进程树；新 generation 重新校验并握手，绝不自动重放失败动作。它不创建全局 server 或 transport。
+
+Windows 使用 PrintWindow 捕获准确 HWND，macOS 使用观测中的准确窗口 ID、PID 和尺寸位置，均不截取遮挡窗口所在的屏幕区域或替换成同进程其他窗口。API 成功不等于自定义/受保护渲染内容可用，必须结合真实 post-action 状态判断。原生硬件 DPI/坐标校准不以组件测试代替。cursorMotionMs 为 0 消除原生光标展示的固定等待，实际观察及 settle 路径保持不变。

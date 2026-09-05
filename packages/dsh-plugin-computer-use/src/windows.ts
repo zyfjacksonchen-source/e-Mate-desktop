@@ -1,14 +1,14 @@
 /** Windows UI Automation backend behind the existing ComputerUseService contract. */
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { lstat, readFile, realpath } from 'node:fs/promises'
 import { dirname, resolve, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SubprocessHandle, SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import type { ComputerUseBackend, BackendActionRequest, BackendActionResult, BackendCursorAction, BackendHealth, BackendObservation, BackendObserveOptions } from '../../../upstream/plugins/dsh-computer-use/src/backend.ts'
 import type { ResolvedComputerUseConfig } from '../../../upstream/plugins/dsh-computer-use/src/config.ts'
 import type { ComputerAppIdentity, ComputerAppSelector, ComputerAppSummary, ComputerPermissionState, ComputerRect } from '../../../upstream/plugins/dsh-computer-use/src/types.ts'
-import { ComputerUseError } from '../../../upstream/plugins/dsh-computer-use/lib/errors.js'
+import { ComputerUseError } from '../../../upstream/plugins/dsh-computer-use/src/errors.ts'
 
 const REQUEST_MAX_BYTES = 256 * 1024
 const STDOUT_MAX_BYTES = 4 * 1024 * 1024
@@ -18,7 +18,7 @@ const WINDOWS_COMMANDS = new Set(['health', 'resolve-app', 'list-apps', 'observe
 const PERMISSIONS = new Set<ComputerPermissionState>(['granted', 'denied', 'not-determined', 'unavailable'])
 interface WindowsTarget { bundleId: string; pid: number; name: string; executablePath: string; processStartTime: string; windowId: number }
 interface PreparedWindowsHelper { path: string; version: string; sha256: string }
-interface WindowsClientOptions { environment?: Pick<NodeJS.ProcessEnv, 'SystemRoot' | 'WINDIR'>; validateExecutable?: (path: string) => Promise<void> }
+interface WindowsClientOptions { environment?: { SystemRoot?: string | undefined; WINDIR?: string | undefined }; validateExecutable?: (path: string) => Promise<void> }
 
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value) }
 function exact(value: unknown, required: readonly string[], optional: readonly string[] = []): value is Record<string, unknown> {
@@ -104,12 +104,6 @@ export function sanitizeWindowsObservation(value: unknown, expected: WindowsTarg
     ...(screenshot === undefined ? {} : { screenshot }), permissions: { accessibility: value.permissions.accessibility, screenRecording: value.permissions.screenRecording } }
 }
 function nativeRoot(): string { return fileURLToPath(new URL('../native/windows/', import.meta.url)) }
-function collected(reader: SubprocessOutputReader | undefined): string {
-  if (reader === undefined) return ''
-  const output = reader.readFrom(0)
-  if (output.lossy) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper output exceeded its protocol limit')
-  return output.text
-}
 async function regularFile(path: string, label: string): Promise<void> {
   let info
   try { info = await lstat(path) } catch (error) { throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', label + ' is unavailable', { cause: error }) }
@@ -117,14 +111,115 @@ async function regularFile(path: string, label: string): Promise<void> {
 }
 
 
+class HelperCommandError extends ComputerUseError {}
+
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  let listener: (() => void) | undefined
+  const aborted = new Promise<never>((_, reject) => {
+    listener = () => reject(new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled'))
+    if (signal.aborted) listener()
+    else signal.addEventListener('abort', listener, { once: true })
+  })
+  try { return await Promise.race([promise, aborted]) }
+  finally { if (listener !== undefined) signal.removeEventListener('abort', listener) }
+}
+
+/** One serial JSONL conversation owned by the existing subprocess handle. */
+class HelperSession {
+  readonly generation = randomUUID()
+  failure?: ComputerUseError
+  stopping?: Promise<void>
+  private sequence = 0
+  private buffer = Buffer.alloc(0)
+  private stderrOffset = 0
+  private pending: { id: string; resolve(value: unknown): void; reject(error: unknown): void } | undefined
+  readonly handle: SubprocessHandle
+  constructor(handle: SubprocessHandle) {
+    this.handle = handle
+    if (handle.stdin === undefined || handle.stdout === undefined) {
+      this.fail(new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper protocol pipes are unavailable'))
+    }
+    handle.stdout?.on('data', this.onData)
+    handle.stdout?.on('error', this.onFailure)
+    handle.stdin?.on('error', this.onFailure)
+    void handle.done.then(this.onFailure, this.onFailure)
+  }
+  private onFailure = (): void => { this.fail(new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper exited without a valid response')) }
+  fail(error: ComputerUseError): void {
+    if (this.failure === undefined) this.handle.terminate()
+    this.failure ??= error
+    this.pending?.reject(this.failure)
+    this.pending = undefined
+  }
+  detach(): void {
+    this.handle.stdout?.off('data', this.onData)
+    this.handle.stdout?.off('error', this.onFailure)
+    this.handle.stdin?.off('error', this.onFailure)
+  }
+  private onData = (chunk: Buffer | string): void => {
+    if (this.failure !== undefined) return
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    if (this.pending === undefined || this.buffer.length + bytes.length > STDOUT_MAX_BYTES) {
+      this.fail(new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper output exceeded its protocol limit or was unsolicited')); return
+    }
+    this.buffer = Buffer.concat([this.buffer, bytes])
+    const newline = this.buffer.indexOf(10)
+    if (newline < 0) return
+    const pending = this.pending
+    let envelope: unknown
+    try {
+      if (newline !== this.buffer.length - 1) throw new Error('extra frame')
+      envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(this.buffer.subarray(0, newline)))
+      if (!record(envelope) || envelope.protocolVersion !== 2 || envelope.requestId !== pending.id) throw new Error('response identity')
+      const stderr = this.handle.collected.stderr?.readFrom(this.stderrOffset)
+      if (stderr?.lossy) throw new Error('stderr overflow')
+      if (stderr !== undefined) this.stderrOffset = stderr.nextOffset
+    } catch {
+      this.fail(new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper returned an invalid envelope')); return
+    }
+    this.buffer = Buffer.alloc(0)
+    this.pending = undefined
+    if (exact(envelope, ['protocolVersion', 'requestId', 'ok', 'value']) && envelope.ok === true) { pending.resolve(envelope.value); return }
+    if (exact(envelope, ['protocolVersion', 'requestId', 'ok', 'error']) && envelope.ok === false && exact(envelope.error, ['code', 'message']) && boundedString(envelope.error.message, 4096, true)) {
+      const messages = {
+        COMPUTER_STALE_OBSERVATION: 'Windows target state changed; observe again before acting.',
+        COMPUTER_ACTION_BLOCKED: 'Windows denied the requested UI action because required desktop or integrity authority is unavailable.',
+        COMPUTER_PROVIDER_FAILURE: 'Windows Computer Use provider failed.',
+      } as const
+      const code = typeof envelope.error.code === 'string' && Object.hasOwn(messages, envelope.error.code) ? envelope.error.code as keyof typeof messages : 'COMPUTER_PROVIDER_FAILURE'
+      pending.reject(new HelperCommandError(code, messages[code])); return
+    }
+    const error = new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper returned an invalid envelope')
+    this.fail(error); pending.reject(error)
+  }
+  async exchange(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    signal.throwIfAborted()
+    if (this.failure !== undefined) throw this.failure
+    if (this.pending !== undefined) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper already has an active request')
+    const id = this.generation + ':' + (++this.sequence)
+    const input = JSON.stringify({ ...request, protocolVersion: 2, requestId: id }) + '\n'
+    const response = new Promise<unknown>((resolve, reject) => { this.pending = { id, resolve, reject } })
+    try {
+      this.handle.stdin!.write(input, error => { if (error != null) this.onFailure() })
+    } catch { this.onFailure() }
+    return await abortable(response, signal)
+  }
+}
+
 /** Fixed-script, integrity-checked client using only the host subprocess service. */
 export class WindowsHelperClient {
   private prepared?: PreparedWindowsHelper
+  private session: HelperSession | undefined
+  private serial: Promise<void> = Promise.resolve()
+  private readonly lifetime = new AbortController()
+  private disposal?: Promise<void>
+  private unreaped?: ComputerUseError
+  private lastActionGeneration: string | undefined
   private readonly ctx: Pick<Context, 'subprocess'>
   private readonly timeoutMs: number
   private readonly managedRoot: string
   private readonly platform: NodeJS.Platform
-  private readonly environment: Pick<NodeJS.ProcessEnv, 'SystemRoot' | 'WINDIR'>
+  private readonly environment: { SystemRoot?: string | undefined; WINDIR?: string | undefined }
   private readonly validateExecutable: (path: string) => Promise<void>
   constructor(ctx: Pick<Context, 'subprocess'>, timeoutMs: number, managedRoot = nativeRoot(), platform: NodeJS.Platform = process.platform, options: WindowsClientOptions = {}) {
     this.ctx = ctx; this.timeoutMs = timeoutMs; this.managedRoot = managedRoot; this.platform = platform
@@ -161,47 +256,78 @@ export class WindowsHelperClient {
     try { exited = await handle.waitForExit(AbortSignal.timeout(REAP_TIMEOUT_MS)) } catch { exited = false }
     if (!exited) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper process tree could not be reaped')
   }
-  async invoke<T>(request: Record<string, unknown>, signal: AbortSignal): Promise<T> {
-    if (signal.aborted) throw new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled')
-    if (typeof request.command !== 'string' || !WINDOWS_COMMANDS.has(request.command)) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'invalid Windows helper command')
-    const input = JSON.stringify({ protocolVersion: 1, ...request })
-    if (Buffer.byteLength(input) > REQUEST_MAX_BYTES) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper request exceeded its protocol limit')
+  private async stop(session: HelperSession): Promise<void> {
+    if (session.stopping !== undefined) return session.stopping
+    session.stopping = (async () => {
+      session.fail(new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper stopped'))
+      try { await this.reap(session.handle, false) }
+      catch (error) { this.unreaped = error as ComputerUseError; throw error }
+      finally { session.detach(); if (this.session === session) this.session = undefined }
+    })()
+    return session.stopping
+  }
+  private async start(signal: AbortSignal): Promise<HelperSession> {
+    if (this.unreaped !== undefined) throw this.unreaped
+    if (this.session !== undefined) {
+      if (this.session.failure === undefined) return this.session
+      await this.stop(this.session)
+    }
+    // Integrity is checked for every new process generation, never for every hot action.
     const prepared = await this.prepare(signal)
     const powershell = this.powershellPath()
     await this.validateExecutable(powershell)
-    if (signal.aborted) throw new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled')
-    const timeout = AbortSignal.timeout(this.timeoutMs)
-    const combined = AbortSignal.any([signal, timeout])
+    signal.throwIfAborted()
     let handle: SubprocessHandle
-    try { handle = this.ctx.subprocess.spawn({ argv: [powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', prepared.path], cwd: dirname(prepared.path), stdio: { stdin: { data: input + '\n' }, stdout: { maxBytes: STDOUT_MAX_BYTES }, stderr: { maxBytes: STDERR_MAX_BYTES } }, graceMs: 1000, signal: combined, env: { SystemRoot: this.environment.SystemRoot ?? this.environment.WINDIR as string, WINDIR: this.environment.WINDIR ?? this.environment.SystemRoot as string } }) } catch (error) { throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper failed to start', { cause: error }) }
-    let abortListener: (() => void) | undefined
-    const aborted = new Promise<never>((_, reject) => { abortListener = () => reject(combined.reason); combined.addEventListener('abort', abortListener, { once: true }) })
-    let outcome: Awaited<SubprocessHandle['done']>
-    try { outcome = await Promise.race([handle.done, aborted]); await this.reap(handle, false) } catch (error) {
-      try { await this.reap(handle, true) } catch (reapError) { throw reapError }
-      if (combined.aborted) {
-        if (signal.aborted) throw new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled')
-        throw new ComputerUseError('COMPUTER_TIMEOUT', 'Windows helper exceeded ' + this.timeoutMs + ' milliseconds')
-      }
-      throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper failed to run', { cause: error })
-    } finally { if (abortListener !== undefined) combined.removeEventListener('abort', abortListener) }
-    const stdout = collected(handle.collected.stdout)
-    collected(handle.collected.stderr)
-    if (outcome.exitCode !== 0 && stdout.trim().length === 0) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper exited without a valid response')
-    let envelope: unknown
-    try { envelope = JSON.parse(stdout) } catch (error) { throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper returned invalid JSON', { cause: error }) }
-    if (exact(envelope, ['ok', 'value']) && envelope.ok === true) return envelope.value as T
-    if (exact(envelope, ['ok', 'error']) && envelope.ok === false && exact(envelope.error, ['code', 'message']) && typeof envelope.error.message === 'string') {
-      const code = typeof envelope.error.code === 'string' && ['COMPUTER_STALE_OBSERVATION', 'COMPUTER_ACTION_BLOCKED', 'COMPUTER_PROVIDER_FAILURE'].includes(envelope.error.code) ? envelope.error.code : 'COMPUTER_PROVIDER_FAILURE'
-      const messages = {
-        COMPUTER_STALE_OBSERVATION: 'Windows target state changed; observe again before acting.',
-        COMPUTER_ACTION_BLOCKED: 'Windows denied the requested UI action because required desktop or integrity authority is unavailable.',
-        COMPUTER_PROVIDER_FAILURE: 'Windows Computer Use provider failed.',
-      } as const
-      throw new ComputerUseError(code as keyof typeof messages, messages[code as keyof typeof messages])
-    }
-    throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper returned an invalid envelope')
+    try { handle = this.ctx.subprocess.spawn({ argv: [powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', prepared.path], cwd: dirname(prepared.path), stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: STDERR_MAX_BYTES } }, graceMs: 1000, signal: this.lifetime.signal, env: { SystemRoot: this.environment.SystemRoot ?? this.environment.WINDIR as string, WINDIR: this.environment.WINDIR ?? this.environment.SystemRoot as string } }) }
+    catch { throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper failed to start') }
+    const session = this.session = new HelperSession(handle)
+    const hello = await session.exchange({ command: 'hello' }, signal)
+    if (!exact(hello, ['helperVersion', 'protocolVersion']) || hello.helperVersion !== prepared.version || hello.protocolVersion !== 2) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper handshake did not match the packaged helper')
+    return session
   }
+  async invoke<T>(request: Record<string, unknown>, signal: AbortSignal): Promise<T> {
+    if (typeof request.command !== 'string' || !WINDOWS_COMMANDS.has(request.command) || 'protocolVersion' in request || 'requestId' in request) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'invalid Windows helper command')
+    if (Buffer.byteLength(JSON.stringify(request)) + 128 > REQUEST_MAX_BYTES) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper request exceeded its protocol limit')
+    const combined = AbortSignal.any([signal, this.lifetime.signal])
+    if (combined.aborted) throw new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled')
+    let started = false
+    const operation = this.serial.then(async () => {
+      started = true
+      if (combined.aborted) throw new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled')
+      const deadline = AbortSignal.any([combined, AbortSignal.timeout(this.timeoutMs)])
+      try {
+        const session = await this.start(deadline)
+        if (request.command === 'act') this.lastActionGeneration = session.generation
+        return await session.exchange(request, deadline) as T
+      } catch (error) {
+        // A valid provider rejection leaves framing intact. Every transport/cancellation
+        // failure destroys the generation; actions are never replayed after a restart.
+        if (!(error instanceof HelperCommandError) && this.session !== undefined) await this.stop(this.session)
+        if (combined.aborted) throw new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled')
+        if (deadline.aborted) throw new ComputerUseError('COMPUTER_TIMEOUT', 'Windows helper exceeded ' + this.timeoutMs + ' milliseconds')
+        if (error instanceof ComputerUseError) throw error
+        throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper protocol failed')
+      }
+    })
+    this.serial = operation.then(() => {}, () => {})
+    // A queued caller can cancel promptly without interrupting another caller's action.
+    let cancelQueued: (() => void) | undefined
+    const queuedCancellation = new Promise<never>((_, reject) => {
+      cancelQueued = () => { if (!started) reject(new ComputerUseError('COMPUTER_CANCELLED', 'Windows helper call was cancelled')) }
+      combined.addEventListener('abort', cancelQueued, { once: true })
+    })
+    try { return await Promise.race([operation, queuedCancellation]) }
+    finally { if (cancelQueued !== undefined) combined.removeEventListener('abort', cancelQueued) }
+  }
+  async dispose(): Promise<void> {
+    return this.disposal ??= (async () => {
+      this.lifetime.abort()
+      await this.serial
+      if (this.session !== undefined) await this.stop(this.session)
+      if (this.unreaped !== undefined) throw this.unreaped
+    })()
+  }
+  canReleaseInput(): boolean { return this.session !== undefined && this.session.failure === undefined && this.lastActionGeneration === this.session.generation }
   info(): PreparedWindowsHelper { if (this.prepared === undefined) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper is not prepared'); return { ...this.prepared } }
 }
 
@@ -241,7 +367,7 @@ export class WindowsBackend implements Omit<ComputerUseBackend, 'name'> {
       if (!/^win32:sha256:[a-f0-9]{64}$/u.test(selector.bundleId)) throw new ComputerUseError('COMPUTER_APP_NOT_FOUND', 'Windows bundleId must be an opaque win32 SHA-256 identifier')
       const matches = (await this.rows(await this.client.invoke<unknown>({ command: 'list-apps' }, signal))).filter(row => row.app.bundleId === selector.bundleId && (selector.pid === undefined || row.app.pid === selector.pid) && (selector.name === undefined || row.app.name === selector.name))
       if (matches.length !== 1) throw new ComputerUseError('COMPUTER_APP_NOT_FOUND', 'opaque Windows application selector did not resolve to exactly one window')
-      return matches[0].app
+      return matches[0]!.app
     }
     if (selector.pid === undefined && selector.name === undefined) throw new ComputerUseError('COMPUTER_APP_NOT_FOUND', 'Windows application selector requires bundleId, pid, or name')
     const target = rawTarget(await this.client.invoke<unknown>({ command: 'resolve-app', selector: { ...(selector.pid === undefined ? {} : { pid: selector.pid }), ...(selector.name === undefined ? {} : { name: selector.name }) } }, signal))
@@ -274,6 +400,7 @@ export class WindowsBackend implements Omit<ComputerUseBackend, 'name'> {
         || (value.pointerInput && value.pointerRouting !== 'target-process')) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper returned invalid action or cleanup evidence')
       return { channel: value.channel as BackendActionResult['channel'], activation: value.activation as BackendActionResult['activation'], pointerInput: value.pointerInput, pointerRouting: value.pointerRouting as BackendActionResult['pointerRouting'] }
     } catch (error) {
+      if (!this.client.canReleaseInput()) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows action failed after helper termination; target input cleanup is unverified', { cause: error })
       try {
         const cleanup = await this.client.invoke<unknown>({ command: 'release-input', action: request.action, app: target, window }, AbortSignal.timeout(REAP_TIMEOUT_MS))
         if (!exact(cleanup, ['cleanupComplete', 'target']) || cleanup.cleanupComplete !== true || !sameTarget(rawTarget(cleanup.target), target)) throw new Error('invalid cleanup evidence')
@@ -285,9 +412,8 @@ export class WindowsBackend implements Omit<ComputerUseBackend, 'name'> {
     signal.throwIfAborted()
     if (this.config.interaction.cursorVisualization !== 'hidden') throw new ComputerUseError('COMPUTER_ACTION_BLOCKED', 'Windows cursor visualization is unavailable; configure it as hidden')
   }
-  async dispose(): Promise<void> {}
+  async dispose(): Promise<void> { await this.client.dispose() }
   async health(signal: AbortSignal): Promise<BackendHealth> {
-    await this.client.prepare(signal)
     const value = await this.client.invoke<unknown>({ command: 'health' }, signal)
     if (!exact(value, ['helperVersion', 'accessibility', 'screenRecording']) || !boundedString(value.helperVersion, 64) || !permission(value.accessibility) || !permission(value.screenRecording)) throw new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper returned invalid health evidence')
     return { helperVersion: value.helperVersion, helperSha256: this.client.info().sha256, accessibility: value.accessibility, screenRecording: value.screenRecording }

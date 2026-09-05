@@ -4,6 +4,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { PassThrough, Writable } from 'node:stream'
 import * as loaderYaml from '../../../upstream/deepseek-harness/vendor/include/node_modules/js-yaml/dist/js-yaml.mjs'
 import { WindowsBackend, WindowsHelperClient, sanitizeWindowsObservation } from '../src/windows.ts'
 
@@ -15,14 +16,33 @@ const options = { screenshot: 'none', maxNodes: 500, maxDepth: 14, maxTextBytes:
 const rawObservation = { app: target, stateHash: hash, frontmost: true, window: { id: target.windowId, title: 'Document', frame }, treeText: '[0] Window Document', truncated: false, elements: [{ index: 0, locator: [], role: 'Window', actions: [], enabled: true, focused: true, frame }], permissions: { accessibility: 'granted', screenRecording: 'granted' } }
 const hiddenConfig = { actionTimeoutMs: 15000, maxNodes: 500, maxDepth: 14, maxTextBytes: 64000, interaction: { focusPolicy: 'preserve', keyboardPolicy: 'preserve', pointerInputPolicy: 'targeted', cursorVisualization: 'hidden', cursorMotionMs: 0, cursorAutoHideMs: 0 } }
 
-function reader(text, lossy = false) { return { readFrom: () => ({ text, lossy }) } }
-function completedHandle(envelope = { ok: true, value: null }) {
-  let waits = 0; let terminations = 0
-  return { handle: { done: Promise.resolve({ exitCode: 0 }), collected: { stdout: reader(JSON.stringify(envelope)), stderr: reader('') }, terminate: () => { terminations += 1 }, waitForExit: async () => { waits += 1; return true } }, waits: () => waits, terminations: () => terminations }
+function persistentHandle(reply = () => ({ ok: true, value: null }), options = {}) {
+  const requests = []; const stdout = new PassThrough(); let exits; let terminated = 0; let waited = 0
+  let stderrText = ''; let stderrLossy = false
+  const done = new Promise(resolve => { exits = resolve })
+  const respond = (request, envelope) => stdout.write(JSON.stringify({ protocolVersion: 2, requestId: request.requestId, ...envelope }) + '\n')
+  const stdin = new Writable({ write(chunk, _encoding, callback) {
+    const request = JSON.parse(chunk.toString()); requests.push(request); callback()
+    queueMicrotask(() => {
+      if (request.command === 'hello') respond(request, options.hello ?? { ok: true, value: { helperVersion: '1.0.0', protocolVersion: 2 } })
+      else { const result = reply(request, { respond, stdout }); if (result !== undefined) respond(request, result) }
+    })
+  } })
+  const handle = { pid: 123, stdin, stdout, done, collected: { stderr: { readFrom: () => ({ text: stderrText, lossy: stderrLossy, nextOffset: Buffer.byteLength(stderrText) }) } },
+    terminate() { terminated += 1; exits({ exitCode: 1, signal: null }) }, async waitForExit() { waited += 1; return options.reaped !== false } }
+  return { handle, requests, respond, stdout, terminated: () => terminated, waited: () => waited, exit: () => exits({ exitCode: 2, signal: null }), stderr(text, lossy = false) { stderrText = text; stderrLossy = lossy } }
 }
+async function withClient(callback, reply, settings = {}) {
+  const managedRoot = await fixtureRoot(); const calls = []; const checked = []; const children = []
+  const client = new WindowsHelperClient({ subprocess: { spawn(spec) { calls.push(spec); const child = persistentHandle(reply, settings); children.push(child); return child.handle } } }, settings.timeoutMs ?? 15000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows', WINDIR: 'c:\\windows' }, validateExecutable: async path => { checked.push(path) } })
+  try { await callback({ client, managedRoot, calls, checked, children }) }
+  finally { await client.dispose().catch(() => {}); await rm(managedRoot, { recursive: true, force: true }) }
+}
+const freshSignal = () => new AbortController().signal
 async function fixtureRoot() { const path = await mkdtemp(join(tmpdir(), 'emate-win-helper-')); await cp(new URL('native/windows/', root), path, { recursive: true }); return path }
 function backendWithReplies(replies, config = hiddenConfig) {
   const backend = new WindowsBackend({ subprocess: {} }, config, { platform: 'win32' }); const calls = []
+  backend.client.canReleaseInput = () => true
   backend.client.invoke = async request => { calls.push(structuredClone(request)); const next = replies.shift(); if (next instanceof Error) throw next; return next }
   return { backend, calls }
 }
@@ -104,71 +124,130 @@ test('failed action cleanup carries exact original action and private target', a
   assert.equal(calls[2].command, 'release-input'); assert.deepEqual(calls[2].action, action); assert.deepEqual(calls[2].app, target); assert.equal(calls[2].window.id, target.windowId)
 })
 
-test('helper uses validated SystemRoot, exact PowerShell path, bounds, and fresh integrity', async () => {
-  const managedRoot = await fixtureRoot(); const calls = []; const checked = []
-  const process = completedHandle({ ok: true, value: { helperVersion: '1.0.0', accessibility: 'granted', screenRecording: 'granted' } })
-  const client = new WindowsHelperClient({ subprocess: { spawn(spec) { calls.push(spec); return process.handle } } }, 15000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows', WINDIR: 'c:\\windows' }, validateExecutable: async path => { checked.push(path) } })
-  try {
-    await client.invoke({ command: 'health' }, new AbortController().signal)
-    assert.equal(calls[0].argv[0], 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
-    assert.deepEqual(checked, [calls[0].argv[0]]); assert.equal(calls[0].stdio.stdout.maxBytes, 4 * 1024 * 1024); assert.equal(calls[0].stdio.stderr.maxBytes, 64 * 1024); assert.equal(process.waits(), 1)
-    await writeFile(join(managedRoot, 'dsh-computer-use-helper.ps1'), '# tampered after first invocation\n')
-    await assert.rejects(client.invoke({ command: 'health' }, new AbortController().signal), /hash does not match/u)
-    assert.equal(calls.length, 1)
-    await assert.rejects(client.invoke({ command: 'health', data: 'x'.repeat(256 * 1024) }, new AbortController().signal), /request exceeded/u)
-  } finally { await rm(managedRoot, { recursive: true, force: true }) }
+test('a terminated action cannot claim cleanup from a replacement helper', async () => {
+  const { backend, calls } = backendWithReplies([target, new Error('helper terminated')])
+  backend.client.canReleaseInput = () => false
+  const app = await backend.resolveApp({ pid: 42 }, freshSignal())
+  await assert.rejects(backend.act({ action: { kind: 'press-key', key: 'arrowleft', observationId: 'o' }, app, expectedStateHash: hash, interaction: hiddenConfig.interaction, window: { title: 'Document', frame } }, freshSignal()), /cleanup is unverified/u)
+  assert.equal(calls.length, 2)
 })
 
-test('invalid environment and envelope extras fail before unsafe use', async () => {
+test('hot requests share one integrity-checked process, handshake and serial response identity', async () => {
+  await withClient(async ({ client, calls, checked, children, managedRoot }) => {
+    const responses = await Promise.all(Array.from({ length: 30 }, (_, number) => client.invoke({ command: 'health', number }, freshSignal())))
+    assert.deepEqual(responses, Array.from({ length: 30 }, (_, number) => number))
+    assert.equal(calls.length, 1); assert.equal(checked.length, 1)
+    assert.equal(calls[0].argv[0], 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+    assert.equal(calls[0].stdio.stdin, 'pipe'); assert.equal(calls[0].stdio.stdout, 'pipe'); assert.equal(calls[0].stdio.stderr.maxBytes, 64 * 1024)
+    assert.equal(children[0].requests[0].command, 'hello')
+    assert.equal(new Set(children[0].requests.map(row => row.requestId)).size, 31)
+    // Editing the source cannot mutate an already loaded process. A new generation rechecks bytes.
+    await writeFile(join(managedRoot, 'dsh-computer-use-helper.ps1'), '# tampered after launch\n')
+    assert.equal(await client.invoke({ command: 'health', number: 30 }, freshSignal()), 30)
+    children[0].exit(); await new Promise(resolve => setImmediate(resolve))
+    await assert.rejects(client.invoke({ command: 'health' }, freshSignal()), /hash does not match/u)
+    assert.equal(calls.length, 1)
+    await assert.rejects(client.invoke({ command: 'health', data: 'x'.repeat(256 * 1024) }, freshSignal()), /request exceeded/u)
+    await assert.rejects(client.invoke({ command: 'health', protocolVersion: 1 }, freshSignal()), /invalid Windows helper command/u)
+  }, request => ({ ok: true, value: request.number }))
+})
+
+test('invalid Windows environment fails before spawn', async () => {
   const managedRoot = await fixtureRoot()
   try {
     for (const environment of [{}, { SystemRoot: 'Windows' }, { SystemRoot: 'C:\\Windows\\..\\Temp' }, { SystemRoot: 'C:\\Windows\0bad' }, { SystemRoot: 'C:\\Windows', WINDIR: 'D:\\Windows' }]) {
       let spawned = false
       const client = new WindowsHelperClient({ subprocess: { spawn() { spawned = true } } }, 15000, managedRoot, 'win32', { environment, validateExecutable: async () => {} })
-      await assert.rejects(client.invoke({ command: 'health' }, new AbortController().signal), /SystemRoot|WINDIR/u); assert.equal(spawned, false)
+      await assert.rejects(client.invoke({ command: 'health' }, freshSignal()), /SystemRoot|WINDIR/u); assert.equal(spawned, false)
+      await client.dispose()
     }
-    const process = completedHandle({ ok: true, value: null, extra: true })
-    const client = new WindowsHelperClient({ subprocess: { spawn() { return process.handle } } }, 15000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} })
-    await assert.rejects(client.invoke({ command: 'health' }, new AbortController().signal), /invalid envelope/u)
-    const errorProcess = completedHandle({ ok: false, error: { code: 'COMPUTER_ACTION_BLOCKED', message: 'denied', extra: true } })
-    const errorClient = new WindowsHelperClient({ subprocess: { spawn() { return errorProcess.handle } } }, 15000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} })
-    await assert.rejects(errorClient.invoke({ command: 'health' }, new AbortController().signal), /invalid envelope/u)
   } finally { await rm(managedRoot, { recursive: true, force: true }) }
 })
 
-test('helper and stderr text never reaches caller-visible errors', async () => {
-  const managedRoot = await fixtureRoot()
-  try {
-    const secret = 'C:\\Users\\Alice\\secret.txt\nWindow title\n at private stack'
-    const process = completedHandle({ ok: false, error: { code: 'COMPUTER_ACTION_BLOCKED', message: secret } })
-    const client = new WindowsHelperClient({ subprocess: { spawn() { return process.handle } } }, 15000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} })
-    await assert.rejects(client.invoke({ command: 'health' }, new AbortController().signal), error => {
-      assert.equal(error.code, 'COMPUTER_ACTION_BLOCKED')
-      for (const leaked of ['C:\\Users', 'Alice', 'secret.txt', 'Window title', 'private stack']) assert.equal(error.message.includes(leaked), false)
-      assert.equal(error.message, 'COMPUTER_ACTION_BLOCKED: Windows denied the requested UI action because required desktop or integrity authority is unavailable.')
-      return true
+test('malformed, wrong-id, duplicate, overlong and lossy frames terminate and reap', async () => {
+  for (const reply of [
+    () => ({ ok: true, value: null, extra: true }),
+    () => ({ ok: true, value: null, requestId: 'other:1' }),
+    () => ({ ok: false, error: { code: 'COMPUTER_ACTION_BLOCKED', message: 'denied', extra: true } }),
+    (_request, { stdout }) => { stdout.write('{}\n{}\n') },
+    (_request, { stdout }) => { stdout.write('x'.repeat(4 * 1024 * 1024 + 1)) },
+  ]) await withClient(async ({ client, children }) => {
+    await assert.rejects(client.invoke({ command: 'health' }, freshSignal()), /invalid envelope|protocol limit/u)
+    assert.ok(children[0].terminated() >= 1); assert.equal(children[0].waited(), 1)
+  }, reply)
+  await withClient(async ({ client, children }) => {
+    await client.invoke({ command: 'health' }, freshSignal()); children[0].stderr('private stderr', true)
+    await assert.rejects(client.invoke({ command: 'health' }, freshSignal()), /invalid envelope/u)
+  })
+})
+
+test('handshake mismatch rejects before dispatching the action', async () => {
+  await withClient(async ({ client, children }) => {
+    await assert.rejects(client.invoke({ command: 'act' }, freshSignal()), /handshake/u)
+    assert.deepEqual(children[0].requests.map(row => row.command), ['hello'])
+    assert.equal(children[0].waited(), 1)
+  }, undefined, { hello: { ok: true, value: { helperVersion: 'wrong', protocolVersion: 2 } } })
+})
+
+test('split UTF-8 JSONL frames are reassembled and provider errors remain sanitized', async () => {
+  await withClient(async ({ client, calls }) => {
+    assert.equal(await client.invoke({ command: 'health' }, freshSignal()), '中文')
+    await assert.rejects(client.invoke({ command: 'observe' }, freshSignal()), error => {
+      assert.equal(error.code, 'COMPUTER_ACTION_BLOCKED'); assert.equal(error.message.includes('Alice'), false); return true
     })
-    const failed = { done: Promise.resolve({ exitCode: 2 }), collected: { stdout: reader(''), stderr: reader(secret) }, terminate() {}, async waitForExit() { return true } }
-    const stderrClient = new WindowsHelperClient({ subprocess: { spawn() { return failed } } }, 15000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} })
-    await assert.rejects(stderrClient.invoke({ command: 'health' }, new AbortController().signal), error => { assert.equal(error.message, 'COMPUTER_PROVIDER_FAILURE: Windows helper exited without a valid response'); assert.equal(error.message.includes('Alice'), false); return true })
-  } finally { await rm(managedRoot, { recursive: true, force: true }) }
+    assert.equal(await client.invoke({ command: 'health' }, freshSignal()), '中文')
+    assert.equal(calls.length, 1)
+  }, (request, { stdout }) => {
+    if (request.command === 'observe') return { ok: false, error: { code: 'COMPUTER_ACTION_BLOCKED', message: 'C:\\Users\\Alice\\secret.txt' } }
+    const frame = Buffer.from(JSON.stringify({ protocolVersion: 2, requestId: request.requestId, ok: true, value: '中文' }) + '\n')
+    const split = frame.indexOf(Buffer.from('中')) + 1; stdout.write(frame.subarray(0, split)); stdout.write(frame.subarray(split))
+  })
 })
 
 test('cancellation during asynchronous preparation is rejected before spawn', async () => {
   const managedRoot = await fixtureRoot(); const controller = new AbortController(); let spawns = 0
-  const process = completedHandle()
-  const client = new WindowsHelperClient({ subprocess: { spawn() { spawns += 1; return process.handle } } }, 120000, managedRoot, 'win32', {
+  const client = new WindowsHelperClient({ subprocess: { spawn() { spawns += 1 } } }, 120000, managedRoot, 'win32', {
     environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => controller.abort(),
   })
-  try { await assert.rejects(client.invoke({ command: 'health' }, controller.signal), /COMPUTER_CANCELLED/u); assert.equal(spawns, 0) } finally { await rm(managedRoot, { recursive: true, force: true }) }
+  try { await assert.rejects(client.invoke({ command: 'health' }, controller.signal), /COMPUTER_CANCELLED/u); assert.equal(spawns, 0) }
+  finally { await client.dispose(); await rm(managedRoot, { recursive: true, force: true }) }
 })
 
-test('cancellation terminates and reaps the subprocess tree', async () => {
-  const managedRoot = await fixtureRoot(); let terminate = 0; let wait = 0
-  const handle = { done: new Promise(() => {}), collected: { stdout: reader(''), stderr: reader('') }, terminate: () => { terminate += 1 }, waitForExit: async () => { wait += 1; return true } }
-  const controller = new AbortController()
-  const client = new WindowsHelperClient({ subprocess: { spawn() { queueMicrotask(() => controller.abort()); return handle } } }, 120000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} })
-  try { await assert.rejects(client.invoke({ command: 'health' }, controller.signal), /COMPUTER_CANCELLED/u); assert.equal(terminate, 1); assert.equal(wait, 1) } finally { await rm(managedRoot, { recursive: true, force: true }) }
+test('in-flight cancellation and timeout reap before returning and restart only with a new handshake', async () => {
+  for (const cancel of [true, false]) {
+    const controller = new AbortController(); let first = true
+    await withClient(async ({ client, children }) => {
+      const pending = client.invoke({ command: 'act' }, controller.signal)
+      await assert.rejects(pending, cancel ? /COMPUTER_CANCELLED/u : /COMPUTER_TIMEOUT/u)
+      assert.equal(children[0].waited(), 1); assert.ok(children[0].terminated() >= 1)
+      assert.equal(await client.invoke({ command: 'health' }, freshSignal()), 'fresh')
+      assert.deepEqual(children[1].requests.map(row => row.command), ['hello', 'health'])
+      assert.equal(children.flatMap(row => row.requests).filter(row => row.command === 'act').length, 1)
+    }, () => { if (first) { first = false; if (cancel) controller.abort(); return undefined }; return { ok: true, value: 'fresh' } }, { timeoutMs: 80 })
+  }
+})
+
+test('queued cancellation does not terminate another caller and dispose is deterministic', async () => {
+  let finish
+  await withClient(async ({ client, children }) => {
+    const active = client.invoke({ command: 'act' }, freshSignal())
+    while (finish === undefined) await new Promise(resolve => setImmediate(resolve))
+    const controller = new AbortController(); const queued = client.invoke({ command: 'health' }, controller.signal); controller.abort()
+    await assert.rejects(queued, /COMPUTER_CANCELLED/u); assert.equal(children[0].terminated(), 0)
+    finish(); await active
+    await client.dispose(); await client.dispose()
+    assert.equal(children[0].waited(), 1)
+    await assert.rejects(client.invoke({ command: 'health' }, freshSignal()), /COMPUTER_CANCELLED/u)
+  }, (request, { respond }) => { finish = () => respond(request, { ok: true, value: true }) })
+})
+
+test('unreaped helper fails closed without creating another generation', async () => {
+  await withClient(async ({ client, calls }) => {
+    await assert.rejects(client.invoke({ command: 'act' }, freshSignal()), /could not be reaped/u)
+    await assert.rejects(client.invoke({ command: 'health' }, freshSignal()), /could not be reaped/u)
+    assert.equal(calls.length, 1)
+    await assert.rejects(client.dispose(), /could not be reaped/u)
+  }, () => undefined, { timeoutMs: 30, reaped: false })
 })
 
 test('Windows cursor configuration is hidden and visible mode cannot silently no-op', async () => {
@@ -190,9 +269,17 @@ test('composition keeps one owner, bounded health probes, exact cleanup, and no 
   assert.deepEqual(rows[0].config.interaction.cursorVisualization, { __jsExpr: "process.platform === 'win32' ? 'hidden' : 'visible'" })
   assert.equal(rows[0].config.interaction.focusPolicy, 'preserve')
   assert.equal(rows[0].config.interaction.keyboardPolicy, 'preserve')
-  assert.match(helper, /if\(\$policy -ne 'activate'\)\{throw 'configured activation policy denies fallback while target is not foreground'\}; if\(-not \[EmateWin32\]::SetForegroundWindow/u)
-  assert.match(helper, /elseif\(\$a\.kind -eq 'type-text'\)[\s\S]*?Ensure-Foreground \$hwnd \(\[string\]\$request\.interaction\.keyboardPolicy\)[\s\S]*?foreach\(\$ch[\s\S]*?Send-Checked/u)
-  assert.match(helper, /elseif\(\$a\.kind -eq 'press-key'\)[\s\S]*?Ensure-Foreground \$hwnd \(\[string\]\$request\.interaction\.keyboardPolicy\)[\s\S]*?Send-Checked/u)
+  assert.match(helper, /if\(\$policy -ne 'activate'\)\{throw/u)
+  assert.match(helper, /preserve focus policy denies AXRaise/u)
+  assert.match(helper, /background raw pointer input is unavailable/u)
+  assert.match(helper, /GetGUIThreadInfo/u)
+  assert.match(helper, /ScrollPattern/u)
+  assert.match(helper, /GetUpdatedCache\(\$cache\)/u)
+  assert.match(helper, /GetFirstChild\(\$element,\$cache\)/u)
+  assert.match(helper, /TryGetCachedPattern/u)
+  assert.match(helper, /ToggleState|ExpandCollapseState|HorizontalScrollPercent/u)
+  assert.match(helper, /Invoke-Semantic/u)
+  assert.doesNotMatch(helper, /SendInput|SetCursorPos|SetClipboardData|GetClipboardData|CopyFromScreen|\.SetFocus\(/u)
   const disabled = platform => Function('process', 'return (' + rows[0].disabled.__jsExpr + ')')({ platform })
   assert.equal(disabled('darwin'), false)
   assert.equal(disabled('win32'), false)
@@ -205,9 +292,9 @@ test('composition keeps one owner, bounded health probes, exact cleanup, and no 
   const input = helper.indexOf('[Console]::InputEncoding = $utf8')
   const output = helper.indexOf('[Console]::OutputEncoding = $utf8')
   const pipeline = helper.indexOf('$OutputEncoding = $utf8')
-  const read = helper.indexOf('[Console]::In.ReadToEnd()')
+  const read = helper.indexOf('[EmateWin32]::ReadRequest([Console]::In)')
   assert.ok(encoding >= 0 && input > encoding && output > input && pipeline > output && read > pipeline)
-  for (const fact of ['RootElement', 'Drawing.Bitmap(1,1)', 'Release-Input $request.app $request.window $request.action', '@([string]$action.key)', 'SendMessageTimeout', 'secure desktop', 'locked session', 'RDP', 'elevated', 'UIPI']) assert.ok(helper.includes(fact))
+  for (const fact of ['RootElement', 'PrintWindow', 'SetProcessDpiAwarenessContext', 'Release-Input $request.app $request.window $request.action', 'Release-Held', 'SendMessageTimeout', 'secure desktop', 'locked session', 'RDP', 'elevated', 'UIPI']) assert.ok(helper.includes(fact))
   assert.equal(build.includes('executablePath?: string'), false)
   assert.equal((build.match(/\$\{'\$\{process\.platform\}'\}/gu) ?? []).length, 2)
   assert.equal((build.match(/current platform is \$\{process\.platform\}\\`/gu) ?? []).length, 0)

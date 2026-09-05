@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
@@ -20,10 +20,6 @@ for (const name of ['lib', 'assets']) {
   await rm(join(root, name), { recursive: true, force: true })
   await cp(join(upstream, name), join(root, name), { recursive: true })
 }
-if (process.platform === 'darwin') {
-  await rm(join(root, 'native/macos'), { recursive: true, force: true })
-  await cp(join(upstream, 'native/macos'), join(root, 'native/macos'), { recursive: true })
-}
 await mkdir(join(root, 'scripts'), { recursive: true })
 await cp(join(upstream, 'scripts/build-native.mjs'), join(root, 'scripts/build-native.mjs'))
 const windowsManifest = JSON.parse(await readFile(join(root, 'native/windows/manifest.json'), 'utf8'))
@@ -33,6 +29,18 @@ if (windowsManifest.schemaVersion !== 1 || windowsManifest.source?.path !== 'dsh
   throw new Error('Windows helper integrity manifest mismatch')
 }
 if (process.platform === 'darwin') {
+  // Native source remains owned here; do not overwrite exact-window fixes with
+  // the reference copy. Reuse the existing native builder when source changed.
+  const sourceDirectory = join(root, 'native/macos/Sources/Helper')
+  const sourceHash = createHash('sha256')
+  for (const name of (await readdir(sourceDirectory)).filter(name => name.endsWith('.swift')).sort()) {
+    sourceHash.update(name).update('\0').update(await readFile(join(sourceDirectory, name))).update('\0')
+  }
+  const before = JSON.parse(await readFile(join(root, 'native/macos/manifest.json'), 'utf8'))
+  if (before.sourceSha256 !== sourceHash.digest('hex')) {
+    const built = spawnSync(process.execPath, [join(root, 'scripts/build-native.mjs'), '--helper-only'], { cwd: root, encoding: 'utf8', stdio: 'pipe' })
+    if (built.status !== 0) throw new Error(`native helper build failed:\n${built.stdout}${built.stderr}`)
+  }
   const helper = join(root, 'native/macos/bin/dsh-computer-use-helper')
   const nativeManifestPath = join(root, 'native/macos/manifest.json')
   const nativeManifest = JSON.parse(await readFile(nativeManifestPath, 'utf8'))
@@ -165,7 +173,7 @@ const runtimeBundle = join(root, '.runtime-bundle')
 try {
 await mkdir(runtimeSource, { recursive: true })
 await writeFile(join(runtimeSource, 'windows.ts'), (await readText(join(root, 'src/windows.ts')))
-  .replace('../../../upstream/plugins/dsh-computer-use/lib/errors.js', '../lib/errors.js'))
+  .replace('../../../upstream/plugins/dsh-computer-use/src/errors.ts', '../lib/errors.js'))
 const providerPath = join(root, 'lib/providers/macos.js')
 let provider = await readText(providerPath)
 provider = replaceExactlyOnce(provider, `import { NativeHelperClient } from "./native-helper.js";`, `import { NativeHelperClient } from "./native-helper.js";

@@ -8,7 +8,7 @@ import { desktopAutomationBypass, hasExplicitComputerUseRequest } from '../lib/e
 
 const root = new URL('../', import.meta.url)
 
-test('computer-use adapter preserves Darwin and adds one pinned Windows backend', async () => {
+test('computer-use adapter keeps pinned owners, exact captures and dual platform policy', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
   const policyEnglish = await readFile(new URL('docs/interaction-policy.md', root))
@@ -29,11 +29,18 @@ test('computer-use adapter preserves Darwin and adds one pinned Windows backend'
   assert.match(patch, /process\.platform === 'win32' \? 'hidden' : 'visible'/u)
   assert.match(patch, /focusPolicy:\s*preserve/u)
   assert.match(patch, /keyboardPolicy:\s*preserve/u)
+  assert.match(patch, /cursorMotionMs:\s*0/u)
   assert.doesNotMatch(patch, /(?:focusPolicy|keyboardPolicy):\s*activate/u)
   assert.match(macHelper, /interactionValue\(interaction, "keyboardPolicy", \["preserve", "activate"\]\)/u)
   assert.match(macHelper, /guard effectiveFocusPolicy == "activate" else \{[\s\S]*return \(snapshot, record, "not-requested"\)/u)
   assert.match(macHelper, /private func pressKey[\s\S]*?down\.postToPid\(app\.processIdentifier\)[\s\S]*?up\.postToPid\(app\.processIdentifier\)/u)
   assert.match(macHelper, /private func typeTextWithKeyboard[\s\S]*?down\.postToPid\(app\.processIdentifier\)[\s\S]*?up\.postToPid\(app\.processIdentifier\)/u)
+  const capture = macHelper.slice(macHelper.indexOf('private func captureWindow'), macHelper.indexOf('private func observationJSON'))
+  assert.match(capture, /windowID == expectedId &&.*processID == snapshot\.app\.processIdentifier/u)
+  assert.match(capture, /afterFrame == expectedFrame/u)
+  assert.doesNotMatch(capture, /windows\.max|window\.title == expectedTitle/u)
+  assert.match(adapterBuilder, /before\.sourceSha256 !== sourceHash\.digest/u)
+  assert.doesNotMatch(adapterBuilder, /rm\(join\(root, 'native\/macos'\)/u)
   const gitBlobHash = contents => createHash('sha1')
     .update(`blob ${contents.byteLength}\0`)
     .update(contents)

@@ -488,15 +488,17 @@ private func captureWindow(_ snapshot: ObservationSnapshot, path: String, requir
         return nil
     }
     let expectedId = (snapshot.windowJSON?["id"] as? NSNumber)?.uint32Value
-    let expectedTitle = snapshot.windowJSON?["title"] as? String
-    let windows = content.windows.filter { $0.owningApplication?.processID == snapshot.app.processIdentifier }
-    let selected = windows.first { window in
-        if let expectedId, window.windowID == expectedId { return true }
-        if let expectedTitle, !expectedTitle.isEmpty, window.title == expectedTitle { return true }
-        return false
-    } ?? windows.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
-    guard let selected else {
-        if required { throw fail("COMPUTER_TARGET_UNAVAILABLE", "no capturable window belongs to the selected application") }
+    guard let expectedId,
+          let frameJSON = snapshot.windowJSON?["frame"] as? [String: Any],
+          let expectedFrame = try? cgRect(frameJSON),
+          let selected = content.windows.first(where: {
+              $0.windowID == expectedId && $0.owningApplication?.processID == snapshot.app.processIdentifier
+          }),
+          abs(selected.frame.minX - expectedFrame.minX) <= 1,
+          abs(selected.frame.minY - expectedFrame.minY) <= 1,
+          abs(selected.frame.width - expectedFrame.width) <= 1,
+          abs(selected.frame.height - expectedFrame.height) <= 1 else {
+        if required { throw fail("COMPUTER_STALE_OBSERVATION", "the exact observed window is no longer capturable; observe again") }
         return nil
     }
     let configuration = SCStreamConfiguration()
@@ -509,6 +511,13 @@ private func captureWindow(_ snapshot: ObservationSnapshot, path: String, requir
         image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
     } catch {
         if required { throw fail("COMPUTER_PROVIDER_FAILURE", "ScreenCaptureKit could not capture the selected window") }
+        return nil
+    }
+    guard let window = snapshot.window,
+          let afterFrame = axFrame(window),
+          afterFrame == expectedFrame,
+          (windowNumber(window) ?? windowNumber(app: snapshot.app, frame: afterFrame, title: axString(window, kAXTitleAttribute as CFString))) == Int(expectedId) else {
+        if required { throw fail("COMPUTER_STALE_OBSERVATION", "the observed window changed during capture") }
         return nil
     }
     let representation = NSBitmapImageRep(cgImage: image)

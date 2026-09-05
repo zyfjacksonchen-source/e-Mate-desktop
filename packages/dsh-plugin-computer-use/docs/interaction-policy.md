@@ -12,11 +12,11 @@ interaction:
   keyboardPolicy: preserve
   pointerInputPolicy: targeted
   cursorVisualization: !!js "process.platform === 'win32' ? 'hidden' : 'visible'"
-  cursorMotionMs: 180
+  cursorMotionMs: 0
   cursorAutoHideMs: 0
 ```
 
-`preserve` means pointer and keyboard actions do not request foreground activation. The Bundle default, `keyboardPolicy: preserve`, keeps macOS keyboard fallback routed to the selected pid without activation and is reliable only for applications that accept background keyboard events. Windows permits semantic UI Automation value changes in the background, but its raw keyboard fallback fails closed while the target is not foreground; it never activates as a fallback. `targeted` means mouse, drag, and wheel events may be sent only to the exact observed process and window. `visible` enables the separate Agent cursor, whose motion and auto-hide timing are also host-owned. The model cannot change any interaction policy through Tool arguments.
+`preserve` means pointer and keyboard actions do not request foreground activation. The Bundle default, `keyboardPolicy: preserve`, keeps macOS keyboard fallback routed to the selected pid without activation and is reliable only for applications that accept background keyboard events. Windows prefers background UIA Invoke, Value, Toggle, SelectionItem, ExpandCollapse and Scroll operations. Exactly checked native Edit/RichEdit controls accept directed text and bounded navigation keys, and selected native controls accept directed scroll messages. Unsupported background raw keyboard, clipboard shortcuts and raw pointer/drag input are denied before delivery; activation is never a fallback. `targeted` means mouse, drag, and wheel events may be sent only to the exact observed process and window. `visible` enables the separate Agent cursor, whose motion and auto-hide timing are also host-owned. The model cannot change any interaction policy through Tool arguments.
 
 This is an input-routing property, not a consequence of Accessibility permission alone. Accessibility grants semantic UI access; foreground preservation comes from choosing semantic Accessibility operations first and using process/window-targeted fallback instead of the system cursor.
 
@@ -63,7 +63,8 @@ These fields do not claim that a target application can never change focus as it
 | `type-text` through selected-text assignment | None | None | Allowed when the focused element accepts it |
 | macOS `type-text` keyboard fallback | None with `keyboardPolicy: preserve`; `activated` with `keyboardPolicy: activate` | Target pid | Allowed when the application accepts background keyboard events |
 | macOS `press-key` | None with `keyboardPolicy: preserve`; `activated` with `keyboardPolicy: activate` | Target pid | Allowed when the application accepts background keyboard events |
-| Windows raw `type-text` or `press-key` fallback | None under the shipped `keyboardPolicy: preserve` | Target HWND | Allowed only when the target is already foreground; otherwise denied before input |
+| Windows `type-text` or bounded navigation keys | None | Exactly checked native Edit/RichEdit HWND | Background delivery; unsupported keyboard and clipboard shortcuts denied |
+| Windows background click / scroll | None | UIA patterns or directed native scroll messages | Unsupported paths denied; raw background drag denied |
 | coordinate click or element-frame fallback | None | Target pid + window | Allowed when `pointerInputPolicy: targeted` |
 | scroll | None | Target pid + window | Allowed when `pointerInputPolicy: targeted` |
 | drag | None | Target pid + window | Allowed when `pointerInputPolicy: targeted` |
@@ -126,7 +127,7 @@ The release evidence covers both implementation and observed behavior:
 - the fixture records every `applicationDidBecomeActive` callback and the default path must not increase `activationCount`;
 - an independent native monitor samples cursor position and the frontmost pid every millisecond throughout click, scroll, and drag; every sample must remain unchanged;
 - background `AXPress`, Accessibility value/action, selected-text input, and pid-targeted key input change the fixture without activating it;
-- the Windows source contract requires the shipped `keyboardPolicy: preserve` and rejects raw keyboard fallback before `SetForegroundWindow` when the target is in the background;
+- the Windows source contract requires the shipped `keyboardPolicy: preserve`, restricts directed keyboard input to exactly checked native Edit/RichEdit controls, and denies unsupported input and raw background pointer actions before delivery;
 - the native fixture inserts a harmless sibling and recreates a uniquely identified checkbox, proving the raw locator becomes stale while `AXIdentifier` resolution still finds exactly one target;
 - target-process click and scroll are each observed exactly once; drag has exactly one down/up gesture; the target remains non-frontmost;
 - `pointerInputPolicy: deny` rejects click fallback, scroll, and drag before any target pointer event is delivered;
@@ -135,9 +136,15 @@ The release evidence covers both implementation and observed behavior:
 ## Known limitations
 
 - Target-process pointer delivery is less universal than semantic Accessibility. Custom canvases, games, hardened input surfaces, or future macOS changes may reject it.
-- Background keyboard delivery is application-dependent on macOS. Windows raw keyboard fallback is unavailable for a background target under the shipped preserve policy and fails closed rather than activating it.
+- Background keyboard delivery is application-dependent on macOS. Windows background raw pointer/drag, custom/WebView keyboard delivery and clipboard shortcuts are unavailable; native Edit/RichEdit text and bounded navigation, UIA semantics and bounded native scroll can run in the background.
 - The clicked point must fall inside an on-screen window of the selected app; minimized, fully hidden, or windowless targets fail closed.
 - `focusPolicy: activate` and `keyboardPolicy: activate` are intentionally disruptive and exist only as operator-selected compatibility modes.
 - A target application may change its own activation or focus as a side effect of an accepted action; the helper does not claim control over application-internal behavior.
 - The Agent cursor is scoped to one active Space and the exact observed window. `cursorAutoHideMs: 0` keeps it visible until the bound window changes, a new hide command arrives, or the helper is disposed.
 - Stable handles currently use exact locators, provider-native identifiers, and strict semantic identity. Semantic-spatial rebinding and provider-native visual hit-testing remain follow-up work; a vision-derived coordinate alone is never a verified target.
+
+## Helper lifecycle and capture
+
+Windows lazily starts one private PowerShell process through the native subprocess owner, verifies integrity and handshakes per generation, then exchanges serial bounded JSONL frames with exact request IDs. Cancellation, timeout, protocol failure and disposal must terminate and reap the process tree. A new generation revalidates and handshakes; failed actions are never replayed automatically. No global server or transport is created.
+
+Windows captures the exact HWND with PrintWindow; macOS captures the observed window ID, PID and geometry. Neither crops an occluded desktop region nor substitutes another same-process window. API success does not establish useful content for custom/protected renderers; real post-action state must confirm the result. Component checks cannot replace native hardware DPI/coordinate calibration. Zero cursorMotionMs removes the native cursor presentation wait while preserving observation and settlement.
