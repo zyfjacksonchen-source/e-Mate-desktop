@@ -1,0 +1,103 @@
+import assert from 'node:assert/strict'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import test from 'node:test'
+import { zipSync, unzipSync, strToU8 } from 'fflate'
+import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
+import { LocalFileSystem } from '../../../upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'
+import { handleCanvas } from '../src/index.ts'
+import { emptyProject, intentMarker } from '../src/contract.ts'
+import { insertAsset } from '../src/client/model.ts'
+import { nativeImageOutputs, requestCalls } from '../src/native-artifacts.ts'
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+const hash = createHash('sha256').update(png).digest('hex')
+const ref = { attachmentId: `sha256:${hash}`, mediaType: 'image/png', bytes: png.length, width: 1, height: 1, name: 'image.png' }
+const asset = { ownerSessionId: 'parent', ref }
+const intent = { id: 'request', kind: 'image', pageId: 'page-1', sessionId: 'parent', sourceIds: [], imported: [] }
+const event = (seq, type, data) => ({ seq, type, data })
+function nativeEvents(status = 'completed') {
+  return [event(0, 'turn/start', { turn: 1 }), event(1, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: `${intentMarker('request')}\ndraw a tree` }] }),
+    event(2, 'tool/call', { turn: 1, callId: 'image-call', name: 'imagegen' }),
+    event(3, 'emate/image-output', { schema_version: 2, status, call_id: 'image-call', revision: 2, parent_session_id: 'parent', output: ref, content: [{ type: 'image', attachment: ref }] })]
+}
+async function setup(t) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'canvas-rpc-')))
+  const native = new Context(); const fiber = await native.plugin(LocalFileSystem, { cwd: root })
+  t.after(async () => { await fiber.dispose(); await rm(root, { recursive: true, force: true }) })
+  const session = { header: { id: 'parent' }, events: nativeEvents() }
+  let reads = 0
+  const ctx = { fs: native.fs, workspaceRegistry: { archivedSessionIds: [], list: () => [{ path: root, sessionIds: ['parent'] }] },
+    sessions: { get: id => id === 'parent' ? session : undefined }, sessionPersistence: { async load() { throw new Error('not found') } },
+    sandboxPolicy: { resolve: () => ({ mode: 'workspace-write' }) },
+    attachments: { async readImage() { reads++; return { ref, data: png } }, async saveImage() { return ref } } }
+  return { root, ctx, session, reads: () => reads, call: async (endpoint, value = {}) => JSON.parse(JSON.stringify(await handleCanvas(ctx, endpoint, { session_id: 'parent', ...value }))) }
+}
+test('native completed attachment can be inserted once and immutable existing assets avoid repeated CAS reads on drawing saves', async t => {
+  const h = await setup(t)
+  const resolved = await h.call('resolve-image', { owner_session_id: 'parent', attachment_id: ref.attachmentId })
+  assert.equal(resolved.ok, true)
+  let document = insertAsset(emptyProject('main'), 'page-1', resolved.value)
+  document = insertAsset(document, 'page-1', resolved.value)
+  assert.equal(document.assets.length, 1); assert.equal(document.pages[0].elements.length, 1)
+  const saved = await h.call('save', { project_id: 'main', project: document, expected_revision: null })
+  assert.equal(saved.ok, true)
+  const reads = h.reads()
+  const next = await h.call('save', { project_id: 'main', project: { ...document, title: 'drawing changed' }, expected_revision: saved.value.revision })
+  assert.equal(next.ok, true); assert.equal(h.reads(), reads)
+  const loaded = await h.call('image', { project_id: 'main', attachment_id: ref.attachmentId })
+  assert.deepEqual(Buffer.from(loaded.value.bytes_base64, 'base64'), png)
+})
+test('portable project export includes real bytes and import validates paths and every hash', async t => {
+  const h = await setup(t)
+  const project = insertAsset(emptyProject('main'), 'page-1', asset)
+  await h.call('save', { project_id: 'main', project, expected_revision: null })
+  const exported = await h.call('export', { project_id: 'main' })
+  assert.equal(exported.ok, true)
+  const entries = unzipSync(Buffer.from(exported.value.archive_base64, 'base64'))
+  assert.deepEqual(Buffer.from(entries[`assets/${hash}.png`]), png)
+  const imported = await h.call('import', { project_id: 'copy', archive_base64: exported.value.archive_base64 })
+  assert.equal(imported.ok, true); assert.equal(imported.value.project.assets[0].ref.attachmentId, ref.attachmentId)
+  assert.equal((await h.call('load', { project_id: 'copy' })).value.project.pages[0].elements.length, 1)
+  entries[`assets/${hash}.png`] = strToU8('bad')
+  assert.equal((await h.call('import', { project_id: 'bad-hash', archive_base64: Buffer.from(zipSync(entries)).toString('base64') })).ok, false)
+  entries['../escape'] = strToU8('escape')
+  assert.equal((await h.call('import', { project_id: 'escape', archive_base64: Buffer.from(zipSync(entries)).toString('base64') })).ok, false)
+})
+test('RPC rejects unknown ownership, archived sessions, readonly writes and caller-controlled paths', async t => {
+  const h = await setup(t)
+  assert.equal((await h.call('resolve-image', { owner_session_id: 'foreign', attachment_id: ref.attachmentId })).ok, false)
+  assert.equal((await h.call('save', { project_id: 'main', project: emptyProject('main'), expected_revision: null, path: '/tmp/escape' })).ok, false)
+  h.ctx.sandboxPolicy.resolve = () => ({ mode: 'read-only' })
+  assert.equal((await h.call('save', { project_id: 'main', project: emptyProject('main'), expected_revision: null })).error.code, 'read-only')
+  h.ctx.workspaceRegistry.archivedSessionIds.push('parent')
+  assert.equal((await h.call('list')).ok, false)
+})
+test('only exact native request turns and completed receipts return image artifacts; unknown/replayed/ambiguous scopes do not', async t => {
+  const h = await setup(t)
+  assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [asset])
+  h.session.events = nativeEvents('unknown'); assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+  h.session.events = nativeEvents(); h.session.events[3].data.call_id = 'foreign'; assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+  h.session.events = nativeEvents(); h.session.events.push(event(4, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: `${intentMarker('second')}\nother request` }] }))
+  assert.equal(requestCalls(h.session.events, intent), null)
+  assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+})
+
+test('a completed child task is importable before the whole batch ends; foreign receipt correlations are rejected', async t => {
+  const h = await setup(t)
+  const taskId = `sha256:${'d'.repeat(64)}`
+  const child = { header: { id: 'child', parentSession: 'parent' }, events: [event(1, 'emate/image-output', {
+    schema_version: 2, status: 'completed', call_id: 'child-call', revision: 2, parent_session_id: 'child',
+    client_request_id: `image-${'d'.repeat(64)}`, output: ref,
+  })] }
+  h.ctx.sessions.get = id => id === 'child' ? child : id === 'parent' ? h.session : undefined
+  h.session.events = nativeEvents().slice(0, 3)
+  h.session.events[2].data.name = 'image_batch'
+  h.session.events.push(event(3, 'emate/image-batch', { kind: 'task-state', parent_call_id: 'image-call', task: {
+    task_id: taskId, state: 'completed', child_session_id: 'child', receipt: { owner_session_id: 'child', status: 'completed', call_id: 'child-call', revision: 2, event_seq: 1 },
+  } }))
+  assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [{ ownerSessionId: 'child', ref }])
+  child.events[0].data.client_request_id = 'foreign'
+  assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+})

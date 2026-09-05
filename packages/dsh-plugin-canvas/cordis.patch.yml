@@ -1,0 +1,4 @@
+- insert:
+    - id: emate-canvas
+      name: '@e-mate/dsh-plugin-canvas'
+      inject: [connection, workspaceRegistry, sessions, sessionPersistence, attachments, sandboxPolicy, fs, webServer]

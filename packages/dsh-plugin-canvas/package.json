@@ -1,0 +1,30 @@
+{
+  "name": "@e-mate/dsh-plugin-canvas",
+  "version": "2.0.18",
+  "description": "Local multi-page canvas in the pinned Harness details panel.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./client": "./lib/client.js", "./contract": "./lib/contract.js", "./package.json": "./package.json" },
+  "files": ["lib/", "licenses/", "LICENSE", "THIRD_PARTY_NOTICES.md", "cordis.patch.yml", "README.md"],
+  "scripts": {
+    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "test": "node --test test/*.test.mjs",
+    "test:types": "../../upstream/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json",
+    "test:client": "../../upstream/deepseek-harness/node_modules/.bin/vitest run --config vitest.config.ts",
+    "check": "pnpm build && pnpm test:types && pnpm test && pnpm test:client"
+  },
+  "dependencies": { "@excalidraw/excalidraw": "0.18.1", "fflate": "0.8.3" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "inject": ["@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-conversation"], "platform": "web" }
+  },
+  "eMate": {
+    "harnessVersion": "0.1.0-rc.7",
+    "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
+    "baseImports": ["react", "react-dom"],
+    "excludedFeatures": ["tldraw", "cloud-storage", "standalone-transport", "parallel-agent-loop", "same-origin-project-html"]
+  },
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "license": "MIT",
+  "private": true
+}
