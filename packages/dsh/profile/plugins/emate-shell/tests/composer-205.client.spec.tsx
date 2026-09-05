@@ -36,11 +36,24 @@ afterEach(() => {
 })
 
 describe('e-Mate 2.0.17 composer projection', () => {
-  it('routes external connections into the existing collaboration capability surface', () => {
-    const openConnections = vi.fn()
-    render(<ComposerConnectors LinkIcon={Icon} openConnections={openConnections} />)
-    fireEvent.click(screen.getByRole('button', { name: '打开外部连接能力中心' }))
-    expect(openConnections).toHaveBeenCalledOnce()
+  it('shows actual connector states and fills a service-specific draft without navigating', async () => {
+    const prepareDraft = vi.fn()
+    const loadConnections = vi.fn(async () => [
+      { id: 'feishu' as const, state: 'connected' as const },
+      { id: 'dingtalk' as const, state: 'not-connected' as const },
+      { id: 'tencent_docs' as const, state: 'expired' as const },
+    ])
+    const before = location.href
+    render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={loadConnections} prepareDraft={prepareDraft} />)
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await waitFor(() => expect(screen.getByText('已连接')).toBeTruthy())
+    expect(screen.getByText('未连接')).toBeTruthy()
+    expect(screen.getByText('授权失效')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /飞书.*已连接/u }))
+    expect(prepareDraft).toHaveBeenCalledOnce()
+    expect(prepareDraft.mock.calls[0]?.[0]).toContain('connect-feishu-cli')
+    expect(location.href).toBe(before)
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('keeps the resident live Harness textarea placeholder', () => {
@@ -221,7 +234,7 @@ describe('e-Mate 2.0.17 composer projection', () => {
     expect(source).toContain("ctx.slots.inject('conversation.input.right'")
     expect(source).toContain("ctx.slots.inject('conversation.input.left'")
     expect(source).toMatch(/id: 'e-mate-mentions',[\s\S]*?order: 11/u)
-    expect(source).toContain("'/capabilities?category=collaboration'")
+    expect(source).toContain("appendConnectionDraft(ctx, sessionId, prompt)")
     const mentions = readFileSync('src/client/composer-mentions.ts', 'utf8')
     expect(mentions).toContain("name: '电脑操控'")
     expect(mentions).toContain("label: '@电脑操控'")

@@ -33,6 +33,7 @@ import { registerActivityFold } from './activity-fold.tsx'
 import './theme-tokens.module.css'
 import './chat-chrome.module.css'
 import { ComposerConnectors, ComposerMentions } from './composer-connectors.tsx'
+import { appendConnectionDraft, loadConnectionStates } from './connection-status.ts'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection, SchedulesOverlayProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
@@ -515,12 +516,9 @@ export function apply(ctx: any): void {
     order: 20,
     inject: (sessionId: string) => ({
       LinkIcon: IconLinkOutline16,
-      openConnections: () => {
-        const route = '/capabilities?category=collaboration'
-        if (`${location.pathname}${location.search}` === route) return
-        history.pushState(null, '', route)
-        dispatchEvent(new PopStateEvent('popstate'))
-      },
+      sessionId,
+      loadConnections: (signal: AbortSignal) => loadConnectionStates((channel, endpoint, payload, signal) => ctx.connection.rpc.call(channel, endpoint, payload, signal), signal),
+      prepareDraft: (prompt: string) => appendConnectionDraft(ctx, sessionId, prompt),
     }),
   }, ComposerConnectors))
   ctx.effect(

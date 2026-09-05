@@ -16,6 +16,7 @@ import { readCollectedOutput } from './collected-output.ts'
 import { parseOAuthCallback } from './oauth-callback.ts'
 import { validatePluginInstall, validatePluginPackageName } from './plugin-source.ts'
 import { isMcpServerActive } from './status.ts'
+import { readFeishuConnection } from './feishu-status.ts'
 
 export { parseOAuthCallback } from './oauth-callback.ts'
 
@@ -136,6 +137,12 @@ function answerText(answer: { answers: Array<{ selected: string[]; custom?: stri
 
 interface DesktopPnpmLike {
   readonly profileDir: string
+  run(args: readonly string[], signal?: AbortSignal): {
+    stdout: AsyncIterable<Uint8Array | string>
+    stderr: AsyncIterable<Uint8Array | string>
+    done: Promise<{ exitCode: number | null }>
+    cancel(): void
+  }
   runPlugin(args: readonly string[], invokingDir: string, signal?: AbortSignal): {
     stdout: AsyncIterable<Uint8Array | string>
     stderr: AsyncIterable<Uint8Array | string>
@@ -669,9 +676,12 @@ export function apply(ctx: Context, config: ConfigShape): void {
 
   ctx.effect(() => ctx.connection.rpc.handle(
     CHANNEL,
-    async (endpoint, payload) => {
+    async (endpoint, payload, signal) => {
       if (!exactObject(payload) || Object.keys(payload).length !== 0) {
         return { ok: false, error: { code: 'bad-request', message: 'MCP 查询参数无效。', details: { issues: [] } } }
+      }
+      if (endpoint === 'feishu.status') {
+        return { ok: true, value: await readFeishuConnection(ctx.get('desktopPnpm') as DesktopPnpmLike | undefined, signal) }
       }
       if (endpoint !== 'active' && endpoint !== 'list') {
         return { ok: false, error: { code: 'not-found', message: 'MCP 查询不存在。', details: { issues: [] } } }

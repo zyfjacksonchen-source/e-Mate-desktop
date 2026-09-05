@@ -5,6 +5,7 @@ export default {
     'oauth-callback': 'src/oauth-callback.ts',
     'plugin-source': 'src/plugin-source.ts',
     status: 'src/status.ts',
+    'feishu-status': 'src/feishu-status.ts',
   },
   outDir: 'lib',
   format: ['esm'],

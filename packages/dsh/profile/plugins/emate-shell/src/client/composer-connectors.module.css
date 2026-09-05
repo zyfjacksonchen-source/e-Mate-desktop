@@ -12,6 +12,30 @@
 
 .root button:disabled { cursor: wait; opacity: .5; }
 
+.panel {
+  position: fixed;
+  z-index: 1000;
+  width: min(280px, calc(100vw - 16px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-text-primary);
+  box-shadow: var(--dsw-shadow-lv3);
+}
+.panel header { display: flex; align-items: center; justify-content: space-between; }
+.panel p { font-size: 12px; line-height: 1.5; color: var(--dsw-alias-text-secondary); }
+.panel button { min-height: 36px; border-radius: 8px; padding: 6px 8px; background: transparent; color: inherit; border: 0; cursor: pointer; }
+.panel button:focus-visible { outline: 2px solid var(--dsw-alias-interactive-primary); outline-offset: 2px; }
+.panel button:hover { background: var(--dsw-alias-bg-layer-2); }
+.panel .connection { display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: space-between; text-align: left; gap: 12px; }
+.connection small { color: var(--dsw-alias-text-secondary); }
+.connection small[data-state='connected'] { color: var(--dsw-alias-state-success-primary); }
+.connection small[data-state='failed'], .panel [role='alert'] { color: var(--dsw-alias-state-error-primary); }
+
 .error {
   position: absolute;
   right: 0;

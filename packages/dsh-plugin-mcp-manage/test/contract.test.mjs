@@ -5,11 +5,35 @@ import { readCollectedOutput } from '../lib/collected-output.mjs'
 import { parseOAuthCallback } from '../lib/oauth-callback.mjs'
 import { validatePluginInstall, validatePluginPackageName } from '../lib/plugin-source.mjs'
 import { isMcpServerActive } from '../lib/status.mjs'
+import { feishuConnectionState, readFeishuConnection } from '../lib/feishu-status.mjs'
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
 const statusSource = readFileSync(new URL('../src/status.ts', import.meta.url), 'utf8')
 const runtime = readFileSync(new URL('../lib/index.mjs', import.meta.url), 'utf8')
+
+test('Feishu readiness requires verified structured user authority and never merely configured credentials', () => {
+  assert.equal(feishuConnectionState({ identities: { user: { available: true, verified: true, status: 'needs_refresh' } } }), 'connected')
+  assert.equal(feishuConnectionState({ ok: true, data: { identity: 'user', verified: true, identities: { user: { available: true } } } }), 'connected')
+  assert.equal(feishuConnectionState({ identities: { user: { available: true, verified: false } } }), 'failed')
+  assert.equal(feishuConnectionState({ identities: { user: { available: false, tokenStatus: 'revoked' } } }), 'expired')
+  assert.equal(feishuConnectionState({ status: 'not_configured' }), 'not-connected')
+  assert.equal(feishuConnectionState({ ok: false, data: { identities: { user: { available: true, verified: true } } } }), 'failed')
+})
+
+test('Feishu status uses the pinned native offline runner and never starts setup or returns credential fields', async () => {
+  let args
+  const runner = { run(value) {
+    args = value
+    return {
+      stdout: (async function* () { yield JSON.stringify({ identities: { user: { available: true, verified: true, userName: 'private-name', openId: 'private-id' } } }) })(),
+      stderr: (async function* () {})(),
+      done: Promise.resolve({ exitCode: 0 }), cancel() {},
+    }
+  } }
+  assert.deepEqual(await readFeishuConnection(runner, undefined, new URL('../src/', import.meta.url)), { state: 'connected' })
+  assert.deepEqual(args, ['--config.offline=true', 'dlx', '@larksuite/cli@1.0.88', 'auth', 'status', '--json', '--verify'])
+})
 
 test('MCP management keeps native DSH ownership and secrets out of settings', () => {
   assert.equal(manifest.version, '2.0.18')
