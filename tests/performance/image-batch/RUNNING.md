@@ -6,12 +6,13 @@ Run from a clean committed worktree using Node 24. The runners do not install or
 node tests/performance/image-single/benchmark.mjs --source-smoke
 node tests/performance/image-single/benchmark.mjs
 node --test tests/performance/image-batch/stress.test.mjs
+node tests/performance/image-batch/mixed-admission.mjs
 node tests/performance/image-single/project-evidence.mjs open PRIVATE_SINGLE_OPEN_JSON
 node tests/performance/image-batch/project-release-evidence.mjs open PRIVATE_BATCH_OPEN_JSON
 node tests/quality/image-batch/real-study.mjs open PRIVATE_QUALITY_OPEN_JSON
 ```
 
-The single benchmark uses deterministic local image bytes and blocks networking. Its comparator is the pinned owners' lower bound, not a native imagegen implementation. Batch stress deliberately injects failures and uses a fixture provider. Neither result establishes provider latency, UI visibility, or real image quality. EM217 evidence retains its historical identity; it cannot close an EM218 manifest.
+The single benchmark uses deterministic local image bytes and blocks networking. Its comparator is the pinned owners' lower bound, not a native imagegen implementation. Batch stress deliberately injects failures and uses a fixture provider. Mixed admission calls the existing in-memory gateway owner with an injected logical clock; it diagnoses default-three versus explicit-four slot behavior and refill, without a provider. These results do not establish provider latency, UI visibility, production fairness, or real image quality. EM217 evidence retains its historical identity; it cannot close an EM218 manifest.
 
 ## Real provider collection
 
