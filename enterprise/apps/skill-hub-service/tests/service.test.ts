@@ -3,7 +3,7 @@ import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
 import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, mkdir, rm, writeFile, readFile, realpath } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, readFile, realpath, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { after, type TestContext } from 'node:test'
@@ -88,7 +88,6 @@ async function realGateway(t: TestContext) {
     fetchImplementation: async () => { throw new Error('Inference is outside this fixture') },
   })
   const server = createServer((request, response) => {
-    request.url = request.url?.replace('/e-mate/model-api', '')
     void handler(request, response)
   })
   server.listen(0, '127.0.0.1')
@@ -103,8 +102,21 @@ async function realGateway(t: TestContext) {
       tenantId: 'tenant-1', scopes: ['models:read', 'responses:create', 'usage:read'], modelIds: ['gpt-5.6-sol'], iat: now, nbf: now, exp: now + 900, jti: randomUUID() })).toString('base64url')
     return `${header}.${claims}.${sign(null, Buffer.from(`${header}.${claims}`), keys.privateKey).toString('base64url')}`
   }
-  return { validationUrl: `http://127.0.0.1:${address.port}/e-mate/model-api/v1/consents/current`, token }
+  return { validationUrl: `http://127.0.0.1:${address.port}/v1/consents/current`, token }
 }
+
+test('fixed Gateway endpoints distinguish the direct internal route from the HTTPS proxy route', () => {
+  const options = { pool: {} as Pool, schema: 'sh_endpoint_test', volume: '/unused', authorKey: 'synthetic-key'.repeat(4) }
+  for (const validationUrl of ['http://model-gateway:8080/v1/consents/current', 'http://127.0.0.1:8080/v1/consents/current',
+    'http://[::1]:8080/v1/consents/current', 'https://gateway.example/e-mate/model-api/v1/consents/current']) {
+    assert.doesNotThrow(() => createService({ ...options, validationUrl }))
+  }
+  for (const validationUrl of ['http://other-service:8080/v1/consents/current', 'http://model-gateway:8080/e-mate/model-api/v1/consents/current',
+    'https://gateway.example/v1/consents/current', 'http://model-gateway:8080/v1/consents/current?target=other',
+    'http://user:password@model-gateway:8080/v1/consents/current']) {
+    assert.throws(() => createService({ ...options, validationUrl }), /Invalid model validation endpoint/)
+  }
+})
 
 test('offline preflight validates six table counts, every archive and the original owner key', async (t) => {
   const fixture = await snapshotFixture(t)
@@ -172,6 +184,47 @@ integration('a lost PostgreSQL activation reply preserves the committed generati
   const packages = new FilePackages(join(fixture.volume, 'generations', row.generation))
   assert.equal((await packages.list()).objects.length, 3)
   assert.equal((await pool!.query(`SELECT count(*)::int AS n FROM "${fixture.schema}".skill_hub_versions`)).rows[0].n, 3)
+  const archive = join(packages.directory, fixture.alpha.package_sha256, 'archive.zip')
+  const original = await readFile(archive)
+  await writeFile(archive, Buffer.from('damaged'))
+  await assert.rejects(migrate({ ...options, pool: pool! }), /active-readback/)
+  await writeFile(archive, original)
+  await pool!.query(`UPDATE "${fixture.schema}".skill_hub_skills SET updated_at='changed-after-migration' WHERE slug='alpha-skill'`)
+  await assert.rejects(migrate({ ...options, pool: pool! }), /active-readback/)
+  assert.equal((await pool!.query(`SELECT generation FROM "${fixture.schema}".skill_hub_control`)).rows[0].generation, row.generation)
+})
+
+integration('a lost staging COMMIT response cleans only its private schema and files before activation', async (t) => {
+  const fixture = await snapshotFixture(t)
+  let stage = ''
+  let injected = false
+  const uncertain = new Proxy(pool!, {
+    get(target, property) {
+      if (property === 'connect') return async () => {
+        const client = await target.connect()
+        let staging = false
+        return new Proxy(client, {
+          get(connection, key) {
+            if (key === 'query') return async (sql: string, values?: unknown[]) => {
+              const match = /^CREATE SCHEMA "(sh_stage_[a-f0-9]+)"$/.exec(sql)
+              if (match) { staging = true; stage = match[1]! }
+              const result = await connection.query(sql, values)
+              if (sql === 'COMMIT' && staging && !injected) { injected = true; throw new Error('simulated staging response loss') }
+              return result
+            }
+            const value = Reflect.get(connection, key)
+            return typeof value === 'function' ? value.bind(connection) : value
+          },
+        }) as PoolClient
+      }
+      const value = Reflect.get(target, property)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  await assert.rejects(migrate({ ...fixture, authorKey: fixture.source.AUTHOR_KEY, pool: uncertain, apply: false }), /database-staging/)
+  assert.equal(injected, true)
+  for (const name of [stage, fixture.schema]) assert.equal((await pool!.query('SELECT to_regnamespace($1)::text AS name', [name])).rows[0].name, null)
+  assert.deepEqual(await readdir(join(fixture.volume, '.staging')), [])
 })
 
 integration('actual PostgreSQL and fs migrate atomically and serve the unchanged protocol through real Gateway verification', async (t) => {
@@ -189,6 +242,15 @@ integration('actual PostgreSQL and fs migrate atomically and serve the unchanged
     ...init, headers: { authorization: `Bearer ${gateway.token(user, sid)}`, ...init.headers },
   }))
   assert.equal((await call('/readyz')).status, 200)
+  const writer = await pool!.connect()
+  try {
+    await writer.query('BEGIN')
+    await writer.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`e-mate-skill-hub:${fixture.schema}`])
+    const began = performance.now()
+    assert.equal((await call('/readyz')).status, 503)
+    assert(performance.now() - began < 5000, 'readiness must not wait for the business write lock')
+    assert.equal((await call('/livez')).status, 200)
+  } finally { await writer.query('ROLLBACK'); writer.release() }
   for (const path of [`${prefix}/skills?limit=1`, `${prefix}/skills?query=ALPHA&tag=office`, `${prefix}/skills/alpha-skill?limit=1`, `${prefix}/publications/mine`]) {
     const old = await direct(fixture.source, path, {}, 'user-1')
     const current = await call(path)
@@ -243,6 +305,22 @@ test('SQL adapter keeps placeholders out of literals and retains SQLite-compatib
   assert.equal(postgresQuery('SELECT 1 WHERE changes()=1', 0), 'SELECT 1 WHERE 0=1')
 })
 
+test('one readiness probe stays outside the four business slots and liveness requires no storage', async () => {
+  let connections = 0
+  let rejectConnection!: (error: Error) => void
+  const connection = new Promise<PoolClient>((_resolve, reject) => { rejectConnection = reject })
+  const fixturePool = { idleCount: 1, totalCount: 1, options: { max: 4 }, connect() { connections++; return connection } } as unknown as Pool
+  const service = createService({ pool: fixturePool, schema: 'sh_probe_test', volume: '/unused', authorKey: 'synthetic-key'.repeat(4),
+    validationUrl: 'http://model-gateway:8080/v1/consents/current' })
+  const probe = service.fetch(new Request('http://hub/readyz'))
+  assert.equal((await service.fetch(new Request('http://hub/readyz'))).status, 503)
+  const business = Array.from({ length: 4 }, () => service.fetch(new Request(`http://hub${prefix}/skills`)))
+  assert.equal(connections, 5)
+  assert.equal((await service.fetch(new Request('http://hub/livez'))).status, 200)
+  rejectConnection(new Error('synthetic unavailable storage'))
+  assert((await Promise.all([probe, ...business])).every((response) => response.status === 503))
+})
+
 test('the real HTTP listener rejects declared and chunked oversized bodies and shuts down idempotently', async (t) => {
   const fixture = await snapshotFixture(t)
   const reservation = createServer()
@@ -253,10 +331,33 @@ test('the real HTTP listener rejects declared and chunked oversized bodies and s
   await new Promise<void>((resolve) => reservation.close(() => resolve()))
   const running = await start({ SKILL_HUB_DATABASE_URL: databaseUrl ?? 'postgresql://postgres@127.0.0.1:1/unavailable',
     SKILL_HUB_AUTHOR_KEY: fixture.source.AUTHOR_KEY, SKILL_HUB_SCHEMA: fixture.schema,
-    SKILL_HUB_VOLUME: fixture.volume, SKILL_HUB_MODEL_VALIDATION_URL: 'http://127.0.0.1:1/e-mate/model-api/v1/consents/current',
+    SKILL_HUB_VOLUME: fixture.volume, SKILL_HUB_MODEL_VALIDATION_URL: 'http://127.0.0.1:1/v1/consents/current',
     SKILL_HUB_PORT: String(address.port) })
   t.after(running.shutdown)
   assert.equal((await fetch(`http://127.0.0.1:${address.port}/livez`)).status, 200)
+  let resolveAdmitted!: () => void
+  const admitted = new Promise<void>((resolve) => { resolveAdmitted = resolve })
+  let holding = 0
+  const observe = (request: import('node:http').IncomingMessage) => {
+    if (request.headers['x-test-held'] === 'true' && ++holding === 4) resolveAdmitted()
+  }
+  running.server.on('request', observe)
+  const held = Array.from({ length: 4 }, () => {
+    const request = httpRequest({ host: '127.0.0.1', port: address.port, path: `${prefix}/skills`, method: 'POST',
+      headers: { 'x-test-held': 'true', 'transfer-encoding': 'chunked' } })
+    request.on('error', () => {})
+    request.write(' ')
+    return request
+  })
+  try {
+    await admitted
+    assert.equal((await fetch(`http://127.0.0.1:${address.port}/livez`)).status, 200)
+    assert.equal((await fetch(`http://127.0.0.1:${address.port}/readyz`)).status, 503)
+  } finally {
+    running.server.off('request', observe)
+    await Promise.all(held.map((request) => new Promise<void>((resolve) => { request.once('close', resolve); request.destroy() })))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
   for (const chunked of [false, true]) {
     const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
       const request = httpRequest({ host: '127.0.0.1', port: address.port, path: `${prefix}/skills`, method: 'POST',

@@ -102,11 +102,11 @@ Skill Hub Host、Agent、RPC 和 UI 作为同一个 Desktop 内置 Profile 组�
 | `SKILL_HUB_AUTHOR_KEY` / `SKILL_HUB_AUTHOR_KEY_FILE` | 恰好提供一个；必须是旧 Worker 的原始 HMAC key，文件内容不 trim、不打印 |
 | `SKILL_HUB_SCHEMA` | 默认 `skill_hub`；独立 schema，禁止 `public` 或系统 schema |
 | `SKILL_HUB_VOLUME` | 默认 `/var/lib/e-mate-skill-hub`；持久、规范绝对路径，不使用符号链接 |
-| `SKILL_HUB_MODEL_VALIDATION_URL` | 必填固定真实 Gateway `/e-mate/model-api/v1/consents/current` URL；不接受请求提供的目标，不跟随重定向；HTTPS 校验证书，内部 HTTP 仅允许 `model-gateway` 或 loopback |
+| `SKILL_HUB_MODEL_VALIDATION_URL` | 必填固定真实 Gateway URL；HTTPS 代理路径为 `/e-mate/model-api/v1/consents/current`，内部 HTTP 仅允许 `model-gateway` 或 loopback 的原生 `/v1/consents/current`；不接受请求提供的目标，不跟随重定向，HTTPS 校验证书 |
 | `SKILL_HUB_HOST` / `SKILL_HUB_PORT` | 默认 `127.0.0.1:8788`；容器网络可显式选择 `0.0.0.0`；代理必须保留完整旧 API 路径 |
 | `SKILL_HUB_SERVICE_ROLE` | 仅迁移 CLI 使用；向生产运行 role 授予 schema USAGE、业务表 SELECT/INSERT、skills/intents UPDATE 和日志 sequence USAGE；控制表只授 SELECT |
 
-服务不会初始化空目录并假装完成迁移。激活回执或原 HMAC key 指纹缺失/不匹配时，ready 和业务请求均失败关闭。`/livez` 只证明进程存活；`/readyz` 与兼容 `/healthz` 检查激活控制行、数据库、文件卷预算及包回读。它们不是真实跨账号安装验收。
+服务不会初始化空目录并假装完成迁移。激活回执或原 HMAC key 指纹缺失/不匹配时，ready 和业务请求均失败关闭。`/livez` 只证明进程存活，独立于业务四路容量；`/readyz` 与兼容 `/healthz` 仅允许一个独立探测，通过非阻塞共享锁及一秒 SQL 预算检查激活控制行、数据库和文件卷容量，遇业务写锁或容量已满返回未就绪，不排队等待写锁。探测不扫描包目录；完整包回读属于迁移、恢复验证和实际下载。它们不是真实跨账号安装验收。
 
 请求体最多 14 MiB，ZIP 最多 10 MiB；请求/关闭预算 45 秒、鉴权请求 10 秒、数据库语句 30 秒、锁等待 10 秒。最多 4 个在途 HTTP 请求和 64 条连接。元数据写入按 schema 串行，读请求使用共享锁；若测得写入压力再考虑拆分锁，不能牺牲 slug 归属与跨表 receipt 的原子性。取消、超时或服务异常不会切换到另一个存储。
 
@@ -162,9 +162,9 @@ manifest 的格式为：
 
 1. 让旧 Worker 进入 `SKILL_HUB_READ_ONLY=true`，等待已有写请求结束后导出六表、完整 R2 对象 inventory/bytes 和原 HMAC key 的指纹。备份和冻结证明由主代理保留。
 2. 运行 `node --experimental-strip-types enterprise/apps/skill-hub-service/src/migrate.ts --dry-run <snapshot>`。检查原始 D1 hash、六表行数、每表内容 hash、每个对象 hash/bytes、slug/version/latest/author/receipt 关系及 key 指纹。历史同名或双 owner 不自动修复；旧的重复 intent request ID 保留，不能伪造新 token。
-3. dry-run 也会写入**独立私有 staging schema 和文件目录**，从独立 PostgreSQL 连接及文件系统完整回读校验，再删除 staging。它不激活目标，也不改写原输入。
+3. dry-run 也会写入**独立私有 staging schema 和文件目录**，从独立 PostgreSQL 连接及文件系统完整回读校验，再删除 staging。staging COMMIT 回包丢失时仍按本次唯一 staging 身份清理，不触碰活动目标。它不激活目标，也不改写原输入。
 4. 通过审查后，使用完全相同快照运行 `--apply`。完整回读后先将文件代目录持久化，再在一个数据库事务中将 staging schema 原子改名为目标 schema，控制行绑定 generation、迁移摘要、原 key 指纹和脱敏回执。已有活动目标不允许被另一快照覆盖；同一 apply 可读取原回执重放。
-5. COMMIT 响应丢失时保留候选字节，不能声称零写入或自行回滚。重复相同 apply 读取持久回执，再由主代理核对新服务 ready、目录分页、owner 查询和下载摘要。
+5. 激活 COMMIT 响应丢失时保留候选字节，不能声称零写入或自行回滚。重复相同 apply 必须完整回读活动六表和包字节并与原快照一致，才返回持久回执；数据损坏或已有后续业务写入时明确失败，不覆盖新数据。再由主代理核对新服务 ready、目录分页、owner 查询和下载摘要。
 6. 主代理授权后才设置旧 Worker 的 `SKILL_HUB_FORWARD_ENABLED=true` 和 `SKILL_HUB_FORWARD_ORIGIN=https://<固定新服务入口 origin>`。启用后不会访问 D1/R2，不接受请求指定 upstream，不跟随 redirect，失败也不会回退旧存储。
 
 公开切换后，所有写入只去新服务。不能通过关闭 forwarder 把已经产生新写入的系统退回旧 D1；回滚必须由主代理冻结写入，并按同一回执恢复对应 PostgreSQL 备份和文件代目录，再核对唯一入口。原 D1/R2 和临时 stage 的保留/清理由主代理决定。

@@ -99,7 +99,8 @@ function configured(env) {
     && ['model-gateway', 'localhost', '127.0.0.1', '[::1]'].includes(validation.hostname)
   if ((validation.protocol !== 'https:' && !internal) || validation.username || validation.password
     || validation.search || validation.hash
-    || !validation.pathname.endsWith('/e-mate/model-api/v1/consents/current')
+    || (internal ? validation.pathname !== '/v1/consents/current' :
+      !validation.pathname.endsWith('/e-mate/model-api/v1/consents/current'))
     || typeof env.AUTHOR_KEY !== 'string' || env.AUTHOR_KEY.length < 32
     || typeof env.DB?.prepare !== 'function' || typeof env.DB?.batch !== 'function'
     || typeof env.PACKAGES?.put !== 'function' || typeof env.PACKAGES?.get !== 'function'

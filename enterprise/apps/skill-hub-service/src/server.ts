@@ -22,26 +22,37 @@ export function createService(options: ServiceOptions) {
   schemaName(options.schema)
   if (!isAbsolute(options.volume) || options.authorKey.length < 32) throw new Error('Invalid Skill Hub service configuration')
   const validation = new URL(options.validationUrl)
+  const internal = validation.protocol === 'http:' && ['model-gateway', 'localhost', '127.0.0.1', '[::1]'].includes(validation.hostname)
   if (validation.username || validation.password || validation.search || validation.hash ||
-      !validation.pathname.endsWith('/e-mate/model-api/v1/consents/current') ||
-      (validation.protocol !== 'https:' && !(validation.protocol === 'http:' &&
-        ['model-gateway', 'localhost', '127.0.0.1', '[::1]'].includes(validation.hostname)))) throw new Error('Invalid model validation endpoint')
+      (validation.protocol !== 'https:' && !internal) ||
+      (internal ? validation.pathname !== '/v1/consents/current' :
+        !validation.pathname.endsWith('/e-mate/model-api/v1/consents/current'))) throw new Error('Invalid model validation endpoint')
   let active = 0
+  let probing = false
   let closing = false
   return {
     close() { closing = true },
     async fetch(request: Request): Promise<Response> {
+      const url = new URL(request.url)
+      if (url.pathname === '/livez' && !url.search && request.method === 'GET') return Response.json({ schema_version: 1, alive: true })
+      const probe = request.method === 'GET' && !url.search && ['/healthz', '/readyz'].includes(url.pathname)
       if (closing || active >= 4) return unavailable()
-      if (new URL(request.url).pathname === '/livez' && request.method === 'GET') return Response.json({ schema_version: 1, alive: true })
-      active++
+      if (probe) {
+        if (probing || (options.pool.idleCount === 0 && options.pool.totalCount >= (options.pool.options.max ?? 10))) return unavailable()
+        probing = true
+      } else active++
       let client: Awaited<ReturnType<typeof beginHubTransaction>> | undefined
       try {
         const write = !['GET', 'HEAD'].includes(request.method)
-        client = await beginHubTransaction(options.pool, options.schema, write)
+        client = await beginHubTransaction(options.pool, options.schema, write, probe)
         const control = (await client.query<{ author_key_sha256: string; generation: string }>('SELECT author_key_sha256,generation FROM skill_hub_control WHERE singleton')).rows[0]
         if (!control || control.author_key_sha256 !== sha256(options.authorKey) || !/^[a-f0-9]{32}$/.test(control.generation)) throw new Error('Skill Hub migration is not activated')
         const packages = new FilePackages(join(options.volume, 'generations', control.generation), options.minimumFreeBytes)
         await packages.ready()
+        if (probe) {
+          await client.query('COMMIT')
+          return Response.json({ schema_version: 1, ready: true }, { headers: { 'cache-control': 'no-store' } })
+        }
         const path = new URL(request.url)
         if (path.pathname === '/readyz') path.pathname = '/healthz'
         const routed = path.href === request.url ? request : new Request(path, request)
@@ -55,7 +66,7 @@ export function createService(options: ServiceOptions) {
         console.error(JSON.stringify({ event: 'skill_hub_request_failed', method: request.method,
           cancelled: request.signal.aborted }))
         return unavailable()
-      } finally { client?.release(); active-- }
+      } finally { client?.release(); if (probe) probing = false; else active-- }
     },
   }
 }
@@ -102,13 +113,21 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   pool.on('error', () => { console.error(JSON.stringify({ event: 'skill_hub_database_connection_failed' })) })
   const service = createService({ ...config, pool })
   let inFlight = 0
+  let readinessInFlight = false
   const server = createServer(async (incoming, outgoing) => {
-    if (inFlight >= 4) {
+    if (incoming.method === 'GET' && incoming.url === '/livez') {
+      outgoing.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      outgoing.end(JSON.stringify({ schema_version: 1, alive: true }))
+      return
+    }
+    const probe = incoming.method === 'GET' && ['/readyz', '/healthz'].includes(incoming.url ?? '')
+    if (inFlight >= 4 || (probe && readinessInFlight)) {
       outgoing.writeHead(503, { 'content-type': 'application/json', 'connection': 'close' })
       outgoing.end(JSON.stringify({ detail: 'Skill Hub service failed', error: { code: 'network', message: 'Skill Hub service failed' } }))
       return
     }
-    inFlight++
+    if (probe) readinessInFlight = true
+    else inFlight++
     const controller = new AbortController()
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)])
     incoming.once('aborted', () => controller.abort())
@@ -142,7 +161,7 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
       if (outgoing.destroyed) return
       if (!outgoing.headersSent) outgoing.writeHead(error instanceof BodyTooLarge ? 413 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store', 'connection': 'close' })
       outgoing.end(JSON.stringify(error instanceof BodyTooLarge ? tooLarge() : { detail: 'Skill Hub service failed', error: { code: 'network', message: 'Skill Hub service failed' } }))
-    } finally { inFlight-- }
+    } finally { if (probe) readinessInFlight = false; else inFlight-- }
   })
   server.requestTimeout = 45_000
   server.headersTimeout = 10_000

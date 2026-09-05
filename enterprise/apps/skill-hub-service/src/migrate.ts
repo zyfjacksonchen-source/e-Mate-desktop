@@ -66,6 +66,21 @@ async function existingReceipt(client: PoolClient, schema: string): Promise<Migr
   return JSON.parse(row.receipt_json) as MigrationReceipt
 }
 
+async function verifyActive(client: PoolClient, schema: string, snapshot: Snapshot, options: MigrationOptions): Promise<void> {
+  const row = (await client.query<{ generation: string; author_key_sha256: string; migration_sha256: string }>(
+    `SELECT generation,author_key_sha256,migration_sha256 FROM "${schema}".skill_hub_control WHERE singleton`)).rows[0]
+  if (!row || !/^[a-f0-9]{32}$/.test(row.generation) || row.author_key_sha256 !== snapshot.authorKeySha256 ||
+      row.migration_sha256 !== snapshot.manifestSha256) throw new Error('Active migration identity differs')
+  await verifyTables(client, snapshot)
+  const packages = new FilePackages(join(options.volume, 'generations', row.generation), options.minimumFreeBytes)
+  await packages.ready()
+  const stored = await packages.list()
+  if (stored.objects.length !== snapshot.objects.length || snapshot.objects.some((expected) => {
+    const actual = stored.objects.find((object) => object.key === expected.key)
+    return !actual || actual.size !== expected.size || actual.customMetadata?.archive_sha256 !== expected.customMetadata?.archive_sha256
+  })) throw new Error('Active migration package readback differs')
+}
+
 export async function migrate(options: MigrationOptions): Promise<MigrationReceipt> {
   const schema = schemaName(options.schema)
   if (options.serviceRole) schemaName(options.serviceRole)
@@ -78,7 +93,7 @@ export async function migrate(options: MigrationOptions): Promise<MigrationRecei
   const temporary = join(options.volume, '.staging', generation)
   const final = join(options.volume, 'generations', generation)
   const packages = new FilePackages(temporary, options.minimumFreeBytes)
-  let stageCommitted = false
+  let stageCreationAttempted = false
   let activationAttempted = false
   let phase = 'target-preflight'
   let connection: PoolClient | undefined
@@ -87,6 +102,8 @@ export async function migrate(options: MigrationOptions): Promise<MigrationRecei
     const previous = await existingReceipt(connection, schema)
     if (previous) {
       if (previous.migration_sha256 !== receipt.migration_sha256) throw new Error('A different Skill Hub migration is already active')
+      phase = 'active-readback'
+      await verifyActive(connection, schema, snapshot, options)
       await connection.query('COMMIT')
       return previous
     }
@@ -102,6 +119,7 @@ export async function migrate(options: MigrationOptions): Promise<MigrationRecei
     phase = 'database-staging'
     connection = await options.pool.connect()
     await connection.query('BEGIN')
+    stageCreationAttempted = true
     await connection.query(`CREATE SCHEMA "${stagingSchema}"`)
     await connection.query(`SET LOCAL search_path TO "${stagingSchema}", pg_catalog`)
     await connection.query(postgresSchema())
@@ -116,7 +134,6 @@ export async function migrate(options: MigrationOptions): Promise<MigrationRecei
       await connection.query(`GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA "${stagingSchema}" TO "${options.serviceRole}"`)
     }
     await connection.query('COMMIT')
-    stageCommitted = true
     connection.release(); connection = undefined
     // Independent connection and full-byte filesystem readback precede activation.
     phase = 'readback'
@@ -142,6 +159,8 @@ export async function migrate(options: MigrationOptions): Promise<MigrationRecei
     const raced = await existingReceipt(connection, schema)
     if (raced) {
       if (raced.migration_sha256 !== receipt.migration_sha256) throw new Error('Migration target changed')
+      phase = 'active-readback'
+      await verifyActive(connection, schema, snapshot, options)
       await connection.query('COMMIT')
       return raced
     }
@@ -157,7 +176,9 @@ export async function migrate(options: MigrationOptions): Promise<MigrationRecei
   } finally {
     if (connection) { await connection.query('ROLLBACK').catch(() => {}); connection.release() }
     if (!activationAttempted) {
-      if (stageCommitted) await options.pool.query(`DROP SCHEMA IF EXISTS "${stagingSchema}" CASCADE`)
+      // The staging COMMIT may have succeeded without returning. This unique name is
+      // never the active schema; cleanup remains safe until activation is attempted.
+      if (stageCreationAttempted) await options.pool.query(`DROP SCHEMA IF EXISTS "${stagingSchema}" CASCADE`)
       await rm(temporary, { recursive: true, force: true })
       await rm(final, { recursive: true, force: true })
     }

@@ -83,15 +83,18 @@ export class PostgresDatabase implements HubDatabase {
   }
 }
 
-export async function beginHubTransaction(pool: Pool, schema: string, write: boolean): Promise<PoolClient> {
+export async function beginHubTransaction(pool: Pool, schema: string, write: boolean, probe = false): Promise<PoolClient> {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     await client.query(`SET LOCAL search_path TO "${schemaName(schema)}", pg_catalog`)
-    await client.query("SET LOCAL statement_timeout = '30s'")
+    await client.query(probe ? "SET LOCAL statement_timeout = '1s'" : "SET LOCAL statement_timeout = '30s'")
     await client.query("SET LOCAL lock_timeout = '10s'")
     // ponytail: serialize metadata mutations per schema; measured write pressure can justify per-target locks later.
-    await client.query(`SELECT ${write ? 'pg_advisory_xact_lock' : 'pg_advisory_xact_lock_shared'}(hashtextextended($1,0))`, [`e-mate-skill-hub:${schema}`])
+    if (probe) {
+      const result = await client.query<{ acquired: boolean }>('SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1,0)) AS acquired', [`e-mate-skill-hub:${schema}`])
+      if (!result.rows[0]?.acquired) throw new Error('Skill Hub storage is busy')
+    } else await client.query(`SELECT ${write ? 'pg_advisory_xact_lock' : 'pg_advisory_xact_lock_shared'}(hashtextextended($1,0))`, [`e-mate-skill-hub:${schema}`])
     return client
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); client.release(); throw error }
 }
