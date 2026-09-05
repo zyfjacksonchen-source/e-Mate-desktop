@@ -1,0 +1,11 @@
+# e-Mate Xiaoxin pet
+
+Presentation-only adaptation of pinned MIT dsh-pet. It occupies the existing `shell.overlay` / `shell.overlay.pet` seats and writes only explicit toggle/position changes through native `settingsScope`. Default enabled, 112 CSS px. Settings: 外观与动效 → 桌面宠物. Pointer dragging and arrow keys move it; Shift moves faster. Clicking opens the current native task's shared details through one Shell callback.
+
+The package itself subscribes to `ctx.sessions.list`, the selected `binding(id).session`, native `goal` and `todos` projection faces, `jobsBySession`, current-turn structured deliverables and Tool presentation metadata. It reads no prompts, token/reasoning text, tool names/arguments, output content, paths or DOM text. Unknown activity stays generic running. Current proved mappings are terminal-card → 运行终端 and native read category → 阅读文档; other office scenes remain available assets until a native source can prove that category. Waiting/approval → error → Goal → current Tool/Job/Todo → queue → deliverable → idle is enforced with 750 ms minimum residence; route changes never retain another task's scene.
+
+Shell integration supplies only `ctx.ematePetDetails.openTaskDetails(taskId)`. Register this ordinary client service on the existing shared structured-details owner; it must not create another panel, store, router or execution path. No model Tool, Job, Session event or additional transport is created by this package.
+
+Assets load in idle time only when enabled, visible and outside first response. They use fixed same-origin URLs, bounded reads, SHA-256 and decoded geometry validation. Browser visibility/focus (including hidden/minimized windows), reduced motion and first response stop animation timers. Disabled/hidden pets detach detailed Session subscriptions. Disposal aborts loading, unsubscribes native faces, clears timers and revokes object URLs. Explicit retry recovers resources without a polling loop.
+
+**Artwork is pending.** The source build is allowed to compile without it and reports `assetProduction: pending`; the asset validator fails while required artwork is absent. See `assets/PRODUCTION.md`. Real standard/office atlases and visual/installed/performance acceptance must be supplied before release.

@@ -1,0 +1,29 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.pet {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  box-sizing: border-box;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.pet:active {
+  cursor: grabbing;
+}
+
+.pet:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+.pet { border: 0; padding: 0; background: transparent; min-width: 44px; min-height: 44px; }
+.saveError { position: absolute; bottom: 0; left: 0; background: var(--dsw-alias-bg-base, white); color: var(--dsw-alias-text-primary, #333); font-size: 12px; border-radius: 4px; }

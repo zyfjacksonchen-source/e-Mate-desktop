@@ -1,0 +1,3 @@
+- insert:
+    - id: emate-pet
+      name: '@e-mate/dsh-plugin-pet'

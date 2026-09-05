@@ -1,0 +1,12 @@
+.sprite {
+  display: block;
+  width: 100%;
+  aspect-ratio: 192 / 208;
+  background-image: var(--pet-atlas);
+  background-repeat: no-repeat;
+  background-position: var(--pet-frame-position);
+  background-size: 800% var(--pet-atlas-rows);
+  image-rendering: auto;
+  user-select: none;
+  pointer-events: none;
+}
