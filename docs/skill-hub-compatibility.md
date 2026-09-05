@@ -1,4 +1,4 @@
-# e-Mate 2.0.17 Skill Hub 与 DSH Skill 合同
+# e-Mate 2.0.18 Skill Hub 与 DSH Skill 合同
 
 ## 1. 一个市场、一个运行时、一个组件
 
@@ -6,7 +6,8 @@ e-Mate 保留一个公开目录与不可变版本模型，不创建第二套市�
 
 权威参考仍是：
 
-- 服务端实现：`enterprise/apps/skill-hub-worker`；
+- 共享协议与 ZIP 校验：`enterprise/apps/skill-hub-worker/src/core.ts`；
+- 同机服务与迁移：`enterprise/apps/skill-hub-service`；旧 Worker 仅承担迁移前绑定适配和受控固定转发；
 - Host、Agent 与客户端投影：`packages/dsh-plugin-skill-hub`；
 - 用户流程：当前 Profile 的原生 Harness Connection、Job、Skill provider 与客户端 slot；
 - 本地解析与调用：固定 rc.7 的 `@deepseek-ai/dsh-skill-filesystem`、`ctx.skills` 与 `@deepseek-ai/dsh-tool-skill`。
@@ -88,3 +89,84 @@ Skill Hub 是用户主动使用的产品能力，不属于管理端的 `emate.id
 Skill Hub Host、Agent、RPC 和 UI 作为同一个 Desktop 内置 Profile 组件构建。变更必须验证固定 rc.7 ABI、原生 parser/provider、Agent Tool/Job、并发、取消、崩溃恢复、界面 remount 和一次性下载行为，并随完整 Desktop Profile 通过启动检查。
 
 线上关闭仍需真实账号证明发布者所有权、跨用户搜索和安装、原生 `skill`/Agent 调用、更新、禁用、重启、启用、卸载及 owned-publication 删除。源码或 fixture 通过不能替代线上和安装态证据。
+
+## 8. 同机服务及单一写入入口
+
+2.0.18 的服务容器运行 `bun enterprise/apps/skill-hub-service/src/server.ts`；HTTP 使用 Bun 的 Node HTTP 兼容 API。唯一运行依赖是已有版本的 `pg`。Worker 与服务共享 `core.ts`，不会分别维护两套市场规则、ZIP parser、HMAC 或 receipt 实现。`src/postgres.ts` 仅适配现有六表所需的占位符、`INSERT OR IGNORE`、`instr`、`changes()`、时间格式及 ASCII LIKE；文本使用 PostgreSQL `C` collation 保持 slug、版本及分页次序。
+
+部署接口由主代理配置，秘密仅通过环境或挂载文件读取：
+
+| 配置 | 合同 |
+|---|---|
+| `SKILL_HUB_DATABASE_URL` / `SKILL_HUB_DATABASE_URL_FILE` | 恰好提供一个；生产使用独立数据库 role，不能借用模型或管理端权限 |
+| `SKILL_HUB_AUTHOR_KEY` / `SKILL_HUB_AUTHOR_KEY_FILE` | 恰好提供一个；必须是旧 Worker 的原始 HMAC key，文件内容不 trim、不打印 |
+| `SKILL_HUB_SCHEMA` | 默认 `skill_hub`；独立 schema，禁止 `public` 或系统 schema |
+| `SKILL_HUB_VOLUME` | 默认 `/var/lib/e-mate-skill-hub`；持久、规范绝对路径，不使用符号链接 |
+| `SKILL_HUB_MODEL_VALIDATION_URL` | 必填固定真实 Gateway `/e-mate/model-api/v1/consents/current` URL；不接受请求提供的目标，不跟随重定向；HTTPS 校验证书，内部 HTTP 仅允许 `model-gateway` 或 loopback |
+| `SKILL_HUB_HOST` / `SKILL_HUB_PORT` | 默认 `127.0.0.1:8788`；容器网络可显式选择 `0.0.0.0`；代理必须保留完整旧 API 路径 |
+| `SKILL_HUB_SERVICE_ROLE` | 仅迁移 CLI 使用；向生产运行 role 授予 schema USAGE、业务表 SELECT/INSERT、skills/intents UPDATE 和日志 sequence USAGE；控制表只授 SELECT |
+
+服务不会初始化空目录并假装完成迁移。激活回执或原 HMAC key 指纹缺失/不匹配时，ready 和业务请求均失败关闭。`/livez` 只证明进程存活；`/readyz` 与兼容 `/healthz` 检查激活控制行、数据库、文件卷预算及包回读。它们不是真实跨账号安装验收。
+
+请求体最多 14 MiB，ZIP 最多 10 MiB；请求/关闭预算 45 秒、鉴权请求 10 秒、数据库语句 30 秒、锁等待 10 秒。最多 4 个在途 HTTP 请求和 64 条连接。元数据写入按 schema 串行，读请求使用共享锁；若测得写入压力再考虑拆分锁，不能牺牲 slug 归属与跨表 receipt 的原子性。取消、超时或服务异常不会切换到另一个存储。
+
+CAS 布局为 `generations/<generation>/<package_sha256>/{archive.zip,metadata.json}`。先写私有临时目录、fsync、原子 rename，再提交目录元数据；已经存在的内容不能覆盖。每次读取均检查普通文件、硬链接、字节数、archive SHA 和规范内容 SHA，验证完成后才返回 ZIP。空闲磁盘低于保留预算或写入出现 ENOSPC 时，不提交目录成功状态。失败上传可能留下不可见、未被目录引用的不可变对象，清理由主代理在核对引用和备份后执行。
+
+迁移进程与 Bun 服务必须以同一运行 UID/GID 写读文件卷，或由主代理在激活前明确完成所有权校准；文件保持 0600、目录 0700，不以放宽全局权限绕过问题。数据库迁移 role 可与运行 role 分离，服务 role 不获得控制表写权限或其他业务 schema 权限。
+
+`install-intent` 的五分钟窗口、Session 混入摘要、claim 一次性和 complete/reconcile 的终态语义不变；已经 claimed 的 completion receipt 不因上传前窗口过去而失去恢复能力。并发失败的 claim/complete 不再额外追加状态日志；相同 complete 终态可重放。
+
+## 9. D1 与 R2 迁移输入及激活
+
+真实导出与旧 `AUTHOR_KEY` 的安全转移由主代理取得。迁移工具不联网读取 Cloudflare，不查询原始用户密码或 token，不打印 ZIP、Skill 文本或秘密。快照目录必须包含：
+
+```text
+snapshot/
+  d1.snapshot                 # D1 SQL 导出或 SQLite 数据文件
+  manifest.json
+  packages/<content-sha>.zip   # R2 packages/ 下每一个对象，包括 tombstone 包
+```
+
+manifest 的格式为：
+
+```json
+{
+  "schema_version": 1,
+  "d1_sha256": "<原始 d1.snapshot 字节 SHA-256>",
+  "author_key_sha256": "<原 Worker key 精确字节的 SHA-256>",
+  "table_counts": {
+    "skill_hub_skills": 0,
+    "skill_hub_versions": 0,
+    "skill_hub_publication_tombstones": 0,
+    "skill_hub_mutation_requests": 0,
+    "skill_hub_install_intents": 0,
+    "skill_hub_install_logs": 0
+  },
+  "objects": [
+    {
+      "key": "packages/<content-sha>.zip",
+      "size": 123,
+      "customMetadata": {
+        "package_sha256": "<content-sha>",
+        "archive_sha256": "<原始 ZIP SHA-256>"
+      },
+      "httpMetadata": {"contentType": "application/zip", "cacheControl": "private, no-store"}
+    }
+  ]
+}
+```
+
+示例数字是格式说明，不能当真实导出证据。`table_counts` 和对象 inventory 必须来自冻结后的真实源。SQLite SQL 只在私有内存数据库中解析；authorizer 拒绝 ATTACH、扩展、外部数据库、业务表 UPDATE/DELETE 和导入中的 SELECT，避免把导出文件当宿主程序执行。迁移 CLI 使用 Node **24.10+** 的 `node:sqlite`，不在 Bun 服务启动路径加载 SQLite。
+
+根代理按以下顺序执行，秘密路径通过上表环境配置，不放入 CLI 参数：
+
+1. 让旧 Worker 进入 `SKILL_HUB_READ_ONLY=true`，等待已有写请求结束后导出六表、完整 R2 对象 inventory/bytes 和原 HMAC key 的指纹。备份和冻结证明由主代理保留。
+2. 运行 `node --experimental-strip-types enterprise/apps/skill-hub-service/src/migrate.ts --dry-run <snapshot>`。检查原始 D1 hash、六表行数、每表内容 hash、每个对象 hash/bytes、slug/version/latest/author/receipt 关系及 key 指纹。历史同名或双 owner 不自动修复；旧的重复 intent request ID 保留，不能伪造新 token。
+3. dry-run 也会写入**独立私有 staging schema 和文件目录**，从独立 PostgreSQL 连接及文件系统完整回读校验，再删除 staging。它不激活目标，也不改写原输入。
+4. 通过审查后，使用完全相同快照运行 `--apply`。完整回读后先将文件代目录持久化，再在一个数据库事务中将 staging schema 原子改名为目标 schema，控制行绑定 generation、迁移摘要、原 key 指纹和脱敏回执。已有活动目标不允许被另一快照覆盖；同一 apply 可读取原回执重放。
+5. COMMIT 响应丢失时保留候选字节，不能声称零写入或自行回滚。重复相同 apply 读取持久回执，再由主代理核对新服务 ready、目录分页、owner 查询和下载摘要。
+6. 主代理授权后才设置旧 Worker 的 `SKILL_HUB_FORWARD_ENABLED=true` 和 `SKILL_HUB_FORWARD_ORIGIN=https://<固定新服务入口 origin>`。启用后不会访问 D1/R2，不接受请求指定 upstream，不跟随 redirect，失败也不会回退旧存储。
+
+公开切换后，所有写入只去新服务。不能通过关闭 forwarder 把已经产生新写入的系统退回旧 D1；回滚必须由主代理冻结写入，并按同一回执恢复对应 PostgreSQL 备份和文件代目录，再核对唯一入口。原 D1/R2 和临时 stage 的保留/清理由主代理决定。
+
+CLI 输出仅含状态、迁移摘要、owner-key 未改变结论以及每表/对象 count/hash/bytes 汇总。本地测试与迁移 dry-run 都不证明生产切换、真实用户本地安装或原生 Skill 调用成功；这些门禁继续由主代理保留为 OPEN，直到取得真实证据。

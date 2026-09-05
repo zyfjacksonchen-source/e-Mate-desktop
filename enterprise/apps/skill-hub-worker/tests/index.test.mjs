@@ -6,226 +6,7 @@ import { deflateRawSync } from 'node:zlib'
 import test from 'node:test'
 import worker, { handleRequest, inspectSkillArchive, versionSort } from '../src/index.js'
 
-class D1Statement {
-  constructor(database, sql, values = []) {
-    this.database = database
-    this.sql = sql
-    this.values = values
-  }
-
-  bind(...values) {
-    return new D1Statement(this.database, this.sql, values)
-  }
-
-  async first() {
-    return this.database.prepare(this.sql).get(...this.values) ?? null
-  }
-
-  async all() {
-    return { results: this.database.prepare(this.sql).all(...this.values) }
-  }
-
-  async run() {
-    const result = this.database.prepare(this.sql).run(...this.values)
-    return { meta: { changes: Number(result.changes) } }
-  }
-}
-
-class MemoryD1 {
-  database = new DatabaseSync(':memory:')
-
-  constructor() {
-    this.database.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'))
-  }
-
-  prepare(sql) {
-    return new D1Statement(this.database, sql)
-  }
-
-  async batch(statements) {
-    this.database.exec('BEGIN IMMEDIATE')
-    try {
-      const results = []
-      for (const statement of statements) results.push(await statement.run())
-      this.database.exec('COMMIT')
-      return results
-    } catch (error) {
-      this.database.exec('ROLLBACK')
-      throw error
-    }
-  }
-}
-
-class MemoryR2 {
-  objects = new Map()
-
-  async put(key, value, options = {}) {
-    const bytes = new Uint8Array(await new Response(value).arrayBuffer())
-    const object = {
-      key,
-      size: bytes.byteLength,
-      bytes,
-      customMetadata: { ...options.customMetadata },
-      httpMetadata: { ...options.httpMetadata },
-    }
-    this.objects.set(key, object)
-    return this.view(object)
-  }
-
-  async head(key) {
-    const object = this.objects.get(key)
-    return object === undefined ? null : this.view(object)
-  }
-
-  async get(key) {
-    const object = this.objects.get(key)
-    return object === undefined ? null : { ...this.view(object), body: new Blob([object.bytes]).stream() }
-  }
-
-  async list() {
-    return { objects: [...this.objects.values()].map(value => this.view(value)), truncated: false }
-  }
-
-  view(object) {
-    return {
-      key: object.key,
-      size: object.size,
-      customMetadata: { ...object.customMetadata },
-      httpMetadata: { ...object.httpMetadata },
-    }
-  }
-}
-
-const CRC_TABLE = new Uint32Array(256)
-for (let index = 0; index < CRC_TABLE.length; index += 1) {
-  let value = index
-  for (let bit = 0; bit < 8; bit += 1) value = (value & 1) === 0 ? value >>> 1 : 0xedb88320 ^ (value >>> 1)
-  CRC_TABLE[index] = value >>> 0
-}
-
-function crc32(bytes) {
-  let value = 0xffffffff
-  for (const byte of bytes) value = CRC_TABLE[(value ^ byte) & 0xff] ^ (value >>> 8)
-  return (value ^ 0xffffffff) >>> 0
-}
-
-function zip(files) {
-  const local = []
-  const central = []
-  let offset = 0
-  for (const [path, value] of Object.entries(files)) {
-    const name = Buffer.from(path, 'utf8')
-    const content = Buffer.from(value)
-    const compressed = deflateRawSync(content)
-    const crc = crc32(content)
-    const header = Buffer.alloc(30)
-    header.writeUInt32LE(0x04034b50, 0)
-    header.writeUInt16LE(20, 4)
-    header.writeUInt16LE(0x800, 6)
-    header.writeUInt16LE(8, 8)
-    header.writeUInt32LE(crc, 14)
-    header.writeUInt32LE(compressed.length, 18)
-    header.writeUInt32LE(content.length, 22)
-    header.writeUInt16LE(name.length, 26)
-    local.push(header, name, compressed)
-    const record = Buffer.alloc(46)
-    record.writeUInt32LE(0x02014b50, 0)
-    record.writeUInt16LE(0x0314, 4)
-    record.writeUInt16LE(20, 6)
-    record.writeUInt16LE(0x800, 8)
-    record.writeUInt16LE(8, 10)
-    record.writeUInt32LE(crc, 16)
-    record.writeUInt32LE(compressed.length, 20)
-    record.writeUInt32LE(content.length, 24)
-    record.writeUInt16LE(name.length, 28)
-    record.writeUInt32LE((0o100644 << 16) >>> 0, 38)
-    record.writeUInt32LE(offset, 42)
-    central.push(record, name)
-    offset += header.length + name.length + compressed.length
-  }
-  const directory = Buffer.concat(central)
-  const end = Buffer.alloc(22)
-  end.writeUInt32LE(0x06054b50, 0)
-  end.writeUInt16LE(Object.keys(files).length, 8)
-  end.writeUInt16LE(Object.keys(files).length, 10)
-  end.writeUInt32LE(directory.length, 12)
-  end.writeUInt32LE(offset, 16)
-  return Buffer.concat([...local, directory, end])
-}
-
-function skill(slug, version, tags = []) {
-  return zip({
-    'SKILL.md': [
-      '---',
-      `name: ${slug}`,
-      `description: ${slug} shared behavior`,
-      `version: ${version}`,
-      `tags: ${JSON.stringify(tags)}`,
-      '---',
-      '',
-      `Run ${slug}.`,
-      '',
-    ].join('\n'),
-  })
-}
-
-function base64url(value) {
-  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')
-}
-
-function modelToken(userId = 'user-1', sessionId = '01234567-89ab-4def-8123-456789abcdef') {
-  return [
-    base64url({ alg: 'EdDSA', typ: 'e-mate-model-session+jwt', kid: 'auth-key-1' }),
-    base64url({
-      schemaVersion: 1,
-      tenantId: 'tenant-1',
-      sub: userId,
-      sid: sessionId,
-      exp: Math.floor(Date.now() / 1_000) + 900,
-    }),
-    'x'.repeat(86),
-  ].join('.')
-}
-
-function environment() {
-  return {
-    MODEL_SESSION_VALIDATION_URL: 'https://model.example/e-mate/model-api/v1/consents/current',
-    AUTHOR_KEY: 'test-author-key-that-is-longer-than-thirty-two-bytes',
-    DB: new MemoryD1(),
-    PACKAGES: new MemoryR2(),
-  }
-}
-
-function request(path, options = {}, userId = 'user-1', sessionId) {
-  return new Request(`https://hub.example${path}`, {
-    ...options,
-    headers: {
-      authorization: `Bearer ${modelToken(userId, sessionId)}`,
-      ...options.headers,
-    },
-  })
-}
-
-const activeSession = async (url, init) => {
-  assert.equal(url, 'https://model.example/e-mate/model-api/v1/consents/current')
-  assert.match(init.headers.authorization, /^Bearer /u)
-  return new Response(null, { status: 200 })
-}
-
-async function direct(env, path, options, userId, sessionId) {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = activeSession
-  try { return await worker.fetch(request(path, options, userId, sessionId), env) } finally { globalThis.fetch = originalFetch }
-}
-
-function publicationBody(payload, slug, category = 'third_party', requestId = 'publish:request-0001') {
-  return JSON.stringify({
-    slug,
-    category,
-    bundle_base64: payload.toString('base64'),
-    client_request_id: requestId,
-  })
-}
+import { MemoryD1, MemoryR2, zip, skill, modelToken, environment, request, activeSession, direct, publicationBody } from './fixtures.mjs'
 
 test('matches the DSH client canonical Skill digest', async () => {
   const payload = zip({
@@ -246,6 +27,76 @@ test('matches the DSH client canonical Skill digest', async () => {
   })
   const inspected = await inspectSkillArchive(payload)
   assert.equal(inspected.packageSha256, 'c268e7ed14e5aa798362b40d25a981d21b7c9d02e457ccc7f36d6da2150b7042')
+})
+
+test('publishes a bounded human-readable heading without changing canonical Skill identity', async () => {
+  const env = environment()
+  const payload = zip({ 'SKILL.md': '---\nname: xhs-note-analyzer\ndescription: Shared note analysis\nversion: 1.1.0\n---\n\n# 小红书笔记分析\n' })
+  const published = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: publicationBody(payload, 'xhs-note-analyzer', 'content_creation', 'publish:xhs-title-0001'),
+  }, 'user-1')
+  assert.equal(published.status, 201)
+  assert.equal((await published.clone().json()).title, '小红书笔记分析')
+  const catalog = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills?query=%E5%B0%8F%E7%BA%A2%E4%B9%A6&limit=24', {}, 'user-2')
+  assert.deepEqual((await catalog.json()).items, [await published.json()])
+})
+
+test('fixed forwarding needs root configuration and never falls back or follows a redirect', async () => {
+  const previous = globalThis.fetch
+  const env = { SKILL_HUB_FORWARD_ENABLED: 'true', SKILL_HUB_FORWARD_ORIGIN: 'https://fixed-service.example' }
+  const calls = []
+  globalThis.fetch = async (input) => { calls.push(input.url); return Response.json({ schema_version: 1, items: [], next_cursor: null }) }
+  try {
+    const response = await worker.fetch(request('/ecorex-agent/client/skill-hub/v1/skills?limit=1'), env)
+    assert.equal(response.status, 200)
+    assert.deepEqual(calls, ['https://fixed-service.example/ecorex-agent/client/skill-hub/v1/skills?limit=1'])
+    globalThis.fetch = async () => new Response(null, { status: 302, headers: { location: 'https://other.example' } })
+    assert.equal((await worker.fetch(request('/ecorex-agent/client/skill-hub/v1/skills'), env)).status, 503)
+    globalThis.fetch = async () => { throw new Error('offline') }
+    assert.equal((await worker.fetch(request('/ecorex-agent/client/skill-hub/v1/skills'), env)).status, 503)
+    assert.equal((await worker.fetch(request('/ecorex-agent/client/skill-hub/v1/skills'), { ...env, SKILL_HUB_FORWARD_ENABLED: 'invalid' })).status, 503)
+    assert.equal((await worker.fetch(request('/ecorex-agent/client/skill-hub/v1/skills', { method: 'POST' }), {
+      SKILL_HUB_READ_ONLY: 'true',
+    })).status, 503)
+  } finally { globalThis.fetch = previous }
+})
+
+test('expired created intents fail while concurrent claim and completion append one log per transition', async () => {
+  const env = environment()
+  const slug = 'intent-race'
+  const published = await direct(env, `/ecorex-agent/client/skill-hub/v1/skills`, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: publicationBody(skill(slug, '1.0.0'), slug) })
+  const card = await published.json()
+  const create = async (requestId) => (await direct(env, `/ecorex-agent/client/skill-hub/v1/skills/${slug}/versions/1.0.0/install-intent`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ package_sha256: card.package_sha256, client_request_id: requestId }),
+  })).json()
+  const expired = await create('intent:expired-request')
+  env.DB.database.prepare('UPDATE skill_hub_install_intents SET expires_at=? WHERE intent_id=?').run('2000-01-01T00:00:00.000Z', expired.intent_id)
+  const invoke = (path, body) => handleRequest(request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), env, activeSession)
+  await assert.rejects(invoke('/ecorex-agent/client/skill-hub/v1/install-intents/consume', { install_intent: expired.install_intent }), (error) => error.status === 409)
+  const fresh = await create('intent:concurrent-request')
+  const originalBatch = env.DB.batch.bind(env.DB)
+  const barrier = () => {
+    let waiting = 0
+    let release
+    const ready = new Promise((resolve) => { release = resolve })
+    env.DB.batch = async (statements) => {
+      waiting++
+      if (waiting === 2) release()
+      await ready
+      return originalBatch(statements)
+    }
+  }
+  barrier()
+  const claims = await Promise.allSettled([0, 1].map(() => invoke('/ecorex-agent/client/skill-hub/v1/install-intents/consume', { install_intent: fresh.install_intent })))
+  assert.equal(claims.filter(({ status }) => status === 'fulfilled').length, 1)
+  const claimed = claims.find(({ status }) => status === 'fulfilled')
+  const receipt = await claimed.value.json()
+  barrier()
+  const completed = await Promise.all([0, 1].map(() => invoke('/ecorex-agent/client/skill-hub/v1/install-intents/complete', { completion_receipt: receipt.completion_receipt, status: 'installed' })))
+  assert.deepEqual(completed.map(({ status }) => status), [200, 200])
+  assert.deepEqual(env.DB.database.prepare('SELECT status FROM skill_hub_install_logs WHERE intent_id=? ORDER BY seq').all(fresh.intent_id).map(({ status }) => status), ['created', 'claimed', 'installed'])
 })
 
 test('rejects an existing R2 object whose full package metadata is not the published identity', async () => {
