@@ -100,7 +100,7 @@
       name: ./plugins/share.js
       inject: [apiProxy, connection, credentials]
       config:
-        rootUrl: https://emate-share.emate-zyfjacksonchen.workers.dev
+        rootUrl: https://mvdcm.ecoremedia.net/e-mate/share
     - id: emate-model-policy
       name: ./plugins/model-policy.js
       inject: [apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity]

@@ -366,7 +366,7 @@ test('managed profile installation is idempotent', () => {
     assert.equal(patchById.get('emate-identity').config.enterprise.organization, 'emate-v2')
     assert.equal(patchById.get('emate-share').name, './plugins/share.js')
     assert.deepEqual(patchById.get('emate-share').inject, ['apiProxy', 'connection', 'credentials'])
-    assert.equal(patchById.get('emate-share').config.rootUrl, 'https://emate-share.emate-zyfjacksonchen.workers.dev')
+    assert.equal(patchById.get('emate-share').config.rootUrl, 'https://mvdcm.ecoremedia.net/e-mate/share')
     assert.equal(patchById.get('emate-audit').name, './plugins/audit.js')
     assert.deepEqual(patchById.get('emate-audit').inject, [
       'connection', 'sessionPersistence', 'storageDomain', 'timer', 'tools', 'emateModelPolicy', 'emateIdentity',
