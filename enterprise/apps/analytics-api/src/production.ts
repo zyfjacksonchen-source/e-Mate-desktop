@@ -1,3 +1,4 @@
+import { createKnowledgeClient, parseKnowledgeConfiguration, type KnowledgeConfiguration } from './knowledge-client.ts';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
 import { once } from 'node:events';
@@ -36,6 +37,7 @@ export type AnalyticsProductionConfiguration = {
   modelRouteKeyEncryptionKey?: Buffer;
   sessionAuth?: AccessSessionVerifierOptions;
   modelFastMode?: ModelFastModeConfiguration;
+  knowledge?: KnowledgeConfiguration;
   authenticate: AuthenticateBearer;
 };
 
@@ -238,6 +240,7 @@ export function parseProductionConfiguration(
       ...(root.modelRouteKeys === undefined ? [] : ['modelRouteKeys']),
       ...(root.sessionAuth === undefined ? [] : ['sessionAuth']),
       ...(root.modelFastMode === undefined ? [] : ['modelFastMode']),
+      ...(root.knowledge === undefined ? [] : ['knowledge']),
     ],
     'configuration'
   );
@@ -304,6 +307,8 @@ export function parseProductionConfiguration(
     };
   }
 
+  const knowledge = root.knowledge === undefined ? undefined : parseKnowledgeConfiguration(root.knowledge);
+  if (knowledge && !sessionAuth) throw new Error('Knowledge requires enterprise access session authentication');
   let modelFastMode: ModelFastModeConfiguration | undefined;
   if (root.modelFastMode !== undefined) {
     const value = record(root.modelFastMode, 'GPT fast mode configuration');
@@ -326,6 +331,7 @@ export function parseProductionConfiguration(
     ...(modelRouteKeyEncryptionKey ? { modelRouteKeyEncryptionKey } : {}),
     ...(sessionAuth ? { sessionAuth } : {}),
     ...(modelFastMode ? { modelFastMode } : {}),
+    ...(knowledge ? { knowledge } : {}),
     authenticate: createHashedBearerAuthenticator(principals),
   };
 }
@@ -423,15 +429,25 @@ export async function startProductionAnalyticsApi(configurationFile: string): Pr
     const consent = await openPostgresConsentStore(configuration.databaseUrl, configuration.consentPolicy);
     closers.push(consent.close);
     let authenticate = configuration.authenticate;
+    let authenticateKnowledge: AuthenticateBearer | undefined;
     if (configuration.sessionAuth) {
       const accessSessions = openPostgresAccessSessionAuthenticator(configuration.databaseUrl, configuration.sessionAuth);
       closers.push(accessSessions.close);
+      if (configuration.knowledge) {
+        if (configuration.knowledge.accessClientId === configuration.sessionAuth.clientId) authenticateKnowledge = accessSessions.authenticate;
+        else {
+          const knowledgeSessions = openPostgresAccessSessionAuthenticator(configuration.databaseUrl, { ...configuration.sessionAuth, clientId: configuration.knowledge.accessClientId });
+          closers.push(knowledgeSessions.close);
+          authenticateKnowledge = knowledgeSessions.authenticate;
+        }
+      }
       const bootstrapAuthenticate = authenticate;
       authenticate = async (bearer) =>
         (await accessSessions.authenticate(bearer)) ?? (await bootstrapAuthenticate(bearer));
     }
     server = createAnalyticsServer({
       authenticate: authenticate,
+      ...(configuration.knowledge && authenticateKnowledge ? { knowledge: { authenticate: authenticateKnowledge, client: createKnowledgeClient(configuration.knowledge) } } : {}),
       usageAnalytics: usage.reader,
       taskEvents: tasks.store,
       adminManagement: admin.store,

@@ -1,3 +1,4 @@
+import { KNOWLEDGE_PREFIX, KnowledgeError, knowledgeRoute, type KnowledgeApi } from './knowledge-client.ts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import {
   parseObservabilityPolicyRollback,
@@ -41,6 +42,7 @@ const managementRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN']);
 export type AuthenticateBearer = (bearer: string) => Promise<RuntimeRegistryPrincipal | null>;
 
 export type AnalyticsApiOptions = {
+  knowledge?: KnowledgeApi;
   registry?: RuntimeRegistryStore;
   authenticate: AuthenticateBearer;
   sessionIndex?: SessionSummaryStore;
@@ -423,6 +425,7 @@ function usageEventPage(url: URL): { cursor: string | null; limit: number } {
 export function createAnalyticsHandler({
   registry,
   authenticate,
+  knowledge,
   sessionIndex,
   observabilityPolicy,
   platformMonitoring,
@@ -437,6 +440,29 @@ export function createAnalyticsHandler({
       const url = new URL(request.url ?? '/', 'http://analytics.internal');
       if (url.hash) {
         throw new HttpError(400, 'INVALID_REQUEST', 'Query parameters are not allowed');
+      }
+      if (url.pathname === KNOWLEDGE_PREFIX || url.pathname.startsWith(KNOWLEDGE_PREFIX + '/')) {
+        if (!knowledge) throw new HttpError(503, 'KNOWLEDGE_UNAVAILABLE', '公共知识暂不可用。');
+        const identity = await principal(request, knowledge.authenticate);
+        requireEnterprisePrincipal(identity);
+        const cancellation = new AbortController();
+        const abort = () => { if (!response.writableEnded) cancellation.abort(); };
+        request.once('aborted', abort);
+        response.once('close', abort);
+        try {
+          const input = knowledgeRoute(request.method, url, request.method === 'POST' ? await readJson(request) : undefined);
+          const result = await knowledge.client.read(identity, input.action, input.params, cancellation.signal);
+          if (cancellation.signal.aborted) return;
+          response.writeHead(result.status, { 'cache-control': 'private, no-store', 'content-type': result.contentType,
+            'content-length': result.body.length, 'x-content-type-options': 'nosniff',
+            ...(result.disposition ? { 'content-disposition': result.disposition } : {}) });
+          response.end(result.body);
+        } catch (error) {
+          if (cancellation.signal.aborted) return;
+          if (error instanceof KnowledgeError) throw new HttpError(error.status, error.code, error.message);
+          throw error;
+        } finally { request.removeListener('aborted', abort); response.removeListener('close', abort); }
+        return;
       }
       if (url.pathname === '/healthz') {
         rejectQuery(url);

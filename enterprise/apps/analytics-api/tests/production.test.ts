@@ -374,3 +374,14 @@ test('health endpoint is available without credentials and leaks no dependency d
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 });
+
+test('public knowledge configuration requires explicit enterprise session auth and desktop client binding', () => {
+  const knowledge = { socketPath: '/run/emate-knowledge/public.sock', tenantMappings: { 'tenant-1': 'xin-org' }, accessClientId: 'e-mate-desktop' };
+  const read = secretReader(principals());
+  assert.throws(() => parseProductionConfiguration({ ...configuration(), knowledge }, read), /requires enterprise/);
+  const sessionAuth = { issuer: 'https://auth.example.test', audience: 'e-mate-access', clientId: 'e-mate-admin', publicKeys: [{ keyId: 'auth-1', file: '/run/secrets/public-key' }] };
+  const config = parseProductionConfiguration({ ...configuration(), knowledge, sessionAuth }, path => path === '/run/secrets/public-key' ? Buffer.from('fixture-public-key') : read(path));
+  assert.deepEqual(config.knowledge, knowledge);
+  assert.equal(config.sessionAuth?.clientId, 'e-mate-admin');
+  assert.throws(() => parseProductionConfiguration({ ...configuration(), knowledge: { ...knowledge, tenantMappings: { 'tenant-1': ['xin-org'] } }, sessionAuth }, path => path === '/run/secrets/public-key' ? Buffer.from('fixture-public-key') : read(path)), /knowledge tenants/);
+});
