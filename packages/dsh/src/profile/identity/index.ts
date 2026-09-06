@@ -290,6 +290,11 @@ export function apply(ctx, config = {}) {
     }
   }
   ctx.provide('emateIdentity', {
+    localAccountPrincipal() {
+      return typeof config.identityProvider?.localAccountPrincipal === 'function'
+        ? config.identityProvider.localAccountPrincipal()
+        : undefined
+    },
     localAccountSubject() {
       return typeof config.identityProvider?.localAccountSubject === 'function'
         ? config.identityProvider.localAccountSubject()

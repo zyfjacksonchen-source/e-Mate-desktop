@@ -874,6 +874,12 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   }
 
   const provider = {
+    localAccountPrincipal() {
+      if (current === undefined || Date.parse(current.session.expiresAt) <= now()
+        || Date.parse(current.session.modelGateway.expiresAt) <= now()) return undefined
+      const { tenantId, userId } = current.session.identity
+      return { tenantId, userId }
+    },
     localAccountSubject() {
       return current === undefined
         ? undefined

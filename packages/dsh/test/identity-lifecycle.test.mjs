@@ -262,8 +262,11 @@ test('logout clears all six local refs before the network and only a valid recei
     assert.equal(values.size, 0, 'the device must be stopped before remote revocation is awaited')
     return new Response('private upstream body', { status: 503 })
   }, () => clock))
+  assert.equal(provider.localAccountPrincipal(), undefined)
   assert.equal((await provider.bootstrap()).authenticated, true)
+  assert.deepEqual(provider.localAccountPrincipal(), { tenantId: 'tenant-test', userId: 'user-a' })
   clock += 3_600_001
+  assert.equal(provider.localAccountPrincipal(), undefined)
 
   const first = provider.logout({ client_request_id: 'logout-test-one' })
   const repeated = provider.logout({ client_request_id: 'logout-test-one' })
@@ -273,6 +276,7 @@ test('logout clears all six local refs before the network and only a valid recei
   ])
   assert.deepEqual(requests, ['/e-mate/auth-api/v1/auth/logout'])
   assert.equal(values.size, 0)
+  assert.equal(provider.localAccountPrincipal(), undefined)
   assert.deepEqual(await provider.bootstrap(), { authenticated: false, workspace_unlocked: false })
 
   const remoteCases = [
