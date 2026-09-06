@@ -57,6 +57,8 @@ export function createBridge(ctx: any, id: string, close: () => void, beforeLeav
 }
 export interface CanvasOpenOptions { projectId?: string; attachment?: { ownerSessionId: string; attachmentId: string } }
 export interface CanvasClientService {
+  activeSessionId(): string | undefined
+  beforeNavigate(): Promise<void>
   leave(): Promise<void>
   open(sessionId: string, options?: CanvasOpenOptions): Promise<void>
   insertAttachment(sessionId: string, ownerSessionId: string, attachmentId: string): Promise<void>

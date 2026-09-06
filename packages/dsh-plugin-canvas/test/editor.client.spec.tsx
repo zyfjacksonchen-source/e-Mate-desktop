@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { webcrypto } from 'node:crypto'
+import { createHash, webcrypto } from 'node:crypto'
 import { fireEvent, render, screen, waitFor, cleanup, act } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { emptyProject, validateProject } from '../src/contract.ts'
-import { htmlDocument, insertAsset, pagesFromHtml } from '../src/client/model.ts'
+import { emptyPage, emptyProject, validateProject } from '../src/contract.ts'
+import { htmlDocument, insertAsset, pagesFromHtml, selectedAnnotationElements } from '../src/client/model.ts'
 import { createBridge } from '../src/client/bridge.ts'
 vi.mock('@excalidraw/excalidraw', () => {
   const MainMenu: any = ({ children }: any) => <div>{children}</div>
@@ -11,17 +11,19 @@ vi.mock('@excalidraw/excalidraw', () => {
   return { MainMenu, exportToBlob: vi.fn(async () => new Blob(['png'])), Excalidraw: (props: any) => {
     const elements = useRef(props.initialData.elements); const [, refresh] = useState(0)
     useEffect(() => { props.excalidrawAPI({ getSceneElementsIncludingDeleted: () => elements.current,
-      updateScene: ({ elements: next }: any) => { elements.current = next; refresh(value => value + 1) }, addFiles: () => {}, scrollToContent: () => {},
+      updateScene: ({ elements: next }: any) => { if (next) elements.current = next; refresh(value => value + 1) }, addFiles: () => {}, scrollToContent: () => {}, setActiveTool: ({ type }: any) => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {}, activeTool: { type } }),
     }) }, [])
-    return <div data-testid="scene"><span>{elements.current.length} elements</span><button onClick={() => {
-      elements.current = [...elements.current, { id: 'mark', type: 'rectangle', x: 1, y: 1 }]
+    return <div data-testid="scene" data-theme={props.theme}><span>{elements.current.length} elements</span><button onClick={() => {
+      elements.current = [...elements.current, { id: 'mark', type: 'arrow', x: 1, y: 1, points: [[0, 0], [10, 10]] }]
       props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {} })
-    }}>Draw mark</button></div>
+    }}>Draw mark</button><button onClick={() => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: Object.fromEntries(elements.current.filter((item: any) => item.type === 'image').slice(0, 1).map((item: any) => [item.id, true])) })}>Select image</button></div>
   } }
 })
 import { CanvasPanel } from '../src/client/editor.tsx'
 beforeEach(() => vi.stubGlobal('crypto', webcrypto))
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+const imageAsset = { ownerSessionId: 'parent', ref: { attachmentId: `sha256:${createHash('sha256').update(imageBytes).digest('hex')}`, mediaType: 'image/png', bytes: imageBytes.length, width: 100, height: 100 } }
 function harness(initial = emptyProject('main')) {
   let document = structuredClone(initial), revision = 'a'.repeat(64), leave = async () => {}
   const calls: any[] = []
@@ -31,6 +33,7 @@ function harness(initial = emptyProject('main')) {
       calls.push([endpoint, payload])
       if (endpoint === 'load') return { project: structuredClone(document), revision, recovered: false }
       if (endpoint === 'list') return [{ id: 'main', title: document.title, recovered: false }]
+      if (endpoint === 'image') return { bytes_base64: imageBytes.toString('base64'), ref: imageAsset.ref }
       if (endpoint === 'outputs') return { kind: 'images', assets: [] }
       if (endpoint !== 'save') throw new Error('unexpected endpoint ' + endpoint)
       if (payload.expected_revision !== revision) throw Object.assign(new Error('another window changed the project'), { code: 'conflict' })
@@ -39,14 +42,21 @@ function harness(initial = emptyProject('main')) {
     }) }
   return { bridge, calls, read: () => document, leave: () => leave(), conflict: () => { revision = 'f'.repeat(64) } }
 }
-it('edits and page ordering save through revision-bound bridge; close flushes pending changes', async () => {
-  const h = harness(); render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
+it('MVP marks save without changing hidden pages, slides or HTML', async () => {
+  const initial = emptyProject('main')
+  initial.pages.push({ ...emptyPage('old-page', 'Existing page'), html: '<h1>preserve me</h1>', slide: true })
+  const h = harness(initial); render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene'); fireEvent.click(screen.getByText('Draw mark'))
-  fireEvent.click(screen.getByRole('button', { name: '新增页面' })); fireEvent.click(screen.getByTitle('向前排序'))
   await act(async () => { await h.leave() })
-  expect(h.read().pages).toHaveLength(2); expect(h.read().pages[1].elements).toHaveLength(1)
-  fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: 'named project' } }); fireEvent.click(screen.getByText('关闭'))
-  await waitFor(() => expect(h.bridge.close).toHaveBeenCalledOnce()); expect(h.read().title).toBe('named project')
+  expect(h.read().pages).toHaveLength(2); expect(h.read().pages[0].elements).toHaveLength(1)
+  expect(h.read().pages[1]).toEqual(initial.pages[1])
+  expect(screen.queryByRole('button', { name: '新增页面' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '导出幻灯片' })).toBeNull()
+  expect(screen.queryByLabelText('HTML 页面内容')).toBeNull()
+  fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: 'Updated' } })
+  await act(async () => { await h.leave() })
+  expect(h.read().title).toBe('Updated')
+  expect(h.read().pages[1]).toEqual(initial.pages[1])
 })
 it('conflict keeps local edits and refuses silent replacement', async () => {
   const h = harness(); render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
@@ -59,20 +69,26 @@ it('conflict keeps local edits and refuses silent replacement', async () => {
   await act(async () => { await h.leave() })
   expect(h.read().pages[0].elements).toHaveLength(1)
 })
-it('AI saves an identity binding then submits once without fabricating a Job status', async () => {
-  const h = harness(); render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
-  await screen.findByTestId('scene'); fireEvent.change(screen.getByLabelText('画布生成需求'), { target: { value: '画一片森林' } })
-  fireEvent.click(screen.getByText('交给当前会话')); await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
-  expect(h.read().intents[0].sessionId).toBe('parent'); expect(h.read().intents[0].imported).toEqual([])
-  expect(h.read().intents[0]).not.toHaveProperty('status'); expect(screen.queryByText('生成成功')).toBeNull()
+it('image modification saves the exact source binding then submits once', async () => {
+  const h = harness(insertAsset(emptyProject('main'), 'page-1', imageAsset))
+  render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene'); fireEvent.click(screen.getByText('Select image'))
+  fireEvent.change(screen.getByLabelText('图片修改需求'), { target: { value: '换成蓝色背景' } })
+  fireEvent.click(screen.getByRole('button', { name: '修改图片' }))
+  await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
+  expect(h.read().intents[0]).toMatchObject({ kind: 'edit', sourceIds: [imageAsset.ref.attachmentId], sessionId: 'parent', imported: [] })
+  expect(h.read().intents[0]).not.toHaveProperty('status')
+  expect(screen.queryByText('生成成功')).toBeNull()
 })
-it('HTML uses opaque sandbox; slide extraction never attaches project markup to the host', async () => {
+it('MVP never mounts legacy HTML while preserving the saved contents', async () => {
   const project = emptyProject('main'); project.pages[0].html = '<script>window.hostAttacked=true</script><a href="https://example.test">link</a>'
   const h = harness(project); render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
-  await screen.findByTestId('scene'); fireEvent.click(screen.getByText('HTML 预览'))
-  const iframe = screen.getByTitle('画布 1') as HTMLIFrameElement
-  expect(iframe.getAttribute('sandbox')).toBe('allow-scripts'); expect(iframe.srcdoc).toContain("default-src 'none'")
-  expect(iframe.srcdoc).toContain('srcdoc='); expect(iframe.srcdoc).not.toContain('<script>window.hostAttacked')
+  await screen.findByTestId('scene')
+  expect(document.querySelector('iframe')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'HTML 预览' })).toBeNull()
+  fireEvent.click(screen.getByText('Draw mark'))
+  await act(async () => { await h.leave() })
+  expect(h.read().pages[0].html).toBe(project.pages[0].html)
   expect((window as any).hostAttacked).toBeUndefined()
   const pages = pagesFromHtml('<style>h1{color:red}</style><section data-slide data-title="A">A</section><section data-slide>B</section>', 'slides')
   expect(pages).toHaveLength(2); expect(pages[0].title).toBe('A'); expect(document.querySelector('section[data-slide]')).toBeNull()
@@ -146,4 +162,54 @@ it('keeps the outgoing document and revision usable when next-project image hydr
   fireEvent.click(screen.getByText('Draw mark'))
   await act(async () => { await h.leave() })
   expect(h.read().id).toBe('main'); expect(h.read().pages[0].elements).toHaveLength(1)
+})
+it('annotation preview includes only selected images and their associated marks without touching the project', () => {
+  const selected = { id: 'selected', type: 'image', fileId: 'a'.repeat(64), x: 0, y: 0, width: 100, height: 100, angle: 0 }
+  const other = { id: 'other', type: 'image', fileId: 'b'.repeat(64), x: 300, y: 0, width: 100, height: 100, angle: 0 }
+  const arrow = { id: 'arrow', type: 'arrow', x: -50, y: 30, points: [[0, 0], [100, 0]], startBinding: { elementId: 'other' }, endBinding: { elementId: 'selected' } }
+  const elements: any[] = [selected, other, arrow,
+    { id: 'label', type: 'text', containerId: 'arrow', x: -40, y: 20, width: 40, height: 20 },
+    { id: 'on-image', type: 'text', x: 10, y: 10, width: 20, height: 20 },
+    { id: 'other-text', type: 'text', x: 310, y: 10, width: 20, height: 20 },
+    { id: 'other-arrow', type: 'arrow', x: 300, y: 20, points: [[0, 0], [20, 0]] },
+    { ...selected, id: 'unselected-copy', x: 600 },
+    { id: 'removed', type: 'text', x: 1, y: 1, width: 20, height: 20, isDeleted: true }]
+  const before = JSON.stringify(elements)
+  const preview = selectedAnnotationElements(elements, ['selected'])
+  expect(preview.map(item => item.id)).toEqual(['selected', 'arrow', 'label', 'on-image'])
+  expect(preview.find(item => item.id === 'arrow')?.startBinding).toBeNull()
+  expect(JSON.stringify(elements)).toBe(before)
+})
+it('MVP follows the native theme and keeps only the four annotation tools', async () => {
+  document.body.removeAttribute('data-ds-dark-theme')
+  const h = harness(); render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
+  const scene = await screen.findByTestId('scene')
+  expect(scene.getAttribute('data-theme')).toBe('light')
+  await act(async () => { document.body.setAttribute('data-ds-dark-theme', '') })
+  expect(scene.getAttribute('data-theme')).toBe('dark')
+  const toolbar = screen.getByRole('toolbar', { name: '图片标注工具' })
+  expect([...toolbar.querySelectorAll('button')].map(button => button.textContent)).toEqual(['选择', '平移', '箭头', '文字'])
+  fireEvent.click(screen.getByRole('button', { name: '箭头', exact: true }))
+  expect(screen.getByRole('button', { name: '箭头', exact: true }).getAttribute('aria-pressed')).toBe('true')
+  document.body.removeAttribute('data-ds-dark-theme')
+})
+it('marked edits stage a preview then submit originals and annotation with explicit roles only once', async () => {
+  const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  project.pages[0].elements.push({ id: 'arrow', type: 'arrow', x: 5, y: 5, points: [[0, 0], [10, 10]] })
+  const h = harness(project)
+  const preview = { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: `sha256:${'c'.repeat(64)}`, name: '标注参考.png' } }
+  h.bridge.stageImages.mockResolvedValue([preview] as never)
+  render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene'); fireEvent.click(screen.getByText('Select image'))
+  fireEvent.change(screen.getByLabelText('图片修改需求'), { target: { value: '把箭头位置改为蓝色' } })
+  const submit = screen.getByRole('button', { name: '修改图片', exact: true })
+  fireEvent.click(submit); fireEvent.click(submit)
+  await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
+  expect(h.bridge.stageImages).toHaveBeenCalledOnce()
+  expect(h.read().assets).toHaveLength(2)
+  expect(h.read().pages[0].elements).toEqual(project.pages[0].elements)
+  const args = h.bridge.submit.mock.calls[0] as unknown as any[]
+  expect(args[1].sourceIds).toEqual([imageAsset.ref.attachmentId, preview.ref.attachmentId])
+  expect(args[2]).toContain('最后一张为这些原图的箭头和文字标注参考')
+  expect(args[2]).toContain('不要把标注添加到成品')
 })

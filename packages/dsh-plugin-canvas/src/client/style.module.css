@@ -1,38 +1,36 @@
-.panel{height:100%;min-width:300px;display:flex;flex-direction:column;background:var(--color-bg,#fafaf8);color:var(--color-text,#23282c);font:13px/1.45 system-ui,sans-serif;overflow:hidden}
-.panel button,.panel select,.panel input,.panel textarea{font:inherit;color:inherit}
-.panel button{border:1px solid #d4d8d5;border-radius:7px;background:#fff;padding:5px 9px;cursor:pointer}
+.panel{height:100%;min-height:420px;min-width:0;display:flex;flex-direction:column;overflow:hidden;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:14px/1.5 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif)}
+.content{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;border:0;margin:0;padding:0}
+.panel button,.panel select,.panel input,.panel textarea,.panel summary{font:inherit;color:inherit}
+.panel button,.panel select,.panel summary{border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);padding:6px 10px;cursor:pointer;white-space:nowrap}
+.panel button:hover,.panel summary:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .panel button:disabled{opacity:.45;cursor:default}
-.panel button:focus-visible,.panel input:focus-visible,.panel textarea:focus-visible,.panel select:focus-visible{outline:2px solid #2f7665;outline-offset:2px}
-.header,.projectBar,.toolbar,.footer{display:flex;align-items:center;gap:6px;padding:8px 10px;flex-wrap:wrap;border-bottom:1px solid #e5e7e2}
-.header{justify-content:space-between;font-size:15px}
-.projectBar select{min-width:100px;flex:1}
-.title{padding:6px 12px;border:0;background:transparent;font-size:17px!important;font-weight:600}
-.pages{display:flex;gap:5px;overflow-x:auto;padding:8px 10px;min-height:38px}
-.pages button{white-space:nowrap;flex-shrink:0}
-.pages button[aria-pressed=true]{background:#e6f1ed;border-color:#437c6d}
-.toolbar{padding-top:4px}
-.toolbar input:not([type=checkbox]){min-width:70px;width:110px;border:1px solid #d4d8d5;border-radius:5px;padding:3px 5px}
-.toolbar label{display:flex;gap:3px;align-items:center}
-.stage{flex:1;min-height:260px;position:relative;background:white;overflow:hidden}
-.htmlPreview{height:100%;display:flex;flex-direction:column}
-.htmlPreview iframe{flex:1;width:100%;border:0;background:white}
-.htmlPreview details{max-height:90px;overflow:auto;padding:4px 10px;font-size:11px}
-.htmlPreview a{display:block;overflow-wrap:anywhere;color:#276c65}
-.htmlEditor{padding:4px 10px;border-top:1px solid #e5e7e2}
-.htmlEditor textarea{width:100%;height:130px;box-sizing:border-box}
-.ai{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 10px;border-top:1px solid #e5e7e2}
-.ai textarea{width:100%;resize:vertical;min-height:48px;max-height:180px;border:1px solid #d4d8d5;border-radius:7px;padding:7px;box-sizing:border-box}
-.footer{border-top:1px solid #e5e7e2;border-bottom:0;font-size:11px;max-height:120px;overflow:auto}
-.footer span{width:100%;color:#59655f}
-.error{padding:10px;background:#fff0eb;color:#8d3820;overflow-wrap:anywhere}
-.error>div{display:flex;gap:6px;margin-top:6px}
-.empty{padding:24px;color:#66716b}
-.presenting{position:fixed;inset:0;z-index:1200;background:#15191a}
-.presenting .stage{min-height:0}
-.presenting .footer{background:#202829;color:white}
-.presenting .footer span{color:#bdcdc9}
-.panel:fullscreen{width:100vw;height:100vh}
-.panel textarea{background:white;color:#23282c}
-.panel select{border:1px solid #d4d8d5;border-radius:6px;padding:5px;background:white}
-@media(prefers-reduced-motion:reduce){.panel *{scroll-behavior:auto!important}
-}
+.panel button:focus-visible,.panel input:focus-visible,.panel textarea:focus-visible,.panel select:focus-visible,.panel summary:focus-visible{outline:2px solid var(--emate-color-brand,#eb5b16);outline-offset:2px}
+.header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l1);flex-wrap:wrap}
+.header>select{max-width:190px;min-width:90px}
+.saveState{margin-right:auto;font-size:12px;color:var(--dsw-alias-label-tertiary)}
+.more{position:relative}
+.more summary{list-style:none}
+.more summary::-webkit-details-marker{display:none}
+.moreMenu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:200px;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-base);box-shadow:0 4px 16px #0002}
+.moreMenu button{text-align:left;border-color:transparent}
+.moreMenu label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.moreMenu input{min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:6px 8px;background:var(--dsw-alias-bg-base)}
+.stage{position:relative;flex:1;min-height:320px;overflow:hidden;background:var(--dsw-alias-bg-base)}
+.tools{position:absolute;z-index:5;top:12px;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:4px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-base);box-shadow:0 2px 8px #0001}
+.tools button{border-color:transparent;padding:5px 10px;font-size:13px}
+.tools button[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--emate-color-brand,#eb5b16)}
+.stageHint{position:absolute;z-index:1;pointer-events:none;inset:0;display:grid;place-items:center;color:var(--dsw-alias-label-tertiary);font-size:14px}
+/* Excalidraw still owns editing, keyboard actions and history. Its full menus
+   are hidden for this MVP; persisted elements/pages remain untouched. */
+.stage :global(.excalidraw){--ui-font:var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif);--color-primary:var(--emate-color-brand,#eb5b16);--color-primary-darker:var(--emate-color-brand,#eb5b16);font-family:var(--dsw-font-family,system-ui,sans-serif)}
+.stage :global(.excalidraw .App-toolbar),.stage :global(.excalidraw .App-menu_top__left),.stage :global(.excalidraw .App-menu__left),.stage :global(.excalidraw .layer-ui__wrapper__top-right),.stage :global(.excalidraw .HintViewer),.stage :global(.excalidraw .help-icon){display:none!important}
+.stage :global(.excalidraw .layer-ui__wrapper__footer){font-family:var(--dsw-font-family,system-ui,sans-serif)}
+.ai{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base)}
+.ai textarea{flex:1;min-width:0;min-height:40px;max-height:96px;resize:vertical;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:9px 12px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}
+.ai textarea::placeholder{color:var(--dsw-alias-label-tertiary)}
+.ai button{border-color:var(--emate-color-brand,#eb5b16);color:var(--emate-color-brand,#eb5b16)}
+.error{padding:10px 16px;overflow-wrap:anywhere;color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);font-size:13px}
+.error>div{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+.empty{padding:24px;color:var(--dsw-alias-label-secondary)}
+@media(max-width:560px){.header{padding:8px;gap:6px}.header>select{max-width:130px}.saveState{order:5;width:100%;font-size:11px}.ai{padding:8px;gap:6px}.tools{top:8px}.panel{min-height:380px}}
+@media(prefers-reduced-motion:reduce){.panel *{scroll-behavior:auto!important}}

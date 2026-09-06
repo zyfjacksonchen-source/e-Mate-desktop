@@ -3,9 +3,10 @@ import * as ReactDOM from 'react-dom'
 import * as Client from 'react-dom/client'
 import * as JSX from 'react/jsx-runtime'
 import { ClientModuleSystem } from '../../../upstream/deepseek-harness/packages/client/modules/src/client/system.ts'
-import { emptyProject } from '../src/contract.ts'
+import { emptyPage, emptyProject } from '../src/contract.ts'
 const modules = new ClientModuleSystem({ modules: [], staticModules: { react: React, 'react-dom': ReactDOM, 'react-dom/client': Client, 'react/jsx-runtime': JSX } })
 let project = emptyProject('main')
+project.pages.push({ ...emptyPage('legacy', '旧项目页'), html: '<script>window.canvasAttacked=true</script><h1>Legacy HTML</h1>', slide: true })
 let revision = 'a'.repeat(64)
 const bridge = { sessionId: 'parent', close() {}, subscribe() { return () => {} }, beforeLeave() { return () => {} }, async submit() { throw new Error('provider requests forbidden in local fixture') }, async stageImages() { return [] },
   async call(endpoint: string, payload: any = {}) {

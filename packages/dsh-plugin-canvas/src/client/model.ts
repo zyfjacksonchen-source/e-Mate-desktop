@@ -88,3 +88,37 @@ export async function digest(bytes: Uint8Array): Promise<string> {
   const value = await crypto.subtle.digest('SHA-256', bytes.slice().buffer)
   return [...new Uint8Array(value)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
+
+/** Render-only modification reference: selected images and their on-image marks.
+ * Never mutate the project or include a different image just because it shares a page.
+ */
+export function selectedAnnotationElements(elements: CanvasPage['elements'], selectedImageIds: readonly string[]): CanvasPage['elements'] {
+  const wanted = new Set(selectedImageIds)
+  const images = elements.filter(item => item.type === 'image' && !item.isDeleted && wanted.has(String(item.id)))
+  const selected = new Set(images.map(item => item.id))
+  const contains = (image: Record<string, Json>, x: number, y: number) => {
+    const cx = Number(image.x) + Number(image.width) / 2, cy = Number(image.y) + Number(image.height) / 2
+    const angle = -Number(image.angle ?? 0), dx = x - cx, dy = y - cy
+    const localX = dx * Math.cos(angle) - dy * Math.sin(angle), localY = dx * Math.sin(angle) + dy * Math.cos(angle)
+    return Number.isFinite(localX) && Number.isFinite(localY) && Math.abs(localX) <= Number(image.width) / 2 && Math.abs(localY) <= Number(image.height) / 2
+  }
+  const bindingId = (value: Json | undefined) => value && typeof value === 'object' && !Array.isArray(value) ? value.elementId : undefined
+  const arrows = elements.filter(item => {
+    if (item.type !== 'arrow' || item.isDeleted) return false
+    if (selected.has(bindingId(item.startBinding) as Json) || selected.has(bindingId(item.endBinding) as Json)) return true
+    if (!Array.isArray(item.points) || !item.points.length) return false
+    return [item.points[0], item.points.at(-1)].some(point => Array.isArray(point) && images.some(image => contains(image, Number(item.x) + Number(point[0]), Number(item.y) + Number(point[1]))))
+  })
+  const included = new Set([...images, ...arrows].map(item => item.id))
+  const texts = elements.filter(item => item.type === 'text' && !item.isDeleted && (item.containerId
+    ? included.has(item.containerId)
+    : images.some(image => contains(image, Number(item.x) + Number(item.width) / 2, Number(item.y) + Number(item.height) / 2))))
+  for (const text of texts) included.add(text.id)
+  return elements.filter(item => included.has(item.id)).map(item => {
+    const copy = structuredClone(item)
+    if (copy.frameId && !included.has(copy.frameId)) copy.frameId = null
+    for (const field of ['startBinding', 'endBinding']) if (copy[field] && !included.has(bindingId(copy[field]) as Json)) copy[field] = null
+    if (Array.isArray(copy.boundElements)) copy.boundElements = copy.boundElements.filter(value => value && typeof value === 'object' && !Array.isArray(value) && included.has(value.id))
+    return copy
+  })
+}

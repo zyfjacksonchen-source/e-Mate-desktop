@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Excalidraw, MainMenu, exportToBlob } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI, BinaryFiles } from '@excalidraw/excalidraw/types'
-import { ASSET_PATH, emptyPage, emptyProject, type CanvasAsset, type CanvasIntent, type CanvasProject, type ProjectReceipt } from '../contract.ts'
+import { ASSET_PATH, emptyProject, type CanvasAsset, type CanvasIntent, type CanvasProject, type ProjectReceipt } from '../contract.ts'
 import type { CanvasBridge } from './bridge.ts'
-import { base64, bytesOf, digest, duplicatePage, externalLinks, htmlDocument, insertAsset, pagesFromHtml, reorderPage, scenePage } from './model.ts'
+import { base64, bytesOf, digest, insertAsset, pagesFromHtml, scenePage, selectedAnnotationElements } from './model.ts'
 import css from './style.module.css'
 
 (window as any).EXCALIDRAW_ASSET_PATH = new URL(ASSET_PATH, location.origin).href
@@ -17,14 +17,20 @@ function download(name: string, blob: Blob) {
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
-function HtmlPreview({ html, title }: { html: string; title: string }) {
-  return <div className={css.htmlPreview}>
-    <iframe title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={htmlDocument(html)} />
-    <details><summary>外部链接</summary>{externalLinks(html).map(url => <a key={url} href={url} target="_blank" rel="noopener noreferrer">{url}</a>)}</details>
-  </div>
+function useNativeTheme() {
+  const current = () => document.body.hasAttribute('data-ds-dark-theme') ? 'dark' as const : 'light' as const
+  const [theme, setTheme] = useState(current)
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTheme(current()))
+    observer.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+    return () => observer.disconnect()
+  }, [])
+  return theme
 }
-export interface CanvasPanelProps { sessionId?: string; bridge: CanvasBridge; initialProjectId: string; initialAsset?: CanvasAsset }
-export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset }: CanvasPanelProps) {
+export interface CanvasPanelProps { sessionId?: string; bridge: CanvasBridge; initialProjectId: string; initialAsset?: CanvasAsset; onInitialAssetConsumed?: () => void }
+export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset, onInitialAssetConsumed }: CanvasPanelProps) {
+  const consumed = useRef(onInitialAssetConsumed)
+  consumed.current = onInitialAssetConsumed
   const [project, setProject] = useState<CanvasProject | null>(null)
   const [pageId, setPageId] = useState('page-1')
   const [projects, setProjects] = useState<any[]>([])
@@ -38,17 +44,18 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
   const transitioning = useRef(false)
   const [recovered, setRecovered] = useState(false)
   const [instruction, setInstruction] = useState('')
-  const [kind, setKind] = useState<CanvasIntent['kind']>('image')
-  const [presenting, setPresenting] = useState(false)
-  const [previewMode, setPreviewMode] = useState<'canvas' | 'html'>('canvas')
+  const theme = useNativeTheme()
+  const [activeTool, setActiveTool] = useState('selection')
+  const [selectionCount, setSelectionCount] = useState(0)
+  const submitting = useRef(false)
   const api = useRef<ExcalidrawImperativeAPI | null>(null)
   const state = useRef<{ project: CanvasProject | null; revision: string | null; dirty: boolean; blocked: boolean }>({ project: null, revision: null, dirty: false, blocked: false })
   const lane = useRef(Promise.resolve())
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const alive = useRef(true)
-  const root = useRef<HTMLDivElement>(null)
   const generation = useRef(0)
   const selected = useRef<string[]>([])
+  const selectedElements = useRef<string[]>([])
   const syncLane = useRef(false)
   const imageInput = useRef<HTMLInputElement>(null)
   const importInput = useRef<HTMLInputElement>(null)
@@ -120,9 +127,9 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
       // Keep the outgoing document/revision intact until the complete next project can be shown.
       state.current = { project: next, revision, dirty: false, blocked: false }
       setSceneLoad(value => value + 1)
-      api.current = null; setFiles(loaded); setProject(next); setPageId(next.pages[0]!.id); setRecovered(result?.recovered ?? false)
+      api.current = null; selected.current = []; selectedElements.current = []; setSelectionCount(0); setActiveTool('selection'); setFiles(loaded); setProject(next); setPageId(next.pages[0]!.id); setRecovered(result?.recovered ?? false)
       setNotice(result?.recovered ? '已恢复上一份完整保存，损坏原件保留。请检查后保存。' : '已恢复项目')
-      setError(null); void refreshList()
+      setError(null); if (asset) consumed.current?.(); void refreshList().catch(error => { if (alive.current) setError(error.message) })
     } finally { transitioning.current = false; if (alive.current) setSwitching(false) }
   }, [bridge, flush, imageFiles, refreshList])
   useEffect(() => {
@@ -165,7 +172,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
             next.pages.splice(index, 1, ...incoming)
           } else target.html = result.html
           next.intents.find(item => item.id === intent.id)!.imported.push(result.sha256)
-          update(next); setPreviewMode('html')
+          update(next)
         }
       }
       if (state.current.dirty && state.current.project) {
@@ -183,21 +190,6 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
   }, [bridge, syncOutputs])
   useEffect(() => { if (project?.id && !switching) void syncOutputs() }, [project?.id, switching, syncOutputs])
   useEffect(() => {
-    if (!presenting) return
-    const key = (event: KeyboardEvent) => {
-      if (!['ArrowRight', 'ArrowLeft', 'Escape'].includes(event.key)) return
-      event.preventDefault()
-      if (event.key === 'Escape') { setPresenting(false); return }
-      const pages = state.current.project?.pages.filter(item => item.slide) ?? []
-      const index = pages.findIndex(item => item.id === pageId)
-      const next = pages[index + (event.key === 'ArrowRight' ? 1 : -1)]
-      if (next) setPageId(next.id)
-    }
-    addEventListener('keydown', key)
-    return () => removeEventListener('keydown', key)
-  }, [presenting, pageId])
-
-  useEffect(() => {
     if (!page || !api.current) return
     if (JSON.stringify(api.current.getSceneElementsIncludingDeleted()) !== JSON.stringify(page.elements)) {
       api.current.updateScene({ elements: page.elements as any })
@@ -206,18 +198,34 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
 
   const submit = async () => {
     const current = state.current.project
-    if (transitioning.current || !current || !instruction.trim()) return
-    const selectedIds = selected.current
-    if (kind === 'edit' && selectedIds.length === 0) { setError('先在画布选中要修改的图片。'); return }
-    setBusy(true); setError(null)
+    if (submitting.current || transitioning.current || !current || !instruction.trim()) return
+    const target = current.pages.find(item => item.id === pageId)
+    const selectedIds = [...selected.current]
+    if (!target || selectedIds.length !== 1) { setError('请只选中一张要修改的图片。'); return }
+    submitting.current = true; setBusy(true); setError(null)
     try {
-      const intent: CanvasIntent = { id: fresh(), kind, pageId, sessionId: bridge.sessionId, sourceIds: kind === 'image' ? [] : selectedIds, imported: [] }
-      const next = { ...current, intents: [...current.intents, intent] }
+      let next = structuredClone(current)
+      const sourceIds = [...selectedIds]
+      const elements = selectedAnnotationElements(target.elements, selectedElements.current)
+      const annotated = elements.some(item => item.type === 'arrow' || item.type === 'text')
+      if (annotated) {
+        const blob = await exportToBlob({ elements: elements as any, appState: { viewBackgroundColor: '#ffffff', exportBackground: true }, files, mimeType: 'image/png' })
+        const [preview] = await bridge.stageImages([new File([blob], '标注参考.png', { type: 'image/png' })])
+        if (!preview) throw new Error('标注参考未保存，请重试。')
+        if (state.current.project !== current || transitioning.current) throw new Error('画布已变化，请重新提交修改。')
+        if (!next.assets.some(item => item.ref.attachmentId === preview.ref.attachmentId)) next.assets.push(preview)
+        if (!sourceIds.includes(preview.ref.attachmentId)) sourceIds.push(preview.ref.attachmentId)
+      }
+      const intent: CanvasIntent = { id: fresh(), kind: 'edit', pageId, sessionId: bridge.sessionId, sourceIds, imported: [] }
+      next.intents.push(intent)
       update(next); await flush()
-      await bridge.submit(next, intent, instruction)
-      setInstruction(''); setNotice('请求已交给当前会话。运行状态和取消操作见原生会话。')
+      const roles = annotated
+        ? `前 ${selectedIds.length} 张为待修改原图；最后一张为这些原图的箭头和文字标注参考。标注仅用于说明修改位置和要求，不要把标注添加到成品。未选中的图片不属于本次修改。\n`
+        : '所附图片为待修改原图。\n'
+      await bridge.submit(next, intent, roles + instruction.trim())
+      setInstruction(''); setNotice('修改已提交')
     } catch (error) { setError((error as Error).message) }
-    finally { setBusy(false) }
+    finally { submitting.current = false; setBusy(false) }
   }
   const addImages = async (incoming: File[]) => {
     const document = state.current.project
@@ -231,108 +239,85 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
     const loaded = await imageFiles(next); setFiles(loaded); api.current?.addFiles(Object.values(loaded))
     api.current?.scrollToContent(undefined, { fitToViewport: true })
   }
-  const exportImages = async (slides: boolean) => {
+  const exportImage = async () => {
     if (!state.current.project) return
     await flush()
-    const pages = slides ? state.current.project.pages.filter(item => item.slide) : [state.current.project.pages.find(item => item.id === pageId)!]
-    if (slides) {
-      const rendered = await Promise.all(pages.map(async item => {
-        const visible = item.elements.filter(element => !element.isDeleted)
-        const blob = visible.length ? await exportToBlob({ elements: visible as any, appState: { viewBackgroundColor: item.view.background, exportBackground: true }, files, mimeType: 'image/png' }) : null
-        const data = blob ? base64(new Uint8Array(await blob.arrayBuffer())) : null
-        return `<section><h2>${item.title.replace(/[&<>"']/gu, char => `&#${char.charCodeAt(0)};`)}</h2>${item.html ? `<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="${htmlDocument(item.html).replace(/[&<>"']/gu, char => `&#${char.charCodeAt(0)};`)}"></iframe>` : ''}${data ? `<img alt="幻灯片画布" src="data:image/png;base64,${data}">` : ''}</section>`
-      }))
-      download(`${state.current.project.id}-slides.html`, new Blob([`<!doctype html><meta charset="utf-8"><title>e-Mate 幻灯片</title><style>body{margin:0;background:#15181e;color:white;font:16px system-ui}section{min-height:100vh;box-sizing:border-box;padding:32px;display:grid;place-items:center;break-after:page}img{max-width:90vw;max-height:85vh}iframe{width:90vw;height:80vh;border:0;background:white}@media print{body{background:white;color:black}section{height:100vh}}</style>${rendered.join('')}`], { type: 'text/html' }))
-    } else {
-      const item = pages[0]!
-      const blob = await exportToBlob({ elements: item.elements as any, appState: { viewBackgroundColor: item.view.background, exportBackground: true }, files, mimeType: 'image/png' })
-      download(`${state.current.project.id}-${item.id}.png`, blob)
-    }
+    const item = state.current.project.pages.find(item => item.id === pageId)!
+    const blob = await exportToBlob({ elements: item.elements as any, appState: { viewBackgroundColor: item.view.background, exportBackground: true }, files, mimeType: 'image/png' })
+    download(`${state.current.project.id}-${item.id}.png`, blob)
+  }
+  const chooseTool = (tool: 'selection' | 'hand' | 'arrow' | 'text') => {
+    api.current?.setActiveTool({ type: tool }); setActiveTool(tool)
   }
   const act = (action: () => Promise<void> | void) => { void Promise.resolve().then(action).catch(error => setError(error.message)) }
   if (sessionId && sessionId !== bridge.sessionId) return <div className={css.empty}>此画布属于先前会话。<button onClick={() => act(async () => { await flush(); bridge.close() })}>保存并关闭</button></div>
-  return <div ref={root} className={`${css.panel} ${presenting ? css.presenting : ''}`} data-emate-canvas>
-    {!presenting && <header className={css.header}>
-      <strong>项目画布</strong><button type="button" onClick={() => act(async () => { await flush(); bridge.close() })}>关闭</button>
-    </header>}
+  return <div className={css.panel} data-emate-canvas data-theme={theme}>
     {error && <div role="alert" className={css.error}>{error}<div>
       <button onClick={() => { if (state.current.project) download(`${state.current.project.id}-unsaved.json`, new Blob([JSON.stringify(state.current.project)], { type: 'application/json' })) }}>导出当前编辑</button>
       <button onClick={() => act(async () => { const id = state.current.project?.id ?? initialProjectId; state.current.dirty = false; state.current.blocked = false; await openProject(id) })}>放弃未保存编辑并重载</button>
     </div></div>}
-    {switching && <div role="status">正在切换项目，编辑已暂停…</div>}
-    {!project || !page ? <div className={css.empty}>{error ? '项目原件保留。可重新载入或选择其他项目。' : notice}</div> : <fieldset disabled={switching} style={{ display: 'contents' }}>
-      {!presenting && <>
-        <div className={css.projectBar}>
-          <select aria-label="选择项目" value={project.id} onChange={event => { const id = event.target.value; act(() => openProject(id)) }}>
-            {!projects.some(item => item.id === project.id) && <option value={project.id}>{project.title}</option>}
-            {projects.map(item => <option key={item.id} value={item.id}>{item.title}{item.error ? ' · 损坏' : ''}</option>)}
-          </select>
+    {!project || !page ? <div className={css.empty}>{error ? '项目原件保留，可重新载入。' : notice}</div> : <fieldset disabled={switching || busy} className={css.content}>
+      <header className={css.header}>
+        <select aria-label="选择项目" value={project.id} onChange={event => { const id = event.target.value; act(() => openProject(id)) }}>
+          {!projects.some(item => item.id === project.id) && <option value={project.id}>{project.title}</option>}
+          {projects.map(item => <option key={item.id} value={item.id}>{item.title}{item.error ? ' · 无法载入' : ''}</option>)}
+        </select>
+        {project.pages.length > 1 && <select aria-label="选择画布页" value={pageId} onChange={event => { selected.current = []; selectedElements.current = []; setSelectionCount(0); setPageId(event.target.value) }}>
+          {project.pages.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+        </select>}
+        <span className={css.saveState} role="status">{switching ? '正在载入…' : saving ? '保存中…' : recovered ? '已恢复备份' : notice}</span>
+        <button onClick={() => imageInput.current?.click()}>添加图片</button>
+        <button onClick={() => act(exportImage)}>导出 PNG</button>
+        <details className={css.more}><summary aria-label="更多画布操作">更多</summary><div className={css.moreMenu}>
+          <label>名称<input aria-label="项目名称" value={project.title} maxLength={120} onChange={event => { if (event.target.value.trim()) update({ ...project, title: event.target.value }) }} /></label>
           <button onClick={() => act(() => openProject(fresh()))}>新项目</button>
-          <button disabled={saving} onClick={() => act(async () => { state.current.blocked = false; state.current.dirty = true; await flush(); await refreshList() })}>{saving ? '保存中…' : recovered ? '保存恢复副本' : '保存'}</button>
+          <button disabled={saving} onClick={() => act(async () => { state.current.blocked = false; state.current.dirty = true; await flush(); await refreshList() })}>{recovered ? '保存恢复副本' : '保存'}</button>
+          <button onClick={() => act(async () => { await flush(); const result = await bridge.call('export', { project_id: project.id }); download(result.name, new Blob([bytesOf(result.archive_base64).slice().buffer], { type: 'application/zip' })) })}>导出项目与素材</button>
+          <button onClick={() => importInput.current?.click()}>导入项目</button>
+        </div></details>
+      </header>
+      <input hidden ref={imageInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" onChange={event => {
+        const incoming = Array.from(event.target.files ?? []); event.target.value = ''
+        if (incoming.length) act(() => addImages(incoming))
+      }} />
+      <input hidden ref={importInput} type="file" accept=".zip" onChange={event => { const file = event.target.files?.[0]; if (!file) return; act(async () => { if (file.size > 100 * 1024 * 1024) throw new Error('项目压缩包超过 100 MiB。'); await flush(); const id = fresh(); const result = await bridge.call('import', { project_id: id, archive_base64: base64(new Uint8Array(await file.arrayBuffer())) }); await openProject(result.project.id) }); event.target.value = '' }} />
+      <div className={css.stage} onContextMenuCapture={event => { event.preventDefault(); event.stopPropagation() }}
+        onKeyDownCapture={event => {
+          if ((event.target as HTMLElement).closest('input,textarea,[contenteditable=true]') || event.ctrlKey || event.metaKey || event.altKey) return
+          if (['r', 'd', 'o', 'l', 'p', 'f', 'e', '2', '3', '4', '6', '7', '9', '0'].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation() }
+        }}
+        onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }} onDropCapture={event => {
+          if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); act(() => addImages(Array.from(event.dataTransfer.files))) }
+        }}>
+        <div className={css.tools} role="toolbar" aria-label="图片标注工具">
+          {([['selection', '选择'], ['hand', '平移'], ['arrow', '箭头'], ['text', '文字']] as const).map(([tool, title]) => <button key={tool} aria-pressed={activeTool === tool} onClick={() => chooseTool(tool)}>{title}</button>)}
         </div>
-        <input className={css.title} aria-label="项目名称" value={project.title} maxLength={120} onChange={event => { if (event.target.value.trim()) update({ ...project, title: event.target.value }) }} />
-        <nav className={css.pages} aria-label="画布页面">
-          {project.pages.map((item, index) => <button key={item.id} aria-pressed={pageId === item.id} draggable
-            onDragStart={event => event.dataTransfer.setData('application/x-emate-canvas-page', item.id)}
-            onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const id = event.dataTransfer.getData('application/x-emate-canvas-page'); const from = project.pages.findIndex(page => page.id === id); if (from >= 0) update(reorderPage(project, id, index - from)) }}
-            onClick={() => setPageId(item.id)}>{index + 1}. {item.title}</button>)}
-          <button aria-label="新增页面" disabled={project.pages.length >= 64} onClick={() => { const id = fresh(); update({ ...project, pages: [...project.pages, emptyPage(id, `画布 ${project.pages.length + 1}`)] }); setPageId(id) }}>＋</button>
-        </nav>
-        <div className={css.toolbar}>
-          <input aria-label="页面名称" value={page.title} maxLength={120} onChange={event => { if (event.target.value.trim()) update({ ...project, pages: project.pages.map(item => item.id === pageId ? { ...item, title: event.target.value } : item) }) }} />
-          <button onClick={() => imageInput.current?.click()}>添加图片</button>
-          <input hidden ref={imageInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" onChange={event => {
-            const incoming = Array.from(event.target.files ?? []); event.target.value = ''
-            if (!incoming.length) return
-            act(() => addImages(incoming))
-          }} />
-          <button title="向前排序" onClick={() => update(reorderPage(project, pageId, -1))}>←</button><button title="向后排序" onClick={() => update(reorderPage(project, pageId, 1))}>→</button>
-          <button disabled={project.pages.length >= 64} onClick={() => { const id = fresh(); update(duplicatePage(project, pageId, id)); setPageId(id) }}>复制页</button>
-          <button disabled={project.pages.length === 1} onClick={() => { const pages = project.pages.filter(item => item.id !== pageId); update({ ...project, pages, intents: project.intents.filter(intent => intent.pageId !== pageId) }); setPageId(pages[0]!.id) }}>删除页</button>
-          <label><input type="checkbox" checked={page.slide} onChange={event => update({ ...project, pages: project.pages.map(item => item.id === pageId ? { ...item, slide: event.target.checked } : item) })} />幻灯片</label>
-          {page.html && <button onClick={() => setPreviewMode(previewMode === 'canvas' ? 'html' : 'canvas')}>{previewMode === 'canvas' ? 'HTML 预览' : '画布标注'}</button>}
-        </div>
-      </>}
-      <div className={css.stage} onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }} onDropCapture={event => {
-        if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); act(() => addImages(Array.from(event.dataTransfer.files))) }
-      }}>
-        {page.html && (previewMode === 'html' || presenting) ? <HtmlPreview html={page.html} title={page.title} /> : <Excalidraw key={`${project.id}:${page.id}:${sceneLoad}`}
+        {page.elements.every(item => item.isDeleted) && <div className={css.stageHint}>添加图片，或从画廊加入图片</div>}
+        <Excalidraw key={`${project.id}:${page.id}:${sceneLoad}`} theme={theme}
           excalidrawAPI={value => { api.current = value }}
-          initialData={{ elements: page.elements as any, files, appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as any }, viewBackgroundColor: page.view.background } }}
-          viewModeEnabled={presenting || switching} langCode="zh-CN" validateEmbeddable={() => false}
-          UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false }, tools: { image: false } }}
+          initialData={{ elements: page.elements as any, files, appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as any }, viewBackgroundColor: page.view.background, currentItemFontFamily: 2, currentItemFontSize: 16, currentItemRoughness: 0 } }}
+          viewModeEnabled={switching || busy} langCode="zh-CN" validateEmbeddable={() => false}
+          UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false, changeViewBackgroundColor: false }, tools: { image: false } }}
           onLinkOpen={(element, event) => { event.preventDefault(); if (element.link && /^https?:\/\//u.test(element.link)) window.open(element.link, '_blank', 'noopener,noreferrer') }}
           onPaste={() => false}
           onChange={(elements, appState) => {
-            selected.current = elements.filter(item => item.type === 'image' && appState.selectedElementIds[item.id]).map(item => `sha256:${(item as any).fileId}`)
-            if (presenting || transitioning.current) return
+            const chosen = elements.filter(item => item.type === 'image' && !item.isDeleted && appState.selectedElementIds[item.id])
+            selectedElements.current = chosen.map(item => item.id)
+            selected.current = chosen.map(item => `sha256:${(item as any).fileId}`)
+            setSelectionCount(selected.current.length)
+            if (['selection', 'hand', 'arrow', 'text'].includes(appState.activeTool?.type)) setActiveTool(appState.activeTool.type)
+            if (transitioning.current || busy) return
             const current = state.current.project
             const existing = current?.pages.find(item => item.id === page.id)
             if (!current || !existing || current.id !== project.id) return
             const next = scenePage(existing, elements as any, appState)
             if (JSON.stringify(next) !== JSON.stringify(existing)) update({ ...current, pages: current.pages.map(item => item.id === page.id ? next : item) })
-          }}><MainMenu><MainMenu.DefaultItems.ClearCanvas /><MainMenu.DefaultItems.ToggleTheme /></MainMenu></Excalidraw>}
+          }}><MainMenu /></Excalidraw>
       </div>
-      {!presenting && <>
-        <details className={css.htmlEditor}><summary>HTML 页面内容</summary><textarea aria-label="HTML 页面内容" value={page.html ?? ''} maxLength={512 * 1024}
-          onChange={event => update({ ...project, pages: project.pages.map(item => item.id === pageId ? { ...item, html: event.target.value || null } : item) })} placeholder="可粘贴 HTML；预览始终位于隔离沙箱中。" /></details>
-        <div className={css.ai}>
-          <select aria-label="AI 操作" value={kind} onChange={event => setKind(event.target.value as CanvasIntent['kind'])}><option value="image">生成图片</option><option value="edit">修改选中图片</option><option value="html">生成 HTML</option><option value="slides">生成幻灯片</option></select>
-          <textarea aria-label="画布生成需求" placeholder="描述需求，交给当前会话执行…" value={instruction} maxLength={20000} onChange={event => setInstruction(event.target.value)} />
-          <button disabled={busy || !instruction.trim() || !!error} onClick={() => act(submit)}>{busy ? '提交中…' : '交给当前会话'}</button><button onClick={() => act(syncOutputs)}>同步成功产物</button>
-        </div>
-      </>}
-      <footer className={css.footer}>
-        <span role="status">{notice}</span>
-        {presenting ? <><button onClick={() => { const pages = project.pages.filter(item => item.slide); const index = pages.findIndex(item => item.id === pageId); if (index > 0) setPageId(pages[index - 1]!.id) }}>上一页</button><button onClick={() => { const pages = project.pages.filter(item => item.slide); const index = pages.findIndex(item => item.id === pageId); if (index < pages.length - 1) setPageId(pages[index + 1]!.id) }}>下一页</button><button onClick={() => { setPresenting(false); if (document.fullscreenElement) void document.exitFullscreen() }}>退出播放</button></>
-          : <>
-            <button onClick={() => act(async () => { await flush(); const first = project.pages.find(item => item.slide); if (!first) throw new Error('请先勾选幻灯片页面。'); setPageId(first.id); setPresenting(true); await root.current?.requestFullscreen?.() })}>全屏播放</button>
-            <button onClick={() => act(() => exportImages(false))}>导出 PNG</button><button onClick={() => act(() => exportImages(true))}>导出幻灯片</button>
-            <button onClick={() => act(async () => { await flush(); const result = await bridge.call('export', { project_id: project.id }); download(result.name, new Blob([bytesOf(result.archive_base64).slice().buffer], { type: 'application/zip' })) })}>导出项目与素材</button>
-            <button onClick={() => importInput.current?.click()}>导入项目</button>
-            <input hidden ref={importInput} type="file" accept=".zip" onChange={event => { const file = event.target.files?.[0]; if (!file) return; act(async () => { if (file.size > 100 * 1024 * 1024) throw new Error('项目压缩包超过 100 MiB。'); await flush(); const id = fresh(); const result = await bridge.call('import', { project_id: id, archive_base64: base64(new Uint8Array(await file.arrayBuffer())) }); await openProject(result.project.id) }); event.target.value = '' }} />
-          </>}
-      </footer>
+      <div className={css.ai}>
+        <textarea aria-label="图片修改需求" placeholder={selectionCount === 1 ? '描述如何修改选中的图片…' : '选中一张图片后，描述修改要求…'} value={instruction} maxLength={18000} onChange={event => setInstruction(event.target.value)} />
+        <button disabled={busy || selectionCount !== 1 || !instruction.trim() || !!error} onClick={() => act(submit)}>{busy ? '提交中…' : '修改图片'}</button>
+      </div>
     </fieldset>}
   </div>
 }
