@@ -353,3 +353,19 @@ test('expired streamed archive closes its body before removing metadata', async 
   assert.equal(response.status, 410)
   assert.equal(cancelled, true)
 })
+
+test('legacy landing links download directly from the enterprise owner without a duplicated prefix', async () => {
+  const env = environment({ PUBLIC_ORIGIN: 'https://mvdcm.ecoremedia.net/e-mate/share' })
+  const created = await (await handleRequest(authorizedRequest('https://mvdcm.ecoremedia.net/e-mate/share/v1/shares', {
+    method: 'POST', headers: { 'content-type': 'application/zip', 'x-emate-session-sha256': '7'.repeat(64) },
+    body: new Uint8Array([80, 75, 3, 4]),
+  }), env, activeSession)).json()
+  const oldUrl = `https://emate-share.example.workers.dev/s/${created.share.id}`
+  const page = await forwardRequest(new Request(oldUrl), { ...env, SHARE_SERVICE_BASE: env.PUBLIC_ORIGIN },
+    request => handleRequest(request, env, activeSession))
+  const href = /href="([^"]+)"/u.exec(await page.text())[1]
+  assert.equal(new URL(href, oldUrl).href, `${created.share.public_url}/archive.zip`)
+  const archive = await handleRequest(new Request(new URL(href, oldUrl)), env, activeSession)
+  assert.equal(archive.status, 200)
+  assert.deepEqual(new Uint8Array(await archive.arrayBuffer()), new Uint8Array([80, 75, 3, 4]))
+})

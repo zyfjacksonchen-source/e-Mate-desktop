@@ -201,11 +201,11 @@ async function liveObject(env, id, body) {
   return { key, object }
 }
 
-function landing(id, expiresAt, basePath) {
+function landing(id, expiresAt, publicBase) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>e-Mate 分享任务</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#f5f5f5;font:16px/1.6 system-ui,sans-serif}.card{width:min(560px,calc(100% - 48px));padding:32px;border:1px solid #383838;border-radius:18px;background:#202020}.brand{color:#ff6a1a}h1{margin:.2em 0}p{color:#bbb}a{display:inline-block;margin-top:12px;padding:10px 16px;border-radius:10px;background:#ff6a1a;color:#fff;text-decoration:none}small{display:block;margin-top:18px;color:#888}</style></head>
-<body><main class="card"><span class="brand">e-Mate</span><h1>分享任务归档</h1><p>分享者通过 e-Mate 创建了这个公开链接。归档包含任务、子任务和附件，下载后可查看。</p><a href="${basePath}/s/${id}/archive.zip">下载任务归档（ZIP）</a><small>链接有效期至 ${expiresAt}</small></main></body></html>`
+<body><main class="card"><span class="brand">e-Mate</span><h1>分享任务归档</h1><p>分享者通过 e-Mate 创建了这个公开链接。归档包含任务、子任务和附件，下载后可查看。</p><a href="${publicBase}/s/${id}/archive.zip">下载任务归档（ZIP）</a><small>链接有效期至 ${expiresAt}</small></main></body></html>`
 }
 
 async function createShare(request, env, config, fetchImplementation) {
@@ -311,7 +311,7 @@ async function publicShare(request, env, config, id, archive) {
       'x-frame-options': 'DENY',
       'x-robots-tag': 'noindex, nofollow',
     }
-    return new Response(request.method === 'HEAD' ? null : landing(id, expiresAt, new URL(config.publicOrigin).pathname.replace(/\/$/u, '')), { headers })
+    return new Response(request.method === 'HEAD' ? null : landing(id, expiresAt, config.publicOrigin), { headers })
   }
   return new Response(request.method === 'HEAD' ? null : current.object.body, {
     headers: {

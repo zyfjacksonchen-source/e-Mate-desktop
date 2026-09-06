@@ -132,6 +132,22 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  apps/share-service:
+    dependencies:
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/pg':
+        specifier: 8.20.0
+        version: 8.20.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   apps/share-worker: {}
 
   apps/skill-hub-service:

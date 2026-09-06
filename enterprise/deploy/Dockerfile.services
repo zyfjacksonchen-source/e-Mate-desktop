@@ -69,3 +69,23 @@ COPY --from=build --chown=10001:0 /app/apps/skill-hub-worker ./apps/skill-hub-wo
 USER 10001:0
 RUN node --input-type=module -e "import { DatabaseSync } from 'node:sqlite'; if (typeof DatabaseSync.prototype.setAuthorizer !== 'function') throw new Error('Restricted SQLite reader is unavailable')"
 ENTRYPOINT ["node", "--experimental-strip-types", "apps/skill-hub-service/src/migrate.ts"]
+
+FROM ${BUN_IMAGE} AS share
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build --chown=10001:0 /app/node_modules ./node_modules
+COPY --from=build --chown=10001:0 /app/apps/share-service ./apps/share-service
+COPY --from=build --chown=10001:0 /app/apps/share-worker ./apps/share-worker
+USER 10001:0
+RUN bun -e "await import('./apps/share-service/src/server.ts')"
+EXPOSE 8789
+CMD ["bun", "apps/share-service/src/server.ts"]
+
+FROM ${MIGRATION_NODE_IMAGE} AS share-migrate
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build --chown=10001:0 /app/node_modules ./node_modules
+COPY --from=build --chown=10001:0 /app/apps/share-service ./apps/share-service
+COPY --from=build --chown=10001:0 /app/apps/share-worker ./apps/share-worker
+USER 10001:0
+ENTRYPOINT ["node", "--experimental-strip-types", "apps/share-service/src/migrate.ts"]
