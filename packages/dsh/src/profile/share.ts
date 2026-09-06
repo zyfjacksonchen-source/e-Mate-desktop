@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 
+import { decodedContentLength } from './http-response.ts'
+
 export const name = 'emate-share'
 export const inject = ['apiProxy', 'connection', 'credentials']
 export const SHARE_CHANNEL = '/emate.share'
@@ -90,9 +92,7 @@ function shareRoot(value: unknown): string {
 }
 
 async function readJson(response: Response, failedAt: ShareFailureAt): Promise<unknown> {
-  // Fetch decodes gzip/br but preserves the wire Content-Length header.
-  const encoding = response.headers.get('content-encoding')
-  const declared = encoding === null || encoding === 'identity' ? response.headers.get('content-length') : null
+  const declared = decodedContentLength(response)
   if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > JSON_MAX_BYTES)) {
     throw new ShareRequestError('invalid-response', failedAt)
   }

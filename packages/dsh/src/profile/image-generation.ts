@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { decodedContentLength } from './http-response.ts'
 import { IMAGE_PROMPT_GUIDANCE } from './image-prompt-guidance.ts'
 import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
@@ -190,7 +191,7 @@ function endpoint(root, path) {
 }
 
 async function readBounded(response, maximum, label) {
-  const declared = response.headers.get('content-length')
+  const declared = decodedContentLength(response)
   if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > maximum)) {
     throw new Error(`${label} response exceeds the byte boundary`)
   }

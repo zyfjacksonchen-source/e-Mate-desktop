@@ -4,6 +4,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
+import { gzipSync } from 'node:zlib'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { unzipSync } from 'fflate'
@@ -1242,10 +1243,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     let activeSubmissions = 0
     let maximumSubmissions = 0
     const jobTimeline = []
-    const json = (value, status = 200) => new Response(JSON.stringify(value), {
-      status,
-      headers: { 'content-type': 'application/json' },
-    })
+    // Match Fetch's decoded body with the proxy's original compressed headers.
+    const json = (value, status = 200) => {
+      const body = JSON.stringify(value)
+      return new Response(body, { status, headers: {
+        'content-type': 'application/json', 'content-encoding': 'gzip', 'content-length': String(gzipSync(body).length),
+      } })
+    }
     const admission = (code, retryAfterMs = 1_000, retryAfter = String(Math.ceil(retryAfterMs / 1_000))) => new Response(
       JSON.stringify({ error: { code, message: 'admission rejected', retryAfterMs } }),
       { status: 429, headers: { 'content-type': 'application/json', 'retry-after': retryAfter } },
@@ -3163,10 +3167,12 @@ test('enterprise identity provider maps target credentials and the production HT
   let transportAvailable = true
   let refreshRejected = false
   let refreshRejectionCode = 'TOKEN_REUSED'
-  const json = value => new Response(JSON.stringify(value), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })
+  const json = value => {
+    const body = JSON.stringify(value)
+    return new Response(body, { status: 200, headers: {
+      'content-type': 'application/json', 'content-encoding': 'gzip', 'content-length': String(gzipSync(body).length),
+    } })
+  }
   const session = {
     schemaVersion: 1,
     sessionId: 'session-enterprise-207',

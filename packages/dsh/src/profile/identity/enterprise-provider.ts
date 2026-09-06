@@ -1,4 +1,5 @@
 import { createHash, createPublicKey } from 'node:crypto'
+import { decodedContentLength } from '../http-response.ts'
 import {
   agreementBundleSha256,
   agreementDocuments,
@@ -548,7 +549,7 @@ function storedSession(value: unknown, modelRoot: string): StoredSession {
 
 async function responseJson(response: Response, label: string): Promise<unknown> {
   if (response.status >= 500) throw new IdentityServiceUnavailable('upstream-http', response.status)
-  const declared = response.headers.get('content-length')
+  const declared = decodedContentLength(response)
   if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_JSON_BYTES)) {
     throw new Error(`e-Mate enterprise ${label} response exceeds its boundary`)
   }
