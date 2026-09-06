@@ -49,7 +49,7 @@ export function QuickTemplates({ prepareDraft }: Props) {
             aria-busy={busy === name}
             onClick={() => { void choose(name, prompt) }}
           >
-            <span className={css.icon} aria-hidden="true"><Icon size={22} /></span>
+            <span className={css.icon} aria-hidden="true"><Icon size={18} /></span>
             <strong>{name}</strong>
             <small>{description}</small>
           </button>

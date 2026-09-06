@@ -67,8 +67,8 @@ describe('T21 quick start templates', () => {
     expect(cards.every(card => card.querySelector('svg') !== null)).toBe(true)
     const css = readFileSync('src/client/quick-templates.module.css', 'utf8')
     expect(css).not.toMatch(/\.number\s*\{/u)
-    expect(css).toMatch(/\.grid button\s*\{[\s\S]*border:\s*1px solid var\(--emate-color-rule\);[\s\S]*background:[^;]*var\(--emate-color-surface\)/u)
-    expect(css).toMatch(/\.grid button\s*\{[\s\S]*box-shadow:(?!\s*none)/u)
+    expect(css).toMatch(/\.grid button\s*\{[\s\S]*grid-template-columns: 28px minmax\(0, 1fr\);/u)
+    expect(css).toMatch(/\.grid button:focus-visible\s*\{[\s\S]*outline: 2px solid var\(--emate-color-brand\)/u)
     for (const [index, [title, , draft]] of OFFICE_TEMPLATES.entries()) {
       fireEvent.click(screen.getByRole('button', { name: new RegExp(title, 'u') }))
       await waitFor(() => { expect(prepareDraft).toHaveBeenNthCalledWith(index + 1, draft) })
