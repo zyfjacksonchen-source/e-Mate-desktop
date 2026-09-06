@@ -1,6 +1,6 @@
 # e-Mate 2.0.18 execution and acceptance
 
-User-approved scope: close the original task `01a06a78-3914-7483-a761-0297705a492a`, implement the nine workstreams below, accept the exact macOS and Windows installers, and publish those same bytes through the Desktop promotion entry point. This document records work, not completion evidence.
+User-approved scope: close the original task `01a06a78-3914-7483-a761-0297705a492a`, implement the workstreams and user additions below, accept the exact macOS and Windows installers, and publish those same bytes through the Desktop promotion entry point. This document records work, not completion evidence.
 
 ## Baseline and ownership
 
@@ -23,6 +23,7 @@ First reconcile every original EM217 work order and user addition against curren
 8. **Skill Hub.** Move API, catalog and immutable ZIP storage to the existing e-Mate server: independent TypeScript service, isolated PostgreSQL schema and content-addressed persistent volume. Preserve v1 wire contracts, owner identity, immutable versions/hashes, tombstones, idempotency and install receipts. New clients use the same-server address; the legacy Worker address forwards only to the one new service. Include the human-readable-title fix. Rehearse backup/restore, pause writes, migrate, verify all rows/objects, switch once and retain no dual writer. Validate cross-account discovery/install/update/uninstall.
 9. **Full review.** Cover maintained client, plugin, Desktop and enterprise code through real login/approval/chat/attachment/tool/task/output/connection/update journeys. Record reproduction, cause, affected boundary and a focused regression for each confirmed defect; avoid unrelated refactors.
 10. **Session-link sharing (user addition).** Investigate the currently reported create/open failures through the native Session ZIP, authenticated share transport and public link paths. Move the share business service and archive storage onto the enterprise server for mainland China access, retaining session/owner scope, expiry, revocation, archive identity and existing links where valid. Verify small and attachment-heavy sessions, lost responses, repeated clicks, restart/list recovery, unauthorized access, expiry/revocation and actual mainland opening/download. Do not rely on a Worker-domain alias while archives or serving still depend on an overseas path.
+11. **Artifact presentation (user addition).** Align completed file artifacts and historical attachments with the existing upload cards, reusing their file-type icons, thumbnail background and filename/type presentation. Preserve genuine image previews, file identities, open/download actions, missing-file states, long names and keyboard navigation. Verify supported file types in light/dark themes and narrow layouts through the actual components, then the installed candidate.
 
 ## Required acceptance
 
@@ -35,6 +36,8 @@ First reconcile every original EM217 work order and user addition against curren
 - Sharing: create a real share from the candidate, open it from mainland China, retrieve the unchanged native archive and verify its attachments; list it after restart, revoke it and verify the public URL no longer serves content. Preserve request/receipt correlation and specific failure stages. Source checks do not close this acceptance.
 
 ## Deployment and evidence
+
+Windows execution is paused at the user's request while the machine is unavailable. Continue other authorized work; keep Windows installation and joint promotion gates OPEN. Do not operate Clash or change the user's local proxy, DNS, TUN, routing or network settings.
 
 Reuse existing authorized deployment/credential boundaries. Verify access, capacity and backups early; the prior failed SSH public-key attempt is not evidence about every other management path. Production user-identity conflicts require a redacted preflight and proven ownership, never speculative merging.
 
