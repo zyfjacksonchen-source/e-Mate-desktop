@@ -6,6 +6,9 @@ import { Readable } from 'node:stream'
 
 export const SHA256 = /^[a-f0-9]{64}$/u
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+const activeTemporary = new Set<string>()
+const STALE_TEMPORARY_MS = 15 * 60 * 1000
+const TEMPORARY_NAME = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.zip$/u
 export class ArchiveTooLarge extends Error { code = 'SHARE_ARCHIVE_TOO_LARGE' }
 export function digest(bytes: Uint8Array) { return createHash('sha256').update(bytes).digest('hex') }
 
@@ -42,12 +45,14 @@ export class ArchiveFiles {
     if (space.bavail * space.bsize < this.limit + 64 * 1024 * 1024) throw new Error('Share volume is full')
     const temporary = join(this.root, 'tmp', `${randomUUID()}.zip`)
     const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+    activeTemporary.add(temporary)
     const hash = createHash('sha256')
     let size = 0
-    const reader = body.getReader()
-    const abort = () => { void reader.cancel(signal.reason).catch(() => {}) }
-    signal.addEventListener('abort', abort, { once: true })
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    const abort = () => { void reader?.cancel(signal.reason).catch(() => {}) }
     try {
+      reader = body.getReader()
+      signal.addEventListener('abort', abort, { once: true })
       while (true) {
         signal.throwIfAborted()
         const chunk = await reader.read()
@@ -71,9 +76,9 @@ export class ArchiveFiles {
       throw error
     } finally {
       signal.removeEventListener('abort', abort)
-      await reader.cancel().catch(() => {})
-      reader.releaseLock()
-      await file.close()
+      await reader?.cancel().catch(() => {})
+      reader?.releaseLock()
+      try { await file.close() } finally { activeTemporary.delete(temporary) }
     }
   }
   async publish(staged: { temporary: string; sha256: string; size: number }) {
@@ -96,6 +101,29 @@ export class ArchiveFiles {
     const hash = createHash('sha256')
     for await (const chunk of body) hash.update(chunk)
     if (hash.digest('hex') !== sha) throw new Error('Archive integrity failure')
+  }
+  async collectTemporary() {
+    const cutoff = Date.now() - STALE_TEMPORARY_MS
+    let removed = 0
+    for (const name of await readdir(join(this.root, 'tmp'))) {
+      if (!TEMPORARY_NAME.test(name)) continue
+      const path = join(this.root, 'tmp', name)
+      if (activeTemporary.has(path)) continue
+      try {
+        const info = await lstat(path)
+        if (!info.isFile() || info.isSymbolicLink() || info.mtimeMs > cutoff) continue
+        // A fresh stat protects a file replaced/touched during enumeration.
+        // UUID names never get reused by stage(), and its active set protects
+        // live uploads even if their mtime is older than the crash grace period.
+        const current = await lstat(path)
+        if (activeTemporary.has(path) || !current.isFile() || current.isSymbolicLink()
+          || current.dev !== info.dev || current.ino !== info.ino || current.mtimeMs !== info.mtimeMs
+          || current.size !== info.size || current.mtimeMs > cutoff) continue
+        await unlink(path)
+        removed++
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    }
+    return removed
   }
   async candidates() {
     return (await readdir(join(this.root, 'archives'))).filter(name => /^[a-f0-9]{64}\.zip$/u.test(name)).map(name => name.slice(0, -4))

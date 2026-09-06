@@ -130,6 +130,7 @@ export class ShareStore {
   async collect() {
     // Maintenance runs against the same DB and digest lock as publication.
     // No directory is served publicly; unreferenced bytes are never accessible.
+    const temporaryRemoved = await this.files.collectTemporary()
     await this.db().query("DELETE FROM emate_share.objects WHERE custom_metadata->>'expires_at' <= $1", [new Date().toISOString()])
     let removed = 0
     for (const sha of await this.files.candidates()) {
@@ -141,6 +142,6 @@ export class ShareStore {
         }
       })
     }
-    return { removed }
+    return { removed, temporary_removed: temporaryRemoved }
   }
 }

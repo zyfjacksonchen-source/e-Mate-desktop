@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile, mkdir, utimes, symlink, lstat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { setImmediate } from 'node:timers/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -46,6 +48,41 @@ test('oversized, empty and stalled cancelled uploads leave no temporary files', 
   assert.equal(cancelled, true)
   assert.deepEqual(await readdir(join(files.root, 'tmp')), [])
   assert.deepEqual(await files.candidates(), [])
+})
+
+test('maintenance collects only stale regular upload files and preserves active, recent and unrelated paths', async t => {
+  const files = await volume(t)
+  const directory = join(files.root, 'tmp')
+  const controller = new AbortController()
+  const body = new ReadableStream<Uint8Array>()
+  const active = files.stage(body, controller.signal)
+  // A locked body means stage has opened and registered its file. There are
+  // no chunks to update its deliberately old mtime during this test.
+  while (!body.locked) await setImmediate()
+  const activeName = (await readdir(directory))[0]
+  const old = new Date(Date.now() - 20 * 60 * 1000)
+  await utimes(join(directory, activeName), old, old)
+  const stale = `${randomUUID()}.zip`
+  const recent = `${randomUUID()}.zip`
+  const link = `${randomUUID()}.zip`
+  const childDirectory = `${randomUUID()}.zip`
+  for (const name of [stale, recent, 'notes.zip', 'not-a-uuid.zip']) await writeFile(join(directory, name), bytes)
+  for (const name of [stale, 'notes.zip', 'not-a-uuid.zip']) await utimes(join(directory, name), old, old)
+  const target = join(files.root, 'unrelated-original.zip')
+  await writeFile(target, bytes)
+  await utimes(target, old, old)
+  await symlink(target, join(directory, link))
+  await mkdir(join(directory, childDirectory))
+  await utimes(join(directory, childDirectory), old, old)
+  const store = new ShareStore(new FaultPool() as unknown as Pool, new ArchiveFiles(files.root))
+  assert.deepEqual(await store.collect(), { removed: 0, temporary_removed: 1 })
+  assert.deepEqual((await readdir(directory)).sort(), [activeName, recent, link, childDirectory, 'notes.zip', 'not-a-uuid.zip'].sort())
+  assert.equal((await lstat(join(directory, link))).isSymbolicLink(), true)
+  assert.deepEqual(new Uint8Array(await readFile(target)), bytes)
+  controller.abort()
+  await assert.rejects(active, { name: 'AbortError' })
+  assert.equal((await readdir(directory)).includes(activeName), false)
+  assert.equal(await files.collectTemporary(), 0)
 })
 
 test('a retried upload can cancel an unread stalled HTTP body without waiting on sender', async () => {
