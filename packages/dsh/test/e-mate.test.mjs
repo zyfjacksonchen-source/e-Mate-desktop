@@ -1521,7 +1521,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(imageProjectionDefinitions[1].key, 'eMateImageBatches')
     const imageProjection = imageProjectionDefinitions[0]
     assert.equal(imageProjection.key, 'eMateImageReceipts')
-    assert.equal(imageProjection.stateVersion, 1)
+    assert.equal(imageProjection.stateVersion, 2)
     const projectionReceipt = (callId, status = 'completed', revision = 2) => ({
       schema_version: 2,
       revision,
@@ -1557,12 +1557,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       type: 'emate/image-output', seq: 4, time: 250, data: projectionReceipt('projected-b', 'failed'),
     }
     const emptyProjection = imageProjection.init()
-    assert.strictEqual(imageProjection.apply(emptyProjection, runningProjectionEvent), emptyProjection)
-    const completedProjection = imageProjection.apply(emptyProjection, completedProjectionEvent)
+    const runningProjection = imageProjection.apply(emptyProjection, runningProjectionEvent)
+    assert.equal(runningProjection[0].receipt.status, 'running')
+    const completedProjection = imageProjection.apply(runningProjection, completedProjectionEvent)
+    assert.strictEqual(imageProjection.apply(completedProjection, runningProjectionEvent), completedProjection)
     assert.strictEqual(imageProjection.apply(completedProjection, completedProjectionEvent), completedProjection)
     const reviewedProjection = imageProjection.apply(completedProjection, reviewProjectionEvent)
     const finalProjection = imageProjection.apply(reviewedProjection, failedProjectionEvent)
-    assert.equal(finalProjection[0].createdAt, 200)
+    assert.equal(finalProjection[0].createdAt, 100)
     assert.deepEqual(imageProjection.view(finalProjection).map(row => row.receipt.call_id), [
       'projected-a', 'projected-b',
     ])
