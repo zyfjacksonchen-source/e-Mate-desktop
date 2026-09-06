@@ -93,6 +93,7 @@ async function loadModelPolicySource() {
 
 async function loadEnterpriseProviderSource() {
   const source = readFileSync(new URL('../src/profile/identity/enterprise-provider.ts', import.meta.url), 'utf8')
+    .replace("from '../http-response.ts'", `from '${new URL('../src/profile/http-response.ts', import.meta.url).href}'`)
     .replace(
       `import {
   agreementBundleSha256,
