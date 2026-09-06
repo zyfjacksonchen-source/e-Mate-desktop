@@ -58,6 +58,87 @@ describe('native sprite host',()=>{
     expect(button.style.left).toBe(latest);expect(screen.queryByText('位置未保存')).toBeNull()
     fireEvent.click(button);expect(open).toHaveBeenCalledWith('a')
   })
+  it('old settings acknowledgements cannot snap a later queued move back',async()=>{
+    const completions:Array<()=>void>=[]
+    const save=vi.fn((_point:{x:number;y:number})=>new Promise<void>(resolve=>completions.push(resolve)))
+    const props={pet:pet(),scene:'idle' as const,paused:true,position:{x:0.5,y:0.5},save,open:vi.fn(),taskId:'a'}
+    const view=render(<PetOverlay {...props}/>);const button=screen.getByRole('button')
+    fireEvent.keyDown(button,{key:'ArrowRight'});const first=save.mock.calls[0]![0]
+    fireEvent.keyDown(button,{key:'ArrowRight'});const second=save.mock.calls[1]![0];const latest=button.style.left
+    view.rerender(<PetOverlay {...props} position={first}/>);expect(button.style.left).toBe(latest)
+    await act(async()=>completions[0]!());expect(button.style.left).toBe(latest)
+    view.rerender(<PetOverlay {...props} position={second}/>)
+    await act(async()=>completions[1]!());expect(button.style.left).toBe(latest)
+    expect(screen.queryByText('位置未保存')).toBeNull()
+  })
+  it('resize cancels a captured gesture and preserves normalized saved coordinates without opening details',()=>{
+    const save=vi.fn(async()=>{});const open=vi.fn();const width=window.innerWidth
+    const view=render(<PetOverlay pet={pet()} scene="idle" paused position={{x:0.5,y:0.5}} save={save} open={open} taskId="a"/>)
+    const button=screen.getByRole('button')
+    fireEvent.pointerDown(button,{button:0,pointerId:3,clientX:100,clientY:100})
+    fireEvent.pointerMove(button,{pointerId:3,clientX:180,clientY:120})
+    try {
+      Object.defineProperty(window,'innerWidth',{configurable:true,value:640})
+      fireEvent(window,new Event('resize'))
+      expect(parseFloat(button.style.left)).toBe((640-112)*0.5)
+      fireEvent.pointerUp(button,{pointerId:3,clientX:180,clientY:120})
+      fireEvent.click(button);expect(open).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled()
+      expect(HTMLElement.prototype.releasePointerCapture).toHaveBeenCalledWith(3)
+    } finally { Object.defineProperty(window,'innerWidth',{configurable:true,value:width});view.unmount() }
+  })
+  it('right-click and keyboard menu keep focus, settings and persistent close on the existing owners',async()=>{
+    const cell=store({status:'ready',writable:true,value:{enabled:true,position:{x:0.5,y:0.5}}})
+    const settings={...cell,set:vi.fn(async(key:string,value:unknown)=>{cell.set({...cell.getSnapshot(),value:{...cell.getSnapshot().value,[key]:value}})})}
+    const projection=store(pause);const resources={...store({status:'ready',pet:pet()}),start:vi.fn(),pause:vi.fn()}
+    const details={openTaskDetails:vi.fn(),openPetSettings:vi.fn(),readWorkFacts:()=>({delivered:false})}
+    const view=render(<PetOverlaySlot projection={projection as never} resources={resources as never} settings={settings as never} details={details}/>)
+    const button=screen.getByRole('button')
+    fireEvent.contextMenu(button,{clientX:window.innerWidth-1,clientY:window.innerHeight-1})
+    expect(screen.getByRole('menu',{name:'小芯菜单'})).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByRole('menuitem',{name:'小芯设置'}))
+    fireEvent.keyDown(screen.getByRole('menu'),{key:'End'})
+    expect(document.activeElement).toBe(screen.getByRole('menuitem',{name:'关闭小芯'}))
+    fireEvent.keyDown(screen.getByRole('menu'),{key:'Escape'})
+    expect(screen.queryByRole('menu')).toBeNull();expect(document.activeElement).toBe(button)
+    fireEvent.keyDown(button,{key:'F10',shiftKey:true})
+    fireEvent.click(screen.getByRole('menuitem',{name:'小芯设置'}))
+    expect(details.openPetSettings).toHaveBeenCalledTimes(1);expect(details.openTaskDetails).not.toHaveBeenCalled()
+    fireEvent.contextMenu(button)
+    fireEvent.click(screen.getByRole('menuitem',{name:'关闭小芯'}))
+    await act(async()=>{})
+    expect(settings.set).toHaveBeenCalledWith('enabled',false)
+    expect(cell.getSnapshot().value.enabled).toBe(false);expect(view.container.querySelector('[data-pet-id]')).toBeNull()
+    view.unmount()
+    render(<PetOverlaySlot projection={projection as never} resources={resources as never} settings={settings as never} details={details}/>)
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+  it('context close verifies persistence, prevents duplicate writes and leaves failures retryable',async()=>{
+    const settings={...store({status:'ready',writable:true,value:{enabled:true,position:{x:0.5,y:0.5}}}),set:vi.fn(async()=>{})}
+    const resources={...store({status:'ready',pet:pet()}),start:vi.fn(),pause:vi.fn()}
+    render(<PetOverlaySlot projection={store(pause) as never} resources={resources as never} settings={settings} details={{openTaskDetails:vi.fn(),openPetSettings:vi.fn(),readWorkFacts:()=>({delivered:false})}}/>)
+    fireEvent.contextMenu(screen.getByRole('button'))
+    const close=screen.getByRole('menuitem',{name:'关闭小芯'})
+    act(()=>{fireEvent.click(close);fireEvent.click(close)})
+    await act(async()=>{})
+    expect(settings.set).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('关闭未保存，请重试。')).toBeTruthy()
+    expect(screen.getByRole('menuitem',{name:'关闭小芯'}).hasAttribute('disabled')).toBe(false)
+    expect(document.querySelector('[data-pet-id]')).toBeTruthy()
+  })
+  it('menu resets persisted position and keeps settings accessible when movement is read-only',async()=>{
+    const save=vi.fn(async()=>{});const openSettings=vi.fn()
+    const props={pet:pet(),scene:'idle' as const,paused:true,position:{x:0.5,y:0.5},save,open:vi.fn(),taskId:null,openSettings,close:vi.fn(async()=>{})}
+    const view=render(<PetOverlay {...props}/>)
+    fireEvent.keyDown(screen.getByRole('button'),{key:'ContextMenu'})
+    fireEvent.click(screen.getByRole('menuitem',{name:'重置位置'}))
+    expect(save).toHaveBeenCalledWith({x:0.97,y:0.97});await act(async()=>{})
+    view.rerender(<PetOverlay {...props} movable={false}/>)
+    fireEvent.contextMenu(screen.getByRole('button'))
+    expect(screen.getByRole('menuitem',{name:'关闭小芯'}).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('menuitem',{name:'重置位置'}).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('menuitem',{name:'小芯设置'}));expect(openSettings).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button'));expect(props.open).not.toHaveBeenCalled()
+  })
   it('native Settings controls are writable only when ready and errors stay visible',async()=>{
     const settings={...store({status:'ready',writable:true,value:{enabled:true,position:{x:0.5,y:0.5}}}),set:vi.fn(async()=>{throw new Error('private error')})}
     const resources={...store({status:'unavailable'}),retry:vi.fn()}
