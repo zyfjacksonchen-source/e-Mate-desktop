@@ -13,7 +13,8 @@ function readWholeBytesSource() {
 \tif (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || before.size > maxBytes) throw new FsError("file exceeds the binary-read limit", "FS_TOO_LARGE");
 \tawait internals.inspectReadBytesAfterStat?.(target);
 \tthrowIfAborted(signal, "read");
-\tconst handle = await open(target.targetKey, "r");
+\tconst flags = emateReadConstants.O_RDONLY | (process.platform === "win32" ? 0 : ((emateReadConstants.O_NOFOLLOW ?? 0) | (emateReadConstants.O_NONBLOCK ?? 0)));
+\tconst handle = await open(target.targetKey, flags);
 \ttry {
 \t\tthrowIfAborted(signal, "read");
 \t\tconst opened = await handle.stat({ bigint: true });
@@ -49,6 +50,9 @@ export function adaptHarnessFsBytesSource(source) {
     || !source.includes('\tconst info = await statRegularFile(target, "read", signal);\n')) {
     throw new Error('Harness binary-read adapter expected one unmodified rc.7 readWholeBytes seam')
   }
+  const imports = 'import { createReadStream } from "node:fs";'
+  if (source.split(imports).length !== 2) throw new Error('Harness binary-read adapter expected one rc.7 node:fs import')
+  source = source.replace(imports, 'import { createReadStream, constants as emateReadConstants } from "node:fs";')
   const start = source.indexOf(begin)
   const end = source.indexOf(ending, start) + ending.length
   if (end <= start) throw new Error('Harness binary-read adapter missing end of rc.7 readWholeBytes')

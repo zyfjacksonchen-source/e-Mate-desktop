@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { createReadStream } from 'node:fs'
+import { createReadStream, constants as emateReadConstants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -20,7 +20,7 @@ const { FsError, FsVersion, FsTargetKey } = await import(pathToFileURL(require.r
 function owner(source = adapted, overrides = {}) {
   const start = source.indexOf('//#region lib/types/fsio.js')
   const end = source.indexOf('//#endregion', start)
-  const imports = { ...fs, ...path, createReadStream, FsError, FsVersion, FsTargetKey, ...overrides }
+  const imports = { ...fs, ...path, createReadStream, FsError, FsVersion, FsTargetKey, emateReadConstants, ...overrides }
   delete imports.default
   return new Function(...Object.keys(imports), `${source.slice(start, end)}\nreturn { readWholeBytes, resolveLocalTarget };`)(...Object.values(imports))
 }
@@ -32,8 +32,9 @@ async function fixture(t, data = Buffer.from('public')) {
   return { directory, filename, target: await owner().resolveLocalTarget(directory, filename) }
 }
 function measuredOpen(control = {}) {
-  const counts = { opened: 0, read: 0, closed: 0, requested: [] }
+  const counts = { opened: 0, read: 0, closed: 0, requested: [], flags: [] }
   return { counts, async open(...args) {
+    counts.flags.push(args[1])
     const handle = await fs.open(...args)
     counts.opened++
     await control.opened?.(handle)
@@ -74,8 +75,13 @@ test('replacement between stat and open cannot read the outside target, even whe
       await fs.rename(filename, path.join(directory, 'old.pdf'))
       await fs.symlink(outside, filename)
     },
-  }), { code: 'FS_STALE_VERSION' })
-  assert.deepEqual([measured.counts.opened, measured.counts.read, measured.counts.closed], [1, 0, 1])
+  }), error => error.code === (process.platform === 'win32' ? 'FS_STALE_VERSION' : 'ELOOP'))
+  assert.deepEqual([measured.counts.opened, measured.counts.read, measured.counts.closed], process.platform === 'win32' ? [1, 0, 1] : [0, 0, 0])
+  const flags = measured.counts.flags[0]
+  if (process.platform !== 'win32') {
+    assert.equal(flags & emateReadConstants.O_NOFOLLOW, emateReadConstants.O_NOFOLLOW)
+    assert.equal(flags & emateReadConstants.O_NONBLOCK, emateReadConstants.O_NONBLOCK)
+  }
 })
 
 test('same-size content mutation after an actual descriptor read is rejected and closes the handle', async t => {
