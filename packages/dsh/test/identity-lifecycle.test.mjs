@@ -232,6 +232,59 @@ test('a valid model lease reaches the live Gateway during control outage but not
   assert.equal(gatewayRequests, 1)
 })
 
+test('knowledge uses only the enterprise access token at the exact managed root and rejects a late response after logout', async () => {
+  const values = new Map([[SESSION_REF, stored()]])
+  const requests = []
+  let finish
+  const provider = createEnterpriseIdentityProvider(options(mapCredentials(values), async (url, init) => {
+    const target = new URL(url)
+    if (target.pathname.endsWith('/v1/auth/logout')) return new Response('', { status: 503 })
+    requests.push({ path: target.pathname, authorization: new Headers(init.headers).get('authorization'), redirect: init.redirect })
+    if (target.pathname === '/ecorex-agent/client/knowledge/v1/search') return await new Promise(resolve => { finish = resolve })
+    return Response.json({ ok: true })
+  }))
+  const root = 'https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1'
+  await provider.authenticatedRequest(root + '/catalog')
+  await provider.authenticatedRequest('https://mvdcm.ecoremedia.net/ecorex-agent/client/skill-hub/v1/search')
+  assert.deepEqual(requests.map(r => r.authorization), ['Bearer access.payload.signature', 'Bearer model.payload.signature'])
+  assert.ok(requests.every(r => r.redirect === 'error'))
+  for (const url of [root + '-other/catalog', root.replace('https:', 'http:') + '/catalog', root + '/catalog#fragment']) {
+    await assert.rejects(provider.authenticatedRequest(url), /outside the managed enterprise root/)
+  }
+  await assert.rejects(provider.authenticatedRequest(root + '/catalog', { headers: { authorization: 'Bearer forbidden' } }), /cannot override authorization/)
+  const pending = provider.authenticatedRequest(root + '/search')
+  while (!finish) await new Promise(resolve => setImmediate(resolve))
+  await provider.logout({ client_request_id: 'logout-during-knowledge' })
+  finish(Response.json({ private: 'old-account-result' }))
+  await assert.rejects(pending, /session mutation was superseded/)
+})
+
+test('valid enterprise access remains usable for knowledge during model lease expiry, but revoked access never does', async () => {
+  const remembered = JSON.parse(stored())
+  remembered.session.modelGateway.expiresAt = new Date(NOW - 1).toISOString()
+  let revoked = false
+  let knowledgeReads = 0
+  const provider = createEnterpriseIdentityProvider(options(mapCredentials(new Map([[SESSION_REF, JSON.stringify(remembered)]])), async (url, init) => {
+    if (new URL(url).pathname.endsWith('/v1/auth/refresh')) {
+      if (revoked) return Response.json({ error: { code: 'SESSION_REVOKED' } }, { status: 401 })
+      throw new Error('synthetic control outage')
+    }
+    knowledgeReads++
+    assert.equal(new Headers(init.headers).get('authorization'), 'Bearer access.payload.signature')
+    return Response.json({ ok: true })
+  }))
+  assert.equal((await provider.bootstrap()).authenticated, true)
+  assert.deepEqual(provider.localAccountPrincipal(), { tenantId: 'tenant-test', userId: 'user-a' })
+  await provider.authenticatedRequest('https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1/catalog')
+  assert.equal(knowledgeReads, 1)
+  await assert.rejects(provider.modelRuntimePolicy(), /暂时不可用/u)
+  revoked = true
+  assert.deepEqual(await provider.bootstrap(), { authenticated: false, workspace_unlocked: false })
+  assert.equal(provider.localAccountPrincipal(), undefined)
+  await assert.rejects(provider.authenticatedRequest('https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1/catalog'), /login is required/)
+  assert.equal(knowledgeReads, 1)
+})
+
 test('terminal refresh revocation clears every managed ref before access expiry', async () => {
   const { createEnterpriseIdentityProvider: createProvider } = await loadEnterpriseProviderSource()
   for (const code of ['INVALID_GRANT', 'SESSION_REVOKED', 'TOKEN_REUSED']) {
@@ -244,10 +297,7 @@ test('terminal refresh revocation clears every managed ref before access expiry'
         status: 401, headers: { 'content-type': 'application/json' },
       })
     }))
-    await assert.rejects(provider.bootstrap(), error => {
-      assert.equal(error.code, code)
-      return true
-    })
+    assert.deepEqual(await provider.bootstrap(), { authenticated: false, workspace_unlocked: false })
     assert.equal(values.size, 0)
     assert.deepEqual(await provider.bootstrap(), { authenticated: false, workspace_unlocked: false })
   }

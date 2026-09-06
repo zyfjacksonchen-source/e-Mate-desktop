@@ -11,6 +11,7 @@ export const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
 const MAX_JSON_BYTES = 2 * 1024 * 1024
 const REQUEST_TIMEOUT_MS = 15_000
 const REFRESH_EARLY_MS = 60_000
+const KNOWLEDGE_ROOT = new URL('https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1')
 const SKILL_HUB_ROOTS = [
   new URL('https://mvdcm.ecoremedia.net/ecorex-agent/client/skill-hub/v1'),
   new URL('https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1'),
@@ -821,6 +822,19 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     return value
   }
 
+  const activeAccessSession = async () => {
+    let value: StoredSession | undefined
+    try {
+      value = await active()
+    } catch (error) {
+      if (error instanceof RefreshFailure && TERMINAL_REFRESH_FAILURE_CODES.has(error.code)) return undefined
+      if (!(error instanceof IdentityServiceUnavailable)
+        && !(error instanceof RefreshFailure && error.code === 'RATE_LIMITED')) throw error
+      value = await load()
+    }
+    return value !== undefined && Date.parse(value.session.expiresAt) > now() ? value : undefined
+  }
+
   const modelCall = (value: StoredSession, path: string, init: RequestInit, label: string) => {
     return call(modelRoot, path, {
       ...init,
@@ -875,8 +889,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
 
   const provider = {
     localAccountPrincipal() {
-      if (current === undefined || Date.parse(current.session.expiresAt) <= now()
-        || Date.parse(current.session.modelGateway.expiresAt) <= now()) return undefined
+      if (current === undefined || Date.parse(current.session.expiresAt) <= now()) return undefined
       const { tenantId, userId } = current.session.identity
       return { tenantId, userId }
     },
@@ -886,18 +899,8 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         : `${current.session.identity.tenantId}:${current.session.identity.userId}`
     },
     async bootstrap() {
-      let value: StoredSession | undefined
-      try {
-        value = await active()
-      } catch (error) {
-        if (!(error instanceof IdentityServiceUnavailable)) throw error
-        value = await load()
-      }
+      const value = await activeAccessSession()
       if (value === undefined) return { authenticated: false, workspace_unlocked: false }
-      if (Date.parse(value.session.expiresAt) <= now()
-        || Date.parse(value.session.modelGateway.expiresAt) <= now()) {
-        return { authenticated: false, workspace_unlocked: false }
-      }
       if (agreementExempt(value)) {
         return {
           authenticated: true,
@@ -1112,15 +1115,23 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       const modelTarget = target.search === '' && target.toString().startsWith(`${modelRoot}/`)
       const skillHubTarget = SKILL_HUB_ROOTS.some(root => target.origin === root.origin
         && (target.pathname === root.pathname || target.pathname.startsWith(`${root.pathname}/`)))
-      if (target.username || target.password || target.hash || (!modelTarget && !skillHubTarget)) {
+      const knowledgeTarget = target.origin === KNOWLEDGE_ROOT.origin
+        && (target.pathname === KNOWLEDGE_ROOT.pathname || target.pathname.startsWith(`${KNOWLEDGE_ROOT.pathname}/`))
+      if (target.username || target.password || target.hash || (!modelTarget && !skillHubTarget && !knowledgeTarget)) {
         throw new Error('e-Mate authenticated request target is outside the managed enterprise root')
       }
-      const value = await active()
+      const value = await (knowledgeTarget ? activeAccessSession() : active())
       if (value === undefined) throw new Error('e-Mate login is required')
+      const revision = leaseRevision
       const headers = new Headers(init.headers)
       if (headers.has('authorization')) throw new Error('e-Mate authenticated request cannot override authorization')
-      headers.set('authorization', `Bearer ${value.session.modelGateway.sessionToken}`)
-      return request(target, { ...init, redirect: 'error', headers })
+      headers.set('authorization', `Bearer ${knowledgeTarget ? value.session.accessToken : value.session.modelGateway.sessionToken}`)
+      const response = await request(target, { ...init, redirect: 'error', headers })
+      if (knowledgeTarget && revision !== leaseRevision) {
+        await response.body?.cancel().catch(() => {})
+        throw new Error('e-Mate enterprise session mutation was superseded')
+      }
+      return response
     },
     async dispose() {
       if (current?.remember_login === false) await clear()
