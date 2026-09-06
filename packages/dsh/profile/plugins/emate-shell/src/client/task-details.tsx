@@ -1,5 +1,6 @@
 import type { ConversationSnapshot, UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import css from './task-details.module.css'
+import { createPetWorkFactsReader } from './pet-image-facts.ts'
 
 const phaseLabels: Record<string, string> = {
   active: '进行中', blocked: '等待处理', paused: '已暂停', completed: '已完成',
@@ -48,6 +49,7 @@ export function TaskDetails({ sessionId, taskId, close, useSession, useSessions,
 }
 
 export function registerPetTaskDetails(ctx: any, notify: (level: 'info' | 'error', text: string) => void): void {
+  const readWorkFacts = createPetWorkFactsReader(ctx)
   let disposePanel: (() => void) | undefined
   let generation = 0
   const release = () => { generation++; disposePanel?.(); disposePanel = undefined }
@@ -66,7 +68,7 @@ export function registerPetTaskDetails(ctx: any, notify: (level: 'info' | 'error
     ctx.layout.openDetails()
   }
   ctx.effect(() => {
-    const dispose = ctx.reflect.provide('ematePetDetails', { release,
+    const dispose = ctx.reflect.provide('ematePetDetails', { release, readWorkFacts,
       openTaskDetails(taskId: string) { void open(taskId).catch(() => notify('error', '任务详情未能打开，请先处理画布保存问题或稍后重试。')) },
     })
     return () => { release(); void dispose() }
