@@ -4,9 +4,11 @@ import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { pathToFileURL } from 'node:url'
+import { Script } from 'node:vm'
 import { adaptHarnessConversationSource } from './harness-conversation-adapter.mjs'
 
-const native = readFileSync(new URL('../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', import.meta.url), 'utf8')
+const native = readFileSync(process.env.EMATE_TEST_NATIVE_ROOT ? join(process.env.EMATE_TEST_NATIVE_ROOT, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js') : new URL('../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', import.meta.url), 'utf8')
 const adapted = adaptHarnessConversationSource(native)
 
 // Execute the actual transformed native machine/facade/hub. The only fixture is
@@ -15,7 +17,7 @@ const section = (start, end) => adapted.slice(adapted.indexOf(start), adapted.in
 const owners = new Function('_deepseek_ai_dsh_client_runtime_client', [
   section('function emateDraftFiles(', '\t\t//#endregion'),
   section('\t\t//#region lib/types/client/queue/store.js', '\t\t//#region ../../../vendor/cosmokit/src/misc.ts'),
-  'return { SessionInputShell, InputHub, createChatStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview }',
+  'return { SessionInputShell, InputHub, createChatStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateCanvasNavigationRequest, emateCanvasBeforeView }',
 ].join('\n'))({
   defineStore: value => value,
   createSnapshotStore(initial) {
@@ -44,6 +46,7 @@ function setup(sendSession = async () => {}) {
 }
 
 test('every pinned seam fails closed on missing, duplicate or already adapted input', () => {
+  assert.doesNotThrow(() => new Script(adapted))
   assert.throws(() => adaptHarnessConversationSource('future'), /expected one rc\.7 seam/u)
   assert.throws(() => adaptHarnessConversationSource(native + native), /found 2/u)
   assert.throws(() => adaptHarnessConversationSource(adapted), /expected one rc\.7 seam/u)
@@ -358,4 +361,134 @@ test('packaged runtime verifies the adapter and actual client hashes instead of 
     writeFileSync(join(root, 'e-mate-conversation-adapter.mjs'), 'changed')
     assert.throws(resolvePackage, /provenance is missing or mismatched/u)
   } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+function pendingSave() {
+  let resolve, reject
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+function nativeHeader(beforeViewNavigate) {
+  const cleanups = []
+  const hooks = { useRef: value => ({ current: value }), useEffect: callback => { const cleanup = callback(); if (cleanup) cleanups.push(cleanup) }, useSyncExternalStore() {} }
+  const jsx = (type, props) => ({ type, props })
+  const Header = new Function('react', 'react_jsx_runtime', 'clsx', 'ConversationRoot_module_css_default', 'emateCanvasNavigationRequest',
+    section('\t\tconst DEFAULT_VIEW_ID =', '\t\tfunction ConversationSession({') + '\nreturn ConversationSessionHeader;')(
+    hooks, { jsx, jsxs: jsx, Fragment: 'fragment' }, (...args) => args.filter(Boolean).join(' '), {}, owners.emateCanvasNavigationRequest,
+  )
+  let selected = 'e-mate-canvas', current = 'one'
+  const writes = [], errors = [], opens = []
+  const tree = Header({ sessionId: 'one', views: { list: () => [{ id: 'chat', label: '对话' }, { id: 'e-mate-gallery', label: '画廊' }, { id: 'e-mate-canvas', label: '画布' }], subscribe() {}, version() {} },
+    useStore: selector => selector({ view: selected }), useSessions: selector => selector({ byId: { one: { id: 'one', displayTitle: 'Current task', origin: 'subagent', parentId: 'parent' }, parent: { id: 'parent', displayTitle: 'Parent task' } } }),
+    useSession: selector => selector({ composerPhase: 'active', blank: false }), actions: { setView: view => { selected = view; writes.push(view) } },
+    renderSlot: () => null, open(id) { opens.push(id); current = id }, t: value => value, beforeViewNavigate,
+    isCurrentViewSession: () => current === 'one', reportViewError: error => errors.push(error.message),
+  })
+  const nodes = []
+  const walk = node => { if (Array.isArray(node)) return node.forEach(walk); if (!node || typeof node !== 'object') return; nodes.push(node); walk(node.props?.children) }
+  walk(tree)
+  return { click: label => nodes.find(node => node.props?.role === 'tab' && node.props.children === label).props.onClick(),
+    clickParent: () => nodes.find(node => node.type === 'button' && node.props.children === 'Parent task').props.onClick(),
+    current: () => current, opens, selected: () => selected, writes, errors, switchSession: () => { current = 'two' }, unmount: () => cleanups.forEach(callback => callback()) }
+}
+
+test('native canvas tab awaits save; conflict holds the old view and success commits its native action', async () => {
+  let save = pendingSave()
+  const h = nativeHeader(view => view === 'e-mate-canvas' ? undefined : save.promise)
+  h.click('画廊')
+  assert.equal(h.selected(), 'e-mate-canvas')
+  assert.deepEqual(h.writes, [])
+  save.reject(new Error('save conflict')); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.selected(), 'e-mate-canvas')
+  assert.deepEqual(h.errors, ['save conflict'])
+  save = pendingSave(); h.click('对话'); save.resolve()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(h.writes, ['chat'])
+})
+
+test('late tab saves cannot overrule a newer click, a different session or an unmounted header', async () => {
+  for (const mode of ['new-click', 'session', 'unmount']) {
+    const save = pendingSave()
+    const h = nativeHeader(view => view === 'e-mate-canvas' ? undefined : save.promise)
+    h.click('对话')
+    if (mode === 'new-click') h.click('画布')
+    else if (mode === 'session') h.switchSession()
+    else h.unmount()
+    save.resolve(); await new Promise(resolve => setImmediate(resolve))
+    assert.equal(h.selected(), 'e-mate-canvas')
+    assert.equal(h.writes.includes('chat'), false)
+  }
+})
+
+test('only the current canvas requests a guard; ordinary tabs retain synchronous native selection', () => {
+  let calls = 0
+  const ctx = { get: () => ({ activeSessionId: () => 'one', beforeNavigate: () => { calls++; return Promise.resolve() } }) }
+  assert.equal(owners.emateCanvasBeforeView(ctx, 'one', 'e-mate-canvas'), undefined)
+  assert.equal(owners.emateCanvasBeforeView(ctx, 'two', 'chat'), undefined)
+  assert.equal(owners.emateCanvasBeforeView({ get: () => undefined }, 'one', 'chat'), undefined)
+  assert.equal(calls, 0)
+  assert.ok(owners.emateCanvasBeforeView(ctx, 'one', 'chat') instanceof Promise)
+  assert.equal(calls, 1)
+  const h = nativeHeader(() => undefined)
+  h.click('画廊')
+  assert.equal(h.selected(), 'e-mate-gallery')
+})
+
+test('native composer hiding uses active view projection and keeps pending interaction overlays', async t => {
+  const browserPath = process.env.EMATE_CANVAS_BROWSER ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  if (!existsSync(browserPath)) { t.skip('local component browser is unavailable'); return }
+  const root = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
+  const { chromium } = await import(pathToFileURL(join(root, 'upstream/deepseek-harness/node_modules/.pnpm/node_modules/playwright/index.mjs')))
+  const browser = await chromium.launch({ executablePath: browserPath, headless: true })
+  t.after(() => browser.close())
+  const page = await browser.newPage()
+  await page.route('**/*', route => route.abort())
+  await page.setContent('<div data-conversation-scroll><div data-slot="conversation.session"><div data-emate-active-view="e-mate-canvas"></div></div><div data-composer-seat data-emate-has-interactions="false"><div data-emate-composer-fallback><textarea>untouched draft</textarea></div><div data-conversation-composer-overlay>Approval question</div></div></div>')
+  const cssStart = adapted.indexOf('\t\tconst css$6 =')
+  const cssEnd = adapted.indexOf('\t\t//#endregion', cssStart)
+  await page.addScriptTag({ content: adapted.slice(cssStart, cssEnd) })
+  assert.equal(await page.locator('[data-composer-seat]').isVisible(), false)
+  await page.locator('[data-composer-seat]').evaluate(node => node.setAttribute('data-emate-has-interactions', 'true'))
+  assert.equal(await page.locator('[data-conversation-composer-overlay]').isVisible(), true)
+  assert.equal(await page.locator('[data-emate-composer-fallback]').isVisible(), false)
+  await page.locator('[data-emate-active-view]').evaluate(node => node.setAttribute('data-emate-active-view', 'chat'))
+  assert.equal(await page.locator('[data-emate-composer-fallback]').isVisible(), true)
+  assert.equal(await page.locator('textarea').inputValue(), 'untouched draft')
+  // These attrs are emitted by native owners; no DOM listener or duplicate
+  // composer implementation supplies view or interaction state.
+  assert.match(adapted, /"data-emate-active-view": active\?\.id \?\? "chat"/u)
+  assert.match(adapted, /"data-emate-has-interactions": pending\.length > 0 \? "true" : "false"/u)
+  assert.match(adapted, /beforeViewNavigate: \(view\) => emateCanvasBeforeView\(ctx, sessionId, view\)/u)
+})
+
+test('native parent-session breadcrumb shares the save guard and commits only after success', async () => {
+  let save = pendingSave()
+  const h = nativeHeader(() => save.promise)
+  h.clickParent()
+  assert.equal(h.current(), 'one')
+  assert.deepEqual(h.opens, [])
+  save.reject(new Error('conflict')); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.current(), 'one')
+  assert.deepEqual(h.errors, ['conflict'])
+  save = pendingSave(); h.clickParent(); save.resolve()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.current(), 'parent')
+  assert.deepEqual(h.opens, ['parent'])
+})
+
+test('tabs and parent-session clicks share one generation so only the latest destination wins', async () => {
+  for (const latest of ['tab', 'parent']) {
+    const save = pendingSave()
+    const h = nativeHeader(() => save.promise)
+    if (latest === 'tab') { h.clickParent(); h.click('画廊') }
+    else { h.click('画廊'); h.clickParent() }
+    save.resolve(); await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(h.opens, latest === 'parent' ? ['parent'] : [])
+    assert.deepEqual(h.writes, latest === 'tab' ? ['e-mate-gallery'] : [])
+  }
+  const save = pendingSave()
+  const h = nativeHeader(() => save.promise)
+  h.clickParent(); h.switchSession(); save.resolve()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(h.opens, [])
 })

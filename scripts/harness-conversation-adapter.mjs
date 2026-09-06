@@ -92,6 +92,33 @@ function emateQueuePreview(row) {
   return chars.length > 200 ? chars.slice(0, 200).join('') + '…' : text
 }
 
+// An async transition fence over the existing tab action. Selection remains
+// wholly in the native chat store; this ref only discards stale save outcomes.
+function emateCanvasNavigationRequest(sequence, beforeNavigate, isCurrentSession, selectView, reportError) {
+  return (view) => {
+    const token = ++sequence.current;
+    const current = () => sequence.current === token && isCurrentSession();
+    const commit = () => { if (current()) selectView(view); };
+    const failed = (error) => { if (current()) reportError(error); };
+    try {
+      const pending = beforeNavigate(view);
+      if (pending && typeof pending.then === "function") return Promise.resolve(pending).then(commit, failed);
+      commit();
+    } catch (error) { failed(error); }
+  };
+}
+function emateCanvasBeforeView(ctx, sessionId, view) {
+  if (view === "e-mate-canvas") return;
+  const canvas = ctx.get("emateCanvas");
+  if (canvas?.activeSessionId() === sessionId) return canvas.beforeNavigate();
+}
+
+const CANVAS_FRAME_CSS = '[data-conversation-scroll]:has([data-emate-active-view="e-mate-canvas"]) [data-emate-composer-fallback]{display:none}'
+  + '[data-conversation-scroll]:has([data-emate-active-view="e-mate-canvas"])>[data-composer-seat][data-emate-has-interactions="false"]{display:none}'
+  + '[data-conversation-scroll]:has([data-emate-active-view="e-mate-canvas"])>[data-slot="conversation.session"]{display:flex;flex:1;min-height:0;min-width:0}'
+  + '[data-conversation-scroll] [data-emate-active-view="e-mate-canvas"]{display:flex;flex-direction:column;flex:1 1 0;min-height:0;min-width:0;overflow:hidden}'
+  + '[data-emate-active-view="e-mate-canvas"]>[data-slot="conversation.view"]{display:flex;flex:1;min-height:0;min-width:0}';
+
 /** Desktop's copied navigation 0.2.1 bundle: one projection for AX and hover. */
 export function adaptNavigationSource(source) {
   source = replaceOnce(source, '      const textOfBlocks = (blocks) => {',
@@ -104,8 +131,23 @@ export function adaptNavigationSource(source) {
 export function adaptHarnessConversationSource(source) {
   const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
 
+  // Native Header still commits via its own scoped actions; failed saves do
+  // not change view, and pending work cannot redirect a newer session/click.
+  change('function ConversationSessionHeader({ sessionId, useSession, useSessions, useStore, actions, renderSlot, views, open, t }) {',
+    'function ConversationSessionHeader({ sessionId, useSession, useSessions, useStore, actions, renderSlot, views, open: commitSessionOpen, beforeViewNavigate, isCurrentViewSession, reportViewError, t }) {\n\t\t\tconst navigation = (0, react.useRef)(0);\n\t\t\t(0, react.useEffect)(() => () => { navigation.current += 1; }, [sessionId]);\n\t\t\tconst selectView = emateCanvasNavigationRequest(navigation, beforeViewNavigate, isCurrentViewSession, actions.setView, reportViewError);\n\t\t\tconst open = emateCanvasNavigationRequest(navigation, () => beforeViewNavigate("chat"), isCurrentViewSession, commitSessionOpen, reportViewError);', 'canvas/header-guard')
+  change('\t\t\t\t\t\t\t\t\t\t\topen(summary.id);', '\t\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);', 'canvas/parent-session-action')
+  change('\t\t\t\t\t\t\tactions.setView(viewTab.id);', '\t\t\t\t\t\t\tvoid selectView(viewTab.id);', 'canvas/tab-action')
+  change('\t\t\t\tinject: () => ({\n\t\t\t\t\tviews,\n\t\t\t\t\topen: (id) => {',
+    '\t\t\t\tinject: (sessionId) => ({\n\t\t\t\t\tviews,\n\t\t\t\t\tbeforeViewNavigate: (view) => emateCanvasBeforeView(ctx, sessionId, view),\n\t\t\t\t\tisCurrentViewSession: () => sessions.list.getSnapshot().current === sessionId,\n\t\t\t\t\treportViewError: (error) => { const scope = sessions.scope(sessionId); if (scope) ctx.conversation.input.for(scope).notify("error", error instanceof Error ? error.message : "画布尚未保存，请重试。"); },\n\t\t\t\t\topen: (id) => {', 'canvas/header-inject')
+  // Preserve the mounted input/draft and native approval/question overlay.
+  // Only its ordinary fallback is hidden; an elected interaction stays usable.
+  change('\t\t\t\tclassName: ConversationRoot_module_css_default.composerFallback,', '\t\t\t\tclassName: ConversationRoot_module_css_default.composerFallback,\n\t\t\t\t"data-emate-composer-fallback": "",', 'canvas/composer-fallback')
+  change('\t\t\t\t"data-composer-seat": "",', '\t\t\t\t"data-composer-seat": "",\n\t\t\t\t"data-emate-has-interactions": pending.length > 0 ? "true" : "false",', 'canvas/interaction-seat')
+  change('\t\t\t\tclassName: ConversationRoot_module_css_default.viewArea,', '\t\t\t\tclassName: ConversationRoot_module_css_default.viewArea,\n\t\t\t\t"data-emate-active-view": active?.id ?? "chat",', 'canvas/active-view')
+  change('\t\t\ttag.textContent = css$6;', '\t\t\ttag.textContent = css$6 + ' + JSON.stringify(CANVAS_FRAME_CSS) + ';', 'canvas/frame-css')
+
   // stores.ts: extend the existing per-session dsh.conversation.chat record.
-  change('\t\tfunction createChatStore() {', `${[emateDraftFiles, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview].map(fn => fn.toString()).join('\n')}\n\t\tfunction createChatStore() {`, 'stores/helper')
+  change('\t\tfunction createChatStore() {', `${[emateDraftFiles, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateCanvasNavigationRequest, emateCanvasBeforeView].map(fn => fn.toString()).join('\n')}\n\t\tfunction createChatStore() {`, 'stores/helper')
   change('\t\t\t\t\tdraft: "",\n\t\t\t\t\tview: null,', '\t\t\t\t\tdraft: "",\n\t\t\t\t\tfileRefs: [],\n\t\t\t\t\timageRefs: [],\n\t\t\t\t\tview: null,', 'stores/init')
   change('\t\t\t\t\tsetDraft: (d, text) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t},', '\t\t\t\t\tsetDraft: (d, text, fileRefs = [], imageRefs = []) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t\td.fileRefs = fileRefs;\n\t\t\t\t\t\td.imageRefs = imageRefs;\n\t\t\t\t\t},', 'stores/mirror-action')
 
