@@ -3472,7 +3472,15 @@ test('enterprise identity provider maps target credentials and the production HT
     path: '/ecorex-agent/client/skill-hub/v1/skills',
     authorization: `Bearer ${modelToken}`,
   })
+  const migratedHubUrl = skillHubUrl.replace('emate-skill-hub.emate-zyfjacksonchen.workers.dev', 'mvdcm.ecoremedia.net')
+  assert.equal((await provider.authenticatedRequest(migratedHubUrl)).ok, true)
+  assert.deepEqual(requests.at(-1), {
+    url: migratedHubUrl, path: '/ecorex-agent/client/skill-hub/v1/skills', authorization: `Bearer ${modelToken}`,
+  })
   for (const target of [
+    'https://mvdcm.ecoremedia.net/ecorex-agent/client/skill-hub/v10/skills',
+    'https://mvdcm.ecoremedia.net/ecorex-agent/client/other-service',
+    'http://mvdcm.ecoremedia.net/ecorex-agent/client/skill-hub/v1/skills',
     'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v10/skills?query=office&limit=24',
     'https://example.com/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24',
     'https://user:password@emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24',

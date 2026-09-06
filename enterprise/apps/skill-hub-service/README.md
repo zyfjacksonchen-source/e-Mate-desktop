@@ -34,3 +34,9 @@ E_MATE_TEST_POSTGRES_URL=postgresql://postgres@127.0.0.1:65432/emate218 corepack
 ```
 
 The last command must target an isolated test database. Tests create and remove random `sh_test_*`/`sh_stage_*` schemas; without the variable PostgreSQL cases are explicitly skipped. These checks do not establish production migration or real-user installation acceptance.
+
+The existing-server deployment files are `deploy/compose.skill-hub.yml` and `deploy/skill-hub.routes.conf` (relative to `enterprise/`). Pin the verified image ID, use the existing separate data/egress networks, and bind the API only to loopback port 18789. The public API keeps `/ecorex-agent/client/skill-hub/v1` on `mvdcm.ecoremedia.net`; the old Worker's `/healthz` forwards to the isolated health path under that prefix.
+
+Prepare the proxy with `skill-hub-write-hold.conf` installed as `/etc/nginx/e-mate-skill-hub-write-mode.conf`. Before the final export, make the old Worker read-only, install and read back the exact 18 triggers in `skill-hub-freeze-d1.sql`, then validate the untouched official export. D1 metadata is frozen only after that readback; old in-flight uploads may still leave unreferenced R2 objects. Migrate every package referenced by frozen D1, retain and separately inventory unreferenced objects in the old bucket, and do not claim the entire bucket is frozen.
+
+Start and validate the new service while the proxy still rejects writes, switch the fixed Worker forwarder, verify authenticated reads, then remove the proxy write hold as the write cutover. Keep D1 frozen afterwards. `skill-hub-thaw-d1-before-cutover.sql` is only for an abort before the new service accepts any write. Later recovery uses PostgreSQL plus the matching volume backup; reverting to writable D1 would create a second data owner.

@@ -1,0 +1,19 @@
+-- PRE-CUTOVER ABORT ONLY: never thaw D1 after the new service has accepted a write.
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_skills_insert;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_skills_update;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_skills_delete;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_versions_insert;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_versions_update;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_versions_delete;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_publication_tombstones_insert;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_publication_tombstones_update;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_publication_tombstones_delete;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_mutation_requests_insert;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_mutation_requests_update;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_mutation_requests_delete;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_install_intents_insert;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_install_intents_update;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_install_intents_delete;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_install_logs_insert;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_install_logs_update;
+DROP TRIGGER IF EXISTS emate218_hold_skill_hub_install_logs_delete;

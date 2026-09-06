@@ -120,6 +120,8 @@ test('catalog search omits empty optional filters but rejects a non-string curso
     query: '',
     tag: '',
   }), { items: [], next_cursor: null })
+  assert.equal(requests[0].origin, 'https://mvdcm.ecoremedia.net')
+  assert.equal(requests[0].pathname, '/ecorex-agent/client/skill-hub/v1/skills')
   assert.equal(requests[0].searchParams.get('category'), 'office_productivity')
   assert.equal(requests[0].searchParams.get('cursor'), null)
   assert.equal(requests[0].searchParams.get('tag'), null)

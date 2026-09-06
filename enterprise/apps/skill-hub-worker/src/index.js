@@ -23,7 +23,8 @@ export default {
       const headers = new Headers(request.headers)
       headers.delete('host')
       headers.delete('cookie')
-      const response = await fetch(new Request(`${target.origin}${incoming.pathname}${incoming.search}`, {
+      const path = incoming.pathname === '/healthz' ? `${BASE_PATH}/healthz` : incoming.pathname
+      const response = await fetch(new Request(`${target.origin}${path}${incoming.search}`, {
         method: request.method, headers, body: request.body, redirect: 'manual', signal: AbortSignal.timeout(45_000),
         ...(request.body ? { duplex: 'half' } : {}),
       }))

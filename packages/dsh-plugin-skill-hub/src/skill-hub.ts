@@ -1208,7 +1208,7 @@ function installedSkillArchive(dshHome, slug) {
   return payload
 }
 
-export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1' }) {
+export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https://mvdcm.ecoremedia.net/ecorex-agent/client/skill-hub/v1' }) {
   if (typeof request !== 'function') throw new Error('Skill Hub requires the authenticated identity transport')
   if (store === undefined) throw new Error('Skill Hub requires its native DSH lifecycle store')
   const base = hubBase(baseUrl)

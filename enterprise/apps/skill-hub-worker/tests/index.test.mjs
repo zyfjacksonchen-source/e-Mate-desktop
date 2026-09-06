@@ -53,6 +53,8 @@ test('fixed forwarding needs root configuration and never falls back or follows 
     const response = await worker.fetch(request('/ecorex-agent/client/skill-hub/v1/skills?limit=1'), env)
     assert.equal(response.status, 200)
     assert.deepEqual(calls, ['https://fixed-service.example/ecorex-agent/client/skill-hub/v1/skills?limit=1'])
+    assert.equal((await worker.fetch(request('/healthz'), env)).status, 200)
+    assert.equal(calls.at(-1), 'https://fixed-service.example/ecorex-agent/client/skill-hub/v1/healthz')
     globalThis.fetch = async () => new Response(null, { status: 302, headers: { location: 'https://other.example' } })
     assert.equal((await worker.fetch(request('/ecorex-agent/client/skill-hub/v1/skills'), env)).status, 503)
     globalThis.fetch = async () => { throw new Error('offline') }

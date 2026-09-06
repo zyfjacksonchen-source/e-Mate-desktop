@@ -1,0 +1,43 @@
+name: e-mate-skill-hub
+services:
+  skill-hub:
+    image: ${EMATE_SKILL_HUB_IMAGE:?Set the verified immutable service image}
+    user: "10001:0"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    ports: ["127.0.0.1:18789:8788"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    environment:
+      SKILL_HUB_HOST: 0.0.0.0
+      SKILL_HUB_PORT: "8788"
+      SKILL_HUB_SCHEMA: skill_hub
+      SKILL_HUB_VOLUME: /var/lib/e-mate-skill-hub
+      SKILL_HUB_DATABASE_URL_FILE: /run/secrets/postgres-url
+      SKILL_HUB_AUTHOR_KEY_FILE: /run/secrets/author-key
+      SKILL_HUB_MODEL_VALIDATION_URL: https://mvdcm.ecoremedia.net/e-mate/model-api/v1/consents/current
+    volumes:
+      - ${SKILL_HUB_SECRETS_DIR:?Set the private secret directory}/postgres-url:/run/secrets/postgres-url:ro
+      - ${SKILL_HUB_SECRETS_DIR:?Set the private secret directory}/author-key:/run/secrets/author-key:ro
+      - ${SKILL_HUB_VOLUME_DIR:?Set the persistent volume directory}:/var/lib/e-mate-skill-hub
+    networks: [enterprise-data, enterprise-egress]
+    healthcheck:
+      test: [CMD, bun, -e, "const r = await fetch('http://127.0.0.1:8788/readyz'); process.exit(r.ok ? 0 : 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+networks:
+  enterprise-data:
+    external: true
+    name: ${EMATE_ENTERPRISE_DATA_NETWORK:?Set the existing enterprise data network}
+  enterprise-egress:
+    external: true
+    name: ${EMATE_ENTERPRISE_EGRESS_NETWORK:?Set the existing enterprise egress network}
