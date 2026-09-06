@@ -5,7 +5,9 @@ import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SidebarRoot } from '../src/client/sidebar.tsx'
 import { HeaderControls } from '../src/client/header-controls.tsx'
-import { SettingsChrome, SettingsCloseLabel, SettingsTrigger } from '../src/client/settings-chrome.tsx'
+import { SettingsChrome, SettingsCloseLabel, SettingsTrigger, openNativePetSettings } from '../src/client/settings-chrome.tsx'
+
+import { SettingsRoot as NativeSettingsRoot } from '../../../../../../upstream/deepseek-harness/packages/client/ui-settings-general/src/client/SettingsRoot.tsx'
 
 vi.mock('../src/client/session-share.tsx', () => ({ SessionShareAction: () => null }))
 
@@ -280,4 +282,72 @@ it('identity change cancels a late Settings open; locked startup waits for gate 
   needsSave = false
   await act(async () => { gate.remove() })
   expect(nativeOpen).toHaveBeenCalledOnce()
+})
+
+
+function nativePetSettingsSidebar(beforeNavigate?: () => Promise<void> | undefined, mounted?: () => void) {
+  function NativeSettings() {
+    React.useEffect(() => { mounted?.() }, [])
+    return <NativeSettingsRoot wide
+      useSections={select => select([{ id: 'profile', label: '个人资料' }, { id: 'appearance-motion', label: '小芯与动态效果' }, { id: 'general', label: '通用设置' }])}
+      useOnboardingSteps={select => select([])} useSessions={select => select(sessionState as never)}
+      renderSlot={(name, _props, options) => name === 'settings.trigger' ? <SettingsTrigger wide SettingsIcon={Icon} beforeNavigate={beforeNavigate} />
+        : name === 'settings.header' ? <SettingsChrome /> : name === 'settings.close' ? <SettingsCloseLabel />
+          : name === 'settings.section' ? <p data-native-section={options?.only}>{options?.only} 内容</p> : null} />
+  }
+  return <SidebarRoot {...props(() => {})} collapsed={false} width={248}
+    renderSlot={name => name === 'sidebar.settings' ? <NativeSettings /> : null}
+    createPortal={createPortal} NewChatIcon={Icon} PanelIcon={Icon} startSession={() => {}} />
+}
+
+it('preserves the pet section across the real native SettingsRoot route remount without overriding manual categories', async () => {
+  history.replaceState({ chatState: 'keep' }, '', '/chat/long-chat?mode=work#last')
+  const mounted = vi.fn()
+  render(nativePetSettingsSidebar(undefined, mounted))
+  let opening!: Promise<void>
+  await act(async () => { opening = openNativePetSettings() })
+  await opening
+  await vi.waitFor(() => {
+    expect(location.pathname).toBe('/settings')
+    expect(document.querySelector('[data-settings-section-id="appearance-motion"]')?.getAttribute('aria-current')).toBe('true')
+    expect(screen.getByText('appearance-motion 内容')).toBeTruthy()
+  })
+  expect(mounted.mock.calls.length).toBeGreaterThan(1)
+  expect(history.state.eMateSettingsReturn).toBe('/chat/long-chat?mode=work#last')
+  fireEvent.click(screen.getByRole('button', { name: '通用设置' }))
+  await act(async () => { dispatchEvent(new PopStateEvent('popstate')) })
+  expect(screen.getByText('general 内容')).toBeTruthy()
+  expect(history.state.eMateSettingsRequestedSection).toBeUndefined()
+  fireEvent.click(screen.getByRole('button', { name: '关闭设置' }))
+  await vi.waitFor(() => expect(`${location.pathname}${location.search}${location.hash}`).toBe('/chat/long-chat?mode=work#last'))
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it('returns from pet settings with browser back and does not carry the section intent into the original chat entry', async () => {
+  history.replaceState({ chatState: 'keep' }, '', '/chat/long-chat?source=pet#reply')
+  render(nativePetSettingsSidebar())
+  let opening!: Promise<void>
+  await act(async () => { opening = openNativePetSettings() })
+  await opening
+  await vi.waitFor(() => expect(location.pathname).toBe('/settings'))
+  await act(async () => { history.back() })
+  await vi.waitFor(() => expect(location.pathname).toBe('/chat/long-chat'))
+  expect(`${location.search}${location.hash}`).toBe('?source=pet#reply')
+  expect(history.state).toEqual({ chatState: 'keep' })
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it('identity changes cancel a pending pet section request before the native panel opens', async () => {
+  history.replaceState(null, '', '/chat/long-chat')
+  let finishSave!: () => void
+  const saving = new Promise<void>(resolve => { finishSave = resolve })
+  render(nativePetSettingsSidebar(() => saving))
+  let opening!: Promise<unknown>
+  await act(async () => { opening = openNativePetSettings().catch(error => error) })
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await act(async () => { dispatchEvent(new CustomEvent('emate:identity-changed')); finishSave() })
+  expect(await opening).toBeInstanceOf(Error)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(history.state.eMateSettingsRequestedSection).toBeUndefined()
+  expect(location.pathname).toBe('/chat/long-chat')
 })

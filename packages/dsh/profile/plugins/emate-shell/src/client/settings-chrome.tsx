@@ -6,6 +6,7 @@ import css from './settings-chrome.module.css'
 
 const SETTINGS_PATH = '/settings'
 const SETTINGS_RETURN_KEY = 'eMateSettingsReturn'
+const SETTINGS_SECTION_KEY = 'eMateSettingsRequestedSection'
 const SETTINGS_CONTENT_SELECTOR = '[data-emate-settings-content]'
 const HIDDEN_SETTINGS_SECTION_IDS = new Set(['models', 'plugins', 'agent-presets', 'vision-toolkit'])
 
@@ -17,6 +18,25 @@ export function applySettingsSectionVisibility(root: ParentNode): void {
     if (hidden) button.setAttribute('aria-hidden', 'true')
     else button.removeAttribute('aria-hidden')
   }
+}
+
+function clearRequestedSection(): void {
+  if (!history.state?.[SETTINGS_SECTION_KEY]) return
+  const state = { ...history.state }
+  delete state[SETTINGS_SECTION_KEY]
+  history.replaceState(state, '')
+}
+
+function selectRequestedSection(root: ParentNode = document): boolean {
+  if (document.querySelector('[data-emate-identity-gate]')) return false
+  const requested = history.state?.[SETTINGS_SECTION_KEY]
+  if (requested !== 'appearance-motion') return false
+  const section = root.querySelector<HTMLButtonElement>('[data-settings-section-id="appearance-motion"]')
+  if (!section) return false
+  section.click()
+  // Keep the route intent across the native SettingsRoot remount caused by /settings.
+  history.replaceState({ ...history.state, [SETTINGS_SECTION_KEY]: requested }, '')
+  return true
 }
 
 interface TriggerProps {
@@ -36,7 +56,7 @@ export function SettingsTrigger({ wide, SettingsIcon, beforeNavigate, onNavigati
 
     let generation = 0
     const identityLocked = () => document.querySelector('[data-emate-identity-gate]') !== null
-    const identityChanged = () => { generation++; approvedClick = false }
+    const identityChanged = () => { generation++; approvedClick = false; clearRequestedSection() }
     let approvedClick = false
     const guardOpen = (event: MouseEvent) => {
       if (identityLocked()) { generation++; event.preventDefault(); event.stopImmediatePropagation(); return }
@@ -73,7 +93,7 @@ export function SettingsTrigger({ wide, SettingsIcon, beforeNavigate, onNavigati
     }
     const observer = new MutationObserver(records => {
       const identityChangedInDom = records.some(record => [...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element && (node.matches('[data-emate-identity-gate]') || node.querySelector('[data-emate-identity-gate]') !== null)))
-      if (identityChangedInDom) { generation++; syncPanel() }
+      if (identityChangedInDom) { generation++; if (identityLocked()) clearRequestedSection(); syncPanel() }
       const changed = records.some(record => [...record.addedNodes, ...record.removedNodes].some(node =>
         node instanceof Element
         && (node.matches(SETTINGS_CONTENT_SELECTOR) || node.querySelector(SETTINGS_CONTENT_SELECTOR) !== null),
@@ -88,7 +108,9 @@ export function SettingsTrigger({ wide, SettingsIcon, beforeNavigate, onNavigati
       open = isOpen
       if (isOpen && location.pathname !== SETTINGS_PATH) {
         const returnPath = `${location.pathname}${location.search}${location.hash}`
-        history.pushState({ [SETTINGS_RETURN_KEY]: returnPath }, '', SETTINGS_PATH)
+        const requestedSection = history.state?.[SETTINGS_SECTION_KEY]
+        clearRequestedSection()
+        history.pushState({ [SETTINGS_RETURN_KEY]: returnPath, ...(requestedSection ? { [SETTINGS_SECTION_KEY]: requestedSection } : {}) }, '', SETTINGS_PATH)
         dispatchEvent(new PopStateEvent('popstate'))
       } else if (!isOpen && location.pathname === SETTINGS_PATH) {
         const returnPath = history.state?.[SETTINGS_RETURN_KEY]
@@ -137,7 +159,12 @@ export function SettingsChrome({ updates, UpdateIcon }: {
     const dialog = heading.current?.closest('[role="dialog"]')
     if (dialog === null || dialog === undefined) return undefined
     applySettingsSectionVisibility(dialog)
-    return undefined
+    selectRequestedSection(dialog)
+    const manualSelection = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest('[data-settings-section-id]')) clearRequestedSection()
+    }
+    dialog.addEventListener('click', manualSelection)
+    return () => dialog.removeEventListener('click', manualSelection)
   }, [])
   return (
     <div ref={heading} className={css.heading} data-emate-settings-header="" data-emate-settings-content="">
@@ -154,21 +181,25 @@ export function SettingsChrome({ updates, UpdateIcon }: {
 
 /** Open the existing native Settings shell and select its registered pet section. */
 export async function openNativePetSettings(): Promise<void> {
-  const select = () => {
-    const section = document.querySelector<HTMLButtonElement>('[data-settings-section-id="appearance-motion"]')
-    if (!section) return false
-    section.click()
-    return true
-  }
-  if (select()) return
+  if (document.querySelector('[data-emate-identity-gate]')) throw new Error('Settings unavailable')
   const trigger = document.querySelector<HTMLButtonElement>('[data-emate-settings-trigger]')
   if (!trigger) throw new Error('Settings unavailable')
+  history.replaceState({ ...history.state, [SETTINGS_SECTION_KEY]: 'appearance-motion' }, '')
+  if (selectRequestedSection()) return
   await new Promise<void>((resolve, reject) => {
-    const finish = (error?: Error) => { observer.disconnect(); clearTimeout(timeout); error ? reject(error) : resolve() }
-    const observer = new MutationObserver(() => { if (select()) finish() })
+    const finish = (error?: Error) => {
+      observer.disconnect(); clearTimeout(timeout); removeEventListener(IDENTITY_CHANGED_EVENT, cancel)
+      if (error) { clearRequestedSection(); reject(error) } else resolve()
+    }
+    const cancel = () => finish(new Error('Settings unavailable'))
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('[data-emate-identity-gate]')) cancel()
+      else if (selectRequestedSection()) finish()
+    })
     const timeout = setTimeout(() => finish(new Error('Settings unavailable')), 5000)
     observer.observe(document.body, { childList: true, subtree: true })
+    addEventListener(IDENTITY_CHANGED_EVENT, cancel)
     trigger.click()
-    if (select()) finish()
+    if (selectRequestedSection()) finish()
   })
 }
