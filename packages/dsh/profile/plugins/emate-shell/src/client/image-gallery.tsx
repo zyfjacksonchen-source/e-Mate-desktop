@@ -1043,6 +1043,7 @@ function ArtifactTerminalBody({
   const rootRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuButtons = useRef<Array<HTMLButtonElement | null>>([])
+  const menuOrigin = useRef<HTMLElement | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const snapshot = useSession(value => value)
   const input = useInput(value => value)
@@ -1068,7 +1069,13 @@ function ArtifactTerminalBody({
   )
   const seenFailures = useRef(new Set<string>())
   const existingBytes = draftBytes(input.imageIds)
-  const closeMenu = (): void => { setMenu(null); menuButtons.current = [] }
+  const closeMenu = (restoreFocus = false): void => {
+    const origin = menuOrigin.current
+    setMenu(null)
+    menuButtons.current = []
+    menuOrigin.current = null
+    if (restoreFocus && origin?.isConnected) origin.focus()
+  }
 
   useEffect(() => {
     const failures = items.filter(item => item.status === 'failed' && !seenFailures.current.has(item.callId))
@@ -1094,6 +1101,8 @@ function ArtifactTerminalBody({
     const point = source instanceof HTMLElement
       ? source.getBoundingClientRect()
       : { left: source.clientX, bottom: source.clientY }
+    menuOrigin.current = source instanceof HTMLElement ? source
+      : document.activeElement instanceof HTMLElement ? document.activeElement : null
     setMenu({
       target,
       left: Math.max(8, Math.min(point.left - bounds.left, bounds.width - 236)),
@@ -1160,7 +1169,7 @@ function ArtifactTerminalBody({
       state={menu}
       menuRef={menuRef}
       buttonRefs={menuButtons}
-      close={closeMenu}
+      close={() => { closeMenu(true) }}
       activate={activate}
     />}
   </div>

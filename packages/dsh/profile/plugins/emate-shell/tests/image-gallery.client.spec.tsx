@@ -1072,6 +1072,7 @@ describe('completed artifact terminal', () => {
     expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: '打开方式 > 选择应用…' }))
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     await waitFor(() => { expect(screen.queryByRole('menu')).toBeNull() })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /打开方式：很长的中文文件名-0/u }))
   })
 
   it('adds a completed image without sending and blocks needs-review', async () => {
