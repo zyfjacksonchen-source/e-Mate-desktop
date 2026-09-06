@@ -33,7 +33,7 @@ it('preserves the canvas on save failure and releases each shared details seat o
   const leave = vi.fn(async () => { if (failSave) throw Error('conflict') })
   const notify = vi.fn()
   const ctx = {
-    get: () => ({ leave }), sessions: { binding: () => ({ session: {} }), open: vi.fn() },
+    get: () => ({ leave }), sessions: { list: { getSnapshot: () => ({ current: 'task' }) }, binding: () => ({ session: {} }), open: vi.fn() },
     layout: { openDetails: vi.fn(), closeDetails: vi.fn() }, slots: { register },
     reflect: { provide: (_: string, value: any) => { service = value; return vi.fn() } },
     effect: (install: any) => { disposeEffect = install() },
@@ -50,4 +50,27 @@ it('preserves the canvas on save failure and releases each shared details seat o
   service.release()
   disposeEffect()
   expect(panelDispose).toHaveBeenCalledOnce()
+})
+
+it('does not return to an old task when a canvas save finishes after navigation', async () => {
+  let service: any
+  let current = 'task-a'
+  let finishSave!: () => void
+  const saving = new Promise<void>(resolve => { finishSave = resolve })
+  const ctx = {
+    get: () => ({ leave: () => saving }),
+    sessions: { list: { getSnapshot: () => ({ current }) }, binding: () => ({ session: {} }), open: vi.fn() },
+    layout: { openDetails: vi.fn(), closeDetails: vi.fn() }, slots: { register: vi.fn() },
+    reflect: { provide: (_: string, value: any) => { service = value; return vi.fn() } },
+    effect: (install: any) => install(),
+  }
+  const notify = vi.fn()
+  registerPetTaskDetails(ctx, notify)
+  service.openTaskDetails('task-a')
+  current = 'task-b'
+  await act(async () => { finishSave(); await saving })
+  expect(ctx.sessions.open).not.toHaveBeenCalled()
+  expect(ctx.slots.register).not.toHaveBeenCalled()
+  expect(ctx.layout.openDetails).not.toHaveBeenCalled()
+  expect(notify).not.toHaveBeenCalled()
 })

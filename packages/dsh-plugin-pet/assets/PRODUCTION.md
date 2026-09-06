@@ -2,8 +2,8 @@
 
 No runtime artwork is included yet. Do not create repeated/static tiles to satisfy this contract.
 
-Canonical legal reference (read-only):
-`/Users/mac/e-mate/worktrees/emate-2.0.18-integration/packages/dsh/profile/plugins/emate-shell/assets/xiaoxin-avatar.png`
+Canonical user-provided official reference (read-only):
+`xiaoxin-official-reference.jpg` in this directory. Preserve its orange/black three-dimensional robot identity, lightning antenna and yellow chest emblem; the earlier flat Shell avatar is not the animation reference.
 
 Use the hatch-pet skill and its imagegen workers. Preserve this Xiaoxin identity; never import upstream dsh/aliang or installed Codex atlases. The main agent owns image generation, manifests, final QA and release. Do not render text, grids or scene labels into cells.
 

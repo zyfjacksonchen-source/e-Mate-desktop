@@ -53,9 +53,11 @@ export function registerPetTaskDetails(ctx: any, notify: (level: 'info' | 'error
   const release = () => { generation++; disposePanel?.(); disposePanel = undefined }
   const open = async (taskId: string) => {
     const request = ++generation
+    if (ctx.sessions.list.getSnapshot().current !== taskId) return
     if (!ctx.sessions.binding(taskId)?.session) throw new Error('Task unavailable')
     await ctx.get('emateCanvas')?.leave()
-    if (request !== generation) return
+    if (request !== generation || ctx.sessions.list.getSnapshot().current !== taskId
+      || !ctx.sessions.binding(taskId)?.session) return
     disposePanel?.()
     disposePanel = ctx.slots.register({ name: 'details', id: 'e-mate-task-details', priority: -2,
       inject: () => ({ taskId, close: () => { release(); ctx.layout.closeDetails() } }),
