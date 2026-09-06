@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-canvas",
   "version": "2.0.18",
-  "description": "Local multi-page canvas in the pinned Harness details panel.",
+  "description": "Native conversation canvas for image arrows, text annotations and edits.",
   "type": "module",
   "main": "lib/index.js",
   "exports": { ".": "./lib/index.js", "./client": "./lib/client.js", "./contract": "./lib/contract.js", "./package.json": "./package.json" },
