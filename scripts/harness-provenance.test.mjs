@@ -17,6 +17,7 @@ import {
 } from './harness-provenance.mjs'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
 import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
+import { SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const harnessRoot = join(root, 'upstream', 'deepseek-harness')
@@ -39,6 +40,17 @@ test('pins one clean native model-directory refresh owner', () => {
     'packages/client/ui-model-selection/src/client/service.ts',
   ), 'utf8')
   assertExactOccurrence(source, "ctx.remote.$on('credentials/updated', refresh)", 'native model listener')
+})
+
+test('Desktop session archives use the same native export adapter and record its file-import contract', () => {
+  const runtime = readFileSync(join(root, 'scripts/harness-runtime-adapters.mjs'), 'utf8')
+  const desktop = readFileSync(join(root, 'scripts/harness-provenance.mjs'), 'utf8')
+  assert.equal(SESSION_EXPORT_PACKAGE, '@deepseek-ai/dsh-host-apiproxy')
+  assert.equal(SESSION_EXPORT_ADAPTER_PATH, 'scripts/harness-session-export-adapter.mjs')
+  assert.match(runtime, /adaptHarnessSessionExportSource\(await readFile\(exportTarget/u)
+  assert.match(desktop, /adaptHarnessSessionExportSource\(readFileSync\(entry/u)
+  assert.match(desktop, /adaptHarnessSessionExportSource\(readFileSync\(join\(sourceLib, 'index.js'\)/u)
+  assert.match(desktop, /adapter_inputs:[\s\S]*packages\/dsh-plugin-file-import\/src\/contract.ts/u)
 })
 
 test('runs manager-free Harness build scripts in order through inherited pnpm and fails fast', () => {

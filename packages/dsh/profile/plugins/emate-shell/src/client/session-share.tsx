@@ -252,7 +252,7 @@ export function SessionShareAction({
       }}
       title="分享任务"
       closeLabel="关闭分享"
-      description="创建公开链接后，任何拿到链接的人都可以下载当前任务、子任务和附件归档。"
+      description="任何拿到链接的人都可以下载创建时已发送的任务、子任务和附件快照。后续消息不会自动同步；需要更新内容时，请先撤销旧链接再创建。"
       className={css.dialog}
     >
       <section className={css.online} aria-labelledby="session-share-title">
