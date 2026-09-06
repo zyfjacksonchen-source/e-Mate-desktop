@@ -226,9 +226,7 @@ export function IdentityGate({ callIdentity }: Props) {
       return
     }
     if (mode === 'login') {
-      const path = routePath === '/agreement' && state === null
-        ? '/agreement'
-        : authView === 'register' ? '/register' : '/login'
+      const path = authView === 'register' ? '/register' : '/login'
       if (routePath !== path) {
         history.replaceState(null, '', path)
         setRoutePath(path)
