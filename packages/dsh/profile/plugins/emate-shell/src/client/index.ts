@@ -33,7 +33,7 @@ import { registerActivityFold } from './activity-fold.tsx'
 import './theme-tokens.module.css'
 import './chat-chrome.module.css'
 import { ComposerConnectors, ComposerMentions } from './composer-connectors.tsx'
-import { appendConnectionDraft, loadConnectionStates } from './connection-status.ts'
+import { appendConnectionDraft, loadConnectionStates, callXinConnection } from './connection-status.ts'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection, SchedulesOverlayProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
@@ -544,6 +544,13 @@ export function apply(ctx: any): void {
       sessionId,
       loadConnections: (signal: AbortSignal) => loadConnectionStates((channel, endpoint, payload, signal) => ctx.connection.rpc.call(channel, endpoint, payload, signal), signal),
       prepareDraft: (prompt: string) => appendConnectionDraft(ctx, sessionId, prompt),
+      loadXin: (signal: AbortSignal) => callXinConnection((channel, endpoint, payload, signal) => ctx.connection.rpc.call(channel, endpoint, payload, signal), 'status', signal),
+      ensureXin: (signal: AbortSignal) => callXinConnection((channel, endpoint, payload, signal) => ctx.connection.rpc.call(channel, endpoint, payload, signal), 'ensure', signal),
+      disconnectXin: (signal: AbortSignal) => callXinConnection((channel, endpoint, payload, signal) => ctx.connection.rpc.call(channel, endpoint, payload, signal), 'disconnect', signal),
+      subscribeIdentity: (listener: () => void) => {
+        addEventListener(IDENTITY_CHANGED_EVENT, listener)
+        return () => removeEventListener(IDENTITY_CHANGED_EVENT, listener)
+      },
     }),
   }, ComposerConnectors))
   ctx.effect(

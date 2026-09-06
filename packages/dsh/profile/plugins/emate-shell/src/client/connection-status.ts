@@ -66,3 +66,47 @@ export function appendConnectionDraft(ctx: any, sessionId: string, prompt: strin
   if (snapshot.phase !== 'plain') throw new Error('输入框正在提交，请稍后重试。')
   input.setDraft(snapshot.draft === '' ? prompt : `${snapshot.draft}\n\n${prompt}`)
 }
+
+export type XinState = 'ready' | 'authorization-required' | 'connecting' | 'unavailable' | 'cancelled'
+export interface XinConnection {
+  schema_version: 1
+  service: 'xin-business-assistant'
+  name: 'xin-business-assistant'
+  transport: 'streamable-http'
+  state: XinState
+  active: boolean
+  authorized: boolean
+  binding?: { tenant_id: string; user_id: number; principal_id: number }
+  permissions?: { tools: string[]; project_count: number; knowledge_project_count: number; writable_project_count: number; scope_revision: string }
+  verified_at?: string
+}
+const XIN_STATES: readonly XinState[] = ['ready', 'authorization-required', 'connecting', 'unavailable', 'cancelled']
+function exactKeys(value: Record<string, unknown>, required: string[], optional: string[] = []): boolean {
+  return required.every(key => Object.hasOwn(value, key)) && Object.keys(value).every(key => required.includes(key) || optional.includes(key))
+}
+export function parseXinConnection(response: unknown): XinConnection {
+  const value = valueOf(response)
+  const required = ['schema_version', 'service', 'name', 'transport', 'state', 'active', 'authorized']
+  if (!record(value) || !exactKeys(value, required, ['binding', 'permissions', 'verified_at']) || value.schema_version !== 1
+    || value.service !== 'xin-business-assistant' || value.name !== value.service || value.transport !== 'streamable-http'
+    || !XIN_STATES.includes(value.state as XinState) || value.active !== (value.state === 'ready') || value.authorized !== value.active) throw new Error('芯助手返回的连接状态无效。')
+  const hasProof = ['binding', 'permissions', 'verified_at'].some(key => Object.hasOwn(value, key))
+  if (value.state === 'ready' && !hasProof) throw new Error('芯助手尚未验证绑定账号和权限。')
+  if (hasProof) {
+    const binding = value.binding; const permissions = value.permissions
+    if (!record(binding) || !exactKeys(binding, ['tenant_id', 'user_id', 'principal_id']) || typeof binding.tenant_id !== 'string' || !binding.tenant_id || binding.tenant_id.length > 128
+      || !Number.isSafeInteger(binding.user_id) || Number(binding.user_id) <= 0 || !Number.isSafeInteger(binding.principal_id) || Number(binding.principal_id) < 0
+      || !record(permissions) || !exactKeys(permissions, ['tools', 'project_count', 'knowledge_project_count', 'writable_project_count', 'scope_revision'])
+      || !Array.isArray(permissions.tools) || permissions.tools.length > 512 || permissions.tools.some(tool => typeof tool !== 'string' || !tool || tool.length > 128)
+      || ['project_count', 'knowledge_project_count', 'writable_project_count'].some(key => !Number.isSafeInteger(permissions[key]) || Number(permissions[key]) < 0 || Number(permissions[key]) > 10000)
+      || typeof permissions.scope_revision !== 'string' || !permissions.scope_revision || permissions.scope_revision.length > 128
+      || typeof value.verified_at !== 'string' || !Number.isFinite(Date.parse(value.verified_at)) || new Date(value.verified_at).toISOString() !== value.verified_at) throw new Error('芯助手的账号或权限验证信息无效。')
+  }
+  return structuredClone(value) as unknown as XinConnection
+}
+export async function callXinConnection(call: Rpc, action: 'status' | 'ensure' | 'disconnect', signal: AbortSignal): Promise<XinConnection> {
+  signal.throwIfAborted()
+  const result = await call('/emate.mcpManage', `xin.${action}`, {}, signal)
+  signal.throwIfAborted()
+  return parseXinConnection(result)
+}

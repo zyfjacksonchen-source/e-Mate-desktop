@@ -84,7 +84,8 @@ test('find-skill is pinned and limits persistent installation to connector sourc
     'lark-shared', 'lark-doc', 'lark-im', 'lark-drive', 'lark-sheets',
     'lark-base', 'lark-calendar', 'lark-task', 'lark-mail',
   ])
-  assert.equal(catalogSources.every(source => source.includes(
+  assert.equal(catalogSources.filter(source => source === 'e-mate-bundled:xin-assistant').length, 1)
+  assert.equal(catalogSources.filter(source => source !== 'e-mate-bundled:xin-assistant').every(source => source.includes(
     '/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-',
   )), true)
 })
@@ -514,7 +515,7 @@ test('signed connector instructions replace only recognized predecessors and pre
   const config = connectorConfig()
   const result = reconcileBundledConnectorSkills(config, roots)
   assert.deepEqual(result.updated, ['connect-feishu-cli'])
-  assert.deepEqual(result.installed, ['connect-tencent-docs', 'connect-dingtalk', 'connect-wechat-bot'])
+  assert.deepEqual(result.installed, ['connect-tencent-docs', 'connect-dingtalk', 'connect-wechat-bot', 'xin-assistant'])
   const installed = await readFile(join(roots.globalSkillDir, 'connect-feishu-cli', 'SKILL.md'), 'utf8')
   assert.match(installed, /auth status --json --verify/u)
   assert.doesNotMatch(installed, /always run config init/u)
@@ -737,3 +738,42 @@ async function writeManagedSkill(root, name, scope, source = 'test/source', cont
   }), 'utf8')
   return target
 }
+
+
+test('one bundled Xin Skill uses the existing managed provider and old names remain search synonyms', async t => {
+  const { ManagedSkillProvider } = await import('../lib/provider.js')
+  const { searchCatalogSkills } = await import('../lib/search.js')
+  const patch = parse(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'))
+  const config = patch[0].insert[0].config
+  const catalog = config.catalogSkills.filter(item => item.id.startsWith('xin-'))
+  assert.equal(catalog.length, 1)
+  assert.equal(catalog[0].id, 'xin-assistant')
+  assert.equal(catalog[0].source, 'e-mate-bundled:xin-assistant')
+  const metadataUi = parse(await readFile(new URL('../lib/skills/xin-assistant/agents/openai.yaml', import.meta.url), 'utf8'))
+  assert.equal(metadataUi.interface.display_name, '芯助手')
+  assert(metadataUi.interface.short_description.length >= 25 && metadataUi.interface.short_description.length <= 64)
+  assert(metadataUi.interface.default_prompt.includes('$xin-assistant'))
+  for (const name of ['芯助手', 'xin-business-data', 'xin-business-operations']) {
+    const matches = searchCatalogSkills(config.catalogSkills, name)
+    assert.deepEqual(matches.map(item => item.id), ['xin-assistant'])
+  }
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-xin-skill-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const roots = { globalSkillDir: join(scratch, 'global'), tempSkillDir: join(scratch, 'temp') }
+  const result = reconcileBundledConnectorSkills(config, roots)
+  assert(result.installed.includes('xin-assistant'))
+  const provider = new ManagedSkillProvider({ globalSkillRoot: roots.globalSkillDir, tempSkillRoot: roots.tempSkillDir }, () => {})
+  const candidates = await provider.list({ cwd: scratch })
+  const xin = candidates.filter(item => item.name.startsWith('xin-'))
+  assert.deepEqual(xin.map(item => item.name), ['xin-assistant'])
+  const loaded = await provider.get(xin[0], {})
+  assert.match(loaded.content, /action: "ensure"/)
+  assert.match(loaded.content, /取得一次针对该对象的确认/)
+  assert.doesNotMatch(loaded.content, /请.*(?:密码|令牌).*粘贴/)
+  const metadata = JSON.parse(await readFile(join(roots.globalSkillDir, 'xin-assistant', '.dsh-find-skill.json'), 'utf8'))
+  assert.equal(metadata.source, 'e-mate-bundled:xin-assistant')
+  assert(reconcileBundledConnectorSkills(config, roots).unchanged.includes('xin-assistant'))
+  await writeManagedSkill(roots.globalSkillDir, 'xin-business-data', 'global', 'user/private', 'keep the user-owned legacy skill')
+  reconcileBundledConnectorSkills(config, roots)
+  assert.match(await readFile(join(roots.globalSkillDir, 'xin-business-data', 'SKILL.md'), 'utf8'), /keep the user-owned legacy skill/)
+})

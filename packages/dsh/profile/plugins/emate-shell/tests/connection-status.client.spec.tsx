@@ -33,3 +33,34 @@ describe('external connection projection', () => {
     expect(input.setDraft).toHaveBeenCalledTimes(1)
   })
 })
+
+import { callXinConnection, parseXinConnection } from '../src/client/connection-status.ts'
+const xinProof = {
+  schema_version: 1, service: 'xin-business-assistant', name: 'xin-business-assistant', transport: 'streamable-http',
+  state: 'ready', active: true, authorized: true,
+  binding: { tenant_id: 'tenant-xin', user_id: 8, principal_id: 12 },
+  permissions: { tools: ['query_projects'], project_count: 2, knowledge_project_count: 3, writable_project_count: 1, scope_revision: 'scope-1' },
+  verified_at: '2026-09-07T01:00:00.000Z',
+} as const
+
+describe('Xin shared Host contract', () => {
+  it('requires an exact current service and complete real proof for ready state', () => {
+    expect(parseXinConnection({ ok: true, value: { ok: true, value: xinProof } }).binding?.user_id).toBe(8)
+    expect(() => parseXinConnection({ ...xinProof, binding: undefined })).toThrow()
+    expect(() => parseXinConnection({ ...xinProof, state: 'unavailable' })).toThrow()
+    expect(() => parseXinConnection({ ...xinProof, access_token: 'must-not-render' })).toThrow()
+    expect(() => parseXinConnection({ ...xinProof, name: 'other-service' })).toThrow()
+    expect(() => parseXinConnection({ ...xinProof, permissions: { ...xinProof.permissions, writable_project_count: -1 } })).toThrow()
+  })
+  it('uses only the same native ensure/status/disconnect endpoints with empty payloads', async () => {
+    const call = vi.fn(async () => ({ ok: true, value: xinProof }))
+    const signal = new AbortController().signal
+    for (const action of ['status', 'ensure', 'disconnect'] as const) await callXinConnection(call, action, signal)
+    expect(call.mock.calls).toEqual(['status','ensure','disconnect'].map(action => ['/emate.mcpManage', `xin.${action}`, {}, signal]))
+  })
+  it('rejects a late native response after cancellation without exposing its account', async () => {
+    const controller = new AbortController()
+    const call = vi.fn(async () => { controller.abort(); return xinProof })
+    await expect(callXinConnection(call, 'ensure', controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})

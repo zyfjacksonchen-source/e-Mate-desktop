@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { COMPOSER_PLACEHOLDER, ComposerConnectors, ComposerMentions } from '../src/client/composer-connectors.tsx'
@@ -54,6 +54,99 @@ describe('e-Mate 2.0.17 composer projection', () => {
     expect(prepareDraft.mock.calls[0]?.[0]).toContain('connect-feishu-cli')
     expect(location.href).toBe(before)
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('connects Xin directly and displays verified binding/permissions without editing the chat draft', async () => {
+    const ready = {
+      schema_version: 1 as const, service: 'xin-business-assistant' as const, name: 'xin-business-assistant' as const, transport: 'streamable-http' as const,
+      state: 'ready' as const, active: true, authorized: true,
+      binding: { tenant_id: 'xin-tenant', user_id: 8, principal_id: 12 },
+      permissions: { tools: ['query_projects'], project_count: 2, knowledge_project_count: 3, writable_project_count: 1, scope_revision: 'r1' },
+      verified_at: '2026-09-07T01:00:00.000Z',
+    }
+    const idle = { ...ready, state: 'authorization-required' as const, active: false, authorized: false, binding: undefined, permissions: undefined, verified_at: undefined }
+    let current = idle as typeof ready | typeof idle
+    const prepareDraft = vi.fn()
+    const ensureXin = vi.fn(async () => { current = ready; return ready })
+    const disconnectXin = vi.fn(async () => { current = idle; return idle })
+    render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={async () => []} prepareDraft={prepareDraft} loadXin={async () => current} ensureXin={ensureXin} disconnectXin={disconnectXin} />)
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await waitFor(() => expect(screen.getByText('待授权')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: '连接芯助手' }))
+    await waitFor(() => expect(screen.getByText('xin-tenant / 用户 8')).toBeTruthy())
+    expect(screen.getByText('经营项目 2 · 知识项目 3 · 可维护项目 1')).toBeTruthy()
+    expect(document.querySelector('time')?.getAttribute('datetime')).toBe(ready.verified_at)
+    expect(prepareDraft).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '重新连接芯助手' }))
+    await waitFor(() => expect(ensureXin).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole('button', { name: '断开芯助手' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '断开芯助手' }))
+    await waitFor(() => expect(screen.queryByText('xin-tenant / 用户 8')).toBeNull())
+    expect(disconnectXin).toHaveBeenCalledOnce()
+  })
+
+  it('deduplicates pending ensure, allows native authorization outside the popup, and rejects results after identity change', async () => {
+    const idle = { schema_version: 1 as const, service: 'xin-business-assistant' as const, name: 'xin-business-assistant' as const, transport: 'streamable-http' as const, state: 'authorization-required' as const, active: false, authorized: false }
+    let finish: (value: any) => void = () => {}
+    let signal: AbortSignal | undefined
+    const ensureXin = vi.fn((value: AbortSignal) => { signal = value; return new Promise<typeof idle>(resolve => { finish = resolve }) })
+    let identityChanged: () => void = () => {}
+    const prepareDraft = vi.fn()
+    render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={async () => []} prepareDraft={prepareDraft} loadXin={async () => idle} ensureXin={ensureXin}
+      subscribeIdentity={listener => { identityChanged = listener; return () => {} }} />)
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await waitFor(() => expect(screen.getByText('待授权')).toBeTruthy())
+    const button = screen.getByRole('button', { name: '连接芯助手' })
+    act(() => { fireEvent.click(button); fireEvent.click(button) })
+    expect(ensureXin).toHaveBeenCalledOnce()
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(signal?.aborted).toBe(false)
+    act(() => identityChanged())
+    expect(signal?.aborted).toBe(true)
+    await act(async () => finish({ ...idle, state: 'ready', active: true, authorized: true, binding: { tenant_id: 'old-private-tenant', user_id: 999, principal_id: 1 } }))
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    expect(screen.queryByText(/old-private-tenant/)).toBeNull()
+    expect(prepareDraft).not.toHaveBeenCalled()
+  })
+
+  it('cancel waits for fresh status instead of displaying a late success as the current connection', async () => {
+    const idle = { schema_version: 1 as const, service: 'xin-business-assistant' as const, name: 'xin-business-assistant' as const, transport: 'streamable-http' as const, state: 'authorization-required' as const, active: false, authorized: false }
+    let finish: (value: typeof idle) => void = () => {}
+    let signal: AbortSignal | undefined
+    const loadXin = vi.fn(async () => idle)
+    render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={async () => []} prepareDraft={vi.fn()} loadXin={loadXin}
+      ensureXin={value => { signal = value; return new Promise(resolve => { finish = resolve }) }} />)
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await waitFor(() => expect(screen.getByText('待授权')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: '连接芯助手' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消等待' }))
+    expect(signal?.aborted).toBe(true)
+    await act(async () => finish(idle))
+    await waitFor(() => expect(loadXin.mock.calls.length).toBeGreaterThan(1))
+    expect(screen.queryByText('芯助手已连接，账号和权限已验证。')).toBeNull()
+  })
+
+  it('ignores a stale status read while direct ensure settles and aborts on a session switch', async () => {
+    const idle = { schema_version: 1 as const, service: 'xin-business-assistant' as const, name: 'xin-business-assistant' as const, transport: 'streamable-http' as const, state: 'authorization-required' as const, active: false, authorized: false }
+    let finishRead: (value: typeof idle) => void = () => {}
+    let finishAction: (value: typeof idle) => void = () => {}
+    let signal: AbortSignal | undefined
+    const loadXin = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve })).mockResolvedValue(idle)
+    const props = { LinkIcon: Icon, sessionId: 's1', loadConnections: async () => [], prepareDraft: vi.fn(), loadXin,
+      ensureXin: (value: AbortSignal) => { signal = value; return new Promise<typeof idle>(resolve => { finishAction = resolve }) } }
+    const view = render(<ComposerConnectors {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    fireEvent.click(screen.getByRole('button', { name: '连接芯助手' }))
+    await act(async () => finishRead(idle))
+    expect(screen.getByText('连接处理中')).toBeTruthy()
+    view.rerender(<ComposerConnectors {...props} sessionId="s2" />)
+    expect(signal?.aborted).toBe(true)
+    await act(async () => finishAction(idle))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await waitFor(() => expect(screen.getByText('待授权')).toBeTruthy())
+    expect(screen.queryByText('连接已取消。')).toBeNull()
   })
 
   it('keeps the resident live Harness textarea placeholder', () => {

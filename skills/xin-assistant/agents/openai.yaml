@@ -1,0 +1,6 @@
+interface:
+  display_name: "芯助手"
+  short_description: "本人授权查询企业经营数据与知识资料，复用连接并完成明确的项目操作"
+  default_prompt: "使用 $xin-assistant 查询我有权限的企业数据或资料，并保留口径、来源和操作回执。"
+policy:
+  allow_implicit_invocation: true

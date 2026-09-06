@@ -65,6 +65,11 @@
           - google
           - github
         catalogSkills:
+          - id: xin-assistant
+            name: 芯助手
+            source: e-mate-bundled:xin-assistant
+            url: https://mvdcm.ecoremedia.net/v1-ui/knowledge
+            keywords: [芯助手, xin-assistant, xin-business-assistant, xin-business-data, xin-business-operations, 企业数据, 知识资料, 项目操作]
           - id: connect-feishu-cli
             name: 连接飞书 CLI
             source: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-feishu-cli

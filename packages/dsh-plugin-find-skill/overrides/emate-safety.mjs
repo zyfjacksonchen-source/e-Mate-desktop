@@ -11,6 +11,7 @@ export const BUNDLED_CONNECTOR_SKILLS = [
   'connect-tencent-docs',
   'connect-dingtalk',
   'connect-wechat-bot',
+  'xin-assistant',
 ]
 
 export function validateManagedSkillName(value) {
