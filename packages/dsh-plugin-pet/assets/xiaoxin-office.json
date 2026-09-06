@@ -1,0 +1,468 @@
+{
+  "schemaVersion": 1,
+  "id": "xiaoxin-office",
+  "baseSha256": "1d84373ae212349318cb9c03f79580cb94657da46ea574515820a4a4ea6858d9",
+  "atlas": {
+    "file": "xiaoxin-office.webp",
+    "sha256": "4665852e230c3491b03080e00361dca34cbf6fd99ef8559c55d2d0db000fe88f",
+    "bytes": 7155134,
+    "width": 1536,
+    "height": 6240,
+    "cellWidth": 192,
+    "cellHeight": 208,
+    "columns": 8,
+    "rows": 30
+  },
+  "scenes": [
+    {
+      "id": "startup",
+      "row": 0,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "requirements",
+      "row": 1,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "planning",
+      "row": 2,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "file-search",
+      "row": 3,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "document-read",
+      "row": 4,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "code-write",
+      "row": 5,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "terminal",
+      "row": 6,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "build",
+      "row": 7,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "test",
+      "row": 8,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "debug",
+      "row": 9,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "code-review",
+      "row": 10,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "web-search",
+      "row": 11,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "browser",
+      "row": 12,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "form-fill",
+      "row": 13,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "download",
+      "row": 14,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "data-analysis",
+      "row": 15,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "spreadsheet",
+      "row": 16,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "document-write",
+      "row": 17,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "slides",
+      "row": 18,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "pdf-read",
+      "row": 19,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "image-generate",
+      "row": 20,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "image-edit",
+      "row": 21,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "canvas",
+      "row": 22,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "meeting",
+      "row": 23,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "upload",
+      "row": 24,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "waiting",
+      "row": 25,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "queue",
+      "row": 26,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "goal",
+      "row": 27,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "delivery",
+      "row": 28,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    },
+    {
+      "id": "error",
+      "row": 29,
+      "frames": 8,
+      "durationsMs": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        260
+      ]
+    }
+  ]
+}

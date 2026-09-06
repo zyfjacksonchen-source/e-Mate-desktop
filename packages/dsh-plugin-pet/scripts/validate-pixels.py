@@ -25,7 +25,9 @@ def inspect(name, counts):
             cell = image.crop((column * 192, row * 208, (column + 1) * 192, (row + 1) * 208))
             alpha = cell.getchannel('A')
             box = alpha.getbbox()
-            if column >= count:
+            # hatch-pet v2 reserves row 0 / column 6 for neutral look; it is not an idle animation frame.
+            neutral = name == 'xiaoxin-v2.webp' and row == 0 and column == 6
+            if column >= count and not neutral:
                 if box is not None:
                     raise ValueError(f'{name}: unused cell {row}/{column} is not transparent')
                 continue

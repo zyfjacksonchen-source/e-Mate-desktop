@@ -1,6 +1,6 @@
 # Xiaoxin resource production handoff
 
-No runtime artwork is included yet. Do not create repeated/static tiles to satisfy this contract.
+The four runtime assets below are included after source, pixel and component-level visual review. Full installed acceptance remains open. Do not replace generated action cycles with repeated/static tiles.
 
 Canonical user-provided official reference (read-only):
 `xiaoxin-official-reference.jpg` in this directory. Preserve its orange/black three-dimensional robot identity, lightning antenna and yellow chest emblem; the earlier flat Shell avatar is not the animation reference.
@@ -9,7 +9,7 @@ Use the hatch-pet skill and its imagegen workers. Preserve this Xiaoxin identity
 
 Deliver these four exact files in this directory:
 
-- `xiaoxin-v2.webp`: 1536×2288; 8×11 cells, each 192×208. Rows 0–8 follow hatch-pet's exact counts/timing. Rows 9–10 contain 16 clockwise look directions, starting 000° up, 90° right, 180° down, 270° left. Transparent unused cells and sprite surroundings.
+- `xiaoxin-v2.webp`: 1536×2288; 8×11 cells, each 192×208. Rows 0–8 follow hatch-pet's exact counts/timing. Rows 9–10 contain 16 clockwise look directions, starting 000° up, 90° right, 180° down, 270° left. Row 0 / column 6 is the assembler's reserved neutral look cell, not a seventh idle animation frame. All other unused cells and sprite surroundings are transparent.
 - `xiaoxin-v2.json`: strict `BaseManifest` from `src/assets.ts`: schemaVersion 1, id xiaoxin, displayName 小芯, spriteVersionNumber 2; exact atlas geometry, actual file bytes and SHA-256; nine ordered animations with the exact timing table in `src/client/pet-animation.ts`; directions `[0,22.5,...,337.5]`.
 - `xiaoxin-office.webp`: 1536×6240; 30 rows × 8 frames; identical 192×208 geometry. Every scene is a distinct complete eight-frame action cycle. Keep identity, scale and registration stable; props must remain physically attached/in the same frame. Each scene is generated independently from the approved Xiaoxin reference, never synthesized by tiling one idle frame.
 - `xiaoxin-office.json`: strict `OfficeManifest` from `src/assets.ts`: schemaVersion 1, id xiaoxin-office, baseSha256 matching the final v2 bytes; actual extension atlas bytes/SHA; exactly 30 ordered `scenes` with `id`, zero-based `row`, `frames:8`, eight integer `durationsMs` (80–2000 each). Suggested complete-loop timing is `[140,140,140,140,140,140,140,260]`.
