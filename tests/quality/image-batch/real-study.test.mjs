@@ -48,9 +48,14 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
     const output = join(temporary, 'outputs')
     let calls = 0
     const seenBatch = new Map()
+    const active = { single: 0, batch: 0 }; const maximum = { single: 0, batch: 0 }
     const packet = await collectStudy(state, precommit, context(), output, async (_url, options) => {
       calls += 1
       const headers = options.headers
+      const condition = headers['x-e-mate-batch-id'] ? 'batch' : 'single'
+      active[condition]++; maximum[condition] = Math.max(maximum[condition], active[condition])
+      await new Promise(resolve => setImmediate(resolve))
+      active[condition]--
       if (headers['x-e-mate-batch-id']) {
         const ordinals = seenBatch.get(headers['x-e-mate-batch-id']) ?? []
         ordinals.push(Number(headers['x-e-mate-batch-ordinal'])); seenBatch.set(headers['x-e-mate-batch-id'], ordinals)
@@ -58,6 +63,8 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
       return new Response(JSON.stringify({ id: `result-${calls}`, data: [{ b64_json: png.toString('base64') }], usage: {} }), { status: 200, headers: { 'content-type': 'application/json' } })
     })
     assert.equal(calls, 60)
+    assert.equal(maximum.single, 1)
+    assert.equal(maximum.batch, 4)
     assert([...seenBatch.values()].every(ordinals => ordinals.length >= 2 && ordinals.length <= 4 && ordinals.every((ordinal, index) => ordinal === index + 1)))
     assert.equal(Object.hasOwn(packet.pairs[0], 'allocation'), false)
     assert.equal(Object.hasOwn(packet.pairs[0], 'condition'), false)
@@ -161,7 +168,8 @@ test('partial provider failure retains successful siblings immediately and refus
         const category = categories[index % categories.length]
         return { pair_id: `pair-${index + 1}`, category, prompt: `prompt ${index + 1}`, references: category === 'reference-edit' ? [reference] : [] }
       }) }
-    const state = prepareStudy(input, '4'.repeat(64), context())
+    const seed = Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(64, '0')).find(value => parseInt(hash(`${value}\0order\0${1}`).slice(0, 2), 16) % 2 === 0)
+    const state = prepareStudy(input, seed, context())
     const precommit = hash(JSON.stringify(state) + '\n')
     const output = join(temporary, 'outputs')
     let calls = 0
@@ -177,5 +185,35 @@ test('partial provider failure retains successful siblings immediately and refus
     for (const name of retained) assert.deepEqual(readFileSync(join(output, name)), png)
     await assert.rejects(collectStudy(state, precommit, context(), output, fetchImpl), /EEXIST/u)
     assert.equal(calls, 4)
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
+})
+
+test('unknown serial single stops before the next case and preserves its successful predecessor', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'emate-quality-single-stop-'))
+  try {
+    const reference = join(temporary, 'reference.png'); writeFileSync(reference, png)
+    const input = { schema_version: 1, evaluator_protocol_commitment_sha256: hash('protocol'),
+      cases: Array.from({ length: 30 }, (_, index) => {
+        const category = categories[index % categories.length]
+        return { pair_id: `pair-${index + 1}`, category, prompt: `prompt ${index + 1}`, references: category === 'reference-edit' ? [reference] : [] }
+      }) }
+    const seed = Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(64, '0')).find(value => parseInt(hash(`${value}\0order\0${1}`).slice(0, 2), 16) % 2 !== 0)
+    const state = prepareStudy(input, seed, context())
+    const precommit = hash(JSON.stringify(state) + '\n')
+    const output = join(temporary, 'outputs')
+    let calls = 0
+    const fetchImpl = async (_url, options) => {
+      assert.equal(options.headers['x-e-mate-batch-id'], undefined)
+      calls++
+      if (calls === 2) throw new Error('unknown')
+      return new Response(JSON.stringify({ id: 'first', data: [{ b64_json: png.toString('base64') }], usage: {} }))
+    }
+    await assert.rejects(collectStudy(state, precommit, context(), output, fetchImpl), /outcome is unknown/u)
+    assert.equal(calls, 2)
+    const files = readdirSync(output).filter(name => /^pair-/u.test(name))
+    assert.equal(files.length, 1)
+    assert.deepEqual(readFileSync(join(output, files[0])), png)
+    await assert.rejects(collectStudy(state, precommit, context(), output, fetchImpl), /EEXIST/u)
+    assert.equal(calls, 2)
   } finally { rmSync(temporary, { recursive: true, force: true }) }
 })

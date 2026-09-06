@@ -220,13 +220,19 @@ export async function collectStudy(state, precommitSha256, context, outputDirect
   for (const [groupIndex, group] of groups(controlledCases).entries()) {
     const batchId = `sha256:${sha256(`${precommitSha256}\0batch\0${groupIndex + 1}`)}`
     const collect = async condition => {
-      const results = await Promise.allSettled(group.map(async (value, index) => {
+      const one = async (value, index) => {
         const result = await generate(context, value, scope(`${precommitSha256}\0${value.pair_id}\0${condition}`, condition === 'batch' ? batchId : undefined, index + 1), fetchImpl)
         const side = value.allocation.A === condition ? 'A' : 'B'
         const path = resolve(outputDirectory, `${value.pair_id}-${side}.${result.extension}`)
         writeFileSync(path, result.bytes, { flag: 'wx', mode: 0o600, flush: true })
         return { ...result, path }
-      }))
+      }
+      if (condition === 'single') {
+        const results = []
+        for (const [index, value] of group.entries()) results.push(await one(value, index))
+        return results
+      }
+      const results = await Promise.allSettled(group.map(one))
       const failed = results.find(result => result.status === 'rejected')
       if (failed) throw failed.reason
       return results.map(result => result.value)

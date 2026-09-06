@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { RELEASE_VERSION, ticketFor } from './release-identity.mjs'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
 import { performance } from 'node:perf_hooks'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DESKTOP_REFERENCE, HARNESS_COMMIT, validateProviderLayerEvidence } from './release-evidence-protocol.mjs'
 
@@ -119,10 +119,74 @@ async function requestImage(config, prompt, requestScope, fetchImpl = fetch, now
   return { status: 'completed', elapsed, digest: image.digest, responseId: image.responseId }
 }
 
+function fixedSchedule(config, prompts) {
+  let offset = 0
+  const schedule = Array.from({ length: config.runs }, (_, index) => {
+    const taskCount = SIZES[index % SIZES.length]
+    const selected = prompts.slice(offset, offset + taskCount); offset += taskCount
+    return { taskCount, selected }
+  })
+  const fixedSetSha256 = sha256(JSON.stringify(schedule.map(({ taskCount, selected }) => ({ task_count: taskCount, prompt_sha256: selected.map(sha256) }))))
+  return { schedule, fixedSetSha256 }
+}
+
+function scopedRequest(executionId, fixedSet, run, ordinal) {
+  const batchId = ordinal === undefined ? undefined : `sha256:${sha256(`${executionId}\0${fixedSet}\0${run}`)}`
+  return scope(`${executionId}\0${fixedSet}\0${ordinal === undefined ? 'direct' : 'batch'}\0${run}\0${ordinal ?? ''}`, batchId, ordinal)
+}
+
+function probeRequest(config, ordinal) {
+  return scopedRequest(config.execution.id, ticketFor(config.provenance.version, '502') + '-typed-429-probe', 1, ordinal)
+}
+
+function executionManifest(config, prompts, id) {
+  const { schedule, fixedSetSha256 } = fixedSchedule(config, prompts)
+  const requests = schedule.flatMap(({ selected }, index) => [
+    { kind: 'direct', prompt_sha256: sha256(selected[0]), headers: scopedRequest(id, fixedSetSha256, index + 1).headers },
+    ...selected.map((prompt, ordinal) => ({ kind: 'batch', prompt_sha256: sha256(prompt), headers: scopedRequest(id, fixedSetSha256, index + 1, ordinal + 1).headers })),
+  ])
+  if (config.probe) requests.push(...prompts.slice(0, 5).map((prompt, index) => ({ kind: 'typed-429-probe', prompt_sha256: sha256(prompt),
+    headers: probeRequest({ ...config, execution: { id } }, index + 1).headers })))
+  return { schema_version: 1, ticket: ticketFor(config.provenance.version, '502'), execution_id: id, provenance: config.provenance,
+    layer: config.layer, gateway_sha256: sha256(config.root.href), deployment_sha256: config.deployment,
+    environment_name_sha256: sha256(config.environmentName), fixed_set_sha256: fixedSetSha256, requests }
+}
+
+function durableNew(path, bytes) {
+  writeFileSync(path, bytes, { flag: 'wx', mode: 0o600, flush: true })
+  const directory = openSync(dirname(path), 'r')
+  try { fsyncSync(directory) } finally { closeSync(directory) }
+  requireValue(Buffer.from(readFileSync(path)).equals(Buffer.from(bytes)), 'execution receipt readback mismatch')
+}
+
+// The private companion binds actual audit/trace IDs without changing the
+// strict public release schema. Preparing reserves a NEW output directory;
+// an interrupted or unknown execution is never resumed or silently replayed.
+export function prepareProviderExecution(config, prompts) {
+  requireValue(typeof config.output === 'string' && config.output.length > 0, 'new private output path is required')
+  requireValue(!existsSync(config.output), 'output already exists; choose an explicit new execution')
+  const directory = `${config.output}.images`
+  mkdirSync(directory, { mode: 0o700 })
+  const parent = openSync(dirname(directory), 'r')
+  try { fsyncSync(parent) } finally { closeSync(parent) }
+  const id = randomBytes(32).toString('hex')
+  const path = resolve(directory, 'execution.json')
+  const raw = JSON.stringify(executionManifest(config, prompts, id)) + '\n'
+  durableNew(path, raw)
+  return { id, path, sha256: sha256(raw) }
+}
+
+function verifyExecution(config, prompts) {
+  const execution = config.execution
+  requireValue(execution && SHA256.test(execution.id) && SHA256.test(execution.sha256), 'durable precommitted execution is required')
+  requireValue(execution.path === resolve(`${config.output}.images`, 'execution.json'), 'execution receipt does not match its output directory')
+  const raw = readFileSync(execution.path)
+  requireValue(sha256(raw) === execution.sha256 && raw.toString('utf8') === JSON.stringify(executionManifest(config, prompts, execution.id)) + '\n', 'execution receipt or committed inputs changed')
+}
+
 async function typed429Probe(config, prompts, fetchImpl) {
   if (!config.probe) return { status: 'NOT_RUN', retry_after_ms: null, attempts: 0, accepted_submissions: 0, identical_request: false, pass: false }
-  const batchId = `sha256:${sha256('EM217-502-typed-429-probe')}`
-  const first = await Promise.all(prompts.slice(0, 5).map((prompt, index) => requestImage(config, prompt, scope(`probe-${index + 1}`, batchId, index + 1), fetchImpl)))
+  const first = await mapLimit(prompts.slice(0, 5), 5, (prompt, index) => requestImage(config, prompt, probeRequest(config, index + 1), fetchImpl))
   const limited = first.filter(result => result.status === 'rate-limited')
   requireValue(limited.length === 1 && first.filter(result => result.status === 'completed').length === 4, 'controlled staging must yield exactly four accepted results and one typed 429')
   const rejected = limited[0]
@@ -138,32 +202,29 @@ async function typed429Probe(config, prompts, fetchImpl) {
 async function mapLimit(values, limit, action) {
   const results = new Array(values.length)
   let next = 0
+  let failure
   await Promise.all(Array.from({ length: Math.min(limit, values.length) }, async () => {
-    while (next < values.length) {
+    while (next < values.length && failure === undefined) {
       const index = next++
-      results[index] = await action(values[index], index)
+      try { results[index] = await action(values[index], index) } catch (error) { failure = error; return }
     }
   }))
+  if (failure !== undefined) throw failure
   return results
 }
 
 export async function runProviderBenchmark(config, prompts, fetchImpl = fetch, now = () => performance.now()) {
   requireValue(config.provenance.version !== RELEASE_VERSION || typeof config.retainImage === 'function', '2.0.18 evidence requires durable private output retention')
-  let offset = 0
-  const schedule = Array.from({ length: config.runs }, (_, index) => {
-    const taskCount = SIZES[index % SIZES.length]
-    const selected = prompts.slice(offset, offset + taskCount); offset += taskCount
-    return { taskCount, selected }
-  })
-  const fixedSetSha256 = sha256(JSON.stringify(schedule.map(({ taskCount, selected }) => ({ task_count: taskCount, prompt_sha256: selected.map(sha256) }))))
+  verifyExecution(config, prompts)
+  durableNew(resolve(`${config.output}.images`, 'started.json'), JSON.stringify({ schema_version: 1, execution_sha256: config.execution.sha256 }) + '\n')
+  const { schedule, fixedSetSha256 } = fixedSchedule(config, prompts)
   const runs = []
   for (const [index, { taskCount, selected }] of schedule.entries()) {
-    const batchId = `sha256:${sha256(`${fixedSetSha256}\0${index + 1}`)}`
-    const control = await requestImage(config, selected[0], scope(`${fixedSetSha256}\0direct\0${index + 1}`), fetchImpl, now)
+    const control = await requestImage(config, selected[0], scopedRequest(config.execution.id, fixedSetSha256, index + 1), fetchImpl, now)
     requireValue(control.status === 'completed', `same-round direct control ${index + 1} did not complete (${control.error_name ?? control.status})`)
     const batchStarted = now()
     const results = await mapLimit(selected, 4, async (prompt, ordinal) => {
-      const result = await requestImage(config, prompt, scope(`${fixedSetSha256}\0${index + 1}\0${ordinal + 1}`, batchId, ordinal + 1), fetchImpl, now)
+      const result = await requestImage(config, prompt, scopedRequest(config.execution.id, fixedSetSha256, index + 1, ordinal + 1), fetchImpl, now)
       return { ...result, batchElapsed: now() - batchStarted }
     })
     requireValue(!results.some(result => result.status === 'rate-limited'), `ordinary ${config.layer} batch ${index + 1} was rate limited`)
@@ -183,6 +244,7 @@ export async function runProviderBenchmark(config, prompts, fetchImpl = fetch, n
     provenance: config.provenance, measured_at: new Date().toISOString(), fixed_set_sha256: fixedSetSha256,
     runs, typed_429_retry_probe: await typed429Probe(config, prompts, fetchImpl),
   }
+  verifyExecution(config, prompts)
   return validateProviderLayerEvidence(report, config.layer, config.provenance)
 }
 
@@ -194,8 +256,7 @@ async function main() {
   config.provenance = { emate_commit: commit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: RELEASE_VERSION }
   const prompts = privatePrompts(config.promptsFile, config.runs)
   const outputDirectory = `${config.output}.images`
-  // Exclusive directory creation prevents replay after partial or unknown provider outcomes.
-  mkdirSync(outputDirectory, { mode: 0o700 })
+  config.execution = prepareProviderExecution(config, prompts)
   config.retainImage = (taskId, image) => {
     const path = resolve(outputDirectory, `${sha256(taskId)}.${image.extension}`)
     writeFileSync(path, image.bytes, { flag: 'wx', mode: 0o600, flush: true })

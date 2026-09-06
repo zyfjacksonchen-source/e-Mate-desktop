@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import test from 'node:test'
-import { readConfiguration, runProviderBenchmark } from './real-provider-benchmark.mjs'
+import test, { after } from 'node:test'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { prepareProviderExecution, readConfiguration, runProviderBenchmark } from './real-provider-benchmark.mjs'
 
 const digest = value => createHash('sha256').update(value).digest('hex')
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -9,8 +12,13 @@ const prompts = Array.from({ length: 30 }, (_, index) => `private-${index + 1}`)
 const provenance = { emate_commit: 'a'.repeat(40), harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d', desktop_reference: '6074088f5b660206e404b3591fab51fb99c69add', version: '2.0.17' }
 const success = id => new Response(JSON.stringify({ id: `result-${id}`, data: [{ b64_json: png }], usage: {} }), { status: 200, headers: { 'content-type': 'application/json' } })
 
-function config(layer, probe) {
-  return { layer, probe, root: new URL(`https://${layer}.example/v1`), token: 'secret-session-token-value', deployment: digest(`${layer}-deployment`), environmentName: layer, runs: 3, provenance }
+const directories = []
+after(() => { for (const directory of directories) rmSync(directory, { recursive: true, force: true }) })
+function config(layer, probe, version = provenance.version) {
+  const directory = mkdtempSync(join(tmpdir(), 'emate-provider-execution-')); directories.push(directory)
+  const value = { layer, probe, root: new URL(`https://${layer}.example/v1`), token: 'secret-session-token-value', deployment: digest(`${layer}-deployment`), environmentName: layer, runs: 3, provenance: { ...provenance, version }, output: join(directory, 'raw.json') }
+  value.execution = prepareProviderExecution(value, prompts)
+  return value
 }
 
 test('real provider runner covers 4/5/8 with four-way batch concurrency and emits hashes only', async () => {
@@ -67,14 +75,17 @@ test('queued mapLimit waves share one monotonic batch start', async () => {
 
 test('controlled staging requires one typed pre-provider 429 and one successful identical retry', async () => {
   let calls = 0
-  const fetchImpl = async () => {
+  const attempted = []
+  const fetchImpl = async (_url, init) => {
     calls += 1
+    attempted.push({ body: init.body, headers: init.headers })
     if (calls === 25) return new Response(JSON.stringify({ error: { code: 'TENANT_CONCURRENCY_LIMITED', message: 'bounded', retryAfterMs: 1000 } }), { status: 429, headers: { 'retry-after': '1' } })
     return success(calls)
   }
   const report = await runProviderBenchmark(config('staging', true), prompts, fetchImpl)
   assert.deepEqual(report.typed_429_retry_probe, { status: 'PASS', retry_after_ms: 1000, attempts: 2, accepted_submissions: 1, identical_request: true, pass: true })
   assert.equal(calls, 26)
+  assert.deepEqual(attempted[24], attempted[25])
 })
 
 test('configuration keeps credentials in env and rejects aliased or uncontrolled layers', () => {
@@ -90,8 +101,7 @@ test('configuration keeps credentials in env and rejects aliased or uncontrolled
 })
 
 test('2.0.18 runner requires output retention before calls and retains each successful response', async () => {
-  const current = config('production', false)
-  current.provenance = { ...provenance, version: '2.0.18' }
+  const current = config('production', false, '2.0.18')
   let calls = 0
   const fetchImpl = async () => success(++calls)
   await assert.rejects(runProviderBenchmark(current, prompts, fetchImpl), /durable private output retention/u)
@@ -106,4 +116,85 @@ test('2.0.18 runner requires output retention before calls and retains each succ
   assert.equal(report.ticket, 'EM218-502')
   assert.equal(retained.size, 20)
   assert.deepEqual(report.runs.map(run => run.retained_success_count), [4, 5, 8])
+})
+
+test('fresh executions persist independent scope before any request and correlate all planned control/batch/probe IDs', async () => {
+  const first = config('staging', true)
+  const second = config('staging', true)
+  const firstReceipt = JSON.parse(readFileSync(first.execution.path, 'utf8'))
+  const secondReceipt = JSON.parse(readFileSync(second.execution.path, 'utf8'))
+  assert.notEqual(first.execution.id, second.execution.id)
+  assert.equal(firstReceipt.fixed_set_sha256, secondReceipt.fixed_set_sha256)
+  const firstIds = new Set(firstReceipt.requests.map(item => item.headers['x-client-request-id']))
+  assert.equal(firstIds.size, 25)
+  assert.equal(secondReceipt.requests.some(item => firstIds.has(item.headers['x-client-request-id'])), false)
+  assert.deepEqual([...new Set(firstReceipt.requests.map(item => item.kind))], ['direct', 'batch', 'typed-429-probe'])
+  const seen = []
+  let rejected
+  const fetchImpl = async (_url, init) => {
+    assert.equal(digest(readFileSync(first.execution.path)), first.execution.sha256)
+    assert.equal(JSON.parse(readFileSync(join(`${first.output}.images`, 'started.json'))).execution_sha256, first.execution.sha256)
+    const committed = firstReceipt.requests.find(item => item.headers['x-client-request-id'] === init.headers['x-client-request-id'])
+    assert.ok(committed, 'every submitted identity must have been committed before dispatch')
+    for (const [key, value] of Object.entries(committed.headers)) assert.equal(init.headers[key], value)
+    assert.equal(committed.prompt_sha256, digest(JSON.parse(init.body).prompt))
+    seen.push(init.headers['x-client-request-id'])
+    if (seen.length === 25) {
+      rejected = { ...init.headers }
+      return new Response(JSON.stringify({ error: { code: 'TENANT_CONCURRENCY_LIMITED', retryAfterMs: 1000 } }), { status: 429, headers: { 'retry-after': '1' } })
+    }
+    if (seen.length === 26) assert.deepEqual(init.headers, rejected)
+    return success(seen.length)
+  }
+  await runProviderBenchmark(first, prompts, fetchImpl)
+  assert.equal(new Set(seen).size, firstIds.size)
+  await assert.rejects(runProviderBenchmark(first, prompts, fetchImpl), /EEXIST/u)
+  assert.equal(seen.length, 26)
+  assert.doesNotMatch(readFileSync(first.execution.path, 'utf8'), /secret-session-token|private-\d/u)
+})
+
+test('lost/tampered execution receipt and an unknown outcome cannot trigger an automatic replay', async () => {
+  let calls = 0
+  for (const damage of ['missing', 'changed']) {
+    const value = config('production', false)
+    if (damage === 'missing') rmSync(value.execution.path)
+    else writeFileSync(value.execution.path, '{}')
+    await assert.rejects(runProviderBenchmark(value, prompts, async () => { calls++; return success(calls) }))
+  }
+  assert.equal(calls, 0)
+  const value = config('production', false)
+  const unknown = async () => { calls++; throw new Error('unknown submission outcome') }
+  await assert.rejects(runProviderBenchmark(value, prompts, unknown), /direct control.*unknown|direct control.*Error/u)
+  assert.equal(calls, 1)
+  assert.ok(readdirSync(`${value.output}.images`).includes('execution.json'))
+  assert.ok(readdirSync(`${value.output}.images`).includes('started.json'))
+  await assert.rejects(runProviderBenchmark(value, prompts, unknown), /EEXIST/u)
+  assert.equal(calls, 1)
+  await assert.rejects(runProviderBenchmark({ ...config('production', false), execution: undefined }, prompts, unknown), /precommitted execution/u)
+  assert.equal(calls, 1)
+})
+
+test('a bad batch response stops queued dispatch and waits for active successes to be retained', async () => {
+  const value = config('production', false, '2.0.18')
+  const retained = []
+  value.retainImage = (id, image) => {
+    const file = join(`${value.output}.images`, `${digest(id)}.${image.extension}`)
+    writeFileSync(file, image.bytes, { flag: 'wx' })
+    retained.push(file)
+  }
+  let calls = 0
+  let active = 0
+  const fetchImpl = async (_url, init) => {
+    const index = ++calls
+    if (!init.headers['x-e-mate-batch-id']) return success(index)
+    active++
+    await new Promise(resolve => setTimeout(resolve, index === 2 ? 0 : 20))
+    active--
+    return index === 2 ? new Response('invalid JSON') : success(index)
+  }
+  await assert.rejects(runProviderBenchmark(value, prompts, fetchImpl), /not valid UTF-8 JSON/u)
+  assert.equal(calls, 5)
+  assert.equal(active, 0)
+  assert.equal(retained.length, 4)
+  for (const file of retained) assert.deepEqual(readFileSync(file), Buffer.from(png, 'base64'))
 })
