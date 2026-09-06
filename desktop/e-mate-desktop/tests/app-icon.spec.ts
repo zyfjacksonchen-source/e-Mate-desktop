@@ -63,8 +63,8 @@ describe('application icon source', () => {
         const green = data[offset + 1]!
         const blue = data[offset + 2]!
         const alpha = data[offset + 3]!
-        if (x < 32 || y < 32 || x >= info.width - 32 || y >= info.height - 32) {
-          expect(alpha).toBe(0)
+        if ((x < 32 || y < 32 || x >= info.width - 32 || y >= info.height - 32) && alpha !== 0) {
+          throw new Error(`non-transparent app-icon border at ${x},${y}: ${alpha}`)
         }
         if (alpha > 0 && alpha < 255) partialAlpha += 1
         if (alpha < 250) continue
