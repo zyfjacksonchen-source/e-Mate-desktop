@@ -68,6 +68,10 @@ export async function migrate(options: { pool: Pool; directory: string; volume: 
     await client.query('BEGIN')
     await client.query("SET LOCAL lock_timeout='15s'; SET LOCAL statement_timeout='20s'")
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended('emate-share-migration', 0))")
+    const activation = (await client.query('SELECT manifest_sha256, imported_object_count FROM emate_share.service_state WHERE singleton=true FOR UPDATE')).rows[0]
+    if (activation && (activation.manifest_sha256 !== sha256 || Number(activation.imported_object_count) !== snapshot.objects.length)) {
+      throw new Error('Share migration manifest conflict')
+    }
     for (const item of snapshot.objects) {
       const body = await sourceBody(options.directory, item)
       let stage: { temporary: string; sha256: string; size: number } | undefined
@@ -88,6 +92,7 @@ export async function migrate(options: { pool: Pool; directory: string; volume: 
         if (stage) { await unlink(stage.temporary); staged.pop() }
         continue
       }
+      if (activation) throw new Error('Share migration identity conflict')
       if (options.apply) {
         if (stage) {
           await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`emate-share-blob:${item.sha256}`])
@@ -106,8 +111,7 @@ export async function migrate(options: { pool: Pool; directory: string; volume: 
         if (!row || Number(row.size) !== item.size || !sameMetadata(row.custom_metadata, item.customMetadata) || !sameMetadata(row.http_metadata, item.httpMetadata)) throw new Error('Share migration readback failed')
       }
     }
-    if (options.apply) await client.query(`INSERT INTO emate_share.service_state(singleton,manifest_sha256,imported_object_count) VALUES(true,$1,$2)
-      ON CONFLICT(singleton) DO UPDATE SET manifest_sha256=EXCLUDED.manifest_sha256,imported_object_count=EXCLUDED.imported_object_count,activated_at=now()`, [sha256, snapshot.objects.length])
+    if (options.apply && !activation) await client.query('INSERT INTO emate_share.service_state(singleton,manifest_sha256,imported_object_count) VALUES(true,$1,$2)', [sha256, snapshot.objects.length])
     await client.query(options.apply ? 'COMMIT' : 'ROLLBACK')
     return { schema_version: 1, applied: options.apply, data_ready: options.apply, manifest_sha256: sha256, objects: snapshot.objects.length, reused }
   } catch (error) {

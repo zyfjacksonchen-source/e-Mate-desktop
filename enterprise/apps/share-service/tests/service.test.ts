@@ -101,18 +101,29 @@ test('a retried upload can cancel an unread stalled HTTP body without waiting on
 // transaction/isolation semantics are separately checked by postgres.test.ts.
 class FaultPool {
   committed = new Map<string, any>()
+  activation: any
+  activationWrites = 0
   failure: 'insert' | 'commit-lost' | 'unavailable' | undefined
   async connect() {
     if (this.failure === 'unavailable') throw new Error('unavailable')
     let pending = new Map(this.committed)
+    let pendingActivation = this.activation
     return {
       release() {},
       query: async (sql: string, args: any[] = []) => {
-        if (sql === 'ROLLBACK') pending = new Map(this.committed)
+        if (sql === 'ROLLBACK') { pending = new Map(this.committed); pendingActivation = this.activation }
         if (sql === 'COMMIT') {
           this.committed = new Map(pending)
+          this.activation = pendingActivation
           if (this.failure === 'commit-lost') { this.failure = undefined; throw new Error('response lost') }
         }
+        if (sql.startsWith('INSERT INTO emate_share.service_state')) {
+          if (pendingActivation) throw new Error('activation already exists')
+          pendingActivation = { manifest_sha256: args[0], imported_object_count: args[1], activated_at: 'original-activation-time' }
+          this.activationWrites++
+          return { rows: [], rowCount: 1 }
+        }
+        if (sql.startsWith('SELECT manifest_sha256, imported_object_count')) return { rows: pendingActivation ? [pendingActivation] : [], rowCount: pendingActivation ? 1 : 0 }
         if (sql.startsWith('INSERT INTO')) {
           if (this.failure === 'insert') throw new Error('metadata unavailable')
           pending.set(args[0], { key: args[0], size: args[1], sha256: args[2], custom_metadata: args[3], http_metadata: args[4] })
@@ -200,14 +211,40 @@ test('migration lost COMMIT response preserves original public identity and supp
   pool.failure = 'commit-lost'
   await assert.rejects(migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply: true }), /response lost/)
   await files.verify(sha256, bytes.length)
+  const originalActivation = structuredClone(pool.activation)
+  const originalManifest = JSON.stringify(snapshot)
   const result = await migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply: true })
-  assert.equal(result.data_ready, true)
-  assert.equal(result.reused, 1)
+  assert.deepEqual(result, { schema_version: 1, applied: true, data_ready: true, manifest_sha256: digest(Buffer.from(originalManifest)), objects: 1, reused: 1 })
+  assert.deepEqual(await migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply: true }), result)
+  assert.deepEqual(pool.activation, originalActivation)
+  assert.equal(pool.activationWrites, 1)
   assert.deepEqual(pool.committed.get(object.key).custom_metadata, object.customMetadata)
   snapshot.objects[0].customMetadata.owner_sha256 = 'f'.repeat(64)
   await writeFile(join(directory, 'manifest.json'), JSON.stringify(snapshot))
-  await assert.rejects(migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply: true }), /identity conflict/)
+  await assert.rejects(migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply: true }), /manifest conflict/)
   assert.equal(pool.committed.get(object.key).custom_metadata.owner_sha256, 'a'.repeat(64))
+  // A different or empty manifest must fail before opening even one source
+  // object, inserting metadata or publishing bytes.
+  for (const objects of [[], [{ ...object, key: `shares/${'e'.repeat(32)}.zip`, sha256: 'e'.repeat(64) }]]) {
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify({ ...snapshot, objects }))
+    for (const apply of [false, true]) await assert.rejects(migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply }), /manifest conflict/)
+    assert.equal(pool.committed.size, 1)
+    assert.deepEqual(await files.candidates(), [sha256])
+    assert.deepEqual(await readdir(join(files.root, 'tmp')), [])
+    assert.deepEqual(pool.activation, originalActivation)
+    assert.equal(pool.activationWrites, 1)
+  }
+  await writeFile(join(directory, 'manifest.json'), originalManifest)
+  await writeFile(join(directory, 'objects', `${sha256}.bin`), new Uint8Array([0, 0, 0, 0]))
+  await assert.rejects(migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply: true }), /digest/)
+  await writeFile(join(directory, 'objects', `${sha256}.bin`), bytes)
+  pool.committed.get(object.key).custom_metadata = { ...pool.committed.get(object.key).custom_metadata, owner_sha256: 'f'.repeat(64) }
+  await assert.rejects(migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply: true }), /identity conflict/)
+  assert.deepEqual(pool.activation, originalActivation)
+  pool.committed.delete(object.key)
+  await assert.rejects(migrate({ pool: pool as unknown as Pool, directory, volume: files.root, apply: true }), /identity conflict/)
+  assert.equal(pool.committed.size, 0)
+  assert.deepEqual(pool.activation, originalActivation)
   await files.verify(sha256, bytes.length)
 })
 
@@ -235,4 +272,21 @@ test('readiness requires activated data, readable schema and accessible capacity
   await mkdir(join(files.root, 'archives'))
   service.files.health = async () => { throw new Error('Share volume is full') }
   assert.equal((await health()).status, 503)
+})
+
+test('a first empty bucket snapshot activates once and replays the same empty manifest', async t => {
+  const files = await volume(t)
+  const directory = join(files.root, 'snapshot')
+  await mkdir(directory)
+  const manifest = JSON.stringify({ schema_version: 1, source_bucket: 'emate-session-shares', objects: [] })
+  await writeFile(join(directory, 'manifest.json'), manifest)
+  const pool = new FaultPool()
+  const options = { pool: pool as unknown as Pool, directory, volume: files.root, apply: true }
+  const result = await migrate(options)
+  assert.deepEqual(result, { schema_version: 1, applied: true, data_ready: true, manifest_sha256: digest(Buffer.from(manifest)), objects: 0, reused: 0 })
+  const activation = structuredClone(pool.activation)
+  assert.deepEqual(await migrate(options), result)
+  assert.deepEqual(pool.activation, activation)
+  assert.equal(pool.activationWrites, 1)
+  assert.deepEqual(await files.candidates(), [])
 })
