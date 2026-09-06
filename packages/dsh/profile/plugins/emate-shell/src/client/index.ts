@@ -354,6 +354,9 @@ export async function startSessionFromRoute(ctx: any, workspaceId?: string): Pro
   if (target === undefined) throw new Error('new task unavailable')
   const fence = captureRouteFence(ctx)
   try {
+    const saving = ctx.get?.('emateCanvas')?.beforeNavigate()
+    if (saving) await saving
+    if (!fence.current()) return false
     const sessionId = await ctx.workspaces.connectWorkspace(target)
     if (!fence.current()) return false
     fence.dispose()
@@ -417,6 +420,12 @@ export async function prepareSchedulePromptFromRoute(
   prompt: string,
   requestedSessionId?: string,
 ): Promise<void> {
+  const navigation = captureRouteFence(ctx)
+  try {
+    const saving = ctx.get?.('emateCanvas')?.beforeNavigate()
+    if (saving) await saving
+    if (!navigation.current()) return
+  } finally { navigation.dispose() }
   if (requestedSessionId !== undefined) {
     const requestedScope = ctx.sessions.scope(requestedSessionId)
     if (requestedScope === undefined) throw new Error(`session "${requestedSessionId}" is not addressable`)
@@ -481,6 +490,12 @@ export function apply(ctx: any): void {
     inject: () => ({
       getSessions: () => ctx.sessions.list.getSnapshot(),
       openSession: (id: string) => { ctx.sessions.open(id) },
+      beforeNavigate: () => {
+        routeGenerations.set(ctx, (routeGenerations.get(ctx) ?? 0) + 1)
+        const canvas = ctx.get('emateCanvas')
+        return canvas?.activeSessionId() === undefined ? undefined : canvas.beforeNavigate()
+      },
+      onNavigationError: () => createTransientGalleryNotice(ctx)('error', '画布尚未保存，已保留当前页面。请处理保存问题后重试。'),
     }),
   }, SessionRouteProjection))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
@@ -566,6 +581,10 @@ export function apply(ctx: any): void {
           if (!result.ok) throw new Error(result.error.message)
         },
         archiveSession: async (id: string) => { await ctx.workspaces.archiveSession(id) },
+        deleteWorkspace: async (workspaceId: string) => {
+          await ctx.get('emateCanvas')?.beforeNavigate()
+          await ctx.workspaces.delete(workspaceId)
+        },
         toggleSidebar: () => { ctx.layout.toggleSidebar() },
       }),
     }, SidebarRoot),
@@ -638,7 +657,15 @@ export function apply(ctx: any): void {
   ctx.slots.inject('settings.trigger', () => ctx.slots.register({
     name: 'settings.trigger',
     priority: -1,
-    inject: () => ({ SettingsIcon: IconSettingsOutline16 }),
+    inject: () => ({
+      SettingsIcon: IconSettingsOutline16,
+      beforeNavigate: () => {
+        routeGenerations.set(ctx, (routeGenerations.get(ctx) ?? 0) + 1)
+        const canvas = ctx.get('emateCanvas')
+        return canvas?.activeSessionId() === undefined ? undefined : canvas.beforeNavigate()
+      },
+      onNavigationError: () => createTransientGalleryNotice(ctx)('error', '画布尚未保存，已保留当前页面。'),
+    }),
   }, SettingsTrigger))
   ctx.slots.inject('settings.header', () => ctx.slots.register({
     name: 'settings.header',

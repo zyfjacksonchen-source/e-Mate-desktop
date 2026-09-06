@@ -15,6 +15,8 @@ interface Props {
   useWorkspaces: <T>(selector: (state: WorkspaceListState) => T) => T
   getSessions: () => SessionListState
   openSession: (id: string) => void
+  beforeNavigate?: () => Promise<void> | undefined
+  onNavigationError?: () => void
 }
 
 type PendingRoute = string | null
@@ -34,6 +36,8 @@ export function SessionRouteProjection({
   useWorkspaces,
   getSessions,
   openSession,
+  beforeNavigate,
+  onNavigationError,
 }: Props) {
   const phase = useSessions(state => state.phase)
   const current = useSessions(state => state.current)
@@ -92,6 +96,55 @@ export function SessionRouteProjection({
       dispatchEvent(new PopStateEvent('popstate'))
     }
   }, [current, phase, workspacesReady])
+
+  useEffect(() => {
+    const indexKey = 'eMateRouteIndex'
+    let accepted = { url: `${location.pathname}${location.search}${location.hash}`, state: { ...history.state, [indexKey]: history.state?.[indexKey] ?? 0 } }
+    history.replaceState(accepted.state, '', accepted.url)
+    let generation = 0
+    let replaying = false
+    let restoring = false
+    const guard = (event: PopStateEvent) => {
+      const url = `${location.pathname}${location.search}${location.hash}`
+      if (restoring) { restoring = false; event.stopImmediatePropagation(); return }
+      const target = { url, state: { ...history.state, [indexKey]: Number.isInteger(history.state?.[indexKey]) ? history.state[indexKey] : event.isTrusted ? null : (accepted.state[indexKey] ?? 0) + 1 } }
+      const request = ++generation
+      if (replaying || target.url === accepted.url) {
+        accepted = target
+        history.replaceState(target.state, '', target.url)
+        return
+      }
+      const saving = beforeNavigate?.()
+      if (!saving) {
+        accepted = target
+        history.replaceState(target.state, '', target.url)
+        return
+      }
+      event.stopImmediatePropagation()
+      const previous = accepted
+      history.replaceState(previous.state, '', previous.url)
+      void saving.then(() => {
+        if (request !== generation) return
+        history.replaceState(target.state, '', target.url)
+        replaying = true
+        dispatchEvent(new PopStateEvent('popstate', { state: target.state }))
+        replaying = false
+      }).catch(() => {
+        if (request !== generation) return
+        // A real Back/Forward changes the history cursor. Return to the prior
+        // entry while retaining the rejected destination for a later retry.
+        const delta = previous.state[indexKey] - target.state[indexKey]
+        if (event.isTrusted && Number.isInteger(previous.state[indexKey]) && Number.isInteger(target.state[indexKey]) && delta !== 0) {
+          history.replaceState(target.state, '', target.url)
+          restoring = true
+          history.go(delta)
+        }
+        onNavigationError?.()
+      })
+    }
+    addEventListener('popstate', guard, true)
+    return () => { generation++; removeEventListener('popstate', guard, true) }
+  }, [beforeNavigate, onNavigationError])
 
   return null
 }

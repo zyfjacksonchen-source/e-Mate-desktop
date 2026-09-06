@@ -33,7 +33,7 @@ it('preserves the canvas on save failure and releases each shared details seat o
   const leave = vi.fn(async () => { if (failSave) throw Error('conflict') })
   const notify = vi.fn()
   const ctx = {
-    get: () => ({ leave }), sessions: { list: { getSnapshot: () => ({ current: 'task' }) }, binding: () => ({ session: {} }), open: vi.fn() },
+    get: () => ({ beforeNavigate: leave }), sessions: { list: { getSnapshot: () => ({ current: 'task' }) }, binding: () => ({ session: {} }), open: vi.fn() },
     layout: { openDetails: vi.fn(), closeDetails: vi.fn() }, slots: { register },
     reflect: { provide: (_: string, value: any) => { service = value; return vi.fn() } },
     effect: (install: any) => { disposeEffect = install() },
@@ -58,7 +58,7 @@ it('does not return to an old task when a canvas save finishes after navigation'
   let finishSave!: () => void
   const saving = new Promise<void>(resolve => { finishSave = resolve })
   const ctx = {
-    get: () => ({ leave: () => saving }),
+    get: () => ({ beforeNavigate: () => saving }),
     sessions: { list: { getSnapshot: () => ({ current }) }, binding: () => ({ session: {} }), open: vi.fn() },
     layout: { openDetails: vi.fn(), closeDetails: vi.fn() }, slots: { register: vi.fn() },
     reflect: { provide: (_: string, value: any) => { service = value; return vi.fn() } },
@@ -73,4 +73,35 @@ it('does not return to an old task when a canvas save finishes after navigation'
   expect(ctx.slots.register).not.toHaveBeenCalled()
   expect(ctx.layout.openDetails).not.toHaveBeenCalled()
   expect(notify).not.toHaveBeenCalled()
+})
+
+it('opens the existing pet settings section only after canvas save succeeds', async () => {
+  let service: any
+  let fail = true
+  const notify = vi.fn()
+  const sectionClick = vi.fn()
+  const trigger = document.createElement('button')
+  trigger.dataset.emateSettingsTrigger = ''
+  trigger.onclick = () => {
+    const section = document.createElement('button')
+    section.dataset.settingsSectionId = 'appearance-motion'
+    section.onclick = sectionClick
+    document.body.append(section)
+  }
+  document.body.append(trigger)
+  const ctx = {
+    get: () => ({ beforeNavigate: async () => { if (fail) throw Error('conflict') } }),
+    sessions: { list: { getSnapshot: () => ({ current: 'task' }) } },
+    reflect: { provide: (_: string, value: any) => { service = value; return vi.fn() } },
+    effect: (install: any) => install(),
+  }
+  try {
+    registerPetTaskDetails(ctx, notify)
+    await act(async () => { service.openPetSettings() })
+    expect(notify).toHaveBeenCalledOnce()
+    expect(sectionClick).not.toHaveBeenCalled()
+    fail = false
+    await act(async () => { service.openPetSettings() })
+    expect(sectionClick).toHaveBeenCalledOnce()
+  } finally { document.body.replaceChildren() }
 })

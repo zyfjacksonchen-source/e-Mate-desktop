@@ -1118,3 +1118,62 @@ describe('project removal through native workspace owner', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 })
+
+describe('canvas route save boundary', () => {
+  it('keeps the current session and standalone page hidden until save succeeds, ignoring older clicks', async () => {
+    history.replaceState(null, '', '/chat/a')
+    const state = { phase: 'ready' as const, current: 'a', byId: { a: {}, b: {}, c: {} } }
+    const saves: Array<{ resolve(): void; reject(error: Error): void }> = []
+    const beforeNavigate = () => new Promise<void>((resolve, reject) => saves.push({ resolve, reject }))
+    const openSession = vi.fn((id: string) => { state.current = id })
+    const onNavigationError = vi.fn()
+    render(<SessionRouteProjection useSessions={read => read(state)} useWorkspaces={read => read({ baselinesReady: true })} getSessions={() => state} openSession={openSession} beforeNavigate={beforeNavigate} onNavigationError={onNavigationError} />)
+    const downstream = vi.fn()
+    addEventListener('popstate', downstream)
+    try {
+      history.pushState(null, '', '/schedules'); dispatchEvent(new PopStateEvent('popstate'))
+      expect(location.pathname).toBe('/chat/a')
+      expect(downstream).not.toHaveBeenCalled()
+      saves[0]!.reject(Error('conflict'))
+      await waitFor(() => expect(onNavigationError).toHaveBeenCalledOnce())
+      expect(openSession).not.toHaveBeenCalled()
+      openSessionFromRoute('b'); openSessionFromRoute('c')
+      saves[1]!.resolve()
+      await Promise.resolve()
+      expect(location.pathname).toBe('/chat/a')
+      saves[2]!.resolve()
+      await waitFor(() => expect(openSession).toHaveBeenCalledExactlyOnceWith('c'))
+      expect(location.pathname).toBe('/chat/c')
+      expect(downstream).toHaveBeenCalledOnce()
+      openSessionFromRoute('b'); openSessionFromRoute('c')
+      saves[3]!.resolve()
+      await Promise.resolve()
+      expect(location.pathname).toBe('/chat/c')
+      expect(openSession).toHaveBeenCalledTimes(1)
+    } finally { removeEventListener('popstate', downstream) }
+  })
+
+  it('returns a failed Back to the original history entry and can retry the same destination', async () => {
+    history.replaceState(null, '', '/chat/a')
+    const state = { phase: 'ready' as const, current: 'a', byId: { a: {}, b: {} } }
+    let active = false
+    let fail = true
+    const beforeNavigate = () => active ? (fail ? Promise.reject(Error('conflict')) : Promise.resolve()) : undefined
+    const openSession = vi.fn((id: string) => { state.current = id })
+    const onNavigationError = vi.fn()
+    render(<SessionRouteProjection useSessions={read => read(state)} useWorkspaces={read => read({ baselinesReady: true })} getSessions={() => state} openSession={openSession} beforeNavigate={beforeNavigate} onNavigationError={onNavigationError} />)
+    openSessionFromRoute('b')
+    expect(state.current).toBe('b')
+    active = true
+    history.back()
+    await waitFor(() => expect(onNavigationError).toHaveBeenCalledOnce())
+    await waitFor(() => expect(location.pathname).toBe('/chat/b'))
+    expect(state.current).toBe('b')
+    fail = false
+    history.back()
+    await waitFor(() => expect(state.current).toBe('a'))
+    expect(location.pathname).toBe('/chat/a')
+    history.forward()
+    await waitFor(() => expect(state.current).toBe('b'))
+  })
+})

@@ -1,5 +1,6 @@
 import type { ConversationSnapshot, UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import css from './task-details.module.css'
+import { openNativePetSettings } from './settings-chrome.tsx'
 import { createPetWorkFactsReader } from './pet-image-facts.ts'
 
 const phaseLabels: Record<string, string> = {
@@ -57,7 +58,7 @@ export function registerPetTaskDetails(ctx: any, notify: (level: 'info' | 'error
     const request = ++generation
     if (ctx.sessions.list.getSnapshot().current !== taskId) return
     if (!ctx.sessions.binding(taskId)?.session) throw new Error('Task unavailable')
-    await ctx.get('emateCanvas')?.leave()
+    await ctx.get('emateCanvas')?.beforeNavigate()
     if (request !== generation || ctx.sessions.list.getSnapshot().current !== taskId
       || !ctx.sessions.binding(taskId)?.session) return
     disposePanel?.()
@@ -69,6 +70,16 @@ export function registerPetTaskDetails(ctx: any, notify: (level: 'info' | 'error
   }
   ctx.effect(() => {
     const dispose = ctx.reflect.provide('ematePetDetails', { release, readWorkFacts,
+      openPetSettings() {
+        const request = ++generation
+        const path = location.pathname
+        const sessionId = ctx.sessions.list.getSnapshot().current
+        void (async () => {
+          await ctx.get('emateCanvas')?.beforeNavigate()
+          if (request === generation && location.pathname === path
+            && ctx.sessions.list.getSnapshot().current === sessionId) await openNativePetSettings()
+        })().catch(() => notify('error', '设置未能打开，请先处理画布保存问题或稍后重试。'))
+      },
       openTaskDetails(taskId: string) { void open(taskId).catch(() => notify('error', '任务详情未能打开，请先处理画布保存问题或稍后重试。')) },
     })
     return () => { release(); void dispose() }

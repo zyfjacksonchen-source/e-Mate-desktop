@@ -240,3 +240,23 @@ describe('Settings route owns its navigation lifecycle', () => {
     expect(screen.getByRole('button', { name: '打开任务：旧新会话 1' })).not.toBeNull()
   })
 })
+
+it('waits for canvas saving before the native Settings button and rejects stale repeated clicks', async () => {
+  const saving: Array<{ resolve(): void; reject(error: Error): void }> = []
+  const beforeNavigate = () => new Promise<void>((resolve, reject) => saving.push({ resolve, reject }))
+  const nativeOpen = vi.fn()
+  const onNavigationError = vi.fn()
+  history.replaceState(null, '', '/chat/a')
+  render(<button onClick={nativeOpen}><SettingsTrigger wide SettingsIcon={Icon} beforeNavigate={beforeNavigate} onNavigationError={onNavigationError} /></button>)
+  const trigger = screen.getByRole('button', { name: '设置' })
+  fireEvent.click(trigger)
+  expect(nativeOpen).not.toHaveBeenCalled()
+  await act(async () => { saving[0]!.reject(Error('conflict')) })
+  expect(onNavigationError).toHaveBeenCalledOnce()
+  expect(location.pathname).toBe('/chat/a')
+  fireEvent.click(trigger); fireEvent.click(trigger)
+  await act(async () => { saving[1]!.resolve() })
+  expect(nativeOpen).not.toHaveBeenCalled()
+  await act(async () => { saving[2]!.resolve() })
+  expect(nativeOpen).toHaveBeenCalledOnce()
+})

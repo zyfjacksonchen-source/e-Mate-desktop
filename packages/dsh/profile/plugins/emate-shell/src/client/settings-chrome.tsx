@@ -21,9 +21,11 @@ export function applySettingsSectionVisibility(root: ParentNode): void {
 interface TriggerProps {
   wide: boolean
   SettingsIcon: ComponentType<{ size?: number }>
+  beforeNavigate?: () => Promise<void> | undefined
+  onNavigationError?: () => void
 }
 
-export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
+export function SettingsTrigger({ wide, SettingsIcon, beforeNavigate, onNavigationError }: TriggerProps) {
   const label = useRef<HTMLSpanElement>(null)
 
   useEffect(() => {
@@ -31,6 +33,24 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
     if (!(trigger instanceof HTMLButtonElement)) return undefined
     trigger.dataset.emateSettingsTrigger = ''
 
+    let generation = 0
+    let approvedClick = false
+    const guardOpen = (event: MouseEvent) => {
+      if (approvedClick || document.querySelector(SETTINGS_CONTENT_SELECTOR)) return
+      const request = ++generation
+      const saving = beforeNavigate?.()
+      if (!saving) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const path = location.pathname
+      void saving.then(() => {
+        if (request !== generation || location.pathname !== path || !trigger.isConnected) return
+        approvedClick = true
+        trigger.click()
+        approvedClick = false
+      }).catch(() => { if (request === generation) onNavigationError?.() })
+    }
+    trigger.addEventListener('click', guardOpen, true)
     let open = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
     const projectTrigger = (panelOpen: boolean) => {
       trigger.inert = panelOpen
@@ -74,12 +94,14 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
     addEventListener('popstate', syncPanel)
     syncPanel()
     return () => {
+      generation++
+      trigger.removeEventListener('click', guardOpen, true)
       observer.disconnect()
       removeEventListener('popstate', syncPanel)
       projectTrigger(false)
       delete trigger.dataset.emateSettingsTrigger
     }
-  }, [])
+  }, [beforeNavigate, onNavigationError])
 
   return (
     <>
@@ -118,4 +140,26 @@ export function SettingsChrome({ updates, UpdateIcon }: {
         : null}
     </div>
   )
+}
+
+
+/** Open the existing native Settings shell and select its registered pet section. */
+export async function openNativePetSettings(): Promise<void> {
+  const select = () => {
+    const section = document.querySelector<HTMLButtonElement>('[data-settings-section-id="appearance-motion"]')
+    if (!section) return false
+    section.click()
+    return true
+  }
+  if (select()) return
+  const trigger = document.querySelector<HTMLButtonElement>('[data-emate-settings-trigger]')
+  if (!trigger) throw new Error('Settings unavailable')
+  await new Promise<void>((resolve, reject) => {
+    const finish = (error?: Error) => { observer.disconnect(); clearTimeout(timeout); error ? reject(error) : resolve() }
+    const observer = new MutationObserver(() => { if (select()) finish() })
+    const timeout = setTimeout(() => finish(new Error('Settings unavailable')), 5000)
+    observer.observe(document.body, { childList: true, subtree: true })
+    trigger.click()
+    if (select()) finish()
+  })
 }
