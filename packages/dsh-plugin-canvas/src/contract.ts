@@ -6,6 +6,8 @@ export const MAX_HTML_BYTES = 512 * 1024
 export const MAX_PROJECT_IMAGES = 100
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 export const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u
+// Excalidraw's pinned nanoid alphabet permits '-' and '_' in the first position.
+const ELEMENT_ID = /^[a-zA-Z0-9_-]{1,64}$/u
 export const HASH = /^[0-9a-f]{64}$/u
 export const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
@@ -94,7 +96,7 @@ export function validateProject(value: unknown): CanvasProject {
     if (!Number.isFinite(page.view.zoom) || Number(page.view.zoom) < 0.1 || Number(page.view.zoom) > 30 || !/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/iu.test(String(page.view.background))) reject('画布视图无效。')
     const ids = new Set<string>()
     for (const element of page.elements) {
-      if (!record(element) || typeof element.id !== 'string' || !ID.test(element.id) || ids.has(element.id)
+      if (!record(element) || typeof element.id !== 'string' || !ELEMENT_ID.test(element.id) || ids.has(element.id)
         || !['rectangle', 'diamond', 'ellipse', 'arrow', 'line', 'freedraw', 'text', 'image', 'frame'].includes(String(element.type))) reject('画布元素无效。')
       ids.add(element.id)
       if (element.type === 'image' && (typeof element.fileId !== 'string' || !fileIds.has(element.fileId))) reject('画布图片缺少确切附件。')

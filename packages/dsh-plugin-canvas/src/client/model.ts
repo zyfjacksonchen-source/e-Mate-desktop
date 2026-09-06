@@ -7,6 +7,15 @@ export function insertAsset(project: CanvasProject, pageId: string, asset: Canva
   const fileId = asset.ref.attachmentId.slice(7)
   if (!next.assets.some(item => item.ref.attachmentId === asset.ref.attachmentId)) next.assets.push(asset)
   if (page.elements.some(item => item.type === 'image' && item.fileId === fileId && !item.isDeleted)) return next
+  const deleted = page.elements.find(item => item.type === 'image' && item.fileId === fileId && item.isDeleted)
+  if (deleted) {
+    // Excalidraw retains deleted elements for undo; restore that identity instead of colliding with it.
+    deleted.isDeleted = false
+    deleted.version = Number(deleted.version ?? 0) + 1
+    deleted.versionNonce = crypto.getRandomValues(new Uint32Array(1))[0]! & 0x7fffffff
+    deleted.updated = Date.now()
+    return validateProject(next)
+  }
   const width = Math.min(800, asset.ref.width)
   const count = page.elements.filter(item => item.type === 'image' && !item.isDeleted).length
   page.elements.push({ id: `image-${fileId.slice(0, 40)}`, type: 'image', fileId, x: count * 40, y: count * 40,

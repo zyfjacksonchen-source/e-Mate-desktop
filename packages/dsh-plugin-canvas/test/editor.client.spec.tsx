@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { webcrypto } from 'node:crypto'
 import { fireEvent, render, screen, waitFor, cleanup, act } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { emptyProject } from '../src/contract.ts'
-import { htmlDocument, pagesFromHtml } from '../src/client/model.ts'
+import { emptyProject, validateProject } from '../src/contract.ts'
+import { htmlDocument, insertAsset, pagesFromHtml } from '../src/client/model.ts'
 import { createBridge } from '../src/client/bridge.ts'
 vi.mock('@excalidraw/excalidraw', () => {
   const MainMenu: any = ({ children }: any) => <div>{children}</div>
@@ -53,6 +53,11 @@ it('conflict keeps local edits and refuses silent replacement', async () => {
   await screen.findByTestId('scene'); h.conflict(); fireEvent.click(screen.getByText('Draw mark')); fireEvent.click(screen.getByText('保存'))
   await screen.findByRole('alert'); expect(screen.getByTestId('scene').textContent).toContain('1 elements')
   expect(h.read().pages[0].elements).toHaveLength(0); expect(h.bridge.close).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText('放弃未保存编辑并重载'))
+  await waitFor(() => expect(screen.getByTestId('scene').textContent).toContain('0 elements'))
+  fireEvent.click(screen.getByText('Draw mark'))
+  await act(async () => { await h.leave() })
+  expect(h.read().pages[0].elements).toHaveLength(1)
 })
 it('AI saves an identity binding then submits once without fabricating a Job status', async () => {
   const h = harness(); render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
@@ -80,4 +85,65 @@ it('native bridge leaves composer draft intact and uses Session.prompt queue', a
   const bridge = createBridge(ctx, 'parent', () => {}, () => () => {})
   await bridge.submit(emptyProject('main'), { id: 'request', pageId: 'page-1', kind: 'image', sessionId: 'parent', sourceIds: [], imported: [] }, 'draw')
   expect(prompt).toHaveBeenCalledOnce(); expect(prompt.mock.calls[0][1]).toBe('queue'); expect(input.draft).toBe('existing draft'); expect(ctx.connection.rpc.call).not.toHaveBeenCalled()
+})
+it('accepts native nanoid element IDs without loosening project filename validation', () => {
+  const project = emptyProject('main')
+  project.pages[0].elements = [{ id: '_native-id', type: 'rectangle' }, { id: '-native-id', type: 'text' }]
+  expect(validateProject(project).pages[0].elements).toHaveLength(2)
+  for (const id of ['../escape', '', 'a'.repeat(65), 'has space']) {
+    expect(() => validateProject({ ...project, pages: [{ ...project.pages[0], elements: [{ id, type: 'rectangle' }] }] })).toThrow()
+  }
+  expect(() => validateProject({ ...project, id: '_filename' })).toThrow()
+})
+it('readding a deleted image restores its native element identity and remains deduplicated', () => {
+  const asset = { ownerSessionId: 'parent', ref: { attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', bytes: 1, width: 1, height: 1 } }
+  const original = insertAsset(emptyProject('main'), 'page-1', asset)
+  const tombstone = original.pages[0].elements[0]
+  tombstone.isDeleted = true; tombstone.x = 420
+  const restored = insertAsset(original, 'page-1', asset)
+  expect(restored.pages[0].elements).toHaveLength(1)
+  expect(restored.pages[0].elements[0]).toMatchObject({ id: tombstone.id, isDeleted: false, x: 420, version: 2 })
+  expect(original.pages[0].elements[0].isDeleted).toBe(true)
+  expect(insertAsset(restored, 'page-1', asset)).toEqual(restored)
+})
+it('flushes outgoing edits and blocks late editor callbacks while the next project loads', async () => {
+  const h = harness()
+  const originalCall = h.bridge.call.getMockImplementation()!
+  let resolveLoad!: (value: any) => void
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'list') return [{ id: 'main', title: 'Main' }, { id: 'other', title: 'Other' }]
+    if (endpoint === 'load' && payload.project_id === 'other') return await new Promise(resolve => { resolveLoad = resolve })
+    return await originalCall(endpoint, payload)
+  })
+  render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  fireEvent.click(screen.getByText('Draw mark'))
+  fireEvent.change(screen.getByLabelText('选择项目'), { target: { value: 'other' } })
+  await waitFor(() => expect(resolveLoad).toBeDefined())
+  expect(h.read().pages[0].elements).toHaveLength(1)
+  expect(screen.getByLabelText('项目名称').closest('fieldset')?.disabled).toBe(true)
+  // Simulate an already queued Excalidraw callback, even though the controls are now disabled.
+  fireEvent.click(screen.getByText('Draw mark'))
+  await act(async () => { resolveLoad({ project: emptyProject('other'), revision: 'c'.repeat(64), recovered: false }) })
+  await waitFor(() => expect((screen.getByLabelText('选择项目') as HTMLSelectElement).value).toBe('other'))
+  expect(screen.getByTestId('scene').textContent).toContain('0 elements')
+  expect(h.read().pages[0].elements).toHaveLength(1)
+})
+it('keeps the outgoing document and revision usable when next-project image hydration fails', async () => {
+  const h = harness(), originalCall = h.bridge.call.getMockImplementation()!
+  const asset = { ownerSessionId: 'parent', ref: { attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', bytes: 1, width: 1, height: 1 } }
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'list') return [{ id: 'main', title: 'Main' }, { id: 'other', title: 'Other' }]
+    if (endpoint === 'load' && payload.project_id === 'other') return { project: insertAsset(emptyProject('other'), 'page-1', asset), revision: 'c'.repeat(64), recovered: false }
+    if (endpoint === 'image') throw new Error('image unavailable')
+    return await originalCall(endpoint, payload)
+  })
+  render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  fireEvent.change(screen.getByLabelText('选择项目'), { target: { value: 'other' } })
+  await screen.findByRole('alert')
+  expect((screen.getByLabelText('选择项目') as HTMLSelectElement).value).toBe('main')
+  fireEvent.click(screen.getByText('Draw mark'))
+  await act(async () => { await h.leave() })
+  expect(h.read().id).toBe('main'); expect(h.read().pages[0].elements).toHaveLength(1)
 })

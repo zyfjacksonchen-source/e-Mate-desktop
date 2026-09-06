@@ -33,6 +33,9 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const [sceneLoad, setSceneLoad] = useState(0)
+  const transitioning = useRef(false)
   const [recovered, setRecovered] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [kind, setKind] = useState<CanvasIntent['kind']>('image')
@@ -76,6 +79,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
   }, [bridge])
   useEffect(() => bridge.beforeLeave(flush), [bridge, flush])
   const update = useCallback((next: CanvasProject) => {
+    if (transitioning.current) return
     state.current.project = next; state.current.dirty = true; setProject(next); setNotice('尚未保存')
     if (timer.current) clearTimeout(timer.current)
     timer.current = setTimeout(() => { if (!state.current.blocked) void flush().catch(() => {}) }, 400)
@@ -97,20 +101,30 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
     return loaded
   }, [bridge])
   const openProject = useCallback(async (id: string, asset?: CanvasAsset) => {
-    await flush()
-    const token = ++generation.current
-    const result: ProjectReceipt | null = await bridge.call('load', { project_id: id })
-    if (!alive.current || token !== generation.current) return
-    let next = result?.project ?? emptyProject(id)
-    state.current = { project: next, revision: result?.revision ?? null, dirty: false, blocked: false }
-    if (!result) { update(next); await flush() }
-    if (asset) { next = insertAsset(next, next.pages[0]!.id, asset); update(next); await flush() }
-    const loaded = await imageFiles(next)
-    if (!alive.current || token !== generation.current) return
-    api.current = null; setFiles(loaded); setProject(next); setPageId(next.pages[0]!.id); setRecovered(result?.recovered ?? false)
-    setNotice(result?.recovered ? '已恢复上一份完整保存，损坏原件保留。请检查后保存。' : '已恢复项目')
-    setError(null); void refreshList()
-  }, [bridge, flush, imageFiles, refreshList, update])
+    if (transitioning.current) return
+    transitioning.current = true; setSwitching(true)
+    try {
+      await flush()
+      const token = ++generation.current
+      const result: ProjectReceipt | null = await bridge.call('load', { project_id: id })
+      if (!alive.current || token !== generation.current) return
+      let next = result?.project ?? emptyProject(id)
+      let revision = result?.revision ?? null
+      if (asset) next = insertAsset(next, next.pages[0]!.id, asset)
+      if (!result || asset) {
+        const saved: ProjectReceipt = await bridge.call('save', { project_id: id, project: next, expected_revision: revision })
+        revision = saved.revision
+      }
+      const loaded = await imageFiles(next)
+      if (!alive.current || token !== generation.current) return
+      // Keep the outgoing document/revision intact until the complete next project can be shown.
+      state.current = { project: next, revision, dirty: false, blocked: false }
+      setSceneLoad(value => value + 1)
+      api.current = null; setFiles(loaded); setProject(next); setPageId(next.pages[0]!.id); setRecovered(result?.recovered ?? false)
+      setNotice(result?.recovered ? '已恢复上一份完整保存，损坏原件保留。请检查后保存。' : '已恢复项目')
+      setError(null); void refreshList()
+    } finally { transitioning.current = false; if (alive.current) setSwitching(false) }
+  }, [bridge, flush, imageFiles, refreshList])
   useEffect(() => {
     alive.current = true
     void openProject(initialProjectId, initialAsset).catch(error => { if (alive.current) setError(error.message) })
@@ -120,7 +134,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
   }, [initialProjectId, initialAsset, openProject, flush])
 
   const syncOutputs = useCallback(async () => {
-    if (syncLane.current || state.current.blocked || !state.current.project) return
+    if (transitioning.current || syncLane.current || state.current.blocked || !state.current.project) return
     syncLane.current = true
     try {
       await flush()
@@ -128,7 +142,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
       for (const pending of original.intents.filter(intent => intent.sessionId === bridge.sessionId)) {
         const result = await bridge.call('outputs', { project_id: original.id, intent_id: pending.id })
         let next = state.current.project
-        if (!next || next.id !== original.id) return
+        if (transitioning.current || !next || next.id !== original.id) return
         const intent = next.intents.find(item => item.id === pending.id)
         if (!intent) continue
         if (result.kind === 'images') {
@@ -167,7 +181,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
     void syncOutputs()
     return () => { off(); if (syncTimer) clearTimeout(syncTimer) }
   }, [bridge, syncOutputs])
-  useEffect(() => { if (project?.id) void syncOutputs() }, [project?.id, syncOutputs])
+  useEffect(() => { if (project?.id && !switching) void syncOutputs() }, [project?.id, switching, syncOutputs])
   useEffect(() => {
     if (!presenting) return
     const key = (event: KeyboardEvent) => {
@@ -192,7 +206,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
 
   const submit = async () => {
     const current = state.current.project
-    if (!current || !instruction.trim()) return
+    if (transitioning.current || !current || !instruction.trim()) return
     const selectedIds = selected.current
     if (kind === 'edit' && selectedIds.length === 0) { setError('先在画布选中要修改的图片。'); return }
     setBusy(true); setError(null)
@@ -207,11 +221,11 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
   }
   const addImages = async (incoming: File[]) => {
     const document = state.current.project
-    if (!document) return
+    if (transitioning.current || !document) return
     const targetPage = pageId
     const assets = await bridge.stageImages(incoming)
     let next = state.current.project
-    if (!next || next.id !== document.id || !next.pages.some(page => page.id === targetPage)) throw new Error('项目或目标页面已变化，图片仍保留在会话中。')
+    if (transitioning.current || !next || next.id !== document.id || !next.pages.some(page => page.id === targetPage)) throw new Error('项目或目标页面已变化，图片仍保留在会话中。')
     for (const asset of assets) next = insertAsset(next, targetPage, asset)
     update(next); await flush()
     const loaded = await imageFiles(next); setFiles(loaded); api.current?.addFiles(Object.values(loaded))
@@ -245,10 +259,11 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
       <button onClick={() => { if (state.current.project) download(`${state.current.project.id}-unsaved.json`, new Blob([JSON.stringify(state.current.project)], { type: 'application/json' })) }}>导出当前编辑</button>
       <button onClick={() => act(async () => { const id = state.current.project?.id ?? initialProjectId; state.current.dirty = false; state.current.blocked = false; await openProject(id) })}>放弃未保存编辑并重载</button>
     </div></div>}
-    {!project || !page ? <div className={css.empty}>{error ? '项目原件保留。可重新载入或选择其他项目。' : notice}</div> : <>
+    {switching && <div role="status">正在切换项目，编辑已暂停…</div>}
+    {!project || !page ? <div className={css.empty}>{error ? '项目原件保留。可重新载入或选择其他项目。' : notice}</div> : <fieldset disabled={switching} style={{ display: 'contents' }}>
       {!presenting && <>
         <div className={css.projectBar}>
-          <select aria-label="选择项目" value={project.id} onChange={event => act(() => openProject(event.target.value))}>
+          <select aria-label="选择项目" value={project.id} onChange={event => { const id = event.target.value; act(() => openProject(id)) }}>
             {!projects.some(item => item.id === project.id) && <option value={project.id}>{project.title}</option>}
             {projects.map(item => <option key={item.id} value={item.id}>{item.title}{item.error ? ' · 损坏' : ''}</option>)}
           </select>
@@ -281,16 +296,16 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
       <div className={css.stage} onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }} onDropCapture={event => {
         if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); act(() => addImages(Array.from(event.dataTransfer.files))) }
       }}>
-        {page.html && (previewMode === 'html' || presenting) ? <HtmlPreview html={page.html} title={page.title} /> : <Excalidraw key={`${project.id}:${page.id}`}
+        {page.html && (previewMode === 'html' || presenting) ? <HtmlPreview html={page.html} title={page.title} /> : <Excalidraw key={`${project.id}:${page.id}:${sceneLoad}`}
           excalidrawAPI={value => { api.current = value }}
           initialData={{ elements: page.elements as any, files, appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as any }, viewBackgroundColor: page.view.background } }}
-          viewModeEnabled={presenting} langCode="zh-CN" validateEmbeddable={() => false}
+          viewModeEnabled={presenting || switching} langCode="zh-CN" validateEmbeddable={() => false}
           UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false }, tools: { image: false } }}
           onLinkOpen={(element, event) => { event.preventDefault(); if (element.link && /^https?:\/\//u.test(element.link)) window.open(element.link, '_blank', 'noopener,noreferrer') }}
           onPaste={() => false}
           onChange={(elements, appState) => {
             selected.current = elements.filter(item => item.type === 'image' && appState.selectedElementIds[item.id]).map(item => `sha256:${(item as any).fileId}`)
-            if (presenting) return
+            if (presenting || transitioning.current) return
             const current = state.current.project
             const existing = current?.pages.find(item => item.id === page.id)
             if (!current || !existing || current.id !== project.id) return
@@ -318,6 +333,6 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset 
             <input hidden ref={importInput} type="file" accept=".zip" onChange={event => { const file = event.target.files?.[0]; if (!file) return; act(async () => { if (file.size > 100 * 1024 * 1024) throw new Error('项目压缩包超过 100 MiB。'); await flush(); const id = fresh(); const result = await bridge.call('import', { project_id: id, archive_base64: base64(new Uint8Array(await file.arrayBuffer())) }); await openProject(result.project.id) }); event.target.value = '' }} />
           </>}
       </footer>
-    </>}
+    </fieldset>}
   </div>
 }

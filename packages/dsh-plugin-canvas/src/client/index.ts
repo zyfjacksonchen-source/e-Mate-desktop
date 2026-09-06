@@ -27,17 +27,20 @@ export function apply(ctx: any): void {
       disposePanel = undefined
     },
     async open(sessionId: string, options: CanvasOpenOptions = {}) {
-      await leave?.()
       const current = ++generation
+      const isCurrent = () => current === generation && ctx.sessions.list.getSnapshot().current === sessionId
+      if (!isCurrent()) return
+      await leave?.()
+      if (!isCurrent()) return
       const editor = await load()
-      if (current !== generation) return
+      if (!isCurrent()) return
       if (!ctx.sessions.binding(sessionId)?.session) throw new Error('当前会话不可用。')
       const close = () => { generation += 1; disposePanel?.(); disposePanel = undefined; ctx.layout.closeDetails() }
       const bridge = createBridge(ctx, sessionId, close, handler => { leave = handler; return () => { if (leave === handler) leave = undefined } })
       const asset = options.attachment ? await bridge.call('resolve-image', {
         owner_session_id: options.attachment.ownerSessionId, attachment_id: options.attachment.attachmentId,
       }) : undefined
-      if (current !== generation) return
+      if (!isCurrent()) return
       ctx.get?.('ematePetDetails')?.release()
       disposePanel?.()
       disposePanel = ctx.slots.register({ name: 'details', id: 'e-mate-canvas', priority: -2,
