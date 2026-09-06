@@ -1,5 +1,6 @@
 import { chmod, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { adaptHarnessFsBytesSource, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 
@@ -40,6 +41,8 @@ export async function applyHarnessRuntimeAdapters(runtimeRoot) {
   const packageEntry = name => join(runtimeRoot, 'node_modules', '@deepseek-ai', name, 'lib', 'index.js')
   const fsTarget = packageEntry('dsh-tool-fs')
   await replaceRuntimeFile(fsTarget, adaptHarnessFsSource(await readFile(fsTarget, 'utf8')))
+  const bytesTarget = join(runtimeRoot, 'node_modules', FS_BYTES_PACKAGE, 'lib', 'index.js')
+  await replaceRuntimeFile(bytesTarget, adaptHarnessFsBytesSource(await readFile(bytesTarget, 'utf8')))
   const exportTarget = join(runtimeRoot, 'node_modules', SESSION_EXPORT_PACKAGE, 'lib', 'index.js')
   await replaceRuntimeFile(exportTarget, adaptHarnessSessionExportSource(await readFile(exportTarget, 'utf8')))
   const conversationTarget = join(runtimeRoot, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')
