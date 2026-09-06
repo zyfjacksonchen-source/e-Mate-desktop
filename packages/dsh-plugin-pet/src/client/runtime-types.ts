@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 import type { PetSettings } from '../settings.ts'
 import type { NativeSessions, Observable } from './native-projection.ts'
-import type { PetImageFactsReader } from '../projection.ts'
+import type { PetWorkFactsReader } from '../projection.ts'
 export interface SettingsSnapshot { readonly status: string; readonly value?: PetSettings; readonly writable: boolean }
 export interface PetSettingsScope extends Observable<SettingsSnapshot> { set<K extends keyof PetSettings>(key: K, value: PetSettings[K]): Promise<void> }
 export interface PetOverlayRootRuntimeProps { renderSlot(name: 'shell.overlay.pet', props: object): ReactNode }
-export interface PetDetails { openTaskDetails(taskId: string): void; readImageFacts: PetImageFactsReader }
+export interface PetDetails { openTaskDetails(taskId: string): void; readWorkFacts: PetWorkFactsReader }
 export interface ClientContext {
   effect(install: () => void | (() => void), label?: string): void
   inject(services: readonly string[], apply: (ctx: ClientContext & { ematePetDetails: PetDetails }) => void): unknown

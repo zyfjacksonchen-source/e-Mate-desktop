@@ -54,7 +54,7 @@ test('queue, current job failures and delivered output use native status only',(
   list.set({...list.getSnapshot(),jobsBySession:{a:[{status:'failed',startedAt:80,finishedAt:101}]}});assert.equal(deriveScene(projection.getSnapshot()),'error')
   list.set({...list.getSnapshot(),jobsBySession:{}});a.conversation.set({...a.conversation.getSnapshot(),queue:[]})
   a.turn.status='closed';a.turn.data={get:()=>({produced:[{get path(){throw new Error('path read')}}]})};a.turn.end={data:{reason:{kind:'aborted'}}};a.conversation.set({...a.conversation.getSnapshot()});assert.equal(deriveScene(projection.getSnapshot()),'idle')
-  a.turn.end={data:{reason:{kind:'completed'}}};a.conversation.set({...a.conversation.getSnapshot()});assert.equal(deriveScene(projection.getSnapshot()),'delivery');projection.dispose()
+  a.turn.end={data:{reason:{kind:'completed'}}};a.conversation.set({...a.conversation.getSnapshot()});assert.equal(deriveScene(projection.getSnapshot()),'idle');projection.dispose()
 })
 test('background/minimized visibility and route mismatch pause without polling',()=>{
   const {a,visible,projection,list}=context();visible.set(false);assert.equal(projection.getSnapshot().window.visible,false)
@@ -71,7 +71,7 @@ test('browser focus and visibility pause state and all listeners dispose',()=>{
 })
 
 
-test('Cordis image facts refresh from native faces and disconnect with the current session',()=>{
+test('Cordis work facts refresh from native faces and disconnect with the current session',()=>{
   const a=fixture();const b=fixture('b');const list=store({current:'a',phase:'ready',byId:{a:{running:false},b:{running:false}},jobsBySession:{}});const visible=store(true)
   let facts={operation:'image-edit',delivered:false};let calls=0
   const projection=new NativePetProjection({list,binding:id=>({session:id==='a'?a.face:b.face})},visible,id=>{assert.equal(id,'a');calls++;return facts})
@@ -79,6 +79,13 @@ test('Cordis image facts refresh from native faces and disconnect with the curre
   assert.equal(deriveScene(projection.getSnapshot()),'image-edit')
   facts={delivered:true};a.goal.set(undefined);a.conversation.set({...a.conversation.getSnapshot(),running:false,runningCalls:[]});a.images.set([])
   assert.equal(deriveScene(projection.getSnapshot()),'delivery')
+  facts={completedOperation:'document-read',delivered:false};a.conversation.set({...a.conversation.getSnapshot()})
+  assert.equal(projection.getSnapshot().tool.status,'completed');assert.equal(deriveScene(projection.getSnapshot()),'document-read')
+  facts={needsAttention:true,failed:false,delivered:false,hasUsableOutput:true};a.images.set([])
+  list.set({...list.getSnapshot(),jobsBySession:{a:[{status:'failed',finishedAt:101}]}})
+  assert.equal(deriveScene(projection.getSnapshot()),'waiting')
+  facts={needsAttention:false,failed:true,delivered:false,hasUsableOutput:true};a.images.set([])
+  assert.equal(deriveScene(projection.getSnapshot()),'error')
   const before=calls;visible.set(false);a.images.set([]);assert.equal(calls,before);assert.equal(a.images.listeners.size,0);assert.equal(a.batches.listeners.size,0)
   projection.dispose();assert.equal(list.listeners.size,0)
 })

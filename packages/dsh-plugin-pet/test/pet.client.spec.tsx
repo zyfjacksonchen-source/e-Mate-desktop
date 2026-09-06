@@ -39,6 +39,11 @@ describe('native sprite host',()=>{
     const button=screen.getByRole('button');expect(button.style.width).toBe('112px');fireEvent.keyDown(button,{key:'ArrowRight'});expect(save).toHaveBeenCalledTimes(1);expect(save.mock.calls[0]![0].x).toBeGreaterThan(0.5)
     fireEvent.click(button);expect(open).toHaveBeenCalledWith('task-a')
   })
+  it('completed Office activity is labelled as a recent completion',()=>{
+    render(<PetOverlay pet={pet()} scene="document-read" completed paused position={{x:0.5,y:0.5}} save={async()=>{}} open={()=>{}} taskId="a"/>)
+    expect(screen.getByRole('button').title).toBe('最近完成：阅读文档')
+    expect(screen.getByRole('button').getAttribute('aria-label')).toContain('最近完成：阅读文档')
+  })
   it('drag completion persists once and does not open details; late failed saves do not roll back newer moves',async()=>{
     let rejectFirst: (error: Error) => void = () => {}
     const save=vi.fn().mockImplementationOnce(()=>new Promise((_resolve,reject)=>{rejectFirst=reject})).mockResolvedValue(undefined)
@@ -64,7 +69,7 @@ describe('native sprite host',()=>{
     const settings={...store({status:'ready',writable:true,value:{enabled:true,position:{x:0.5,y:0.5}}}),set:vi.fn(async()=>{})}
     const projection=store(pause)
     const resources={...store({status:'ready',pet:pet()}),start:vi.fn(),pause:vi.fn()}
-    const view=render(<PetOverlaySlot projection={projection as never} resources={resources as never} settings={settings} details={{openTaskDetails:vi.fn(),readImageFacts:()=>({delivered:false})}}/>)
+    const view=render(<PetOverlaySlot projection={projection as never} resources={resources as never} settings={settings} details={{openTaskDetails:vi.fn(),readWorkFacts:()=>({delivered:false})}}/>)
     const button=screen.getByRole('button');const original=button.style.left
     fireEvent.keyDown(button,{key:'ArrowRight'});expect(button.style.left).not.toBe(original)
     await act(async()=>{});expect(button.style.left).toBe(original);expect(screen.getByText('位置未保存')).toBeTruthy()
@@ -101,7 +106,7 @@ describe('native sprite host',()=>{
     const projection=store({...pause,firstResponsePending:true})
     const settings={...store({status:'ready',writable:true,value:{enabled:true,position:{x:0.5,y:0.5}}}),set:vi.fn(async()=>{})}
     const resources={...store({status:'idle'}),start:vi.fn(),pause:vi.fn()}
-    const view=render(<PetOverlaySlot projection={projection as never} resources={resources as never} settings={settings} details={{openTaskDetails:vi.fn(),readImageFacts:()=>({delivered:false})}}/>);
+    const view=render(<PetOverlaySlot projection={projection as never} resources={resources as never} settings={settings} details={{openTaskDetails:vi.fn(),readWorkFacts:()=>({delivered:false})}}/>);
     act(()=>{vi.advanceTimersByTime(3000)});expect(resources.start).not.toHaveBeenCalled()
     act(()=>{projection.set(pause)});expect(vi.getTimerCount()).toBe(1)
     act(()=>{projection.set({...pause,firstResponsePending:true,revision:2})});act(()=>{vi.advanceTimersByTime(3000)});expect(resources.start).not.toHaveBeenCalled()

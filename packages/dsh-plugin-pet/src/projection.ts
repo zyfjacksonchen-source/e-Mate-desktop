@@ -1,8 +1,18 @@
 import { isOfficeScene, type OfficeScene, type PetScene } from './scenes.ts'
 
-/** Read-only Cordis callback supplied by the Shell's existing image owners. */
-export interface PetImageFacts { readonly operation?: 'image-generate' | 'image-edit'; readonly delivered: boolean }
-export type PetImageFactsReader = (sessionId: string) => PetImageFacts
+/** Read-only Cordis callback supplied by the Shell's existing work owners. */
+export type PetWorkOperation = 'image-generate' | 'image-edit' | 'web-search' | 'file-search' | 'browser' | 'code-write'
+  | 'document-write' | 'document-read' | 'spreadsheet' | 'slides' | 'pdf-read'
+export interface PetWorkFacts {
+  readonly operation?: PetWorkOperation
+  readonly completedOperation?: PetWorkOperation
+  readonly delivered: boolean
+  readonly needsAttention?: boolean
+  readonly failed?: boolean
+  /** A retained output is not evidence that the whole task or batch succeeded. */
+  readonly hasUsableOutput?: boolean
+}
+export type PetWorkFactsReader = (sessionId: string) => PetWorkFacts
 
 /** Glue consumes the existing native projections; never text, DOM, tokens or Tool args.
  * operation is an admitted semantic category from the native Tool/Job owner.
@@ -49,6 +59,7 @@ export function deriveScene(value: PetTaskProjection): PetScene {
   if (value.todo?.status === 'in_progress') return operation(value.todo.operation)
   if (value.goal?.status === 'active') return 'goal'
   if ((value.queue?.pending ?? 0) > 0) return 'queue'
+  if (value.tool?.status === 'completed' && value.tool.operation !== undefined) return operation(value.tool.operation)
   if (value.deliverable?.status === 'completed' || value.deliverable?.status === 'building') return 'delivery'
   return 'idle'
 }

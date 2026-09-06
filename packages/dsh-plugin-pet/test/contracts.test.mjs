@@ -20,6 +20,7 @@ test('native status precedence never promotes missing or unknown activity to suc
   assert.equal(deriveScene({...task,goal:{status:'active'},tool:{status:'running',operation:'image-edit'}}),'image-edit')
   assert.equal(deriveScene({...task,goal:{status:'active'},job:{status:'running',operation:'terminal'}}),'terminal')
   assert.equal(deriveScene({...task,tool:{status:'completed'}}),'idle')
+  assert.equal(deriveScene({...task,tool:{status:'completed',operation:'spreadsheet'}}),'spreadsheet')
   assert.equal(deriveScene({...task,taskId:null,goal:{status:'active'}}),'idle')
 })
 test('750ms hysteresis suppresses thrash and never leaks a different task state',()=>{

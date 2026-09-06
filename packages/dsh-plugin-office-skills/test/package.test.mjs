@@ -213,6 +213,9 @@ test('Tools stay inside the current workspace and never overwrite output', async
   const second = await write.execute({ format: 'docx', filename: '交付.docx', document }, execution)
   assert.equal(first.relative_path, '.e-mate/office/交付.docx')
   assert.equal(second.relative_path, '.e-mate/office/交付-2.docx')
+  const writeMeta = write.output.presentationMeta({ filename: '交付.docx' }, second)
+  assert.deepEqual(writeMeta, {operation:'write',format:'docx',job_id:second.job_id,relative_path:second.relative_path,bytes:second.bytes})
+  assert.notEqual(writeMeta.relative_path, write.presentCall({format:'docx',filename:'交付.docx'}).locations[0].path)
   assert.ok((await readFile(join(root, first.relative_path))).byteLength > 500)
   assert.match(JSON.stringify((await read.execute({ path: first.relative_path }, execution)).document), /轻量 Office/u)
 
@@ -227,6 +230,9 @@ test('Tools stay inside the current workspace and never overwrite output', async
     const reopened = await read.execute({ path: artifact.relative_path }, execution)
     assert.equal(reopened.format, format)
     assert.match(JSON.stringify(reopened.document), new RegExp(expected, 'u'))
+    const guarded = {...reopened, get document(){throw new Error('presentation must not read Office body')}}
+    assert.deepEqual(read.output.presentationMeta({},guarded), {operation:'read',format,job_id:reopened.job_id,relative_path:reopened.relative_path,bytes:reopened.bytes})
+    assert.deepEqual(Object.keys(write.output.presentationMeta({},artifact)).sort(), ['bytes','format','job_id','operation','relative_path'])
   }
 
   const beforeMalformed = await readdir(join(root, '.e-mate', 'office'))

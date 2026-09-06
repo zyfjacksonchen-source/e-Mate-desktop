@@ -1,4 +1,4 @@
-import { createPetImageFactsReader } from '../src/client/pet-image-facts.ts'
+import { createPetWorkFactsReader } from '../src/client/pet-image-facts.ts'
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -554,7 +554,7 @@ function petContext() {
   const conversation=petStore({sessionId:'a',openState:'open',composerPhase:'active',running:false,lastAgentError:null,runningCalls:[],pending:[],queue:[],chat:{timeline:{turnOrder:[1],turns:new Map([[1,turn]])},locations:{getTurn:()=>[]},nodes:new Map()}})
   const session={...conversation,projections:{faceOf:(key: string)=>faces[key]}}
   const list=petStore({current:'a',phase:'ready',byId:{a:{running:false}},jobsBySession:{}})
-  const read=createPetImageFactsReader({sessions:{list,binding:()=>({session})}} as never)
+  const read=createPetWorkFactsReader({sessions:{list,binding:()=>({session})}} as never)
   return {a:{turn,conversation,goal:faces.goal,images:faces.eMateImageReceipts,batches:faces.eMateImageBatches},list,read}
 }
 
@@ -613,4 +613,87 @@ it('batch activity uses admitted source identities, current parent call and exac
     list.set({...list.getSnapshot(),byId:{...list.getSnapshot().byId,...children}});expect(read('a').delivered).toBe(false)
   }
   a.turn.data={get:()=>undefined};a.conversation.set({...a.conversation.getSnapshot()});expect(read('a').delivered).toBe(false);
+})
+
+it('work activity uses exact native identities without search or browser prefix guessing',()=>{
+  const {a,read,list}=petContext()
+  const call=(name: string,turn=1,callView: any=null)=>a.conversation.set({...a.conversation.getSnapshot(),running:true,
+    runningCalls:[{callId:'work',name,turn,callView,get argsRaw(){throw new Error('arguments inspected')}}]})
+  for(const [name,scene] of [['web_search','web-search'],['grep','file-search'],['glob','file-search'],
+    ['browser_tabs','browser'],['browser_select_tab','browser'],['browser_snapshot','browser'],['browser_click','browser'],
+    ['browser_type','browser'],['browser_press','browser'],['browser_navigate','browser'],['browser_back','browser'],
+    ['browser_forward','browser'],['browser_reload','browser'],['browser_scroll','browser'],['browser_get_text','browser'],['browser_wait','browser']]) {
+    call(name!);expect(read('a').operation).toBe(scene)
+  }
+  for(const name of ['tool_search','session_search','web_fetch','browser_control_access','browser_unverified','computer_type_text','bash','lsp','skill','run_code']) {
+    call(name,1,{card:'generic',kind:'search',get title(){throw new Error('title inspected')}});expect(read('a').operation).toBeUndefined()
+  }
+  call('web_search',2);expect(read('a').operation).toBeUndefined()
+  call('web_search');list.set({...list.getSnapshot(),current:'b'});expect(read('a').operation).toBeUndefined()
+})
+
+it('code activity requires actual native write/edit diff locations with explicit code extensions',()=>{
+  const {a,read}=petContext()
+  const call=(name: string,card: string,paths: string[])=>a.conversation.set({...a.conversation.getSnapshot(),running:true,
+    runningCalls:[{callId:'work',name,turn:1,callView:{card,locations:paths.map(path=>({path})),get diffs(){throw new Error('body inspected')}}}]})
+  for(const [name,path] of [['write','src/main.ts'],['edit','C:\\src\\MAIN.PY'],['write','app.vue']]) {
+    call(name!,'diff',[path!]);expect(read('a').operation).toBe('code-write')
+  }
+  for(const [name,card,paths] of [['write','diff',['README.md']],['edit','diff',['settings.json']],['edit','diff',['app.ts','notes.txt']],
+    ['write','generic',['app.ts']],['office_write','diff',['app.ts']],['write','diff',['ts']],['write','diff',[]]] as const) {
+    call(name,card,[...paths]);expect(read('a').operation).toBeUndefined()
+  }
+})
+
+it('Office completion uses current-turn canonical result metadata, never the requested delivery path',()=>{
+  const {a,read}=petContext()
+  a.turn.status='closed';a.turn.end={data:{reason:{kind:'completed'}}}
+  let root: any
+  a.turn.data={get:(key: string)=>key==='deliverables'?{produced:[{seq:9,path:'.e-mate/office/requested.docx'}]}:undefined}
+  a.conversation.set({...a.conversation.getSnapshot(),chat:{...a.conversation.getSnapshot().chat,
+    locations:{getTurn:(turn: number)=>turn===1?['current']:[]},nodes:{get:(key: string)=>key==='current'?{kind:'tool-call',data:{root}}:undefined}}})
+  const result=(operation: string,format: string)=>({kind:'tool-result',seq:9,callId:'office',call:{name:'office_'+operation},isError:false,
+    meta:{operation,format,job_id:'emate-office-1',relative_path:'.e-mate/office/final-2.'+format,bytes:100}})
+  for(const [operation,format,scene] of [['write','docx','document-write'],['read','docx','document-read'],
+    ['write','xlsx','spreadsheet'],['read','xlsx','spreadsheet'],['write','pptx','slides'],['read','pptx','slides'],
+    ['read','pdf','pdf-read'],['write','pdf','document-write']]) {
+    root=result(operation!,format!);expect(read('a').completedOperation).toBe(scene);expect(read('a').delivered).toBe(operation==='write')
+  }
+  const valid=result('write','docx')
+  for(const changes of [{meta:undefined},{isError:true},{meta:{...valid.meta,operation:'read'}},{meta:{...valid.meta,format:'xls'}},
+    {meta:{...valid.meta,relative_path:'../escape.docx'}},{meta:{...valid.meta,bytes:0}},
+    {meta:{...valid.meta,document:{private:'body'}}},{meta:{...valid.meta,relative_path:'.e-mate/office/wrong.pdf'}}]) {
+    root={...valid,...changes};expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
+  }
+  root=valid;a.turn.end={data:{reason:{kind:'aborted'}}};expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
+  a.turn.end={data:{reason:{kind:'completed'}}};a.turn.data={get:()=>undefined}
+  root={...valid,call:{name:'run_code'}};expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
+  root={...valid,call:{name:'foreign_tool'}};expect(read('a').completedOperation).toBeUndefined()
+  root=valid;a.conversation.set({...a.conversation.getSnapshot(),chat:{...a.conversation.getSnapshot().chat,locations:{getTurn:()=>[]}}})
+  expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
+})
+
+it('ordinary native deliverables require their successful current-turn result identity',()=>{
+  const {a,read}=petContext();a.turn.status='closed';a.turn.end={data:{reason:{kind:'completed'}}}
+  a.turn.data={get:(key: string)=>key==='deliverables'?{produced:[{seq:9,path:'report.md'}]}:undefined}
+  let root: any={kind:'tool-result',seq:9,callId:'write',call:{name:'write'},isError:false}
+  a.conversation.set({...a.conversation.getSnapshot(),chat:{...a.conversation.getSnapshot().chat,
+    locations:{getTurn:()=>['write']},nodes:{get:()=>({kind:'tool-call',data:{root}})}}})
+  expect(read('a').delivered).toBe(true)
+  root={...root,seq:8};expect(read('a').delivered).toBe(false)
+  root={...root,seq:9,isError:true};expect(read('a').delivered).toBe(false)
+})
+
+it('partial and unknown image batches retain good outputs without claiming whole-batch success',()=>{
+  const {a,list,read}=petContext();petImageTurn(a,{running:false,batch:true})
+  list.set({...list.getSnapshot(),byId:{...list.getSnapshot().byId,'child-1':{running:false,
+    projectionValues:{eMateImageReceipts:[petImageRow({owner:'child-1',call:'call-1',status:'completed'})]}}}})
+  for(const state of ['failed','unknown']) {
+    const batches=projection(['completed',state],{terminal:true}).map(row=>({...row,parent_session_id:'a',parent_call_id:'batch'}))
+    a.batches.set(batches)
+    const facts=read('a');expect(facts.hasUsableOutput).toBe(true);expect(facts.delivered).toBe(false)
+    expect(facts.failed).toBe(state==='failed');expect(facts.needsAttention).toBe(state==='unknown')
+  }
+  petImageTurn(a,{running:false});a.batches.set([]);a.images.set([petImageRow({status:'unknown'})])
+  expect(read('a').needsAttention).toBe(true);expect(read('a').failed).toBe(false);expect(read('a').delivered).toBe(false)
 })

@@ -21,7 +21,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'appearance-motion', order: 30, label: '外观与动效', inject: () => ({ settings, resources }) }, PetsSection))
   ctx.inject(['ematePetDetails'], detailsCtx => registerOverlay(detailsCtx, detailsCtx.ematePetDetails))
   function registerOverlay(scope: ClientContext, details: PetDetails): void {
-    const projection = new NativePetProjection(scope.sessions, documentVisibility(), details.readImageFacts)
+    const projection = new NativePetProjection(scope.sessions, documentVisibility(), details.readWorkFacts)
     scope.effect(() => {
       const updateEnabled = () => projection.setEnabled(decodeSettings(settings.getSnapshot().value).enabled)
       updateEnabled()

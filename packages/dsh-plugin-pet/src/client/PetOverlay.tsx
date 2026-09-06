@@ -6,8 +6,8 @@ import { PetSprite, lookDirection } from './PetSprite.tsx'
 import type { LoadedPet } from './resource.ts'
 import css from './PetOverlay.module.css'
 const viewport = () => ({ width: window.innerWidth, height: window.innerHeight })
-export function PetOverlay({ pet, scene, paused, position: saved, save, open, taskId, movable = true }: {
-  pet: LoadedPet; scene: PetScene; paused: boolean; position: Position; save(position: Position): Promise<void>; open(taskId: string): void; taskId: string | null; movable?: boolean
+export function PetOverlay({ pet, scene, paused, position: saved, save, open, taskId, movable = true, completed = false }: {
+  pet: LoadedPet; scene: PetScene; paused: boolean; position: Position; save(position: Position): Promise<void>; open(taskId: string): void; taskId: string | null; movable?: boolean; completed?: boolean
 }) {
   const [position, setPosition] = useState(() => pixelPosition(saved, viewport()))
   const [dragAnimation, setDragAnimation] = useState<StandardState | null>(null)
@@ -51,7 +51,8 @@ export function PetOverlay({ pet, scene, paused, position: saved, save, open, ta
   const label = OFFICE_SCENES.find(row => row[0] === scene)?.[1] ?? (scene === 'running' ? '正在处理任务' : '待命')
   return <div className={css.overlay} data-pet-overlay>
     <button type="button" className={css.pet} style={{ width: PET_SIZE, left: position.x, top: position.y, right: 'auto', bottom: 'auto' }}
-      aria-label={`小芯：${label}。${taskId === null ? '暂无当前任务。' : '打开任务详情。'}${movable ? '方向键移动，Shift 加速。' : ''}`} data-pet-id="xiaoxin"
+      title={completed ? `最近完成：${label}` : label}
+      aria-label={`小芯：${completed ? '最近完成：' : ''}${label}。${taskId === null ? '暂无当前任务。' : '打开任务详情。'}${movable ? '方向键移动，Shift 加速。' : ''}`} data-pet-id="xiaoxin"
       onKeyDown={keyboard} onPointerDown={begin} onPointerMove={move} onPointerUp={event => end(event)} onPointerCancel={event => end(event, true)}
       onLostPointerCapture={event => { if (drag.current !== null) end(event, true) }} onPointerLeave={() => setLook(null)}
       onClick={() => { if (suppressClick.current) { suppressClick.current = false; return }; if (taskId !== null) open(taskId) }}>

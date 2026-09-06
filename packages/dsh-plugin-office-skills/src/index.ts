@@ -248,6 +248,9 @@ const writeOutput = {
     },
   },
   render: (_args: unknown, value: PublishedFile & { job_id: string }) => [{ type: 'text', text: `Office 文件已生成：${value.relative_path}（${value.bytes} bytes）。` }],
+  presentationMeta: (_args: unknown, value: PublishedFile & { job_id: string }) => ({
+    operation: 'write', format: value.format, job_id: value.job_id, relative_path: value.relative_path, bytes: value.bytes,
+  }),
 }
 
 const readOutput = {
@@ -261,6 +264,9 @@ const readOutput = {
   render: (_args: unknown, value: { document: unknown; format: OfficeFormat; relative_path: string }) => [{
     type: 'text', text: `已读取 ${value.relative_path}。规范化内容：\n${JSON.stringify(value.document)}`,
   }],
+  presentationMeta: (_args: unknown, value: PublishedFile & { job_id: string }) => ({
+    operation: 'read', format: value.format, job_id: value.job_id, relative_path: value.relative_path, bytes: value.bytes,
+  }),
 }
 
 /** Register four Skills and two real Tool/Job paths on target Harness seams. */
