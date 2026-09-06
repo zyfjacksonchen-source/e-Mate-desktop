@@ -1,5 +1,9 @@
 import { isOfficeScene, type OfficeScene, type PetScene } from './scenes.ts'
 
+/** Read-only Cordis callback supplied by the Shell's existing image owners. */
+export interface PetImageFacts { readonly operation?: 'image-generate' | 'image-edit'; readonly delivered: boolean }
+export type PetImageFactsReader = (sessionId: string) => PetImageFacts
+
 /** Glue consumes the existing native projections; never text, DOM, tokens or Tool args.
  * operation is an admitted semantic category from the native Tool/Job owner.
  * Unknown/private providers must omit it, never classify from names or content.
@@ -40,10 +44,10 @@ export function deriveScene(value: PetTaskProjection): PetScene {
   if (value.taskId === null) return 'idle'
   if (value.tool?.status === 'approval' || value.tool?.status === 'waiting' || value.job?.status === 'waiting' || value.goal?.status === 'blocked') return 'waiting'
   if (value.tool?.status === 'failed' || value.job?.status === 'failed' || value.deliverable?.status === 'failed') return 'error'
-  if (value.goal?.status === 'active') return 'goal'
   if (value.tool?.status === 'running') return operation(value.tool.operation)
   if (value.job?.status === 'running') return operation(value.job.operation)
   if (value.todo?.status === 'in_progress') return operation(value.todo.operation)
+  if (value.goal?.status === 'active') return 'goal'
   if ((value.queue?.pending ?? 0) > 0) return 'queue'
   if (value.deliverable?.status === 'completed' || value.deliverable?.status === 'building') return 'delivery'
   return 'idle'

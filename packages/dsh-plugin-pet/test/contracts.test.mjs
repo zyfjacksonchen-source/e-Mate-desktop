@@ -17,6 +17,8 @@ test('native status precedence never promotes missing or unknown activity to suc
   const full={...task,tool:{status:'approval'},job:{status:'failed'},goal:{status:'active'},queue:{pending:4},deliverable:{status:'completed'}}
   assert.equal(deriveScene(full),'waiting');delete full.tool;assert.equal(deriveScene(full),'error');delete full.job;assert.equal(deriveScene(full),'goal');delete full.goal;assert.equal(deriveScene(full),'queue');delete full.queue;assert.equal(deriveScene(full),'delivery')
   assert.equal(deriveScene({...task,tool:{status:'running',operation:'untrusted-name'}}),'running')
+  assert.equal(deriveScene({...task,goal:{status:'active'},tool:{status:'running',operation:'image-edit'}}),'image-edit')
+  assert.equal(deriveScene({...task,goal:{status:'active'},job:{status:'running',operation:'terminal'}}),'terminal')
   assert.equal(deriveScene({...task,tool:{status:'completed'}}),'idle')
   assert.equal(deriveScene({...task,taskId:null,goal:{status:'active'}}),'idle')
 })

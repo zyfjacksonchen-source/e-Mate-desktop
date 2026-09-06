@@ -1,3 +1,4 @@
+import { createPetImageFactsReader } from '../src/client/pet-image-facts.ts'
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -543,4 +544,73 @@ describe('live image batch progress', () => {
     expect(screen.getByRole('region', { name: '批次未完成项目：2 项' })).toBeTruthy()
     rejected.unmount()
   })
+})
+
+
+function petStore(value: any) { return {getSnapshot:()=>value,set:(next: any)=>{value=next}} }
+function petContext() {
+  const faces: Record<string, ReturnType<typeof petStore>>={goal:petStore(undefined),todos:petStore(undefined),eMateImageReceipts:petStore(undefined),eMateImageBatches:petStore(undefined)}
+  const turn: any={status:'open',start:{time:100},data:{get:()=>undefined}}
+  const conversation=petStore({sessionId:'a',openState:'open',composerPhase:'active',running:false,lastAgentError:null,runningCalls:[],pending:[],queue:[],chat:{timeline:{turnOrder:[1],turns:new Map([[1,turn]])},locations:{getTurn:()=>[]},nodes:new Map()}})
+  const session={...conversation,projections:{faceOf:(key: string)=>faces[key]}}
+  const list=petStore({current:'a',phase:'ready',byId:{a:{running:false}},jobsBySession:{}})
+  const read=createPetImageFactsReader({sessions:{list,binding:()=>({session})}} as never)
+  return {a:{turn,conversation,goal:faces.goal,images:faces.eMateImageReceipts,batches:faces.eMateImageBatches},list,read}
+}
+
+const petImageRef={attachmentId:'sha256:'+'a'.repeat(64),mediaType:'image/png',width:2,height:2,bytes:42}
+function petImageRow({owner='a',call='image',operation='generate',status='running',seq=9}={}) {
+  return {seq,createdAt:100,receipt:{schema_version:2,revision:status==='running'?1:2,call_id:call,parent_session_id:owner,
+    operation,status,billing_status:status==='running'?'unknown':'recorded',sources:[],
+    content:status==='completed'||status==='needs-review'?[{type:'image',attachment:petImageRef}]:[],
+    output:petImageRef,verifier:{structural:'attachment-cas-v1'},verification:{structural:status==='running'?'not-run':'passed',semantic:'not-applicable'}}}
+}
+function petImageTurn(a,{running=true,batch=false}={}) {
+  a.turn.data={get:key=>key==='e-mate-image-calls'?{calls:batch?[]:[{callId:'image',seq:1}],batchCalls:batch?[{callId:'batch',seq:1}]:[]}:undefined}
+  a.turn.status=running?'open':'closed';a.turn.end=running?undefined:{data:{reason:{kind:'completed'}}}
+  a.conversation.set({...a.conversation.getSnapshot(),running,runningCalls:running?[{callId:batch?'batch':'image',turn:1,callView:null}]:[]})
+}
+function petBatchRows(state='running',imageIds=[[],[]]) {
+  const tasks=[1,2].map(ordinal=>({task_id:'sha256:'+String(ordinal).repeat(64),ordinal,revision:1,state,
+    submission_status:state==='running'?'unknown':'submitted',prompt_sha256:'b'.repeat(64),image_url:imageIds[ordinal-1],
+    child_session_id:'child-'+ordinal,job_id:'job-'+ordinal,
+    ...(state==='completed'?{receipt:{owner_session_id:'child-'+ordinal,call_id:'call-'+ordinal,revision:2,event_seq:9,status:'completed'}}:{})}))
+  return [{schema_version:1,batch_id:'sha256:'+'c'.repeat(64),parent_session_id:'a',parent_call_id:'batch',concurrency:2,tasks,
+    image_evidence:tasks.filter(task=>task.receipt).map(task=>({task_id:task.task_id,ordinal:task.ordinal,child_session_id:task.child_session_id,receipt:task.receipt})),failures:[],
+    ...(state==='completed'?{status:'completed',terminal_event_id:'sha256:'+'d'.repeat(64)}:{})}]
+}
+it('image facts require the exact native running call and owner',()=>{
+  const {a,list,read}=petContext();petImageTurn(a);a.goal.set({goal:{phase:'active'}})
+  for(const operation of ['generate','edit','fusion']) {
+    a.images.set([petImageRow({operation})]);expect(read('a').operation).toBe(operation==='generate'?'image-generate':'image-edit')
+  }
+  for(const wrong of [{owner:'b'},{call:'other'},{status:'unknown'},{operation:'invented'}]) {
+    a.images.set([petImageRow(wrong)]);expect(read('a').operation).toBeUndefined()
+  }
+  a.images.set([petImageRow()]);list.set({...list.getSnapshot(),current:'b'});expect(read('a').delivered).toBe(false)
+
+})
+it('only this completed turn exact successful attachment can show image delivery',()=>{
+  const {a,read}=petContext();petImageTurn(a,{running:false});a.images.set([petImageRow({status:'completed'})]);expect(read('a').delivered).toBe(true)
+  for(const wrong of [{call:'old'},{owner:'other'},{status:'needs-review'},{status:'unknown'},{status:'failed'}]) {
+    a.images.set([petImageRow({status:'completed',...wrong})]);expect(read('a').delivered).toBe(false)
+  }
+  const invalid=petImageRow({status:'completed'});invalid.receipt.output={...petImageRef,attachmentId:'sha256:'+'e'.repeat(64)}
+  a.images.set([invalid]);expect(read('a').delivered).toBe(false)
+  a.images.set([petImageRow({status:'completed'})]);a.turn.end={data:{reason:{kind:'aborted'}}};a.conversation.set({...a.conversation.getSnapshot()});expect(read('a').delivered).toBe(false);
+})
+it('batch activity uses admitted source identities, current parent call and exact terminal child pointers',()=>{
+  const {a,list,read}=petContext();petImageTurn(a,{batch:true})
+  a.batches.set(petBatchRows());expect(read('a').operation).toBe('image-generate')
+  a.batches.set(petBatchRows('running',[[petImageRef.attachmentId],[petImageRef.attachmentId]]));expect(read('a').operation).toBe('image-edit')
+  a.batches.set(petBatchRows('running',[[],[petImageRef.attachmentId]]));expect(read('a').operation).toBeUndefined()
+  a.batches.set([{parent_session_id:'foreign',parent_call_id:'batch',get tasks(){throw new Error('foreign tasks accessed')}}]);expect(read('a').operation).toBeUndefined()
+  petImageTurn(a,{running:false,batch:true});a.batches.set(petBatchRows('completed'))
+  const children=Object.fromEntries([1,2].map(n=>['child-'+n,{running:false,projectionValues:{eMateImageReceipts:[petImageRow({owner:'child-'+n,call:'call-'+n,status:'completed'})]}}]))
+  list.set({...list.getSnapshot(),byId:{...list.getSnapshot().byId,...children}});expect(read('a').delivered).toBe(true)
+  for(const wrong of [{seq:10},{receipt:{...petImageRow({owner:'child-1',call:'call-1',status:'completed'}).receipt,revision:3}},{receipt:petImageRow({owner:'foreign',call:'call-1',status:'completed'}).receipt}]) {
+    children['child-1'].projectionValues.eMateImageReceipts=[{...petImageRow({owner:'child-1',call:'call-1',status:'completed'}),...wrong}]
+    list.set({...list.getSnapshot(),byId:{...list.getSnapshot().byId,...children}});expect(read('a').delivered).toBe(false)
+  }
+  a.turn.data={get:()=>undefined};a.conversation.set({...a.conversation.getSnapshot()});expect(read('a').delivered).toBe(false);
 })

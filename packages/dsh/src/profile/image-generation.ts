@@ -91,7 +91,7 @@ const IMAGE_RECEIPTS_PROJECTION = 'eMateImageReceipts'
 const COLD_READ_CONCURRENCY = 4
 const TERMINAL_IMAGE_STATUSES = new Set(['completed', 'needs-review', 'failed', 'cancelled', 'unknown'])
 
-/** Child-owned terminal receipts projected through rc.7's native Session projection feed. */
+/** Owned image lifecycle receipts projected through rc.7's native Session projection feed. */
 export function imageReceiptsProjectionDefinition(z) {
   const row = z.object({
     seq: z.number().int().nonnegative(),
@@ -101,7 +101,7 @@ export function imageReceiptsProjectionDefinition(z) {
   return {
     key: IMAGE_RECEIPTS_PROJECTION,
     schema: z.array(row),
-    stateVersion: 1,
+    stateVersion: 2,
     init: () => [],
     apply(state, event) {
       if (event.type !== 'emate/image-output' || !isRecord(event.data)) return state
@@ -109,9 +109,10 @@ export function imageReceiptsProjectionDefinition(z) {
       if (data.schema_version !== IMAGE_RECEIPT_VERSION
         || typeof data.call_id !== 'string' || data.call_id === ''
         || !Number.isSafeInteger(data.revision) || data.revision < 1
-        || !TERMINAL_IMAGE_STATUSES.has(String(data.status))) return state
+        || data.status !== 'running' && !TERMINAL_IMAGE_STATUSES.has(String(data.status))) return state
       const currentIndex = state.findIndex(item => item.receipt.call_id === data.call_id)
       const current = state[currentIndex]
+      if (current !== undefined && TERMINAL_IMAGE_STATUSES.has(String(current.receipt.status)) && data.status === 'running') return state
       if (current !== undefined
         && (Number(current.receipt.revision) > data.revision
           || Number(current.receipt.revision) === data.revision && current.seq >= event.seq)) return state

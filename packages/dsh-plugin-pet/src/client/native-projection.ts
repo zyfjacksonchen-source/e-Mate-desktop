@@ -2,14 +2,14 @@
  * Runtime sources: sessions/service.ts, sessions/conversation.ts and
  * sessions/projection-store.ts at Harness 4da69d7c3522. No domain is folded here.
  */
-import { EMPTY_PROJECTION, type PetTaskProjection } from '../projection.ts'
+import { EMPTY_PROJECTION, type PetTaskProjection, type PetImageFactsReader } from '../projection.ts'
 import type { OfficeScene } from '../scenes.ts'
 export interface Observable<T> { getSnapshot(): T; subscribe(listener: () => void): () => void }
 interface NativeTurn { readonly status: string; readonly start?: { readonly time: number }; readonly end?: { readonly data: { readonly reason: { readonly kind: string } } }; readonly data: { get(key: string): unknown } }
 interface NativeConversation {
   readonly sessionId: string; readonly openState: string; readonly composerPhase: string
   readonly running: boolean; readonly lastAgentError: string | null
-  readonly runningCalls: readonly { readonly callView: { readonly card: string; readonly kind?: string } | null }[]
+  readonly runningCalls: readonly { readonly callId: string; readonly turn: number; readonly callView: { readonly card: string; readonly kind?: string } | null }[]
   readonly pending: readonly { readonly kind: string }[]; readonly queue: readonly unknown[]
   readonly chat: {
     readonly timeline: { readonly turnOrder: readonly number[]; readonly turns: ReadonlyMap<number, NativeTurn> }
@@ -21,7 +21,7 @@ export interface NativeSession extends Observable<NativeConversation> { readonly
 interface Job { readonly status: string; readonly finishedAt?: number }
 interface NativeList {
   readonly current?: string; readonly phase: string
-  readonly byId: Readonly<Record<string, { readonly pendingInteraction?: string; readonly running: boolean }>>
+  readonly byId: Readonly<Record<string, { readonly pendingInteraction?: string; readonly running: boolean; readonly projectionValues?: Readonly<Record<string, unknown>> }>>
   readonly jobsBySession: Readonly<Record<string, readonly Job[]>>
 }
 export interface NativeSessions { readonly list: Observable<NativeList>; binding(id: string): { readonly session: NativeSession } | undefined }
@@ -45,8 +45,9 @@ export class NativePetProjection implements Observable<PetTaskProjection> {
   private revision = 0
   private disposed = false
   private enabled = true
-  constructor(privateSessions: NativeSessions, visibility: Visibility) {
-    this.sessions = privateSessions; this.visibility = visibility
+  private readonly readImageFacts: PetImageFactsReader
+  constructor(privateSessions: NativeSessions, visibility: Visibility, readImageFacts: PetImageFactsReader = () => ({ delivered: false })) {
+    this.sessions = privateSessions; this.visibility = visibility; this.readImageFacts = readImageFacts
     this.detach = [privateSessions.list.subscribe(this.update), visibility.subscribe(this.update)]
     this.update()
   }
@@ -63,7 +64,7 @@ export class NativePetProjection implements Observable<PetTaskProjection> {
     if (session !== this.session || current !== this.current) {
       for (const dispose of this.detachSession) dispose()
       this.detachSession = []; this.session = session; this.current = current; this.seenResponseTurn = undefined
-      if (session !== undefined) this.detachSession = [session.subscribe(this.update), ...['goal', 'todos'].map(key => session.projections.faceOf(key).subscribe(this.update))]
+      if (session !== undefined) this.detachSession = [session.subscribe(this.update), ...['goal', 'todos', 'eMateImageReceipts', 'eMateImageBatches'].map(key => session.projections.faceOf(key).subscribe(this.update))]
     }
     const conversation = session?.getSnapshot()
     const ready = current !== undefined && conversation?.sessionId === current && conversation.openState === 'open' && list.byId[current] !== undefined
@@ -89,7 +90,8 @@ export class NativePetProjection implements Observable<PetTaskProjection> {
       const failedJob = jobs.some(job => job.status === 'failed' && turn?.start !== undefined && job.finishedAt !== undefined && job.finishedAt >= turn.start.time)
       const waiting = conversation.pending.length > 0 || list.byId[current!]?.pendingInteraction !== undefined
       const produced = turn?.status === 'closed' && turn.end?.data.reason.kind === 'completed' ? turn.data.get('deliverables') : undefined
-      const delivered = object(produced) && Array.isArray(produced.produced) && produced.produced.length > 0
+      const images = this.readImageFacts(current!)
+      const delivered = images.delivered || object(produced) && Array.isArray(produced.produced) && produced.produced.length > 0
       let failedTool = false
       if (call === undefined && turnNumber !== undefined) {
         const keys = conversation.chat.locations.getTurn(turnNumber)
@@ -100,7 +102,7 @@ export class NativePetProjection implements Observable<PetTaskProjection> {
           break
         }
       }
-      const toolOperation = presentedOperation(call?.callView)
+      const toolOperation = images.operation ?? presentedOperation(call?.callView)
       candidate = {
         taskId: current!, window: { visible },
         firstResponsePending: conversation.composerPhase === 'engaging' || (conversation.running && (turnNumber === undefined || this.seenResponseTurn !== turnNumber)),

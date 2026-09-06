@@ -4,11 +4,12 @@ import { NativePetProjection, documentVisibility } from '../src/client/native-pr
 import { deriveScene } from '../src/projection.ts'
 import { store } from './support.mjs'
 function fixture(id='a') {
-  const goal=store(undefined);const todos=store(undefined);const nodes=new Map();const keys=[]
+  const goal=store(undefined);const todos=store(undefined);const images=store(undefined);const batches=store(undefined);const nodes=new Map();const keys=[]
   const turn={status:'open',start:{time:100},data:{get:()=>undefined}}
   const conversation=store({sessionId:id,openState:'open',composerPhase:'active',running:false,lastAgentError:null,runningCalls:[],pending:[],queue:[],chat:{timeline:{turnOrder:[1],turns:new Map([[1,turn]])},locations:{getTurn:()=>keys},nodes:{get:key=>nodes.get(key)}}})
-  const face={...conversation,projections:{faceOf:key=>key==='goal'?goal:todos}}
-  return {goal,todos,conversation,face,nodes,keys,turn}
+  const faces={goal,todos,eMateImageReceipts:images,eMateImageBatches:batches}
+  const face={...conversation,projections:{faceOf:key=>faces[key]}}
+  return {goal,todos,images,batches,conversation,face,nodes,keys,turn}
 }
 function context() {
   const a=fixture();const b=fixture('b');const list=store({current:'a',phase:'ready',byId:{a:{running:false},b:{running:false}},jobsBySession:{}});const visible=store(true)
@@ -67,4 +68,17 @@ test('disabled and hidden pets detach detailed native subscriptions',()=>{
 
 test('browser focus and visibility pause state and all listeners dispose',()=>{
   let focused=true;const view=new EventTarget();const doc=Object.assign(new EventTarget(),{visibilityState:'visible',hasFocus:()=>focused,defaultView:view});const visibility=documentVisibility(doc);let notifications=0;const stop=visibility.subscribe(()=>notifications++);assert.equal(visibility.getSnapshot(),true);focused=false;view.dispatchEvent(new Event('blur'));assert.equal(visibility.getSnapshot(),false);assert.equal(notifications,1);stop();view.dispatchEvent(new Event('focus'));assert.equal(notifications,1)
+})
+
+
+test('Cordis image facts refresh from native faces and disconnect with the current session',()=>{
+  const a=fixture();const b=fixture('b');const list=store({current:'a',phase:'ready',byId:{a:{running:false},b:{running:false}},jobsBySession:{}});const visible=store(true)
+  let facts={operation:'image-edit',delivered:false};let calls=0
+  const projection=new NativePetProjection({list,binding:id=>({session:id==='a'?a.face:b.face})},visible,id=>{assert.equal(id,'a');calls++;return facts})
+  a.goal.set({goal:{phase:'active'}});a.conversation.set({...a.conversation.getSnapshot(),running:true,runningCalls:[{callId:'image',turn:1,callView:null}]})
+  assert.equal(deriveScene(projection.getSnapshot()),'image-edit')
+  facts={delivered:true};a.goal.set(undefined);a.conversation.set({...a.conversation.getSnapshot(),running:false,runningCalls:[]});a.images.set([])
+  assert.equal(deriveScene(projection.getSnapshot()),'delivery')
+  const before=calls;visible.set(false);a.images.set([]);assert.equal(calls,before);assert.equal(a.images.listeners.size,0);assert.equal(a.batches.listeners.size,0)
+  projection.dispose();assert.equal(list.listeners.size,0)
 })

@@ -22,6 +22,20 @@ const z = {
 const projection = imageReceiptsProjectionDefinition(z)
 const header = id => ({ id, origin: 'subagent' })
 
+test('native receipt face exposes running work but terminal state never regresses to running', () => {
+  assert.equal(projection.stateVersion, 2)
+  const event = (status, revision, seq) => ({type:'emate/image-output',seq,time:seq * 100,
+    data:{schema_version:2,revision,call_id:'call',parent_session_id:'a',operation:'edit',status}})
+  const running = projection.apply(projection.init(), event('running',1,1))
+  assert.equal(projection.view(running)[0].receipt.operation,'edit')
+  for (const status of ['completed','needs-review','failed','cancelled','unknown']) {
+    const terminal = projection.apply(running,event(status,2,2))
+    assert.equal(projection.view(terminal)[0].receipt.status,status)
+    assert.equal(projection.apply(terminal,event('running',1,3)),terminal)
+    assert.equal(projection.apply(terminal,event('running',3,4)),terminal)
+  }
+})
+
 function context(headers, cachedSnapshots = new Map(), coldSnapshot = async () => {}) {
   const warnings = []
   return {
