@@ -74,16 +74,16 @@ function statusValue(result: unknown): boolean {
   return value.ready
 }
 
-function shareValue(value: unknown): ShareLink {
+function shareValue(value: unknown, allowExpired = false): ShareLink {
   const item = record(value)
   if (typeof item?.share_id !== 'string' || typeof item.public_url !== 'string'
     || typeof item.expires_at !== 'string' || !/^[A-Za-z0-9_-]{32}$/u.test(item.share_id)
-    || !Number.isFinite(Date.parse(item.expires_at)) || Date.parse(item.expires_at) <= Date.now()) {
+    || !Number.isFinite(Date.parse(item.expires_at)) || (!allowExpired && Date.parse(item.expires_at) <= Date.now())) {
     throw new Error('分享服务返回了无效链接。')
   }
   const url = new URL(item.public_url)
   if (url.protocol !== 'https:' || url.username !== '' || url.password !== ''
-    || url.pathname !== `/s/${item.share_id}` || url.search !== '' || url.hash !== '') {
+    || ![`/s/${item.share_id}`, `/e-mate/share/s/${item.share_id}`].includes(url.pathname) || url.search !== '' || url.hash !== '') {
     throw new Error('分享服务返回了无效链接。')
   }
   return {
@@ -105,11 +105,11 @@ function shareLinks(result: unknown): ShareLink[] {
     || !Array.isArray(value.shares) || value.shares.length > 50) {
     throw new Error('分享服务返回了无效链接列表。')
   }
-  const shares = value.shares.map(shareValue)
+  const shares = value.shares.map(value => shareValue(value, true))
   if (new Set(shares.map(share => share.share_id)).size !== shares.length) {
     throw new Error('分享服务返回了无效链接列表。')
   }
-  return shares
+  return shares.filter(share => Date.parse(share.expires_at) > Date.now())
 }
 
 export function SessionShareAction({

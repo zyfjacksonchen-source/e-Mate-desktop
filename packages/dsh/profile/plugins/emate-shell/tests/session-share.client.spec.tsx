@@ -93,6 +93,29 @@ describe('session share plugin', () => {
     expect(await screen.findByRole('button', { name: '创建公开链接' })).toBeTruthy()
   })
 
+  it('accepts the enterprise subpath and ignores a link expiring during list transit', async () => {
+    const shareId = 'E'.repeat(32)
+    const publicUrl = `https://enterprise.example/e-mate/share/s/${shareId}`
+    const callShare = vi.fn(async () => ({ ok: true, value: {
+      schema_version: 1, stage: 'listing', shares: [
+        { share_id: shareId, public_url: publicUrl, expires_at: '2030-08-21T00:00:00.000Z' },
+        { share_id: 'X'.repeat(32), public_url: `https://enterprise.example/e-mate/share/s/${'X'.repeat(32)}`,
+          expires_at: new Date(Date.now() - 1).toISOString() },
+      ],
+    } }))
+    render(<SessionShareAction
+      sessionId="session-enterprise"
+      callShare={callShare}
+      useSessionLogDownload={selector => selector({ bySession: {} })}
+      requestDownload={vi.fn()}
+      dismissDownload={vi.fn()}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: '分享当前任务' }))
+    await screen.findByRole('link', { name: publicUrl })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getAllByRole('link')).toHaveLength(1)
+  })
+
   it('recovers the server-side link when the create response is uncertain', async () => {
     const shareId = 'U'.repeat(32)
     let listCalls = 0

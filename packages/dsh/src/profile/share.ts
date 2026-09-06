@@ -83,14 +83,16 @@ function shareRoot(value: unknown): string {
   if (typeof value !== 'string') throw new Error('e-Mate public share service is not configured')
   const url = new URL(value)
   if (url.protocol !== 'https:' || url.username !== '' || url.password !== ''
-    || (url.pathname !== '' && url.pathname !== '/') || url.search !== '' || url.hash !== '') {
+    || !['/', '/e-mate/share', '/e-mate/share/'].includes(url.pathname) || url.search !== '' || url.hash !== '') {
     throw new Error('e-Mate public share service must be a fixed HTTPS origin')
   }
-  return url.origin
+  return url.origin + (url.pathname === '/' ? '' : '/e-mate/share')
 }
 
 async function readJson(response: Response, failedAt: ShareFailureAt): Promise<unknown> {
-  const declared = response.headers.get('content-length')
+  // Fetch decodes gzip/br but preserves the wire Content-Length header.
+  const encoding = response.headers.get('content-encoding')
+  const declared = encoding === null || encoding === 'identity' ? response.headers.get('content-length') : null
   if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > JSON_MAX_BYTES)) {
     throw new ShareRequestError('invalid-response', failedAt)
   }
@@ -130,16 +132,16 @@ function providerFailure(response: Response, failedAt: ShareFailureAt): never {
 
 type ShareValue = { share_id: string; public_url: string; expires_at: string }
 
-function parseShareValue(value: unknown, root: string, failedAt: ShareFailureAt): ShareValue {
+function parseShareValue(value: unknown, root: string, failedAt: ShareFailureAt, allowExpired = false): ShareValue {
   if (!isRecord(value) || !exact(value, ['id', 'public_url', 'expires_at'])
     || typeof value.id !== 'string' || !SHARE_ID.test(value.id)
     || typeof value.public_url !== 'string' || typeof value.expires_at !== 'string') {
     throw new ShareRequestError('invalid-response', failedAt)
   }
   const publicUrl = new URL(value.public_url)
-  if (publicUrl.origin !== root || publicUrl.pathname !== `/s/${value.id}`
+  if (publicUrl.toString() !== `${root}/s/${value.id}`
     || publicUrl.username !== '' || publicUrl.password !== '' || publicUrl.search !== '' || publicUrl.hash !== ''
-    || !Number.isFinite(Date.parse(value.expires_at)) || Date.parse(value.expires_at) <= Date.now()) {
+    || !Number.isFinite(Date.parse(value.expires_at)) || (!allowExpired && Date.parse(value.expires_at) <= Date.now())) {
     throw new ShareRequestError('invalid-response', failedAt)
   }
   return {
@@ -161,11 +163,11 @@ function parseShares(value: unknown, root: string): { schema_version: 1; shares:
     || !Array.isArray(value.shares) || value.shares.length > 50) {
     throw new ShareRequestError('invalid-response', 'listing')
   }
-  const shares = value.shares.map(share => parseShareValue(share, root, 'listing'))
+  const shares = value.shares.map(share => parseShareValue(share, root, 'listing', true))
   if (new Set(shares.map(share => share.share_id)).size !== shares.length) {
     throw new ShareRequestError('invalid-response', 'listing')
   }
-  return { schema_version: 1, shares }
+  return { schema_version: 1, shares: shares.filter(share => Date.parse(share.expires_at) > Date.now()) }
 }
 
 function sessionSha256(value: unknown): string | undefined {
@@ -195,6 +197,9 @@ async function modelToken(ctx: any, failedAt: ShareFailureAt): Promise<string> {
 export function apply(ctx: any, config: ShareConfig = {}): void {
   const root = shareRoot(config.rootUrl)
   const request = config.fetchImplementation ?? fetch
+  // Coalesce overlapping modal/reconnect calls only while the exact account
+  // and session upload is in flight; this is not a retry or persistent cache.
+  const creating = new Map<string, Promise<unknown>>()
   ctx.effect(() => ctx.connection.rpc.handle(
     SHARE_CHANNEL,
     async (endpoint: string, payload: unknown) => {
@@ -232,36 +237,43 @@ export function apply(ctx: any, config: ShareConfig = {}): void {
         const sessionHash = exact(payload, ['session_id']) ? sessionSha256(payload.session_id) : undefined
         if (sessionHash === undefined) return badRequest('create')
         try {
-          const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
           const token = await modelToken(ctx, 'preparing')
-          let archive
-          try {
-            archive = await ctx.apiProxy.downloads.sessionLog({
-              sessionId: payload.session_id as string,
-              includeDescendants: true,
-            }, signal)
-          } catch (error) {
-            if (error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)) throw error
-            throw new ShareRequestError('archive-unavailable', 'preparing')
-          }
-          if (!archive.ok || archive.body === null
-            || archive.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/zip') {
-            throw new ShareRequestError('archive-unavailable', 'preparing')
-          }
-          const response = await request(`${root}/v1/shares`, {
-            method: 'POST',
-            redirect: 'error',
-            signal,
-            headers: {
-              authorization: `Bearer ${token}`,
-              'content-type': 'application/zip',
-              'x-emate-session-sha256': sessionHash,
-            },
-            body: archive.body,
-            duplex: 'half',
-          } as RequestInit & { duplex: 'half' })
-          if (!response.ok) providerFailure(response, 'uploading')
-          return { ok: true, value: { stage: 'created' as const, ...parseShare(await readJson(response, 'uploading'), root) } }
+          const key = createHash('sha256').update(token).update('\0').update(sessionHash).digest('hex')
+          const active = creating.get(key)
+          if (active !== undefined) return await active
+          const upload = (async () => {
+            const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+            let archive
+            try {
+              archive = await ctx.apiProxy.downloads.sessionLog({
+                sessionId: payload.session_id as string,
+                includeDescendants: true,
+              }, signal)
+            } catch (error) {
+              if (error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)) throw error
+              throw new ShareRequestError('archive-unavailable', 'preparing')
+            }
+            if (!archive.ok || archive.body === null
+              || archive.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/zip') {
+              throw new ShareRequestError('archive-unavailable', 'preparing')
+            }
+            const response = await request(`${root}/v1/shares`, {
+              method: 'POST',
+              redirect: 'error',
+              signal,
+              headers: {
+                authorization: `Bearer ${token}`,
+                'content-type': 'application/zip',
+                'x-emate-session-sha256': sessionHash,
+              },
+              body: archive.body,
+              duplex: 'half',
+            } as RequestInit & { duplex: 'half' })
+            if (!response.ok) providerFailure(response, 'uploading')
+            return { ok: true, value: { stage: 'created' as const, ...parseShare(await readJson(response, 'uploading'), root) } }
+          })()
+          creating.set(key, upload)
+          try { return await upload } finally { creating.delete(key) }
         } catch (error) {
           return failed('create', error, 'uploading')
         }
