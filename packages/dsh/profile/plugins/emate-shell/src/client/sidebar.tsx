@@ -54,6 +54,7 @@ interface Props {
   pickWorkspace: () => Promise<string | null>
   renameSession: (id: string, title: string) => Promise<void>
   archiveSession: (id: string) => Promise<void>
+  deleteWorkspace: (workspaceId: string) => Promise<void>
   toggleSidebar: () => void
 }
 
@@ -84,6 +85,7 @@ export function SidebarRoot({
   pickWorkspace,
   renameSession,
   archiveSession,
+  deleteWorkspace,
   toggleSidebar,
 }: Props) {
   const wide = !collapsed
@@ -109,6 +111,11 @@ export function SidebarRoot({
   const [batchSelected, setBatchSelected] = useState<Set<string>>(() => new Set())
   const [batchConfirming, setBatchConfirming] = useState(false)
   const [batchBusy, setBatchBusy] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Pick<WorkspaceRow, 'workspaceId' | 'title'> | null>(null)
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const deleteInFlight = useRef(false)
+  const deleteDialog = useRef<HTMLElement>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pathname, setPathname] = useState(() => location.pathname)
 
@@ -158,7 +165,41 @@ export function SidebarRoot({
     return () => { document.removeEventListener('pointerdown', closeOutsideMenus) }
   }, [])
 
+  useEffect(() => {
+    if (!deleteTarget) return
+    const previous = document.activeElement
+    deleteDialog.current?.querySelector<HTMLButtonElement>('button')?.focus()
+    return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus() }
+  }, [deleteTarget])
+
   if (pathname === '/settings') return <>{renderSlot('sidebar.settings', { wide })}</>
+
+  const requestWorkspaceDelete = (workspace: WorkspaceRow, menu: HTMLDetailsElement | null) => {
+    if (deleteInFlight.current) return
+    menu?.removeAttribute('open')
+    menu?.querySelector<HTMLElement>('summary')?.focus()
+    setDeleteError(null)
+    setDeleteTarget({ workspaceId: workspace.workspaceId, title: workspace.title })
+  }
+
+  const removeWorkspace = async () => {
+    if (!deleteTarget || deleteInFlight.current) return
+    const target = deleteTarget
+    deleteInFlight.current = true
+    setDeletingWorkspace(true)
+    setDeleteError(null)
+    try {
+      await deleteWorkspace(target.workspaceId)
+      setDeleteTarget(null)
+      setUnassignedCollapsed(false)
+      setNotice('项目已从列表移除。本地文件和会话已保留，会话可在“未分组”中查看。')
+    } catch {
+      setDeleteError('项目暂时无法删除，请重试。')
+    } finally {
+      deleteInFlight.current = false
+      setDeletingWorkspace(false)
+    }
+  }
 
   const addWorkspace = async () => {
     if (picking) return
@@ -409,10 +450,18 @@ export function SidebarRoot({
                       const shown = showAll[workspace.workspaceId] ? rows : rows.slice(0, COLLAPSED_SESSION_LIMIT)
                       return (
                         <div className={css.projectGroup} key={workspace.workspaceId}>
-                          <div className={css.projectRow}>
+                          <div className={css.projectRow} onContextMenu={event => {
+                            event.preventDefault()
+                            const menu = event.currentTarget.querySelector<HTMLDetailsElement>('details')
+                            if (menu) { menu.open = true; menu.querySelector<HTMLButtonElement>('button')?.focus() }
+                          }}>
                             <button className={css.projectMain} type="button" title={`${workspace.title}\n${workspace.path}`} onClick={() => { rows[0] ? openSession(rows[0].id) : void beginSession(workspace.workspaceId) }}><FolderIcon size={16} /><span>{workspace.title}</span></button>
                             <button className={css.iconButton} type="button" title={open ? `折叠 ${workspace.title} 会话` : `展开 ${workspace.title} 会话`} aria-label={open ? `折叠 ${workspace.title} 会话` : `展开 ${workspace.title} 会话`} onClick={() => { setExpanded(value => ({ ...value, [workspace.workspaceId]: !open })) }}><ChevronIcon className={!open ? css.rotated : undefined} size={14} /></button>
                             <button className={css.iconButton} type="button" title={`为 ${workspace.title} 创建新会话`} aria-label={`为 ${workspace.title} 创建新会话`} aria-busy={creating || undefined} disabled={creating} onClick={() => { void beginSession(workspace.workspaceId) }}><PlusIcon size={16} /></button>
+                            <details className={`${css.taskMenu} ${css.projectMenu}`} onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector<HTMLElement>('summary')?.focus() } }}>
+                              <summary aria-label={`管理项目：${workspace.title}`}><EllipsisIcon size={16} /></summary>
+                              <div><button type="button" className={css.danger} disabled={deletingWorkspace} onClick={event => { requestWorkspaceDelete(workspace, event.currentTarget.closest('details')) }}>删除项目</button></div>
+                            </details>
                           </div>
                           {open && <div className={css.projectSessions}>{rows.length ? shown.map(sessionRow) : <button className={css.projectEmpty} type="button" onClick={() => { void beginSession(workspace.workspaceId) }}><PlusIcon size={16} /><span>新建项目会话</span></button>}{rows.length > COLLAPSED_SESSION_LIMIT && <button className={css.showMore} type="button" onClick={() => { setShowAll(value => ({ ...value, [workspace.workspaceId]: !value[workspace.workspaceId] })) }}>{showAll[workspace.workspaceId] ? '收起' : `查看更多（${rows.length - shown.length}）`}</button>}</div>}
                         </div>
@@ -436,9 +485,9 @@ export function SidebarRoot({
                   : <div className={css.taskList}>{generalRows.length ? generalRows.map(sessionRow) : <p className={css.empty}>暂无会话</p>}</div>)}
               </section>
 
-              {unassignedRows.length > 0 && <section className={css.sidebarSection} aria-label="未归属/待恢复">
+              {unassignedRows.length > 0 && <section className={css.sidebarSection} aria-label="未分组">
                 <div className={css.navHeading}>
-                  <button className={css.sectionToggle} type="button" aria-expanded={!unassignedCollapsed} onClick={() => { setUnassignedCollapsed(value => !value) }}><ChevronIcon className={unassignedCollapsed ? css.rotated : undefined} size={14} /><span>未归属/待恢复</span><small>{unassignedRows.length}</small></button>
+                  <button className={css.sectionToggle} type="button" aria-expanded={!unassignedCollapsed} onClick={() => { setUnassignedCollapsed(value => !value) }}><ChevronIcon className={unassignedCollapsed ? css.rotated : undefined} size={14} /><span>未分组</span><small>{unassignedRows.length}</small></button>
                 </div>
                 {!unassignedCollapsed && <div className={css.taskList}>{unassignedRows.map(sessionRow)}</div>}
               </section>}
@@ -453,6 +502,24 @@ export function SidebarRoot({
         </div>
 
       </aside>
+      {deleteTarget && createPortal(
+        <div className={css.dialogBackdrop} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !deleteInFlight.current) setDeleteTarget(null) }}>
+          <section ref={deleteDialog} className={css.dialog} role="alertdialog" aria-modal="true" aria-labelledby="emate-project-delete-title" aria-describedby="emate-project-delete-description" aria-busy={deletingWorkspace || undefined} onKeyDown={event => {
+            if (event.key === 'Escape' && !deleteInFlight.current) { event.preventDefault(); setDeleteTarget(null) }
+            if (event.key === 'Tab') {
+              const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))
+              const next = event.shiftKey ? buttons.at(-1) : buttons[0]
+              if (!next || (event.shiftKey ? document.activeElement === buttons[0] : document.activeElement === buttons.at(-1))) { event.preventDefault(); next?.focus() }
+            }
+          }}>
+            <h2 id="emate-project-delete-title">删除项目“{deleteTarget.title}”？</h2>
+            <p id="emate-project-delete-description">仅从项目列表中移除。本地文件夹、文件和会话记录都会保留，会话将显示在“未分组”下。</p>
+            {deleteError && <p role="alert">{deleteError}</p>}
+            <div><button type="button" disabled={deletingWorkspace} onClick={() => { setDeleteTarget(null) }}>取消</button><button type="button" className={css.dangerButton} disabled={deletingWorkspace} onClick={() => { void removeWorkspace() }}>{deletingWorkspace ? '正在删除项目' : '确认删除项目'}</button></div>
+          </section>
+        </div>,
+        document.body,
+      )}
       {renameTarget && createPortal(
         <div className={css.dialogBackdrop} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && busySession === null) setRenameTarget(null) }}>
           <form className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="emate-rename-title" onSubmit={event => { event.preventDefault(); void submitRename() }}>

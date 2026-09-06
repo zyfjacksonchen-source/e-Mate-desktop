@@ -29,7 +29,7 @@ const props = (toggleSidebar: () => void) => ({
   getThemeScheme: () => document.body.hasAttribute('data-ds-dark-theme') ? 'dark' as const : 'light' as const,
   subscribeTheme: () => () => {}, toggleTheme: () => {}, LightIcon: Icon, DarkIcon: Icon,
   openSession: () => {}, openSchedules: () => {}, pickWorkspace: async () => null,
-  renameSession: async () => {}, archiveSession: async () => {}, toggleSidebar,
+  renameSession: async () => {}, deleteWorkspace: async () => {}, archiveSession: async () => {}, toggleSidebar,
 })
 
 afterEach(() => {
@@ -207,8 +207,8 @@ describe('Settings route owns its navigation lifecycle', () => {
       useSessions={selector => selector(sessions)} useWorkspaces={selector => selector(workspaces)}
       renderSlot={() => null} createPortal={createPortal} NewChatIcon={Icon} PanelIcon={Icon} startSession={() => {}} />
     const expectCollapsed = () => {
-      const recovery = screen.getByRole('region', { name: '未归属/待恢复' })
-      expect(within(recovery).getByRole('button', { name: /未归属\/待恢复/u }).getAttribute('aria-expanded')).toBe('false')
+      const recovery = screen.getByRole('region', { name: '未分组' })
+      expect(within(recovery).getByRole('button', { name: /未分组/u }).getAttribute('aria-expanded')).toBe('false')
       expect(recovery.textContent).toContain('67')
       expect(screen.queryByRole('button', { name: '打开任务：旧新会话 1' })).toBeNull()
     }
@@ -234,7 +234,7 @@ describe('Settings route owns its navigation lifecycle', () => {
     const restored = render(sidebar())
     expectCollapsed()
 
-    fireEvent.click(within(screen.getByRole('region', { name: '未归属/待恢复' })).getByRole('button', { name: /未归属\/待恢复/u }))
+    fireEvent.click(within(screen.getByRole('region', { name: '未分组' })).getByRole('button', { name: /未分组/u }))
     expect(screen.getByRole('button', { name: '打开任务：旧新会话 1' })).not.toBeNull()
     restored.rerender(sidebar())
     expect(screen.getByRole('button', { name: '打开任务：旧新会话 1' })).not.toBeNull()

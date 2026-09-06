@@ -535,6 +535,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       openSession={openSession}
       pickWorkspace={pickWorkspace}
       renameSession={async () => {}}
+      deleteWorkspace={async () => {}}
       archiveSession={async () => {}}
       toggleSidebar={() => {}}
       {...sidebarUtilityProps}
@@ -566,12 +567,12 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
     expect(screen.getByRole('region', { name: '项目' }).getAttribute('data-dsh-workspace-drop-target')).toBe('')
     const conversations = screen.getByRole('region', { name: '会话' })
-    const unassigned = screen.getByRole('region', { name: '未归属/待恢复' })
+    const unassigned = screen.getByRole('region', { name: '未分组' })
     expect(conversations.textContent).toContain('通用任务')
     expect(conversations.compareDocumentPosition(unassigned) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     expect(unassigned.textContent).not.toContain('待恢复任务')
     expect(screen.queryByRole('button', { name: '打开任务：待恢复任务' })).toBeNull()
-    fireEvent.click(within(unassigned).getByRole('button', { name: /未归属\/待恢复/u }))
+    fireEvent.click(within(unassigned).getByRole('button', { name: /未分组/u }))
     expect(unassigned.textContent).toContain('待恢复任务')
     expect(conversations.textContent).not.toContain('待恢复任务')
     expect(screen.queryByText('一次性子代理记录')).toBeNull()
@@ -680,14 +681,15 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       openSession={openSession}
       pickWorkspace={async () => null}
       renameSession={async () => {}}
+      deleteWorkspace={async () => {}}
       archiveSession={archiveSession}
       toggleSidebar={() => {}}
       {...sidebarUtilityProps}
     />)
 
-    const unassigned = screen.getByRole('region', { name: '未归属/待恢复' })
+    const unassigned = screen.getByRole('region', { name: '未分组' })
     expect(unassigned.textContent).not.toContain('待恢复任务')
-    fireEvent.click(within(unassigned).getByRole('button', { name: /未归属\/待恢复/u }))
+    fireEvent.click(within(unassigned).getByRole('button', { name: /未分组/u }))
     expect(unassigned.textContent).toContain('待恢复任务')
     fireEvent.click(screen.getByRole('button', { name: '批量删除' }))
     expect(screen.getByRole('checkbox', { name: '选择会话：项目任务' })).not.toBeNull()
@@ -740,13 +742,14 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       openSession={() => {}}
       pickWorkspace={async () => null}
       renameSession={async () => {}}
+      deleteWorkspace={async () => {}}
       archiveSession={async () => {}}
       toggleSidebar={() => {}}
       {...sidebarUtilityProps}
     />)
 
     expect(screen.getByText('正在加载项目…')).not.toBeNull()
-    expect(screen.queryByRole('region', { name: '未归属/待恢复' })).toBeNull()
+    expect(screen.queryByRole('region', { name: '未分组' })).toBeNull()
     expect(screen.queryByText('尚未归类任务')).toBeNull()
   })
 
@@ -857,6 +860,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       openSession={() => {}}
       pickWorkspace={async () => null}
       renameSession={renameSession}
+      deleteWorkspace={async () => {}}
       archiveSession={async () => {}}
       toggleSidebar={() => {}}
       {...sidebarUtilityProps}
@@ -920,6 +924,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
         openSession={openSession}
         pickWorkspace={async () => null}
         renameSession={async () => {}}
+        deleteWorkspace={async () => {}}
         archiveSession={async () => {}}
         toggleSidebar={() => {}}
         {...sidebarUtilityProps}
@@ -1037,5 +1042,79 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(styles).toMatch(/@media \(max-width: 767px\) \{[\s\S]*?div\[data-sidebar-collapsed\]:has\(> \[data-shell-overlay\]\) \[data-slot='conversation\.session\.header'\] > header\) \{[\s\S]*?padding-left: 64px;/u)
     expect(styles).toMatch(/\[data-slot='conversation\.session\.header'\] > header > div:first-child\) \{[\s\S]*?min-height: 44px;/u)
     expect(styles).toMatch(/\.mobileOpen \{[\s\S]*?left: 12px;[\s\S]*?width: 44px;[\s\S]*?height: 44px;/u)
+  })
+})
+
+
+describe('project removal through native workspace owner', () => {
+  const workspace = (workspaceId: string, sessionIds: string[] = []) => ({ workspaceId, title: '同名项目', path: `/work/${workspaceId}`, sessionIds })
+  function setup(deleteWorkspace: (id: string) => Promise<void>) {
+    const sessions = nativeSessionState({ ids: ['kept'], byId: { kept: { id: 'kept', displayTitle: '保留的会话', blank: false, running: false, updatedAt: 1 } } })
+    const state = { items: [workspace('first', ['kept']), workspace('second')], archivedSessionIds: [], phase: 'ready' as const }
+    const archiveSession = vi.fn(async () => {})
+    const props = { collapsed: false, width: 248, renderSlot: () => null, createPortal,
+      useSessions: <T,>(selector: (value: SessionListState) => T) => selector(sessions),
+      useWorkspaces: <T,>(selector: (value: typeof state) => T) => selector(state),
+      NewChatIcon: Icon, PanelIcon: Icon, SearchIcon: Icon, ScheduleIcon: Icon, ChevronIcon: Icon,
+      FolderIcon: Icon, PlusIcon: Icon, EllipsisIcon: Icon, CopyIcon: Icon, EditIcon: Icon, ArchiveIcon: Icon, CloseIcon: Icon,
+      startSession: vi.fn(), openSchedules: vi.fn(), openSession: vi.fn(), pickWorkspace: async () => null,
+      renameSession: async () => {}, archiveSession, deleteWorkspace, toggleSidebar: vi.fn() }
+    const view = render(<SidebarRoot {...props} />)
+    return { state, props, view, archiveSession }
+  }
+
+  it('opens from the project menu and cancels without deleting', () => {
+    const remove = vi.fn(async () => {})
+    setup(remove)
+    fireEvent.click(screen.getAllByLabelText('管理项目：同名项目')[0]!)
+    fireEvent.click(screen.getAllByRole('button', { name: '删除项目' })[0]!)
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getByText(/本地文件夹、文件和会话记录都会保留/)).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(remove).not.toHaveBeenCalled()
+  })
+
+  it('freezes same-name project ID, prevents duplicate submit and consumes native list updates', async () => {
+    let resolve!: () => void
+    const remove = vi.fn(() => new Promise<void>(done => { resolve = done }))
+    const { state, props, view, archiveSession } = setup(remove)
+    const row = screen.getAllByLabelText('管理项目：同名项目')[0]!.closest('details')!.parentElement!
+    fireEvent.contextMenu(row)
+    expect(row.querySelector('details')!.open).toBe(true)
+    fireEvent.click(within(row).getByRole('button', { name: '删除项目' }))
+    state.items = [workspace('second'), workspace('first', ['kept'])]
+    view.rerender(<SidebarRoot {...props} />)
+    const button = within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认删除项目' })
+    fireEvent.click(button); fireEvent.click(button)
+    expect(remove).toHaveBeenCalledExactlyOnceWith('first')
+    state.items = [workspace('second')]
+    resolve()
+    await waitFor(() => { expect(screen.queryByRole('alertdialog')).toBeNull() })
+    view.rerender(<SidebarRoot {...props} />)
+    expect(within(screen.getByRole('region', { name: '未分组' })).getByRole('button', { name: '打开任务：保留的会话' })).toBeTruthy()
+    expect(archiveSession).not.toHaveBeenCalled()
+    view.unmount()
+    render(<SidebarRoot {...props} />)
+    expect(screen.getAllByLabelText('管理项目：同名项目')).toHaveLength(1)
+    expect(screen.getByRole('region', { name: '未分组' })).toBeTruthy()
+  })
+
+  it('preserves failed target for retry and supports Escape cancellation', async () => {
+    const remove = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(undefined)
+    setup(remove)
+    const secondMenu = screen.getAllByLabelText('管理项目：同名项目')[1]!.closest('details')!
+    fireEvent.click(within(secondMenu).getByLabelText('管理项目：同名项目'))
+    fireEvent.click(within(secondMenu).getByRole('button', { name: '删除项目' }))
+    const dialog = screen.getByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认删除项目' }))
+    await waitFor(() => { expect(within(dialog).getByRole('alert').textContent).toContain('请重试') })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认删除项目' }))
+    await waitFor(() => { expect(screen.queryByRole('alertdialog')).toBeNull() })
+    expect(remove.mock.calls).toEqual([['second'], ['second']])
+    fireEvent.click(screen.getAllByLabelText('管理项目：同名项目')[0]!)
+    fireEvent.click(screen.getAllByRole('button', { name: '删除项目' })[0]!)
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 })

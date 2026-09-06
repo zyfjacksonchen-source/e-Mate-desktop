@@ -316,7 +316,7 @@
 
 .projectRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px 32px;
+  grid-template-columns: minmax(0, 1fr) 32px 32px 32px;
   align-items: center;
 }
 
@@ -762,7 +762,7 @@
   }
 
   .projectRow {
-    grid-template-columns: minmax(0, 1fr) 44px 44px;
+    grid-template-columns: minmax(0, 1fr) 44px 44px 44px;
   }
 
   .taskRow {
@@ -797,4 +797,14 @@
 
 @keyframes emate-pulse {
   50% { opacity: .35; }
+}
+
+.projectMenu {
+  position: relative;
+  top: auto;
+  right: auto;
+}
+
+.projectMenu > summary {
+  opacity: 1;
 }
