@@ -272,11 +272,10 @@
 }
 
 .arrows {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
   display: flex;
+  justify-content: flex-end;
   gap: 7px;
+  margin-top: 8px;
 }
 
 .arrows button {
