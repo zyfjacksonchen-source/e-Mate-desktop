@@ -24,3 +24,12 @@ test('resource owner has zero startup fetch; pause/dispose reject late generatio
 test('complete resource lifecycle revokes both URLs and supports explicit recovery',async()=>{
   const transport=io();const owner=new PetResources(transport);owner.start();while(owner.getSnapshot().status==='loading')await new Promise(resolve=>setImmediate(resolve));assert.equal(owner.getSnapshot().status,'ready');owner.retry();assert.equal(transport.revoked.length,2);assert.equal(owner.getSnapshot().status,'idle');owner.dispose()
 })
+test('office-only failures recover through the same resource retry lifecycle',async()=>{
+  const transport=io({office:false});const owner=new PetResources(transport)
+  owner.start();while(owner.getSnapshot().status==='loading')await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(owner.getSnapshot().status,'ready');assert.equal(owner.getSnapshot().pet.extensionStatus,'unavailable')
+  owner.retry();assert.equal(transport.revoked.length,1)
+  Object.assign(transport,io());owner.start()
+  while(owner.getSnapshot().status==='loading')await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(owner.getSnapshot().pet.extensionStatus,'ready');owner.dispose();assert.equal(transport.revoked.length,2)
+})

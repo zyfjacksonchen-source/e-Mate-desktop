@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { deriveScene, nextScene, motionPaused, type SceneState } from '../projection.ts'
 import { decodeSettings } from '../settings.ts'
+import { setPetSetting } from './settings-write.ts'
 import { NativePetProjection } from './native-projection.ts'
 import { PetResources } from './resources.ts'
 import { PetOverlay } from './PetOverlay.tsx'
@@ -42,6 +43,6 @@ export function PetOverlaySlot({ projection, resources, settings, details }: Ove
   useEffect(() => () => resources.pause(), [resources])
   if (!selected.enabled || asset.pet === undefined) return null
   return <PetOverlay pet={asset.pet} scene={state.taskId === task.taskId ? state.scene : deriveScene(task)} paused={paused}
-    movable={preferences.status === 'ready' && preferences.writable} position={selected.position} save={position => settings.set('position', position)} taskId={task.taskId}
+    movable={preferences.status === 'ready' && preferences.writable} position={selected.position} save={position => setPetSetting(settings, 'position', position)} taskId={task.taskId}
     open={taskId => { if (projection.getSnapshot().taskId === taskId) details.openTaskDetails(taskId) }} />
 }

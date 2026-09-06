@@ -6,6 +6,7 @@ import { PetOverlay } from '../src/client/PetOverlay.tsx'
 import { PetSprite, lookDirection } from '../src/client/PetSprite.tsx'
 import { PetsSection } from '../src/client/PetsSection.tsx'
 import { PetOverlaySlot } from '../src/client/PetOverlaySlot.tsx'
+import { setPetSetting } from '../src/client/settings-write.ts'
 import { baseManifest, officeManifest, store } from './support.mjs'
 const pet = () => ({base:baseManifest(),baseUrl:'blob:base',office:officeManifest(),officeUrl:'blob:office',extensionStatus:'ready' as const,dispose(){}})
 const pause = { taskId:'a',revision:1,firstResponsePending:false,window:{visible:true,minimized:false} }
@@ -58,6 +59,43 @@ describe('native sprite host',()=>{
     render(<PetsSection settings={settings} resources={resources as never}/>);fireEvent.click(screen.getByRole('checkbox'))
     await act(async()=>{});expect(settings.set).toHaveBeenCalledWith('enabled',false);expect(screen.getByText('设置未保存，请重试。')).toBeTruthy();expect(screen.queryByText('private error')).toBeNull()
     fireEvent.click(screen.getByRole('button',{name:'重新加载资源'}));expect(resources.retry).toHaveBeenCalledTimes(1)
+  })
+  it('resolved native write failures restore unchanged coordinates and report unsaved settings',async()=>{
+    const settings={...store({status:'ready',writable:true,value:{enabled:true,position:{x:0.5,y:0.5}}}),set:vi.fn(async()=>{})}
+    const projection=store(pause)
+    const resources={...store({status:'ready',pet:pet()}),start:vi.fn(),pause:vi.fn()}
+    const view=render(<PetOverlaySlot projection={projection as never} resources={resources as never} settings={settings} details={{openTaskDetails:vi.fn()}}/>)
+    const button=screen.getByRole('button');const original=button.style.left
+    fireEvent.keyDown(button,{key:'ArrowRight'});expect(button.style.left).not.toBe(original)
+    await act(async()=>{});expect(button.style.left).toBe(original);expect(screen.getByText('位置未保存')).toBeTruthy()
+    view.unmount()
+    render(<PetsSection settings={settings} resources={resources as never}/>);fireEvent.click(screen.getByRole('checkbox'))
+    await act(async()=>{});expect(screen.getByText('设置未保存，请重试。')).toBeTruthy()
+  })
+  it('verified writes use native readback; stale and unmounted gestures cannot report failure or retry resources',async()=>{
+    const cell=store({status:'ready',writable:true,value:{enabled:true,position:{x:0.5,y:0.5}}})
+    const settings={...cell,set:vi.fn(async()=>{})}
+    let finishFirst:()=>void=()=>{}
+    settings.set.mockImplementationOnce(()=>new Promise<void>(resolve=>{finishFirst=resolve}))
+    settings.set.mockImplementationOnce(async()=>{cell.set({...settings.getSnapshot(),value:{...settings.getSnapshot().value,enabled:false}})})
+    const resources={...store({status:'ready',pet:{...pet(),extensionStatus:'unavailable'}}),retry:vi.fn()}
+    const view=render(<PetsSection settings={settings} resources={resources as never}/>);
+    fireEvent.click(screen.getByRole('checkbox'));fireEvent.click(screen.getByRole('checkbox'))
+    await act(async()=>{});await act(async()=>{finishFirst()});expect(screen.queryByText('设置未保存，请重试。')).toBeNull()
+    let finishLast:()=>void=()=>{}
+    settings.set.mockImplementationOnce(()=>new Promise<void>(resolve=>{finishLast=resolve}))
+    fireEvent.click(screen.getByRole('checkbox'));view.unmount()
+    await act(async()=>{cell.set({...settings.getSnapshot(),value:{...settings.getSnapshot().value,enabled:true}});finishLast()})
+    expect(resources.retry).not.toHaveBeenCalled()
+    await expect(setPetSetting(settings,'enabled',true)).resolves.toBeUndefined()
+  })
+  it('office extension failures expose retry and re-enabling retries an unavailable extension',async()=>{
+    const cell=store({status:'ready',writable:true,value:{enabled:false,position:{x:0.5,y:0.5}}})
+    const settings={...cell,set:vi.fn(async()=>{cell.set({...settings.getSnapshot(),value:{...settings.getSnapshot().value,enabled:true}})})}
+    const resources={...store({status:'ready',pet:{...pet(),extensionStatus:'unavailable'}}),retry:vi.fn()}
+    render(<PetsSection settings={settings} resources={resources as never}/>);
+    fireEvent.click(screen.getByRole('button',{name:'重新加载办公动画'}));expect(resources.retry).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('checkbox'));await act(async()=>{});expect(resources.retry).toHaveBeenCalledTimes(2)
   })
   it('first-response or hidden state cancels idle asset loading, with no timer left after disposal',()=>{
     const projection=store({...pause,firstResponsePending:true})

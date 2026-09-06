@@ -18,7 +18,7 @@ interface NativeConversation {
   }
 }
 export interface NativeSession extends Observable<NativeConversation> { readonly projections: { faceOf(key: string): Observable<unknown> } }
-interface Job { readonly status: string; readonly startedAt: number }
+interface Job { readonly status: string; readonly finishedAt?: number }
 interface NativeList {
   readonly current?: string; readonly phase: string
   readonly byId: Readonly<Record<string, { readonly pendingInteraction?: string; readonly running: boolean }>>
@@ -30,7 +30,6 @@ function object(value: unknown): value is Record<string, unknown> { return value
 function presentedOperation(view: { readonly card: string; readonly kind?: string } | null | undefined): OfficeScene | undefined {
   if (view?.card === 'terminal') return 'terminal'
   // Generic file/category presentation cannot prove a code/document/media subtype.
-  if (view?.card === 'generic' && view.kind === 'read') return 'document-read'
   return undefined
 }
 /** Native fields become a small redacted sprite input; no new Session store or events. */
@@ -87,7 +86,7 @@ export class NativePetProjection implements Observable<PetTaskProjection> {
       const todoActive = Array.isArray(todos) && todos.some(item => object(item) && item.status === 'in_progress')
       const jobs = list.jobsBySession[current!] ?? []
       const activeJob = jobs.find(job => job.status === 'running' || job.status === 'stopping')
-      const failedJob = jobs.some(job => job.status === 'failed' && turn?.start !== undefined && job.startedAt >= turn.start.time)
+      const failedJob = jobs.some(job => job.status === 'failed' && turn?.start !== undefined && job.finishedAt !== undefined && job.finishedAt >= turn.start.time)
       const waiting = conversation.pending.length > 0 || list.byId[current!]?.pendingInteraction !== undefined
       const produced = turn?.status === 'closed' && turn.end?.data.reason.kind === 'completed' ? turn.data.get('deliverables') : undefined
       const delivered = object(produced) && Array.isArray(produced.produced) && produced.produced.length > 0
