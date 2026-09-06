@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ComponentType } from 'react'
 import type { DesktopUpdateTriggerBridge } from '../../../../../../../desktop/e-mate-desktop/src/desktop-update-trigger-contract.ts'
+import { IDENTITY_CHANGED_EVENT } from './identity.tsx'
 import { UpdateControl } from './header-controls.tsx'
 import css from './settings-chrome.module.css'
 
@@ -34,8 +35,11 @@ export function SettingsTrigger({ wide, SettingsIcon, beforeNavigate, onNavigati
     trigger.dataset.emateSettingsTrigger = ''
 
     let generation = 0
+    const identityLocked = () => document.querySelector('[data-emate-identity-gate]') !== null
+    const identityChanged = () => { generation++; approvedClick = false }
     let approvedClick = false
     const guardOpen = (event: MouseEvent) => {
+      if (identityLocked()) { generation++; event.preventDefault(); event.stopImmediatePropagation(); return }
       if (approvedClick || document.querySelector(SETTINGS_CONTENT_SELECTOR)) return
       const request = ++generation
       const saving = beforeNavigate?.()
@@ -44,7 +48,7 @@ export function SettingsTrigger({ wide, SettingsIcon, beforeNavigate, onNavigati
       event.stopImmediatePropagation()
       const path = location.pathname
       void saving.then(() => {
-        if (request !== generation || location.pathname !== path || !trigger.isConnected) return
+        if (request !== generation || identityLocked() || location.pathname !== path || !trigger.isConnected) return
         approvedClick = true
         trigger.click()
         approvedClick = false
@@ -53,20 +57,23 @@ export function SettingsTrigger({ wide, SettingsIcon, beforeNavigate, onNavigati
     trigger.addEventListener('click', guardOpen, true)
     let open = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
     const projectTrigger = (panelOpen: boolean) => {
-      trigger.inert = panelOpen
-      if (panelOpen) trigger.setAttribute('aria-hidden', 'true')
+      trigger.inert = panelOpen || identityLocked()
+      if (trigger.inert) trigger.setAttribute('aria-hidden', 'true')
       else trigger.removeAttribute('aria-hidden')
     }
     const syncPanel = () => {
       const shouldOpen = location.pathname === SETTINGS_PATH
       const isOpen = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
       projectTrigger(isOpen)
+      if (identityLocked()) return
       if (shouldOpen && !isOpen) trigger.click()
       if (!shouldOpen && isOpen) {
         document.querySelector<HTMLElement>('[data-emate-settings-close]')?.closest('button')?.click()
       }
     }
     const observer = new MutationObserver(records => {
+      const identityChangedInDom = records.some(record => [...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element && (node.matches('[data-emate-identity-gate]') || node.querySelector('[data-emate-identity-gate]') !== null)))
+      if (identityChangedInDom) { generation++; syncPanel() }
       const changed = records.some(record => [...record.addedNodes, ...record.removedNodes].some(node =>
         node instanceof Element
         && (node.matches(SETTINGS_CONTENT_SELECTOR) || node.querySelector(SETTINGS_CONTENT_SELECTOR) !== null),
@@ -92,12 +99,14 @@ export function SettingsTrigger({ wide, SettingsIcon, beforeNavigate, onNavigati
 
     observer.observe(document.body, { childList: true, subtree: true })
     addEventListener('popstate', syncPanel)
+    addEventListener(IDENTITY_CHANGED_EVENT, identityChanged)
     syncPanel()
     return () => {
       generation++
       trigger.removeEventListener('click', guardOpen, true)
       observer.disconnect()
       removeEventListener('popstate', syncPanel)
+      removeEventListener(IDENTITY_CHANGED_EVENT, identityChanged)
       projectTrigger(false)
       delete trigger.dataset.emateSettingsTrigger
     }

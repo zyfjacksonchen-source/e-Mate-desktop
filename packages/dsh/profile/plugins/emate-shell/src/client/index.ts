@@ -37,7 +37,7 @@ import { appendConnectionDraft, loadConnectionStates } from './connection-status
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection, SchedulesOverlayProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
-import { IdentityGate } from './identity.tsx'
+import { IDENTITY_CHANGED_EVENT, IdentityGate } from './identity.tsx'
 import {
   ArtifactTerminal,
   desktopResourceRun,
@@ -324,7 +324,9 @@ function captureRouteFence(ctx: any): RouteFence {
   routeGenerations.set(ctx, generation)
   const sourcePath = location.pathname
   const sourceSession = ctx.sessions.list.getSnapshot().current
-  let stale = false
+  let stale = document.querySelector('[data-emate-identity-gate]') !== null
+  const onIdentityChanged = () => { stale = true }
+  addEventListener(IDENTITY_CHANGED_EVENT, onIdentityChanged)
   const onNavigation = () => {
     if (location.pathname !== sourcePath) stale = true
   }
@@ -337,10 +339,11 @@ function captureRouteFence(ctx: any): RouteFence {
     if (disposed) return
     disposed = true
     removeEventListener('popstate', onNavigation)
+    removeEventListener(IDENTITY_CHANGED_EVENT, onIdentityChanged)
     unsubscribe()
   }
   return {
-    current: () => routeGenerations.get(ctx) === generation && !stale && location.pathname === sourcePath
+    current: () => routeGenerations.get(ctx) === generation && !stale && !document.querySelector('[data-emate-identity-gate]') && location.pathname === sourcePath
       && ctx.sessions.list.getSnapshot().current === sourceSession,
     dispose,
   }

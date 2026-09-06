@@ -260,3 +260,24 @@ it('waits for canvas saving before the native Settings button and rejects stale 
   await act(async () => { saving[2]!.resolve() })
   expect(nativeOpen).toHaveBeenCalledOnce()
 })
+
+it('identity change cancels a late Settings open; locked startup waits for gate removal', async () => {
+  let resolveSave!: () => void
+  let needsSave = true
+  const beforeNavigate = vi.fn(() => needsSave ? new Promise<void>(resolve => { resolveSave = resolve }) : undefined)
+  const nativeOpen = vi.fn()
+  history.replaceState(null, '', '/chat/a')
+  render(<button onClick={nativeOpen}><SettingsTrigger wide SettingsIcon={Icon} beforeNavigate={beforeNavigate} /></button>)
+  fireEvent.click(screen.getByRole('button', { name: '设置' }))
+  act(() => { dispatchEvent(new CustomEvent('emate:identity-changed')) })
+  await act(async () => { resolveSave() })
+  expect(nativeOpen).not.toHaveBeenCalled()
+  const gate = document.createElement('main'); gate.dataset.emateIdentityGate = 'login'
+  await act(async () => { document.body.append(gate) })
+  act(() => { history.replaceState(null, '', '/settings'); dispatchEvent(new PopStateEvent('popstate')) })
+  expect(beforeNavigate).toHaveBeenCalledOnce()
+  expect(nativeOpen).not.toHaveBeenCalled()
+  needsSave = false
+  await act(async () => { gate.remove() })
+  expect(nativeOpen).toHaveBeenCalledOnce()
+})

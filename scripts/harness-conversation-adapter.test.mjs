@@ -370,11 +370,12 @@ function pendingSave() {
 }
 function nativeHeader(beforeViewNavigate) {
   const cleanups = []
+  const events = new Map()
   const hooks = { useRef: value => ({ current: value }), useEffect: callback => { const cleanup = callback(); if (cleanup) cleanups.push(cleanup) }, useSyncExternalStore() {} }
   const jsx = (type, props) => ({ type, props })
-  const Header = new Function('react', 'react_jsx_runtime', 'clsx', 'ConversationRoot_module_css_default', 'emateCanvasNavigationRequest',
+  const Header = new Function('react', 'react_jsx_runtime', 'clsx', 'ConversationRoot_module_css_default', 'emateCanvasNavigationRequest', 'addEventListener', 'removeEventListener',
     section('\t\tconst DEFAULT_VIEW_ID =', '\t\tfunction ConversationSession({') + '\nreturn ConversationSessionHeader;')(
-    hooks, { jsx, jsxs: jsx, Fragment: 'fragment' }, (...args) => args.filter(Boolean).join(' '), {}, owners.emateCanvasNavigationRequest,
+    hooks, { jsx, jsxs: jsx, Fragment: 'fragment' }, (...args) => args.filter(Boolean).join(' '), {}, owners.emateCanvasNavigationRequest, (name, callback) => events.set(name, callback), (name, callback) => { if (events.get(name) === callback) events.delete(name) },
   )
   let selected = 'e-mate-canvas', current = 'one'
   const writes = [], errors = [], opens = []
@@ -389,6 +390,7 @@ function nativeHeader(beforeViewNavigate) {
   walk(tree)
   return { click: label => nodes.find(node => node.props?.role === 'tab' && node.props.children === label).props.onClick(),
     clickParent: () => nodes.find(node => node.type === 'button' && node.props.children === 'Parent task').props.onClick(),
+    identityChanged: () => events.get('emate:identity-changed')?.(),
     current: () => current, opens, selected: () => selected, writes, errors, switchSession: () => { current = 'two' }, unmount: () => cleanups.forEach(callback => callback()) }
 }
 
@@ -491,4 +493,18 @@ test('tabs and parent-session clicks share one generation so only the latest des
   h.clickParent(); h.switchSession(); save.resolve()
   await new Promise(resolve => setImmediate(resolve))
   assert.deepEqual(h.opens, [])
+})
+
+test('identity changes invalidate native tab and breadcrumb saves even before the session or URL changes', async () => {
+  for (const action of ['tab', 'parent']) {
+    const save = pendingSave()
+    const h = nativeHeader(() => save.promise)
+    if (action === 'tab') h.click('画廊'); else h.clickParent()
+    h.identityChanged(); save.resolve()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(h.writes, [])
+    assert.deepEqual(h.opens, [])
+    assert.equal(h.current(), 'one')
+  }
+  assert.match(adapted, /isCurrentViewSession:.*!document\.querySelector\("\[data-emate-identity-gate\]"\)/u)
 })

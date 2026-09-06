@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { IDENTITY_CHANGED_EVENT } from './identity.tsx'
 
 interface SessionListState {
   phase: 'pending' | 'ready'
@@ -104,11 +105,26 @@ export function SessionRouteProjection({
     let generation = 0
     let replaying = false
     let restoring = false
+    const identityChanged = () => { generation++; replaying = false; restoring = false; pending.current = null }
     const guard = (event: PopStateEvent) => {
       const url = `${location.pathname}${location.search}${location.hash}`
+      // Authentication wins even over a pending history-cursor restoration.
+      if (['/login', '/register', '/agreement'].includes(location.pathname)) {
+        generation++; restoring = false; replaying = false; pending.current = null
+        accepted = { url, state: { ...history.state, [indexKey]: Number.isInteger(history.state?.[indexKey]) ? history.state[indexKey] : accepted.state[indexKey] ?? 0 } }
+        history.replaceState(accepted.state, '', accepted.url)
+        return
+      }
       if (restoring) { restoring = false; event.stopImmediatePropagation(); return }
       const target = { url, state: { ...history.state, [indexKey]: Number.isInteger(history.state?.[indexKey]) ? history.state[indexKey] : event.isTrusted ? null : (accepted.state[indexKey] ?? 0) + 1 } }
       const request = ++generation
+      // Identity routing must never wait on an ordinary workspace save. A
+      // locked workspace cannot replay an old settings/chat destination.
+      if (document.querySelector('[data-emate-identity-gate]')) {
+        event.stopImmediatePropagation()
+        history.replaceState(accepted.state, '', accepted.url)
+        return
+      }
       if (replaying || target.url === accepted.url) {
         accepted = target
         history.replaceState(target.state, '', target.url)
@@ -124,7 +140,7 @@ export function SessionRouteProjection({
       const previous = accepted
       history.replaceState(previous.state, '', previous.url)
       void saving.then(() => {
-        if (request !== generation) return
+        if (request !== generation || document.querySelector('[data-emate-identity-gate]')) return
         history.replaceState(target.state, '', target.url)
         replaying = true
         dispatchEvent(new PopStateEvent('popstate', { state: target.state }))
@@ -143,7 +159,8 @@ export function SessionRouteProjection({
       })
     }
     addEventListener('popstate', guard, true)
-    return () => { generation++; removeEventListener('popstate', guard, true) }
+    addEventListener(IDENTITY_CHANGED_EVENT, identityChanged)
+    return () => { generation++; removeEventListener('popstate', guard, true); removeEventListener(IDENTITY_CHANGED_EVENT, identityChanged) }
   }, [beforeNavigate, onNavigationError])
 
   return null

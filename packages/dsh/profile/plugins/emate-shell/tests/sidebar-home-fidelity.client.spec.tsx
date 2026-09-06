@@ -1177,3 +1177,67 @@ describe('canvas route save boundary', () => {
     await waitFor(() => expect(state.current).toBe('b'))
   })
 })
+
+it('logout routing bypasses canvas saves and old destinations cannot replay across the identity boundary', async () => {
+  history.replaceState(null, '', '/chat/a')
+  const state = { phase: 'ready' as const, current: 'a', byId: { a: {}, b: {} } }
+  let resolveSave!: () => void
+  const beforeNavigate = vi.fn(() => new Promise<void>(resolve => { resolveSave = resolve }))
+  const openSession = vi.fn((id: string) => { state.current = id })
+  render(<SessionRouteProjection useSessions={read => read(state)} useWorkspaces={read => read({ baselinesReady: true })} getSessions={() => state} openSession={openSession} beforeNavigate={beforeNavigate} />)
+  openSessionFromRoute('b')
+  expect(location.pathname).toBe('/chat/a')
+  dispatchEvent(new CustomEvent('emate:identity-changed'))
+  const gate = document.createElement('main'); gate.dataset.emateIdentityGate = 'login'; document.body.append(gate)
+  history.replaceState(null, '', '/login'); dispatchEvent(new PopStateEvent('popstate'))
+  expect(location.pathname).toBe('/login')
+  expect(beforeNavigate).toHaveBeenCalledOnce()
+  resolveSave(); await Promise.resolve(); await Promise.resolve()
+  expect(location.pathname).toBe('/login')
+  expect(openSession).not.toHaveBeenCalled()
+  history.pushState(null, '', '/settings'); dispatchEvent(new PopStateEvent('popstate'))
+  expect(location.pathname).toBe('/login')
+  expect(beforeNavigate).toHaveBeenCalledOnce()
+  history.replaceState(null, '', '/agreement'); dispatchEvent(new PopStateEvent('popstate'))
+  expect(location.pathname).toBe('/agreement')
+  expect(beforeNavigate).toHaveBeenCalledOnce()
+})
+
+it('identity change cancels a pending new-task route before workspace creation or native open', async () => {
+  history.replaceState(null, '', '/chat/a')
+  let resolveSave!: () => void
+  const connectWorkspace = vi.fn(async () => 'new-session')
+  const open = vi.fn()
+  const ctx = {
+    sessions: { list: { getSnapshot: () => ({ current: 'a' }), subscribe: () => () => {} }, open },
+    workspaces: { list: { getSnapshot: () => ({ baselinesReady: true, items: [] }) }, connectWorkspace },
+    get: () => ({ beforeNavigate: () => new Promise<void>(resolve => { resolveSave = resolve }) }),
+  }
+  const opening = startSessionFromRoute(ctx, 'workspace')
+  dispatchEvent(new CustomEvent('emate:identity-changed'))
+  resolveSave()
+  await expect(opening).resolves.toBe(false)
+  expect(connectWorkspace).not.toHaveBeenCalled()
+  expect(open).not.toHaveBeenCalled()
+})
+
+it('a login transition also wins while a failed Back is restoring its history cursor', async () => {
+  history.replaceState(null, '', '/chat/a')
+  const state = { phase: 'ready' as const, current: 'a', byId: { a: {}, b: {} } }
+  let active = false
+  const gate = document.createElement('main'); gate.dataset.emateIdentityGate = 'login'
+  const beforeNavigate = vi.fn(() => active ? Promise.reject(Error('conflict')) : undefined)
+  const openSession = vi.fn((id: string) => { state.current = id })
+  const onNavigationError = vi.fn(() => {
+    document.body.append(gate)
+    history.replaceState(null, '', '/login'); dispatchEvent(new PopStateEvent('popstate'))
+  })
+  render(<SessionRouteProjection useSessions={read => read(state)} useWorkspaces={read => read({ baselinesReady: true })} getSessions={() => state} openSession={openSession} beforeNavigate={beforeNavigate} onNavigationError={onNavigationError} />)
+  openSessionFromRoute('b')
+  active = true; history.back()
+  await waitFor(() => expect(onNavigationError).toHaveBeenCalledOnce())
+  await new Promise(resolve => setTimeout(resolve, 25))
+  expect(location.pathname).toBe('/login')
+  expect(state.current).toBe('b')
+  expect(beforeNavigate).toHaveBeenCalledTimes(2)
+})
