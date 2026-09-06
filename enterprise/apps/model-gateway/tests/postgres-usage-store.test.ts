@@ -214,7 +214,16 @@ const imageDatabaseUrl = process.env.IMAGE_ADMISSION_TEST_DATABASE_URL;
 test('real Postgres image admission preserves rollback, fairness, TTL, isolation and exactly-once accounting', {
   skip: imageDatabaseUrl === undefined ? 'requires the isolated image-admission PostgreSQL database' : false,
 }, async t => {
-  assert.equal(imageDatabaseUrl, 'postgresql://postgres@127.0.0.1:65432/emate218');
+  // Both the local tunnel and native server drill use isolated, passwordless
+  // loopback databases; their published ports need not be the same.
+  const target = new URL(imageDatabaseUrl!);
+  assert.equal(target.protocol, 'postgresql:');
+  assert.equal(target.hostname, '127.0.0.1');
+  assert.equal(target.username, 'postgres');
+  assert.equal(target.password, '');
+  assert.match(target.pathname, /^\/emate218(?:_[a-z0-9_]+)?$/);
+  assert.equal(target.search, '');
+  assert.equal(target.hash, '');
   const schema = `ia_${randomUUID().replaceAll('-', '')}`;
   const admin = new Pool({ connectionString: imageDatabaseUrl });
   const pool = new Pool({ connectionString: imageDatabaseUrl, options: `-c search_path=${schema}`, max: 8 });
