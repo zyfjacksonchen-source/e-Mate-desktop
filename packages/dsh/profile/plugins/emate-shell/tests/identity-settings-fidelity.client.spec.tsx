@@ -510,10 +510,33 @@ describe('e-Mate 2.0.17 identity and settings fidelity', () => {
     fireEvent.click(await screen.findByRole('button', { name: '退出登录' }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '退出登录' }))
 
-    await waitFor(() => { expect(screen.getByLabelText('用户中心，未登录')).toBeTruthy() })
-    expect(screen.queryByRole('heading', { name: '欢迎回来' })).toBeNull()
+    await waitFor(() => { expect(location.pathname).toBe('/login') })
+    expect(screen.getByRole('heading', { name: '欢迎回来' })).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toBe('本机已退出；企业会话撤销状态未知，请稍后重新登录确认。')
     expect(document.body.textContent).not.toContain('500')
+    expect(callIdentity.mock.calls.filter(([endpoint]) => endpoint === 'session.logout')).toHaveLength(1)
+  })
+
+  it('locks the workspace when Host logout succeeds but its RPC response is lost', async () => {
+    history.replaceState(null, '', '/chat/logout-response-lost')
+    let loggedOut = false
+    const signedOut = { ...signedIn, authenticated: false, workspace_unlocked: false }
+    const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => {
+      if (endpoint === 'identity.bootstrap') return { ok: true, value: loggedOut ? signedOut : signedIn }
+      if (endpoint === 'session.logout') {
+        loggedOut = true
+        throw new Error('synthetic response lost after Host cleared credentials')
+      }
+      return { ok: false }
+    })
+    const Icon = () => <svg />
+    render(<IdentityGate callIdentity={callIdentity} />)
+    render(<AccountControl callIdentity={callIdentity} wide UserIcon={Icon} expandSidebar={() => {}} />)
+    fireEvent.click(await screen.findByLabelText('用户中心，测试用户'))
+    fireEvent.click(await screen.findByRole('button', { name: '退出登录' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '退出登录' }))
+    await waitFor(() => expect(location.pathname).toBe('/login'))
+    expect(screen.getByRole('heading', { name: '欢迎回来' })).toBeTruthy()
     expect(callIdentity.mock.calls.filter(([endpoint]) => endpoint === 'session.logout')).toHaveLength(1)
   })
 

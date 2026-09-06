@@ -159,9 +159,6 @@ export function AccountControl({ callIdentity, wide, placement = 'sidebar', User
         confirmed: true,
       })
       if (!result.ok) {
-        dispatchEvent(new CustomEvent(IDENTITY_CHANGED_EVENT, {
-          detail: { logout_incomplete: true },
-        }))
         throw new Error('退出登录暂未完成，请稍后重试。')
       }
       if (!validLogout(result.value)) throw new Error('企业服务器返回了无效退出状态。')
@@ -172,6 +169,11 @@ export function AccountControl({ callIdentity, wide, placement = 'sidebar', User
         detail: { remote_revocation: result.value.remote_revocation },
       }))
     } catch {
+      // A lost response can follow successful Host credential clearing.
+      // Recheck authoritative identity for every failure shape, not just RPC envelopes.
+      dispatchEvent(new CustomEvent(IDENTITY_CHANGED_EVENT, {
+        detail: { logout_incomplete: true },
+      }))
       setError('退出登录暂未完成，请稍后重试。')
     } finally {
       setBusy(false)

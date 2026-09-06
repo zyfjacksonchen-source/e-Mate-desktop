@@ -51,8 +51,8 @@ describe('enterprise model recovery identity boundary', () => {
     expect(location.pathname).toBe('/agreement')
   })
 
-  it('keeps an ordinary local route and shell interactive when enterprise auth is unavailable', async () => {
-    history.replaceState(null, '', '/chat/local-session')
+  it.each(['/', '/chat/local-session', '/settings'])('requires login after signed-out startup on %s', async path => {
+    history.replaceState(null, '', path)
     const shell = document.createElement('main')
     shell.id = 'root'
     const localTool = document.createElement('button')
@@ -62,13 +62,61 @@ describe('enterprise model recovery identity boundary', () => {
     const callIdentity = vi.fn(async (): Promise<RpcResult> => ({ ok: true, value: signedOut }))
 
     render(<IdentityGate callIdentity={callIdentity} />)
-    await waitFor(() => expect(callIdentity).toHaveBeenCalledOnce())
+    await waitFor(() => expect(location.pathname).toBe('/login'))
 
-    expect(location.pathname).toBe('/chat/local-session')
-    expect(shell.hidden).toBe(false)
-    expect(shell.inert).not.toBe(true)
+    expect(shell.hidden).toBe(true)
+    expect(shell.inert).toBe(true)
     expect(localTool.disabled).toBe(false)
-    expect(document.querySelector('[data-emate-identity-gate]')).toBeNull()
+    expect(document.querySelector('[data-emate-identity-gate="login"]')).not.toBeNull()
+  })
+
+  it('blocks the workspace immediately after logout while bootstrap is still pending', async () => {
+    history.replaceState(null, '', '/chat/local-session')
+    const shell = document.createElement('main')
+    shell.id = 'root'
+    document.body.append(shell)
+    let finish!: (result: RpcResult) => void
+    const callIdentity = vi.fn().mockResolvedValueOnce({ ok: true, value: signedIn })
+      .mockImplementationOnce(() => new Promise<RpcResult>(resolve => { finish = resolve }))
+    render(<IdentityGate callIdentity={callIdentity} />)
+    await waitFor(() => expect(document.querySelector('[data-emate-identity-gate]')).toBeNull())
+    act(() => { dispatchEvent(new CustomEvent(IDENTITY_CHANGED_EVENT)) })
+    expect(shell.hidden).toBe(true)
+    expect(shell.inert).toBe(true)
+    finish({ ok: true, value: signedOut })
+    await waitFor(() => expect(location.pathname).toBe('/login'))
+    act(() => {
+      history.pushState(null, '', '/chat/local-session')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await waitFor(() => expect(location.pathname).toBe('/login'))
+    expect(shell.hidden).toBe(true)
+  })
+
+  it('requires agreement on a restored chat route for an authenticated locked account', async () => {
+    history.replaceState(null, '', '/chat/local-session')
+    render(<IdentityGate callIdentity={vi.fn(async () => ({ok:true as const,value:{...signedIn,workspace_unlocked:false}}))} />)
+    await waitFor(() => expect(location.pathname).toBe('/agreement'))
+    expect(document.querySelector('[data-emate-identity-gate="agreement"]')).not.toBeNull()
+  })
+
+  it('locks late native portals while verifying identity and restores their original state after login', async () => {
+    const shell = document.createElement('main')
+    shell.id = 'root'
+    document.body.append(shell)
+    let complete!: (result: RpcResult) => void
+    render(<IdentityGate callIdentity={vi.fn(() => new Promise<RpcResult>(resolve => { complete = resolve }))} />)
+    const late = document.createElement('button')
+    late.textContent = 'Late native settings portal'
+    const originalInert = late.inert
+    document.body.append(late)
+    await waitFor(() => expect(late.hidden).toBe(true))
+    expect(late.inert).toBe(true)
+    expect(document.querySelector<HTMLElement>('[data-emate-identity-gate]')?.hidden).toBe(false)
+    complete({ ok: true, value: signedIn })
+    await waitFor(() => expect(late.hidden).toBe(false))
+    expect(late.inert).toBe(originalInert)
+    late.remove()
   })
 
   it('discards an in-flight bootstrap and runs one trailing refresh after identity mutation', async () => {

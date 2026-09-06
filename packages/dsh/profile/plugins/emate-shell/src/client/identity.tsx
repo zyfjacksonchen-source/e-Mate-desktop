@@ -185,6 +185,9 @@ export function IdentityGate({ callIdentity }: Props) {
         : event instanceof CustomEvent && event.detail?.remote_revocation === 'unknown'
           ? REMOTE_LOGOUT_UNKNOWN_MESSAGE
           : null
+      // Identity changes invalidate the visible workspace immediately, even
+      // while an older bootstrap or the authoritative follow-up is pending.
+      setState(null)
       const pending = identityLoad.current
       if (pending === null) {
         void load(notice)
@@ -197,20 +200,27 @@ export function IdentityGate({ callIdentity }: Props) {
     return () => { removeEventListener(IDENTITY_CHANGED_EVENT, refresh) }
   }, [])
 
-  const enterpriseRoute = routePath === '/login' || routePath === '/register' || routePath === '/agreement'
   const mode = state?.authenticated === true && state.workspace_unlocked
     ? 'unlocked'
-    : state?.authenticated === true && routePath === '/agreement'
+    : state?.authenticated === true
       ? 'agreement'
-      : enterpriseRoute
-        ? 'login'
-        : 'local'
+      : 'login'
 
   useEffect(() => {
     if (mode === 'unlocked') {
       if (['/login', '/register', '/agreement'].includes(location.pathname)) {
         history.replaceState(null, '', returnPath)
         dispatchEvent(new PopStateEvent('popstate'))
+      }
+      return
+    }
+    // Keep the original deep link until bootstrap resolves, but never expose
+    // its workspace while authentication is unknown.
+    if (state === null) return
+    if (mode === 'agreement') {
+      if (routePath !== '/agreement') {
+        history.replaceState(null, '', '/agreement')
+        setRoutePath('/agreement')
       }
       return
     }
@@ -235,7 +245,7 @@ export function IdentityGate({ callIdentity }: Props) {
         }
         return
       }
-      if (mode === 'agreement' || mode === 'local') return
+      if (mode === 'agreement') return
       const nextView = location.pathname === '/register' ? 'register' : 'login'
       setAuthView(nextView)
     }
@@ -244,24 +254,27 @@ export function IdentityGate({ callIdentity }: Props) {
   }, [mode, returnPath])
 
   useEffect(() => {
-    if (mode === 'unlocked' || mode === 'local') return undefined
+    if (mode === 'unlocked') return undefined
     const root = document.getElementById('root')
     if (root === null) return undefined
-    const gate = document.querySelector('[data-emate-identity-gate]')
-    const background = [root, ...Array.from(document.body.children).filter(
-      (element): element is HTMLElement => element instanceof HTMLElement
-        && element !== root
-        && element !== gate
-        && element.tagName !== 'SCRIPT',
-    )].map(element => ({ element, inert: element.inert, hidden: element.hidden }))
-    for (const { element } of background) {
-      element.inert = true
-      element.hidden = true
+    const background = new Map<HTMLElement, { inert: boolean; hidden: boolean }>()
+    const lock = () => {
+      for (const element of [root, ...document.body.children]) {
+        if (!(element instanceof HTMLElement) || element.matches('[data-emate-identity-gate]')
+          || element.tagName === 'SCRIPT' || background.has(element)) continue
+        background.set(element, { inert: element.inert, hidden: element.hidden })
+        element.inert = true
+        element.hidden = true
+      }
     }
+    lock()
+    const observer = new MutationObserver(lock)
+    observer.observe(document.body, { childList: true })
     return () => {
-      for (const previous of background) {
-        previous.element.inert = previous.inert
-        previous.element.hidden = previous.hidden
+      observer.disconnect()
+      for (const [element, previous] of background) {
+        element.inert = previous.inert
+        element.hidden = previous.hidden
       }
     }
   }, [mode])
@@ -397,12 +410,6 @@ export function IdentityGate({ callIdentity }: Props) {
   }
 
   if (mode === 'unlocked') return null
-  if (mode === 'local') {
-    return error === null ? null : createPortal(
-      <p role="alert" data-emate-identity-status="local">{error}</p>,
-      document.body,
-    )
-  }
 
   if (mode === 'agreement' && state !== null) {
     return createPortal(
