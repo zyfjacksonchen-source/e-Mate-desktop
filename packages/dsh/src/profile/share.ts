@@ -193,6 +193,10 @@ async function modelToken(ctx: any, failedAt: ShareFailureAt): Promise<string> {
  * Publish the pinned DSH Session ZIP through one authenticated share provider.
  * The ZIP remains the only session/attachment projection; this adapter adds no
  * second event store, transcript renderer, or client-side upload path.
+ * The native export projection omits local-only image staging events and places
+ * submitted imported files in files/<stored_name> (or subagents/<id>/files/).
+ * Remaining JSONL lines retain their original references; image bytes stay in
+ * native media/ entries (sha256:<digest> becomes sha256-<digest> for safe extraction). Missing submitted files fail the export.
  */
 export function apply(ctx: any, config: ShareConfig = {}): void {
   const root = shareRoot(config.rootUrl)

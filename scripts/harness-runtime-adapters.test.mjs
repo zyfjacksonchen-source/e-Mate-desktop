@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import test from 'node:test'
 
 import { adaptHarnessFsSource, applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
+import { adaptHarnessSessionExportSource, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 
 const rc7Seam = `\tasync resolvePolicy(toolName, args, exec) {
@@ -29,13 +30,16 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
   const directory = await fs.mkdtemp(join(tmpdir(), 'emate-runtime-hardlinks-'))
   t.after(() => fs.rm(directory, { recursive: true, force: true }))
   const runtime = join(directory, 'runtime')
-  const nativeConversation = await fs.readFile(new URL('../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', import.meta.url), 'utf8')
+  const nativeRoot = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
+  const nativeConversation = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js'), 'utf8')
+  const nativeExport = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/host/apiproxy/lib/index.js'), 'utf8')
   const entries = [
     { name: '@deepseek-ai/dsh-tool-fs', file: 'index.js', input: rc7Seam, adapt: adaptHarnessFsSource },
+    { name: SESSION_EXPORT_PACKAGE, file: 'index.js', input: nativeExport, adapt: adaptHarnessSessionExportSource },
     { name: CONVERSATION_PACKAGE, file: 'client.js', input: nativeConversation, adapt: adaptHarnessConversationSource },
   ]
   for (const entry of entries) {
-    entry.source = join(directory, entry.file)
+    entry.source = join(directory, entry.name.replace(/[@/]/gu, '_') + '-' + entry.file)
     entry.target = join(runtime, 'node_modules', entry.name, 'lib', entry.file)
     await fs.writeFile(entry.source, entry.input)
     await fs.chmod(entry.source, 0o750)
