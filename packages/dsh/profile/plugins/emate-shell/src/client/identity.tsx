@@ -221,6 +221,7 @@ export function IdentityGate({ callIdentity }: Props) {
       if (routePath !== '/agreement') {
         history.replaceState(null, '', '/agreement')
         setRoutePath('/agreement')
+        dispatchEvent(new PopStateEvent('popstate'))
       }
       return
     }
@@ -231,6 +232,7 @@ export function IdentityGate({ callIdentity }: Props) {
       if (routePath !== path) {
         history.replaceState(null, '', path)
         setRoutePath(path)
+        dispatchEvent(new PopStateEvent('popstate'))
       }
     }
   }, [authView, mode, returnPath, routePath, state])

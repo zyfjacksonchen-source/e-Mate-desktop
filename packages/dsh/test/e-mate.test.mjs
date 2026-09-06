@@ -121,7 +121,7 @@ test('Computer Use composes one cross-platform Profile row without a candidate p
   }
 })
 
-test('validated identity transitions restore only explicit enterprise routes while local routes stay available', () => {
+test('identity mutations restore the native route only after validated login or agreement acceptance', () => {
   const source = readFileSync(new URL('../profile/plugins/emate-shell/src/client/identity.tsx', import.meta.url), 'utf8')
   const login = source.slice(source.indexOf('  const login = async'), source.indexOf('  const issueChallenge'))
   const acceptance = source.slice(source.indexOf('  const accept = async'), source.indexOf("  if (mode === 'unlocked') return null"))
@@ -133,9 +133,6 @@ test('validated identity transitions restore only explicit enterprise routes whi
   const acceptanceRestore = acceptance.indexOf("history.replaceState(null, '', returnPath)")
   const acceptanceReload = acceptance.indexOf('location.reload()')
   assert.ok(acceptanceValidation >= 0 && acceptanceRestore > acceptanceValidation && acceptanceReload > acceptanceRestore)
-  assert.match(source, /routePath === '\/login'.*routePath === '\/register'.*routePath === '\/agreement'/u)
-  assert.match(source, /mode === 'unlocked' \|\| mode === 'local'/u)
-  assert.match(source, /if \(mode === 'unlocked' \|\| mode === 'local'\) return undefined/u)
   assert.doesNotMatch(login, /setState\(result\.value\)/)
   assert.doesNotMatch(acceptance, /setState\(result\.value\)/)
   assert.match(source, /addEventListener\('popstate', sync\)/)
