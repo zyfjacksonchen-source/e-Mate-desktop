@@ -18,6 +18,7 @@ import {
 import { pinnedPnpmInvocation } from './package-manager.mjs'
 import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
+import { FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const harnessRoot = join(root, 'upstream', 'deepseek-harness')
@@ -51,6 +52,11 @@ test('Desktop session archives use the same native export adapter and record its
   assert.match(desktop, /adaptHarnessSessionExportSource\(readFileSync\(entry/u)
   assert.match(desktop, /adaptHarnessSessionExportSource\(readFileSync\(join\(sourceLib, 'index.js'\)/u)
   assert.match(desktop, /adapter_inputs:[\s\S]*packages\/dsh-plugin-file-import\/src\/contract.ts/u)
+  assert.equal(FS_BYTES_PACKAGE, '@deepseek-ai/dsh-fs-local')
+  assert.equal(FS_BYTES_ADAPTER_PATH, 'scripts/harness-fs-bytes-adapter.mjs')
+  assert.match(runtime, /adaptHarnessFsBytesSource\(await readFile\(bytesTarget/u)
+  assert.match(desktop, /adaptHarnessFsBytesSource\(readFileSync\(entry/u)
+  assert.match(desktop, /adaptHarnessFsBytesSource\(readFileSync\(join\(sourceLib, 'index.js'\)/u)
 })
 
 test('runs manager-free Harness build scripts in order through inherited pnpm and fails fast', () => {

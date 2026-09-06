@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
+import { adaptHarnessFsBytesSource, FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 
 export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
 export const HARNESS_VERSION = '0.1.0-rc.7'
@@ -276,6 +277,10 @@ export function materializeHarnessDesktopRuntime(root) {
       const entry = join(targetLib, 'index.js')
       writeFileSync(entry, adaptHarnessSessionExportSource(readFileSync(entry, 'utf8')))
     }
+    if (manifest.name === FS_BYTES_PACKAGE) {
+      const entry = join(targetLib, 'index.js')
+      writeFileSync(entry, adaptHarnessFsBytesSource(readFileSync(entry, 'utf8')))
+    }
     const overlay = DESKTOP_OVERLAYS.get(manifest.name)
     if (overlay !== undefined) {
       const targetDirectory = relative(root, target).split(sep).join('/')
@@ -305,7 +310,8 @@ function desktopProvenance(root, receipt) {
     if (!existsSync(sourceLib) || !existsSync(targetLib)) throw new Error(`Desktop Harness lib is missing: ${manifest.name}`)
     const overlay = DESKTOP_OVERLAYS.get(manifest.name)
     const adapter = manifest.name === CONVERSATION_PACKAGE ? CONVERSATION_ADAPTER_PATH
-      : manifest.name === SESSION_EXPORT_PACKAGE ? SESSION_EXPORT_ADAPTER_PATH : null
+      : manifest.name === SESSION_EXPORT_PACKAGE ? SESSION_EXPORT_ADAPTER_PATH
+        : manifest.name === FS_BYTES_PACKAGE ? FS_BYTES_ADAPTER_PATH : null
     if (manifest.name === CONVERSATION_PACKAGE && readFileSync(join(targetLib, 'client.js'), 'utf8')
       !== adaptHarnessConversationSource(readFileSync(join(sourceLib, 'client.js'), 'utf8'))) {
       throw new Error('Desktop conversation package does not match the pinned native owner plus product adapter')
@@ -313,6 +319,10 @@ function desktopProvenance(root, receipt) {
     if (manifest.name === SESSION_EXPORT_PACKAGE && readFileSync(join(targetLib, 'index.js'), 'utf8')
       !== adaptHarnessSessionExportSource(readFileSync(join(sourceLib, 'index.js'), 'utf8'))) {
       throw new Error('Desktop session export does not match the pinned native owner plus product adapter')
+    }
+    if (manifest.name === FS_BYTES_PACKAGE && readFileSync(join(targetLib, 'index.js'), 'utf8')
+      !== adaptHarnessFsBytesSource(readFileSync(join(sourceLib, 'index.js'), 'utf8'))) {
+      throw new Error('Desktop binary reads do not match the pinned native owner plus product adapter')
     }
     packages.push({
       name: manifest.name,
