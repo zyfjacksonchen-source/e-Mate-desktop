@@ -6,7 +6,9 @@ import { clientBundle } from '../../upstream/deepseek-harness/packages/client/ts
 
 const require = createRequire(import.meta.url)
 const excalidrawRoot = dirname(dirname(dirname(require.resolve('@excalidraw/excalidraw'))))
-const preset = clientBundle('@e-mate/dsh-plugin-canvas', ['src/index.ts', 'src/contract.ts'])
+const preset = clientBundle('@e-mate/dsh-plugin-canvas', ['src/index.ts', 'src/contract.ts'], {
+  lib: { deps: { alwaysBundle: ['fflate'] } },
+})
 export default (options: any) => {
   const configs = preset(options)
   const client = configs.find((config: any) => config.name?.endsWith('/client'))
