@@ -22,6 +22,8 @@ import {
   toolImagesDefinition,
 } from '../src/client/image-gallery.tsx'
 import { createTransientGalleryNotice, registerImageGallery } from '../src/client/index.ts'
+import { LegacyArtifacts } from '../src/client/legacy-artifacts.tsx'
+import fileCss from '../../../../../dsh-plugin-file-import/src/client/style.module.css'
 
 vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
   MessageImage: ({ attachment, labels }: {
@@ -1001,11 +1003,62 @@ describe('completed artifact terminal', () => {
     expect(screen.queryByRole('button', { name: /其余/u }) === null).toBe(count <= 6)
   })
 
+  it.each([
+    ['docx', 'FileText'], ['pdf', 'FileText'], ['xlsx', 'FileSpreadsheet'], ['csv', 'FileSpreadsheet'],
+    ['pptx', 'FileChartColumn'], ['html', 'File'], ['md', 'FileText'], ['txt', 'FileText'],
+    ['zip', 'FileArchive'], ['json', 'FileJson2'], ['unknown', 'File'],
+  ])('uses the upload icon and compact text style for %s terminal files', (extension, icon) => {
+    const name = `完整的很长中文文件名称与版本信息-${extension}.${extension}`
+    const path = `private/output/${name}`
+    const props = terminalProps([], { callIds: [], paths: [path] })
+    const view = render(<ArtifactTerminal {...props as never} />)
+    const open = screen.getByRole('button', { name: `打开 ${name}` })
+    const svg = open.querySelector('svg[data-file-icon]')
+    expect(svg?.getAttribute('data-file-icon')).toBe(icon)
+    expect(svg?.parentElement?.className).toBe(fileCss.icon)
+    expect(screen.getByText(name).className).toBe(fileCss.name)
+    expect(screen.getByText(name).getAttribute('title')).toBe(name)
+    expect(screen.getByText(extension.toUpperCase()).className).toBe(fileCss.extension)
+    expect(open.getAttribute('title')).toBe(name)
+    expect(open.tabIndex).toBe(0)
+    open.focus()
+    expect(document.activeElement).toBe(open)
+    fireEvent.click(open)
+    expect(props.openFile).toHaveBeenCalledWith(path)
+    expect(screen.getByRole('button', { name: `打开方式：${name}` }).tabIndex).toBe(0)
+    expect(view.container.textContent).not.toContain('private/output')
+  })
+
+  it('keeps legacy downloads and unavailable evidence while reusing upload file presentation', () => {
+    const name = '很长的历史项目结果及附件名称.docx'
+    const sha = 'a'.repeat(64)
+    const node = { data: { items: [
+      { status: 'available', artifact_id: `legacy-sha256:${sha}`, kind: 'artifact', message_seq: '1',
+        name, media_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size_bytes: 2048, sha256: sha },
+      { status: 'unavailable', kind: 'attachment', message_seq: '2', name: '找不到的报表.xlsx', reason: '原始文件不可用' },
+    ] } }
+    const view = render(<LegacyArtifacts {...{ node, canDownload: true } as never} />)
+    const download = screen.getByRole('link', { name: `下载 ${name}` })
+    expect(download.getAttribute('href')).toBe(`/api/e-mate/legacy-artifact.download?id=${sha}`)
+    expect(download.getAttribute('download')).toBe(name)
+    expect(download.tabIndex).toBe(0)
+    expect(screen.getByText(name).getAttribute('title')).toBe(name)
+    expect(screen.getByText('DOCX · 2.0 KiB').className).toBe(fileCss.extension)
+    expect(view.container.querySelectorAll(`.${fileCss.icon} svg[data-file-icon]`)).toHaveLength(2)
+    expect(view.container.querySelector('[data-status="unavailable"] svg')?.getAttribute('data-file-icon')).toBe('FileSpreadsheet')
+    expect(screen.getByText('不可用 · 原始文件不可用')).toBeTruthy()
+    cleanup()
+    render(<LegacyArtifacts {...{ node, canDownload: false } as never} />)
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.getByText('仅可在本机下载')).toBeTruthy()
+    expect(screen.getByText('不可用 · 原始文件不可用')).toBeTruthy()
+  })
+
   it('closes the one file menu outside or by Escape and keeps keyboard order', async () => {
     const paths = Array.from({ length: 7 }, (_, index) => `folder-${index}/很长的中文文件名-${index}.pptx`)
     const props = terminalProps([], { callIds: [], paths })
     const view = render(<ArtifactTerminal {...props as never} />)
-    expect(screen.getAllByText('PPTX 文件')).toHaveLength(6)
+    expect(screen.getAllByText('PPTX')).toHaveLength(6)
     expect(screen.getByRole('button', { name: '其余 1 项，在文件夹中查看' })).toBeTruthy()
     expect(view.container.textContent).not.toContain('/work')
     fireEvent.click(screen.getByRole('button', { name: /打开方式：很长的中文文件名-0/u }))

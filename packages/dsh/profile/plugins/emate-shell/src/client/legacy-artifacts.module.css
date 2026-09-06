@@ -2,15 +2,10 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--dsw-alias-border-primary);
-  border-radius: 12px;
-  background: var(--dsw-alias-bg-layer-1);
 }
 
 .heading {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--dsw-alias-border-primary);
+  margin-bottom: 8px;
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;
   font-weight: 600;
@@ -24,64 +19,53 @@
 
 .item {
   display: flex;
+  box-sizing: border-box;
   min-width: 0;
-  min-height: 44px;
-  padding: 8px 14px;
+  min-height: 52px;
+  padding: 5px;
   align-items: center;
-  gap: 12px;
-}
-
-.item + .item {
-  border-top: 1px solid var(--dsw-alias-border-primary);
-}
-
-.copy {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.copy strong,
-.copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.copy strong {
+  gap: 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
-  font-size: 14px;
-  line-height: 20px;
 }
 
-.copy span,
+.item + .item { margin-top: 8px; }
+
+.copy { flex: 1; }
+
+.state {
+  color: var(--dsw-alias-label-danger, #c13b32);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
 .unavailable {
-  color: var(--dsw-alias-label-tertiary);
+  max-width: 96px;
+  padding-inline: 4px;
+  color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   line-height: 18px;
 }
 
 .download {
   display: inline-flex;
-  min-width: 52px;
-  min-height: 44px;
+  flex-shrink: 0;
+  min-width: 48px;
+  min-height: 40px;
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
 }
 
+.download:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .download:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
-}
-
-@media (max-width: 480px) {
-  .item {
-    align-items: flex-start;
-  }
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: -2px;
 }

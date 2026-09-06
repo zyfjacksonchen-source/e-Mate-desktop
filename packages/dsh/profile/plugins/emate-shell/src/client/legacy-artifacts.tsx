@@ -2,6 +2,9 @@ import type {
   ChatConversationViewNode, ConversationNodeDefinition,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { FileIcon } from '../../../../../../dsh-plugin-file-import/src/client/file-icons.tsx'
+import { allowedMediaType, extensionOf } from '../../../../../../dsh-plugin-file-import/src/contract.ts'
+import fileCss from '../../../../../../dsh-plugin-file-import/src/client/style.module.css'
 import css from './legacy-artifacts.module.css'
 
 const SHA256 = /^[0-9a-f]{64}$/u
@@ -130,12 +133,14 @@ export function LegacyArtifacts({ node, canDownload }: LegacyArtifactsProps) {
       <div className={css.list}>
         {node.data.items.map((item, index) => (
           <div className={css.item} key={`${item.message_seq}:${index}`} data-status={item.status}>
-            <div className={css.copy}>
-              <strong title={item.name}>{item.name}</strong>
-              <span>{item.status === 'available' ? readableBytes(item.size_bytes) : `不可用 · ${item.reason}`}</span>
+            <span className={fileCss.icon}><FileIcon name={item.name} mediaType={item.status === 'available' ? item.media_type : allowedMediaType(item.name) ?? 'application/octet-stream'} /></span>
+            <div className={`${css.copy} ${fileCss.details}`}>
+              <span className={fileCss.name} title={item.name}>{item.name}</span>
+              <span className={fileCss.extension}>{extensionOf(item.name).toUpperCase() || 'FILE'}{item.status === 'available' ? ` · ${readableBytes(item.size_bytes)}` : ''}</span>
+              {item.status === 'unavailable' && <span className={css.state}>不可用 · {item.reason}</span>}
             </div>
             {item.status === 'available' && canDownload
-              ? <a className={css.download} href={`/api/e-mate/legacy-artifact.download?id=${encodeURIComponent(item.sha256)}`} download={item.name}>下载</a>
+              ? <a className={css.download} href={`/api/e-mate/legacy-artifact.download?id=${encodeURIComponent(item.sha256)}`} download={item.name} aria-label={`下载 ${item.name}`}>下载</a>
               : item.status === 'available' ? <span className={css.unavailable}>仅可在本机下载</span> : null}
           </div>
         ))}

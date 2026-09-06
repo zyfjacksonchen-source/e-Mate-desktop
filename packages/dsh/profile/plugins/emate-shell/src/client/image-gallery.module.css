@@ -298,21 +298,24 @@
 }
 
 .files {
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent);
-  border-radius: 18px;
-  background: var(--dsw-alias-fill-weak, var(--dsw-alias-interactive-bg-hover));
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 8px;
+  min-width: 0;
 }
 
 .fileRow {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
-}
-
-.fileRow + .fileRow,
-.moreFiles {
-  border-top: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 9%, transparent);
+  min-height: 52px;
+  box-sizing: border-box;
+  padding: 5px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
 }
 
 .fileOpen,
@@ -326,56 +329,26 @@
 }
 
 .fileOpen {
-  display: grid;
+  display: flex;
   flex: 1 1 auto;
-  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  padding: 12px 14px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 8px;
   text-align: left;
 }
 
-.fileIcon {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--emate-color-brand, #eb5b16) 14%, transparent);
-  color: var(--emate-color-brand, #eb5b16);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.fileText {
-  display: grid;
-  min-width: 0;
-}
-
-.fileText strong {
-  overflow: hidden;
-  font-size: 14px;
-  font-weight: 550;
-  line-height: 21px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fileText small {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
 .fileMenu {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-  padding: 0 16px;
+  display: grid;
+  flex: 0 0 40px;
+  width: 40px;
+  min-height: 40px;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
 }
 
 .fileOpen:hover,
@@ -394,7 +367,10 @@
 }
 
 .moreFiles {
+  grid-column: 1 / -1;
   width: 100%;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
   padding: 11px 14px;
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;
@@ -465,13 +441,6 @@
     border-radius: 22px;
   }
 
-  .fileMenu span {
-    display: none;
-  }
-
-  .fileMenu {
-    padding-inline: 14px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

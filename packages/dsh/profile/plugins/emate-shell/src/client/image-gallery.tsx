@@ -43,6 +43,9 @@ import {
   type ImageBatchRetryResult,
   type ImageBatchRetryTask,
 } from './image-batch-progress.tsx'
+import { FileIcon } from '../../../../../../dsh-plugin-file-import/src/client/file-icons.tsx'
+import { allowedMediaType, extensionOf } from '../../../../../../dsh-plugin-file-import/src/contract.ts'
+import fileCss from '../../../../../../dsh-plugin-file-import/src/client/style.module.css'
 import css from './image-gallery.module.css'
 
 interface ToolImagesData {
@@ -660,11 +663,6 @@ function fileName(path: string): string {
   return at < 0 ? path : path.slice(at + 1)
 }
 
-function fileKind(name: string): string {
-  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).trim() : ''
-  return extension === '' ? '文件' : `${extension.toUpperCase()} 文件`
-}
-
 export function galleryAttachmentName(attachment: ImageAttachmentRef): string {
   return attachment.name?.trim() || 'e-Mate-图片.png'
 }
@@ -983,21 +981,21 @@ function FileTerminal({ paths, openFile, openMenu }: {
   return <section className={css.files} aria-label="产物文件">
     {shown.map((path, index) => {
       const name = fileName(path)
-      const extension = fileKind(name)
+      const extension = extensionOf(name).toUpperCase() || 'FILE'
       return <div className={css.fileRow} key={`${path}:${index}`} onContextMenu={event => {
         event.preventDefault()
         openMenu({ kind: 'file', path }, event)
       }}>
-        <button type="button" className={css.fileOpen} aria-label={`打开 ${name}`} onClick={() => { openFile(path) }}>
-          <span className={css.fileIcon} aria-hidden="true">{extension === '文件' ? 'FILE' : extension.slice(0, 4)}</span>
-          <span className={css.fileText}><strong>{name}</strong><small>{extension}</small></span>
+        <button type="button" className={css.fileOpen} title={name} aria-label={`打开 ${name}`} onClick={() => { openFile(path) }}>
+          <span className={fileCss.icon}><FileIcon name={name} mediaType={allowedMediaType(name) ?? 'application/octet-stream'} /></span>
+          <span className={fileCss.details}><span className={fileCss.name} title={name}>{name}</span><span className={fileCss.extension}>{extension}</span></span>
         </button>
         <button
           type="button"
           className={css.fileMenu}
           aria-label={`打开方式：${name}`}
           onClick={event => { openMenu({ kind: 'file', path }, event.currentTarget) }}
-        ><span>打开方式</span><IconEllipsisOutline16 /></button>
+        ><IconEllipsisOutline16 /></button>
       </div>
     })}
     {hidden > 0 && <button type="button" className={css.moreFiles} onClick={() => { openFile('.') }}>
