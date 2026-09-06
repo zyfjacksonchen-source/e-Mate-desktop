@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import test from 'node:test'
-import { handleRequest } from '../src/index.js'
+import { handleRequest, forwardRequest } from '../src/index.js'
 
 class MemoryR2 {
   objects = new Map()
@@ -313,4 +313,43 @@ test('expires public reads with 410 and removes the matching owner/session index
   assert.equal(expired.status, 410)
   assert.deepEqual(await expired.json(), { schema_version: 1, error: { code: 'SHARE_EXPIRED' } })
   assert.equal(env.SHARES.objects.size, 0)
+})
+
+test('enterprise base keeps the native API and landing archive links under the same path', async () => {
+  const env = environment({ PUBLIC_ORIGIN: 'https://mvdcm.ecoremedia.net/e-mate/share' })
+  const created = await (await handleRequest(authorizedRequest('https://share.example/e-mate/share/v1/shares', {
+    method: 'POST', headers: { 'content-type': 'application/zip', 'x-emate-session-sha256': '3'.repeat(64) }, body: new Uint8Array([1]),
+  }), env, activeSession)).json()
+  assert.equal(created.share.public_url, `https://mvdcm.ecoremedia.net/e-mate/share/s/${created.share.id}`)
+  const page = await handleRequest(new Request(created.share.public_url), env, activeSession)
+  assert.match(await page.text(), new RegExp(`/e-mate/share/s/${created.share.id}/archive.zip`))
+  assert.equal((await handleRequest(new Request(`${created.share.public_url}/archive.zip`, { method: 'HEAD' }), env, activeSession)).body, null)
+})
+
+test('legacy forwarder uses only the fixed enterprise owner and preserves old client URL binding', async () => {
+  const env = environment({ SHARE_SERVICE_BASE: 'https://mvdcm.ecoremedia.net/e-mate/share' })
+  const id = 'a'.repeat(32)
+  const incoming = authorizedRequest('https://emate-share.example.workers.dev/v1/shares', {
+    method: 'POST', headers: { 'content-type': 'application/zip' }, body: new Uint8Array([80, 75]),
+  })
+  const response = await forwardRequest(incoming, env, async (request, init) => {
+    assert.equal(request.url, 'https://mvdcm.ecoremedia.net/e-mate/share/v1/shares')
+    assert.equal(init.redirect, 'manual')
+    assert.equal(request.headers.get('authorization'), incoming.headers.get('authorization'))
+    assert.deepEqual(new Uint8Array(await request.arrayBuffer()), new Uint8Array([80, 75]))
+    return Response.json({ schema_version: 1, share: { id, public_url: `https://mvdcm.ecoremedia.net/e-mate/share/s/${id}`, expires_at: '2026-09-10T00:00:00.000Z' } }, { status: 201 })
+  })
+  assert.equal(response.status, 201)
+  assert.equal((await response.json()).share.public_url, `https://emate-share.example.workers.dev/s/${id}`)
+  await assert.rejects(forwardRequest(new Request('https://old.example/healthz'), { ...env, SHARE_SERVICE_BASE: 'https://unrelated.example' }, () => { throw new Error('must not fetch') }), /fixed share service/)
+})
+
+test('expired streamed archive closes its body before removing metadata', async () => {
+  const env = environment()
+  let cancelled = false
+  env.SHARES.get = async key => ({ key, size: 1, customMetadata: { expires_at: '2020-01-01T00:00:00.000Z' },
+    body: new ReadableStream({ cancel() { cancelled = true } }) })
+  const response = await handleRequest(new Request(`https://share.example/s/${'a'.repeat(32)}/archive.zip`), env, activeSession)
+  assert.equal(response.status, 410)
+  assert.equal(cancelled, true)
 })

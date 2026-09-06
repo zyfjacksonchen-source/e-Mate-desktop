@@ -13,7 +13,20 @@ against the archive's exact owner and session hashes before it is returned.
 The `emate-session-shares` R2 bucket is dedicated user-data storage. Never bind
 the `emate-desktop-downloads` release bucket here.
 
-One-time production activation:
+## Enterprise ownership in 2.0.18
+
+`src/core.ts` is the shared business handler used by the enterprise
+[`share-service`](../share-service/README.md). After its original R2 data has
+been migrated and verified, set `SHARE_SERVICE_BASE` to exactly
+`https://mvdcm.ecoremedia.net/e-mate/share`. The Worker then forwards every
+request to that fixed owner without following redirects. Legacy create/list
+responses preserve the old public origin required by old Desktop clients;
+existing `/s/<id>` URLs continue to resolve to the same archive. Do not delete
+the old binding or snapshot during cutover. An absent setting retains the
+original R2 implementation for the main agent's controlled pre-cutover state;
+an invalid setting fails closed. There is no dual-write mode.
+
+The following describes the original R2 activation, not the 2.0.18 migration:
 
 ```sh
 pnpm dlx wrangler@4.124.0 r2 bucket create emate-session-shares
