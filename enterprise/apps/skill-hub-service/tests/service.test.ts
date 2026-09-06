@@ -3,7 +3,7 @@ import { generateKeyPairSync, randomUUID, sign, createHmac } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
 import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, mkdir, rm, writeFile, readFile, realpath, readdir } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, readFile, realpath, readdir, chmod, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { after, type TestContext } from 'node:test'
@@ -341,6 +341,59 @@ test('CAS fails closed on disk budget, never replaces an existing package and ve
   await Promise.all([files.put(object.key, bytes, object), files.put(object.key, bytes, object)])
   assert.equal((await files.list()).objects.length, 1)
   assert.deepEqual((await files.get(object.key))?.customMetadata, object.customMetadata)
+})
+
+test('readiness checks canonical writable generation and staging directories without scanning or writing packages', async (t) => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'skill-hub-readiness-')))
+  const generation = join(directory, 'generation')
+  const temporary = join(generation, '.tmp')
+  t.after(async () => {
+    await chmod(generation, 0o700).catch(() => {})
+    await chmod(temporary, 0o700).catch(() => {})
+    await rm(directory, { recursive: true, force: true })
+  })
+  const files = new FilePackages(generation, 0)
+  await files.initialize()
+  await Promise.all(Array.from({ length: 8 }, () => files.ready()))
+  assert.deepEqual(await readdir(generation), ['.tmp'])
+  assert.deepEqual(await readdir(temporary), [])
+  await rm(temporary, { recursive: true })
+  await assert.rejects(files.ready(), { code: 'ENOENT' })
+  await writeFile(temporary, 'not a directory')
+  await assert.rejects(files.ready(), /Invalid package volume directory/)
+  await rm(temporary)
+  const alternate = join(directory, 'alternate')
+  await mkdir(alternate)
+  await symlink(alternate, temporary, 'dir')
+  await assert.rejects(files.ready(), /Invalid package volume directory/)
+  await rm(temporary)
+  await mkdir(temporary)
+  const fileGeneration = join(directory, 'file-generation')
+  await writeFile(fileGeneration, 'not a directory')
+  await assert.rejects(new FilePackages(fileGeneration, 0).ready(), /Invalid package volume directory/)
+  const alias = join(directory, 'alias')
+  await symlink(generation, alias, 'dir')
+  await assert.rejects(new FilePackages(alias, 0).ready(), /Invalid package volume directory/)
+  const parentAlias = join(directory, 'parent-alias')
+  await symlink(directory, parentAlias, 'dir')
+  await assert.rejects(new FilePackages(join(parentAlias, 'generation'), 0).ready(), /Invalid package volume directory/)
+  // access() intentionally checks the actual identity, including privileged
+  // identities. POSIX mode revocation is meaningful for the non-root service UID.
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    for (const target of [generation, temporary]) {
+      for (const mode of [0o300, 0o500, 0o600]) {
+        await chmod(target, mode)
+        await assert.rejects(files.ready(), { code: 'EACCES' })
+      }
+      await chmod(target, 0o700)
+    }
+  }
+  // Readiness does not enumerate or inspect packages; downloads/migration own
+  // byte integrity. An unrelated unrecognized file stays untouched.
+  await writeFile(join(generation, 'unrelated-file'), 'preserve')
+  await files.ready()
+  assert.equal(await readFile(join(generation, 'unrelated-file'), 'utf8'), 'preserve')
+  assert.deepEqual(await readdir(temporary), [])
 })
 
 test('SQL adapter keeps placeholders out of literals and retains SQLite-compatible ASCII search', () => {

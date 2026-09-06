@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { mkdir, open, lstat, readdir, realpath, rename, rm, statfs } from 'node:fs/promises'
+import { mkdir, open, lstat, readdir, realpath, rename, rm, statfs, access } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { inspectSkillArchive } from '../../skill-hub-worker/src/core.ts'
 import type { HubPackages, PackageMetadata } from '../../skill-hub-worker/src/ports.ts'
@@ -50,6 +50,11 @@ export class FilePackages implements HubPackages {
     return match[1]!
   }
   async ready(requiredBytes = 0): Promise<void> {
+    for (const directory of [this.directory, join(this.directory, '.tmp')]) {
+      const info = await lstat(directory)
+      if (!info.isDirectory() || info.isSymbolicLink() || await realpath(directory) !== directory) throw new Error('Invalid package volume directory')
+      await access(directory, constants.R_OK | constants.W_OK | constants.X_OK)
+    }
     const disk = await statfs(this.directory, { bigint: true })
     if (disk.bavail * disk.bsize < BigInt(this.minimumFreeBytes + requiredBytes)) throw new Error('Package volume is full')
   }
