@@ -16,7 +16,7 @@ import LocalJobs from '../../../upstream/deepseek-harness/packages/jobs/jobs-loc
 import GoalService from '../../../upstream/deepseek-harness/packages/goal/goal/lib/index.js'
 import Persistence from '../../../upstream/deepseek-harness/packages/session/session-persistence-jsonl/lib/index.js'
 import LocalFs from '../../../upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'
-import { createKnowledgeWorkflow, recoverNativeClaims, normalizeCheckpoint } from '../src/workflow.ts'
+import { createKnowledgeWorkflow, recoverNativeClaims, normalizeCheckpoint, BENCHMARK_CLAIM_TEXT } from '../src/workflow.ts'
 import { collectOriginals, digest, events } from '../src/imports.ts'
 
 // Captured from B 92b50d9 KnowledgeCheckpointData.model_validate({}).model_dump(mode='json').
@@ -79,7 +79,6 @@ function server() {
 }
 async function runtime(t, backend = server(), root, dependencies = {}) {
   const directory = root ?? await mkdtemp(join(tmpdir(), 'emate-knowledge-runtime-'))
-  if (!root) t.after(() => rm(directory, { recursive: true, force: true }))
   const ctx = new Context()
   await ctx.plugin(Timer)
   await mountAgentLoopTestDependencies(ctx)
@@ -96,7 +95,7 @@ async function runtime(t, backend = server(), root, dependencies = {}) {
   const caller = await workflow.openOperation({ provider: 'mock', model: 'model' })
   let disposed = false
   const dispose = async () => { if (disposed) return; disposed = true; await workflow.dispose(); await ctx.fiber.dispose() }
-  t.after(dispose)
+  t.after(async () => { await dispose(); if (!root) await rm(directory, { recursive: true, force: true }) })
   return { ctx, workflow, caller, adapter, backend, root: directory, dispose, changeAccount() { principal = { ...principal, userId: 'u2' }; workflow.changed() } }
 }
 const request = () => ({ operationId: randomUUID(), sourceVersions: [source], topics: [{ key: 'general', expected_revision_id: null }], model: { id: 'model', reasoning_effort: 'none' }, scope: { kind: 'public' } })
@@ -112,7 +111,14 @@ test('real native Session, spawn, Goal and Job compile only frozen public chunks
   run.ctx.systemPrompt.section({ name: 'private-persona', order: 1, text: 'PRIVATE_PERSONA_MARKER' })
   run.ctx.tools.register({ name: 'xin_private_read', description: 'PRIVATE_XIN_TOOL', parameters: { type: 'object', properties: {} }, output: { schema: { type: 'object', properties: {} }, render: () => [] }, async execute() { throw Error('must never execute') } })
   run.caller.session.append('knowledge/workflow', { kind: 'private-history', text: 'PRIVATE_CHAT_MARKER' }, { ignorable: true })
-  run.adapter.script.push(toolChunks('read', 'knowledge_frozen_source', { source_index: 0, offset: 0 }), toolChunks('result', 'structured_output', output))
+  run.adapter.script.push(toolChunks('read', 'knowledge_frozen_source', { source_index: 0, offset: 0 }), request => {
+    const returned = request.messages.flatMap(message => message.content).find(block => block.type === 'tool-result' && block.toolCallId === 'read')
+    const value = JSON.parse(returned.content.find(block => block.type === 'text').text)
+    assert.deepEqual(value.version, source)
+    assert.equal(value.chunks[0].content, '公开原文')
+    assert.equal(value.untrusted, true)
+    return toolChunks('result', 'structured_output', output)
+  })
   const result = await run.workflow.start({ agent: run.caller }, request())
   assert.equal((await done(run, result)).status, 'completed')
   assert.equal(backend.compilation.state, 'committed')
@@ -155,7 +161,8 @@ test('native Job stop cancels the actual model stream; resume does not replay an
 
 test('a server CAS conflict retains durable structured output; new native runtime resumes the same compilation without generating again', async t => {
   const backend = server(); backend.conflict()
-  const first = await runtime(t, backend); first.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const persistedRoot = await mkdtemp(join(tmpdir(), 'emate-knowledge-restart-'))
+  const first = await runtime(t, backend, persistedRoot); first.adapter.script.push(toolChunks('result', 'structured_output', output))
   const result = await first.workflow.start({ agent: first.caller }, request())
   assert.equal((await done(first, result)).status, 'failed')
   assert.equal(first.adapter.requests.length, 1)
@@ -163,6 +170,7 @@ test('a server CAS conflict retains durable structured output; new native runtim
   await first.dispose()
   backend.clearConflict()
   const second = await runtime(t, backend, first.root)
+  t.after(() => rm(persistedRoot, { recursive: true, force: true }))
   const resumed = await second.workflow.resume({ agent: second.caller }, id)
   assert.equal((await done(second, resumed)).status, 'completed')
   assert.equal(second.adapter.requests.length, 0)
@@ -193,7 +201,14 @@ test('project compilation uses only fixed Xin knowledge tools and supports nativ
       return { content: [{ type: 'text', text: JSON.stringify(value) }] }
     },
   })
-  run.adapter.script.push(toolChunks('read', 'knowledge_frozen_source', { source_index: 0, offset: 0 }), toolChunks('result', 'structured_output', output))
+  run.adapter.script.push(toolChunks('read', 'knowledge_frozen_source', { source_index: 0, offset: 0 }), request => {
+    const returned = request.messages.flatMap(message => message.content).find(block => block.type === 'tool-result' && block.toolCallId === 'read')
+    const value = JSON.parse(returned.content.find(block => block.type === 'text').text)
+    assert.deepEqual(value.version, source)
+    assert.equal(value.chunks[0].content, '公开原文')
+    assert.equal(value.untrusted, true)
+    return toolChunks('result', 'structured_output', output)
+  })
   const result = await run.workflow.start({ agent: run.caller }, { ...request(), scope: { kind: 'project', project_id: 42 } })
   assert.equal((await done(run, result)).status, 'completed')
   assert.equal(backend.compilation.request.scope.project_id, 42)
@@ -202,7 +217,7 @@ test('project compilation uses only fixed Xin knowledge tools and supports nativ
 })
 
 test('native filesystem import streams only original bytes to Host and requires matching explicit public action', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'emate-knowledge-files-')); t.after(() => rm(root, { recursive: true, force: true }))
+  const root = await mkdtemp(join(tmpdir(), 'emate-knowledge-files-'))
   await mkdir(join(root, 'folder'))
   const original = Buffer.from([0, 1, 255, 9]); await writeFile(join(root, 'folder', 'binary.pdf'), original)
   const requests = []; const imports = new Map()
@@ -220,6 +235,7 @@ test('native filesystem import streams only original bytes to Host and requires 
     return Response.json({ schema_version: 1, ...value })
   } }
   const run = await runtime(t, backend, root)
+  t.after(() => rm(root, { recursive: true, force: true }))
   const paths = [join(root, 'folder')]
   const result = await run.workflow.importFiles({ agent: run.caller }, { paths, operationId: randomUUID() })
   assert.equal(result.scope.kind, 'uploader-private')
@@ -247,7 +263,7 @@ test('folder collection rejects escapes and oversized files before reading any o
 
 
 test('project original upload uses the exact native ticket and queries the durable original after a lost response', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'emate-project-files-')); t.after(() => rm(root, { recursive: true, force: true }))
+  const root = await mkdtemp(join(tmpdir(), 'emate-project-files-'))
   const bytes = Buffer.from('project original'); const sha256 = createHash('sha256').update(bytes).digest('hex')
   const path = join(root, 'source.pdf'); await writeFile(path, bytes)
   const uploaded = { id: randomUUID(), file_hash: sha256, project_id: 42, status: 'parsing' }
@@ -261,6 +277,7 @@ test('project original upload uses the exact native ticket and queries the durab
       return { content: [{ type: 'text', text: JSON.stringify({ upload_url: ticket, method: 'PUT', sha256, size: bytes.length }) }] }
     },
   })
+  t.after(() => rm(root, { recursive: true, force: true }))
   const operationId = randomUUID()
   const result = await run.workflow.importFiles({ agent: run.caller }, { operationId, paths: [path], scope: { kind: 'project', project_id: 42 } })
   assert.deepEqual(result.sources, [uploaded])
@@ -421,7 +438,7 @@ test('a persisted compilation intent recovers after POST never arrives and looku
 })
 
 test('a persisted import intent retries only the same body after a real lookup miss and never treats 403/409/network lookup failures as missing', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'emate-import-recover-')); t.after(() => rm(root, { recursive: true, force: true }))
+  const root = await mkdtemp(join(tmpdir(), 'emate-import-recover-'))
   const path = join(root, 'original.pdf'); await writeFile(path, 'raw original')
   const calls = []; let remaining = 2, imported, denyLookup
   const backend = { async request(url, init) {
@@ -439,6 +456,7 @@ test('a persisted import intent retries only the same body after a real lookup m
     return Response.json({ schema_version: 1, ...imported })
   } }
   const run = await runtime(t, backend, root)
+  t.after(() => rm(root, { recursive: true, force: true }))
   const options = { paths: [path], operationId: randomUUID() }
   await assert.rejects(run.workflow.importFiles({ agent: run.caller }, options))
   for (const denied of [403, 409, 'network']) {
@@ -451,4 +469,25 @@ test('a persisted import intent retries only the same body after a real lookup m
   const creates = calls.filter(call => call.method === 'POST')
   assert.equal(creates.length, 3)
   assert(creates.every(call => digest(call.body) === digest(creates[0].body)))
+})
+
+
+test('benchmark selections produce only the fixed Host explanation, never model-written metric numbers', async t => {
+  const run = await runtime(t)
+  const queryId = randomUUID()
+  const input = { ...request(), benchmarkQueryIds: [queryId] }
+  const numericClaim = { ...output.claims[0], kind: 'model_organized', text: 'CTR100%，denominator=100', benchmark_query_ids: [queryId] }
+  const ordinaryClaim = { ...output.claims[0], kind: 'model_organized', text: '统一口径，一般方法保持可追溯。', benchmark_query_ids: [] }
+  run.adapter.script.push(toolChunks('result', 'structured_output', { claims: [numericClaim, ordinaryClaim] }))
+  const result = await run.workflow.start({ agent: run.caller }, input)
+  assert.equal((await done(run, result)).status, 'completed')
+  const revision = run.backend.calls.find(call => call.method === 'PUT' && call.path.startsWith('/revisions/')).body
+  assert.equal(revision.claims[0].text, BENCHMARK_CLAIM_TEXT)
+  assert.deepEqual(revision.claims[0].benchmark_query_ids, [queryId])
+  assert.equal(revision.claims[1].text, ordinaryClaim.text)
+  assert.equal(revision.markdown, BENCHMARK_CLAIM_TEXT + '\n\n' + ordinaryClaim.text)
+  assert.doesNotMatch(revision.markdown, /100|CTR|denominator/)
+  assert.match(run.adapter.requests[0].system, /只在 benchmark_query_ids 选择真实 query_id/)
+  const schema = run.adapter.requests[0].tools.find(tool => tool.name === 'structured_output').parameters
+  assert.match(schema.properties.claims.items.properties.text.description, /结构化指标见下方快照/)
 })
