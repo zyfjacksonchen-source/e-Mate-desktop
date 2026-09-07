@@ -1,0 +1,49 @@
+Meeting: Enterprise Event Streaming Migration Architecture Review
+Date: 2026-08-14
+Participants: Sarah Lin (Principal Architect), Marcus Vance (Lead Data Engineer), Elena Rostova (Director of Infrastructure), David Chen (Product Security Lead)
+
+[00:00:02] Sarah Lin: Good morning everyone. Can everyone see my screen and hear me clearly?
+[00:00:06] Marcus Vance: Yes, loud and clear Sarah.
+[00:00:08] Elena Rostova: Loud and clear.
+[00:00:10] David Chen: All good here.
+[00:00:12] Sarah Lin: Great. Let's get started. Today's agenda is finalizing the migration strategy from our self-hosted Apache Kafka cluster on EC2 to Google Cloud Pub/Sub. We have three main areas to align on: the messaging architecture and schema evolution standard, infrastructure cost projections and sizing, and the security compliance requirements before our Q4 cutover.
+
+[00:00:41] Sarah Lin: To provide context, our current self-hosted Kafka cluster consists of 18 `r5.2xlarge` broker instances across three Availability Zones, plus a 5-node ZooKeeper quorum. Over the last two quarters, our platform team has spent roughly 22 hours per month dealing with partition rebalancing storms, broker disk saturation, and rolling patching. Under peak marketing campaigns, our consumer rebalance lag spikes to over 4 minutes, which violates our downstream SLA of sub-30-second inventory updates.
+
+[00:01:22] Marcus Vance: Thanks Sarah. On the data engineering side, we tested two alternatives: upgrading to Kafka 3.8 with KRaft mode to eliminate ZooKeeper, versus migrating completely to Google Cloud Pub/Sub. Upgrading to KRaft eliminates ZooKeeper management, but it does not solve our primary pain points: manual partition scaling, hot broker rebalancing, and cross-AZ data egress fees. In our pilot benchmark on Pub/Sub, we ingested 65,000 events per second with an average publish latency of 14 milliseconds and a p99 latency of 26 milliseconds across multi-region topics.
+
+[00:02:11] Elena Rostova: What does the operational and financial comparison look like between the two options?
+
+[00:02:18] Marcus Vance: Self-hosting Kafka currently costs us approximately $14,200 per month in raw EC2 compute and EBS gp3 storage, plus an estimated $8,500 per month in dedicated engineering hours for cluster maintenance. Google Cloud Pub/Sub for our projected monthly volume of 4.2 billion messages (averaging 2 KB payload size) will cost roughly $11,800 per month. Even factoring in Pub/Sub Lite for high-volume, low-criticality logging topics, we project a 28% net infrastructure cost reduction and zero broker patching overhead.
+
+[00:03:02] Elena Rostova: That is a compelling operational win. I approve moving forward with Google Cloud Pub/Sub as our target messaging platform.
+
+[00:03:15] Sarah Lin: Excellent. Let's move to schema evolution and serialization. Currently, downstream consumers parse arbitrary JSON blobs, leading to silent schema drift and production parser failures. Marcus, what is the recommendation?
+
+[00:03:33] Marcus Vance: We evaluated Apache Avro versus Protocol Buffers version 3 (Protobuf). Initially, I leaned toward Avro because our historical data pipelines in Snowflake and Spark have built-in Avro readers. However, after reviewing our microservice fleet—which is written in Go, Java, and TypeScript—Protobuf v3 provides significantly faster code generation, strongly typed stubs, and smaller binary payloads. Our benchmarks showed Protobuf serialized payloads are 42% smaller than JSON and 15% smaller than Avro with schema registry overhead, saving network bandwidth.
+
+[00:04:18] Sarah Lin: I fully support Protobuf v3. We should enforce schema validation directly at the Pub/Sub topic level using Google Cloud Pub/Sub Schema Registry with strict backward compatibility rules. That way, any producer attempting to publish a non-compliant payload is rejected at the API boundary, preventing poison pills from entering the pipeline.
+
+[00:04:45] Marcus Vance: Agreed. We will establish a central Git repository for `.proto` definitions with automated CI linting using Buf.
+
+[00:05:01] Sarah Lin: David, let's discuss security and compliance requirements. What is required before we can route production data through Pub/Sub?
+
+[00:05:12] David Chen: From an InfoSec and compliance standpoint, we have three mandatory gates. First, Customer-Managed Encryption Keys (CMEK) via Google Cloud KMS must be enabled on all production topics, using our existing Cloud KMS key ring in `us-central1`. Second, we must enforce VPC Service Controls (VPC-SC) perimeters around the Pub/Sub service to prevent data exfiltration. Third, all producer and consumer service accounts must use fine-grained IAM roles—`roles/pubsub.publisher` and `roles/pubsub.subscriber`—restricted to specific topic and subscription resource URIs, with short-lived Workload Identity Federation tokens. No service account JSON keys are permitted.
+
+[00:06:05] Elena Rostova: Can infrastructure automate the VPC-SC perimeters and CMEK bindings in Terraform?
+
+[00:06:12] Elena Rostova: Yes, we can add that to our standard Terraform module library. I will assign Tom Bradley from our DevOps team to write the reusable Terraform module for Pub/Sub topics with CMEK and IAM hardening. He will have that ready for review by August 28th.
+
+[00:06:34] Sarah Lin: What is our schedule for staging validation and production cutover?
+
+[00:06:40] Marcus Vance: We will build the dual-publishing adapter in our core event gateway by September 5th. This will publish events simultaneously to Kafka and Pub/Sub in staging. We will run shadow traffic for two weeks to verify message delivery guarantees and consumer offset behavior.
+
+[00:07:02] Sarah Lin: If the shadow testing passes with zero data loss by September 19th, we will schedule the production cutover for the weekend of October 3rd.
+
+[00:07:15] David Chen: Before September 19th, InfoSec will need to run the automated security validation scan on the VPC-SC configuration. I will complete that security audit by September 12th.
+
+[00:07:31] Sarah Lin: Also, we need someone to benchmark the memory footprint on our legacy Python consumer workers when switching from the Kafka Python client to the Google Cloud Pub/Sub streaming pull client. Marcus, can your team handle that?
+
+[00:07:46] Marcus Vance: We have tight bandwidth with the dual-publisher adapter. Let's leave that task open for now and assign it during next Monday's sprint planning.
+
+[00:07:58] Sarah Lin: Understood. Let's mark that as unassigned for this week's sprint. To summarize: we are migrating to Google Cloud Pub/Sub with Protobuf v3 schemas, Terraform-managed CMEK/VPC-SC security controls, dual-publishing in staging by September 5th, InfoSec sign-off by September 12th, and target production cutover on October 3rd. Thank you everyone for your preparation.

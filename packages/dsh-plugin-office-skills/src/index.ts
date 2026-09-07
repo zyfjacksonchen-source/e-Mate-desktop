@@ -76,7 +76,8 @@ interface SkillSpec {
   description: string
   whenToUse: string
   directory: string
-  format: OfficeFormat
+  format?: OfficeFormat
+  hostGuide?: string
 }
 
 const skillRoot = fileURLToPath(new URL('../skills/', import.meta.url))
@@ -85,6 +86,7 @@ const SPECS: readonly SkillSpec[] = [
   { name: 'pdf', description: 'Create, read, and safely regenerate PDF documents locally.', whenToUse: 'Use for text-first PDF creation, extraction, review, and supported edits.', directory: `${skillRoot}pdf`, format: 'pdf' },
   { name: 'spreadsheets', description: 'Create, read, and safely regenerate XLSX workbooks locally.', whenToUse: 'Use for tabular XLSX authoring, reading, analysis, and supported edits.', directory: `${skillRoot}spreadsheets`, format: 'xlsx' },
   { name: 'presentations', description: 'Create, read, and safely regenerate PPTX presentations locally.', whenToUse: 'Use for text-first PPTX authoring, extraction, review, and supported edits.', directory: `${skillRoot}presentations`, format: 'pptx' },
+  { name: 'meeting-summary', description: '会议总结：从本地转录文本整理会议纪要、决策与行动项，保留事实来源。', whenToUse: '用于会议转录文本、VTT、SRT 的总结和行动项整理；不负责录音或音频转录。', directory: `${skillRoot}meeting-summary`, hostGuide: 'HOST.md' },
 ]
 
 function candidate(spec: SkillSpec): SkillCandidate {
@@ -99,7 +101,7 @@ function candidate(spec: SkillSpec): SkillCandidate {
     rank: BUNDLED_SKILL_RANK,
     locator: spec.name,
     path: `${spec.directory}/SKILL.md`,
-    metadata: { eMateCapability: 'office', format: spec.format, adapter: 'clean-room', state: 'ready' },
+    metadata: { eMateCapability: 'office', ...(spec.format === undefined ? {} : { format: spec.format }), adapter: spec.hostGuide === undefined ? 'clean-room' : 'upstream', state: 'ready' },
   }
 }
 
@@ -112,7 +114,10 @@ async function loadDefinition(spec: SkillSpec, options: SkillLookupOptions): Pro
   const end = lines[0] === '---' ? lines.indexOf('---', 1) : -1
   if (end < 0) throw new Error(`${PROVIDER_NAME}: malformed skill frontmatter in ${path}`)
   const summary = candidate(spec)
-  return { ...summary, content: lines.slice(end + 1).join('\n').trim() }
+  const hostGuide = spec.hostGuide === undefined ? '' : (await readFile(join(spec.directory, spec.hostGuide), {
+    encoding: 'utf8', ...(options.signal === undefined ? {} : { signal: options.signal }),
+  })).replaceAll('{{SKILL_DIR}}', spec.directory)
+  return { ...summary, content: `${hostGuide}${lines.slice(end + 1).join('\n').trim()}` }
 }
 
 function inside(root: string, candidatePath: string): boolean {
@@ -269,7 +274,7 @@ const readOutput = {
   }),
 }
 
-/** Register four Skills and two real Tool/Job paths on target Harness seams. */
+/** Register bundled Skills and two real Tool/Job paths on target Harness seams. */
 export function apply(ctx: OfficeContext): void {
   ctx.skills.registerProvider((): SkillProvider => ({
     name: PROVIDER_NAME,

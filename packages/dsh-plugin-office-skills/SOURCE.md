@@ -14,3 +14,14 @@ Exact distributable dependencies:
 - Noto Sans SC Variable 5.3.0 font assets — SIL Open Font License 1.1
 
 The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability seams. Unsupported layout-preserving edits are an explicit product boundary, not a hidden system dependency.
+
+## Meeting summary preset
+
+- Source: https://github.com/terravic/meeting-transcript-summary-skill
+- Fixed commit: `510aab036c6190f3ee547628cb66409def639ac6`
+- License: Apache-2.0, preserved in `skills/meeting-summary/LICENSE`.
+- Original Skill name: `meeting-transcript-summary`; local provider identifier: `meeting-summary`, Chinese discovery description: “会议总结”. No additional Tool is registered.
+- Original `SKILL.md` bytes are unchanged (SHA-256 `852f8724aafd16de632326fb7aa12437bf8129b919f80180de71e216902694ca`); its three references, HTML template and examples are preserved. The source README and explanatory screenshots are not required by the Skill entry and are omitted.
+- e-Mate additions: `HOST.md` is prepended by the existing provider with the actual absolute resource directory. It retains the original transcript as authority, makes cleaning optional, uses only existing native Python if available, and does not claim audio transcription or require a connection.
+- e-Mate script change (2026-09-07): `clean_transcript.py` now drops an all-digit line only when immediately followed by a subtitle timestamp. Standalone numeric meeting facts survive. All other upstream cleanup behavior remains; timestamps are still removed from the optional derivative, so citations and facts must be checked against the untouched original.
+- The helper requires only Python standard-library modules; no Python dependency or runtime is bundled by this addition. The Agent performs synthesis through its existing model channel. The original four Office presets and two Tool/Job paths remain available while their replacements are prepared.

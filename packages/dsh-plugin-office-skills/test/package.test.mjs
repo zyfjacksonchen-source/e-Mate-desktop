@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { inflateSync } from 'node:zlib'
 import JSZip from 'jszip'
@@ -14,7 +16,7 @@ import {
   writeOfficeBuffer,
 } from '../lib/index.js'
 
-test('registers four ready Skills and two target Tool/Job paths', async () => {
+test('registers five ready Skills and two target Tool/Job paths', async () => {
   let provider
   const capabilities = []
   const tools = []
@@ -29,7 +31,7 @@ test('registers four ready Skills and two target Tool/Job paths', async () => {
   })
   assert.equal(provider.name, 'emate-office-skills')
   const skills = await provider.list({})
-  assert.deepEqual(skills.map(skill => skill.name), ['documents', 'pdf', 'spreadsheets', 'presentations'])
+  assert.deepEqual(skills.map(skill => skill.name), ['documents', 'pdf', 'spreadsheets', 'presentations', 'meeting-summary'])
   for (const skill of skills) {
     assert.equal(skill.rank, 600)
     assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
@@ -38,6 +40,23 @@ test('registers four ready Skills and two target Tool/Job paths', async () => {
     assert.ok(loaded.content.length > 300)
     assert.doesNotMatch(loaded.content, /^---/u)
     assert.doesNotMatch(loaded.content, /EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE/u)
+    if (skill.name === 'meeting-summary') {
+      assert.match(skill.description, /^会议总结/u)
+      assert.equal(skill.metadata.adapter, 'upstream')
+      assert.equal(skill.metadata.format, undefined)
+      assert.equal(loaded.resourceBase.kind, 'directory')
+      assert.ok(loaded.content.includes(loaded.resourceBase.path))
+      assert.doesNotMatch(loaded.content, /\{\{SKILL_DIR\}\}/u)
+      assert.match(loaded.content, /原文是事实和引用的权威来源/u)
+      assert.match(loaded.content, /清洗不是必需步骤/u)
+      assert.match(loaded.content, /# Meeting Transcript Summary Skill/u)
+      const upstream = await readFile(join(loaded.resourceBase.path, 'SKILL.md'))
+      assert.equal(createHash('sha256').update(upstream).digest('hex'), '852f8724aafd16de632326fb7aa12437bf8129b919f80180de71e216902694ca')
+      assert.match(await readFile(join(loaded.resourceBase.path, 'LICENSE'), 'utf8'), /Apache License/u)
+      for (const resource of ['references/canvas_ui_guide.md', 'references/quality_checklist.md', 'references/transcript_formats.md', 'templates/meeting_dashboard_template.html']) {
+        assert.ok((await readFile(join(loaded.resourceBase.path, resource))).length > 0)
+      }
+    }
   }
   assert.deepEqual(tools.map(tool => tool.name), ['office_write', 'office_read'])
   assert.equal(tools.every(tool => tool.timeoutMs === 120_000), true)
@@ -63,6 +82,23 @@ test('registers four ready Skills and two target Tool/Job paths', async () => {
     toolsRegistered: 2,
     reason: 'Pure JavaScript DOCX, XLSX, PPTX, and PDF execution is installed locally; unsupported lossless binary edits fail closed.',
   })
+})
+
+test('meeting transcript helper preserves Chinese speakers and standalone numeric facts', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'emate-meeting-summary-'))
+  t.after(async () => await rm(directory, { recursive: true, force: true }))
+  const input = join(directory, '会议 转录.txt')
+  const output = join(directory, '会议 整理.txt')
+  const transcript = 'WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\n张三：预算金额如下\n300\n李四：客户数量\n25\n王五：责任人未定，截止日期未提供。\n'
+  await writeFile(input, transcript)
+  const python = process.env.EMATE_TEST_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')
+  const result = spawnSync(python, [fileURLToPath(new URL('../skills/meeting-summary/scripts/clean_transcript.py', import.meta.url)),
+    input, '--output', output], { encoding: 'utf8', timeout: 10_000 })
+  assert.equal(result.status, 0, result.error?.message ?? result.stderr)
+  const cleaned = await readFile(output, 'utf8')
+  assert.match(cleaned, /张三：预算金额如下 300 李四：客户数量 25 王五：责任人未定/u)
+  assert.doesNotMatch(cleaned, /WEBVTT|00:00:01|(?:^|\s)1(?:\s|$)/u)
+  assert.equal(await readFile(input, 'utf8'), transcript)
 })
 
 test('round-trips real DOCX, XLSX, PPTX, and Chinese PDF bytes', async () => {
