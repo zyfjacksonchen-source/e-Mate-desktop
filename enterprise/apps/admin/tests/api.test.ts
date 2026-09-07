@@ -12,6 +12,7 @@ import {
   loginAdmin,
   loadApiKeys,
   loadModelFastMode,
+  loadModelRoutes,
   updateModelFastMode,
   loadConsentAcceptances,
   requestAdmin,
@@ -29,6 +30,32 @@ import {
 import { messagesFor } from '../src/i18n.ts';
 
 const origin = 'https://admin.example.test';
+
+test('model routes display Astra first and preserve unknown order and route policies', async () => {
+  const ids = ['custom-z', 'gpt-image-2-pro', 'gpt-5.6-luna', 'custom-a', 'deepseek',
+    'gpt-6-astra', 'doubao-seed-2-0-pro-260215', 'gpt-5.6-sol'];
+  const routes = ids.map((routeId, index) => ({
+    schemaVersion: 1, routeId, label: routeId, provider: 'test',
+    published: index % 2 === 0, enabled: index % 3 === 0, updatedAt: null,
+    keyConfigured: index % 2 === 1, keyUpdatedAt: index % 2 === 1 ? '2026-09-01T00:00:00.000Z' : null,
+  }));
+  const original = structuredClone(routes);
+  const result = await loadModelRoutes('admin', new AbortController().signal, {
+    origin,
+    fetcher: async (url, init) => {
+      assert.equal(String(url), '/v1/admin/model-routes');
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer admin');
+      return new Response(JSON.stringify({ schemaVersion: 1, routes }), { status: 200 });
+    },
+  });
+  const expectedIds = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
+    'doubao-seed-2-0-pro-260215', 'gpt-image-2-pro', 'custom-z', 'custom-a'];
+  assert.deepEqual(result, {
+    schemaVersion: 1,
+    routes: expectedIds.map(id => original.find(route => route.routeId === id)),
+  });
+  assert.deepEqual(routes, original);
+});
 
 test('fast mode saves one authenticated batch and reads the authoritative revision', async () => {
   const state = { schemaVersion: 1 as const, revision: 'a'.repeat(64), enabledModelIds: ['gpt-5.6-luna' as const] };

@@ -505,12 +505,25 @@ export async function revokeApiKey(
   });
 }
 
+const MODEL_DISPLAY_ORDER = new Map([
+  'gpt-6-astra',
+  'gpt-5.6-sol',
+  'gpt-5.6-luna',
+  'deepseek',
+  'doubao-seed-2-0-pro-260215',
+  'gpt-image-2-pro',
+].map((id, index) => [id, index]));
+
 export async function loadModelRoutes(
   token: string,
   signal: AbortSignal,
   options: StatusRequestOptions
 ): Promise<AdminModelRouteList> {
-  return parseAdminModelRouteList(await requestAdmin(token, signal, options, '/v1/admin/model-routes'));
+  const result = parseAdminModelRouteList(await requestAdmin(token, signal, options, '/v1/admin/model-routes'));
+  result.routes.sort((left, right) =>
+    (MODEL_DISPLAY_ORDER.get(left.routeId) ?? MODEL_DISPLAY_ORDER.size)
+    - (MODEL_DISPLAY_ORDER.get(right.routeId) ?? MODEL_DISPLAY_ORDER.size));
+  return result;
 }
 
 export async function loadModelFastMode(
