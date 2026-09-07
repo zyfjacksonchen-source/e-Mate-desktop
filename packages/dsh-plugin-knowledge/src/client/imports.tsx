@@ -4,7 +4,7 @@ import { HASH, type CallKnowledge } from '../contract.ts'
 import type { UiImportStatus } from '../ui-operations.ts'
 import css from './imports.module.css'
 type Picked = { path: string; name: string; mediaType: string }
-export interface KnowledgeImportsProps { callKnowledge: CallKnowledge; pickDirectory?: (signal?: AbortSignal) => Promise<string | null>; openTask?: (sessionId: string) => void; replacement?: { source_id: string; source_version: string; title: string } }
+export interface KnowledgeImportsProps { openRequest?: number; callKnowledge: CallKnowledge; pickDirectory?: (signal?: AbortSignal) => Promise<string | null>; openTask?: (sessionId: string) => void; replacement?: { source_id: string; source_version: string; title: string } }
 const labels = { prepared: '尚未开始', importing: '导入中', parsing: '解析中', compiling: '整理中', complete: '已完成', partial: '部分未完成', paused: '已暂停', stopping: '正在停止', stopped: '已停止', unknown: '回执待确认', failed: '未完成' }
 const sourceLabels: Record<string, string> = { ready: '已解析', parsing: '解析中', failed: '解析失败', deleted: '已删除', superseded: '已有新版本', awaiting_content: '等待原件', unknown: '回执待确认' }
 export function diskFiles(files: File[], bridge = (window as any).__DSH_DESKTOP_FILE_PATH__): Picked[] {
@@ -17,8 +17,11 @@ export function diskFiles(files: File[], bridge = (window as any).__DSH_DESKTOP_
     return { path, name: file.name, mediaType: file.type }
   })
 }
-export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, replacement }: KnowledgeImportsProps) {
+export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, replacement, openRequest }: KnowledgeImportsProps) {
+  const chooseButton = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false), [files, setFiles] = useState<Picked[]>([]), [title, setTitle] = useState('')
+  useEffect(() => { if (openRequest) setOpen(true) }, [openRequest])
+  useEffect(() => { if (open && openRequest) { chooseButton.current?.scrollIntoView?.({ block: 'nearest' }); chooseButton.current?.focus() } }, [open, openRequest])
   const [kind, setKind] = useState<'uploader-private' | 'public' | 'project'>('uploader-private'), [projectId, setProjectId] = useState('')
   const [replace, setReplace] = useState(false), [error, setError] = useState(''), [busy, setBusy] = useState(false), [pending, setPending] = useState<string>()
   const [items, setItems] = useState<UiImportStatus[]>([]), [more, setMore] = useState(false)
@@ -84,7 +87,7 @@ export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, repla
       <div className={css.top}><div><strong>导入并整理知识</strong><p>导入原件，解析后自动整理发布。离开页面任务会继续。</p></div><button type="button" onClick={() => setOpen(false)} aria-label="收起知识导入">收起</button></div>
       <div className={css.drop} aria-disabled={busy} onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }} onDrop={event => { event.preventDefault(); if (busy || action.current) return; try { addFiles(diskFiles(Array.from(event.dataTransfer.files))) } catch (reason) { report(reason) } }}>
         <input ref={chooser} type="file" multiple hidden disabled={busy} aria-label="选择知识原件" onChange={event => { if (busy || action.current) { event.currentTarget.value = ''; return }; try { addFiles(diskFiles(Array.from(event.currentTarget.files ?? []))) } catch (reason) { report(reason) }; event.currentTarget.value = '' }} />
-        <span>拖入磁盘文件，或</span><button type="button" disabled={busy} onClick={() => { if (!action.current) chooser.current?.click() }}>选择文件</button>
+        <span>拖入磁盘文件，或</span><button ref={chooseButton} type="button" disabled={busy} onClick={() => { if (!action.current) chooser.current?.click() }}>选择文件</button>
         <button type="button" disabled={!pickDirectory || busy} onClick={async () => { const epoch = generation.current; const controller = new AbortController(); requests.current.add(controller); try { const path = await pickDirectory?.(controller.signal); if (path && epoch === generation.current) addFiles([{ path, name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path, mediaType: 'inode/directory' }]) } catch (reason) { if (epoch === generation.current) report(reason) } finally { requests.current.delete(controller) } }}>选择文件夹</button>
       </div>
       {!!files.length && <ul className={css.files} aria-label="待导入原件">{files.map(file => <li key={file.path}><FileIcon name={file.name} mediaType={file.mediaType} /><span>{file.name}</span><button type="button" aria-label={'移除 ' + file.name} disabled={busy} onClick={() => setFiles(previous => previous.filter(value => value.path !== file.path))}>×</button></li>)}</ul>}

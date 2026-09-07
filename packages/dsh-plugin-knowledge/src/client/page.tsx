@@ -15,7 +15,7 @@ function revisionOriginals(value: any): OriginalVersion[] {
 }
 type ViewNode = KnowledgeNode & { source_only?: boolean; excerpt?: string }
 type GraphModule = { createGraph(element: HTMLElement, select: (id: string) => void, unavailable: () => void): GraphController }
-interface Props { callKnowledge: CallKnowledge; loadGraph(): Promise<GraphModule>; pickDirectory?: KnowledgeImportsProps['pickDirectory']; openTask?: KnowledgeImportsProps['openTask'] }
+interface Props { callKnowledge: CallKnowledge; loadGraph(): Promise<GraphModule>; pickDirectory?: KnowledgeImportsProps['pickDirectory']; openTask?: KnowledgeImportsProps['openTask']; prepareDraft?: (text: string, signal: AbortSignal) => Promise<void> }
 const layerNames: Record<string, string> = { expert: '专家知识', case: '案例方法', source: '原始资料' }
 export function KnowledgeEntry({ wide, KnowledgeIcon }: { wide: boolean; KnowledgeIcon: ComponentType<{ size?: number }> }) {
   const [active, setActive] = useState(location.pathname === '/knowledge')
@@ -43,14 +43,16 @@ function GraphView({ nodes, edges, selected, select, loadGraph, failed }: {
   useEffect(() => { if (selected) controller.current?.focus(selected) }, [selected])
   return <div ref={element} className={css.graph} aria-label="知识关系图，使用下方列表进行键盘浏览"><button className={css.resetView} type="button" disabled={!ready} onClick={() => controller.current?.reset()}>重置视角</button></div>
 }
-export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTask }: Props) {
+export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTask, prepareDraft }: Props) {
   const [open, setOpen] = useState(location.pathname === '/knowledge')
   const [graph, setGraph] = useState<KnowledgeGraph>()
   const [scope, setScope] = useState('')
   const [total, setTotal] = useState<number>()
   const [query, setQuery] = useState(''), [layer, setLayer] = useState('all')
-  const [search, setSearch] = useState<{ question: string; nodes: ViewNode[] }>()
+  const [search, setSearch] = useState<{ question: string; query_id?: string; nodes: ViewNode[] }>()
   const [selected, setSelected] = useState<ViewNode>(), [detail, setDetail] = useState<any>()
+  const [drafting, setDrafting] = useState(false), [importRequest, setImportRequest] = useState(0)
+  const draftRequest = useRef<AbortController | undefined>(undefined)
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [reading, setReading] = useState(false), [downloading, setDownloading] = useState(false)
   const [view, setView] = useState<'graph' | 'list'>('graph'), [unavailable, setUnavailable] = useState(false)
   const [reduced, setReduced] = useState(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -60,8 +62,8 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
   const request = useRef<AbortController | undefined>(undefined), readingRequest = useRef<AbortController | undefined>(undefined), downloadRequest = useRef<AbortController | undefined>(undefined)
   const clear = () => {
     generation.current++; reads.current++; downloadGeneration.current++
-    request.current?.abort(); readingRequest.current?.abort(); downloadRequest.current?.abort()
-    setGraph(undefined); setScope(''); setTotal(undefined); setSearch(undefined); setQuery(''); setLayer('all'); setSelected(undefined); setDetail(undefined); setBusy(false); setReading(false); setDownloading(false)
+    request.current?.abort(); readingRequest.current?.abort(); downloadRequest.current?.abort(); draftRequest.current?.abort()
+    setDrafting(false); setGraph(undefined); setScope(''); setTotal(undefined); setSearch(undefined); setQuery(''); setLayer('all'); setSelected(undefined); setDetail(undefined); setBusy(false); setReading(false); setDownloading(false)
   }
   const report = (reason: any) => {
     if (['scope-changed', 'unauthorized'].includes(reason?.code)) clear()
@@ -69,6 +71,7 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
     setError(reason instanceof Error ? reason.message : '企业知识请求未完成，请重试。')
   }
   const refresh = async () => {
+    draftRequest.current?.abort(); setDrafting(false)
     const ticket = ++generation.current
     request.current?.abort(); const controller = new AbortController(); request.current = controller
     setBusy(true); setError(''); setUnavailable(false); setSelected(undefined); setDetail(undefined); setSearch(undefined)
@@ -88,7 +91,7 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
     const sync = () => { const next = location.pathname === '/knowledge'; if (!next) clear(); setOpen(next) }
     const identity = () => { clear(); setError('登录状态已变化，请重新加载企业知识。') }
     addEventListener('popstate', sync); addEventListener('emate:identity-changed', identity)
-    return () => { request.current?.abort(); readingRequest.current?.abort(); downloadRequest.current?.abort(); generation.current++; reads.current++; downloadGeneration.current++; removeEventListener('popstate', sync); removeEventListener('emate:identity-changed', identity) }
+    return () => { request.current?.abort(); readingRequest.current?.abort(); downloadRequest.current?.abort(); draftRequest.current?.abort(); generation.current++; reads.current++; downloadGeneration.current++; removeEventListener('popstate', sync); removeEventListener('emate:identity-changed', identity) }
   }, [])
   useEffect(() => { if (open) void refresh() }, [open])
   useEffect(() => {
@@ -104,6 +107,7 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
   }, [graph, query, layer, search])
   useEffect(() => { if (selected && !nodes.some(node => node.id === selected.id)) { reads.current++; readingRequest.current?.abort(); setSelected(undefined); setDetail(undefined); setReading(false) } }, [nodes, selected])
   const searchText = async () => {
+    draftRequest.current?.abort(); setDrafting(false)
     if (!graph || !query.trim()) return
     const ticket = ++generation.current
     request.current?.abort(); const controller = new AbortController(); request.current = controller
@@ -122,11 +126,13 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
         if (node && node.source_version !== source.file_hash) throw Error('检索来源版本不一致，请刷新。')
         return { ...(node ?? { id: source.id, title: source.title, source_id: source.id, source_version: source.file_hash, layer: 'source', source_only: true }), excerpt: hit.text }
       })
-      setSearch({ question, nodes: result }); setSelected(undefined); setDetail(undefined)
+      if (reply.result.query_id !== undefined && !SOURCE_ID.test(reply.result.query_id)) throw Error('检索快照身份无效。')
+      setSearch({ question, query_id: reply.result.query_id, nodes: result }); setSelected(undefined); setDetail(undefined)
     } catch (reason) { if (ticket === generation.current && !controller.signal.aborted) report(reason) }
     finally { if (ticket === generation.current) setBusy(false) }
   }
   const read = async (node: ViewNode) => {
+    draftRequest.current?.abort(); setDrafting(false)
     const ticket = ++reads.current
     readingRequest.current?.abort(); const controller = new AbortController(); readingRequest.current = controller
     setSelected(node); setDetail(undefined); setReading(true); setError('')
@@ -134,6 +140,7 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
       const reply = await callKnowledge(node.source_only ? 'source' : 'node', { [node.source_only ? 'source_id' : 'node_id']: node.source_only ? node.source_id : node.id, version: node.source_version }, controller.signal)
       if (ticket !== reads.current || controller.signal.aborted) return
       if (reply.scope_key !== scope) throw Object.assign(Error('登录账号已变化，请重新加载。'), { code: 'scope-changed' })
+      if (reply.result?.corpus_revision !== graph?.corpus_revision) throw Error('资料快照已变化，请刷新后阅读。')
       const version = node.source_only ? reply.result?.source?.file_hash : reply.result?.source_version
       if (version !== node.source_version || (node.source_only ? reply.result.source.id !== node.source_id : reply.result.id !== node.id || reply.result.source_id !== node.source_id || reply.result.untrusted !== true || typeof reply.result.content !== 'string')) throw Error('原文版本不一致，请刷新。')
       if (node.revision_id !== undefined) {
@@ -157,15 +164,36 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
     } catch (reason) { if (ticket === downloadGeneration.current && !controller.signal.aborted) report(reason) }
     finally { if (ticket === downloadGeneration.current) setDownloading(false) }
   }
+  const prepareReading = async (action: 'question' | 'report' | 'correction') => {
+    if (!selected || !detail || !graph || !prepareDraft || draftRequest.current && !draftRequest.current.signal.aborted) return
+    const controller = new AbortController(); draftRequest.current = controller; setDrafting(true); setError('')
+    const node = selected, snapshot = graph.corpus_revision
+    const sources = node.revision_id ? revisionOriginals(detail.source_versions) : [{ source_id: node.source_id, source_version: node.source_version }]
+    const reference = { title: node.title, scope: graph.scope, scope_key: scope, corpus_revision: snapshot, node_id: node.source_only ? undefined : node.id,
+      ...(node.revision_id ? { revision_id: node.revision_id, revision_version: node.source_version } : {}), source_versions: sources,
+      ...(search?.question === query.trim() ? { question: search.question, ...(search.query_id ? { query_id: search.query_id } : {}) } : {}) }
+    const intent = action === 'question' ? '请基于以下知识引用回答我的问题（请补充问题）：'
+      : action === 'report' ? '请将以下知识加入我要制作的方案/报表（请补充目标）：'
+      : '请协助核对此处知识并准备纠错建议（请补充疑点及新依据）：'
+    const text = `${intent}\n\n知识引用：\n${JSON.stringify(reference, null, 2)}\n\n请先按上述版本读取原文，复用同一查询快照。区分原文事实、模型整理、推断和冲突；编译内容不等于原文事实。数字必须来自可核验的结构化 benchmark 及其证据，缺失时明确说明。${action === 'correction' ? '逐项列出原文表述、疑点、依据及建议更正，未经原件和引用校验不得宣称已修正或发布。' : '不要将推断写成已证实事实，也不要混入其他版本。'}`
+    try {
+      const current = await callKnowledge('catalog', {}, controller.signal)
+      controller.signal.throwIfAborted()
+      if (current.scope_key !== scope) throw Object.assign(Error('登录账号已变化，请重新加载。'), { code: 'scope-changed' })
+      if (current.result?.corpus_revision !== snapshot) throw Error('资料快照已变化，请刷新后再准备草稿。')
+      await prepareDraft(text, controller.signal)
+    } catch (reason) { if (!controller.signal.aborted) report(reason) }
+    finally { if (draftRequest.current === controller) { draftRequest.current = undefined; setDrafting(false) } }
+  }
   if (!open) return null
   const originals: OriginalVersion[] = selected ? selected.revision_id ? detail?.source_versions ?? [] : [{ source_id: selected.source_id, source_version: selected.source_version }] : []
   const graphical = view === 'graph' && !reduced && !unavailable && nodes.length > 0
   return <main className={css.page} aria-label="企业知识图谱" data-emate-knowledge-page="">
     <header className={css.header}><div><small>公司公共知识</small><h1>企业知识图谱</h1><p>沿知识、方法与原始资料，找到可追溯的依据。</p></div><button type="button" onClick={() => void refresh()} disabled={busy}>{busy ? '正在读取' : '刷新资料'}</button></header>
-    <KnowledgeImports callKnowledge={callKnowledge} pickDirectory={pickDirectory} openTask={openTask} replacement={selected && !selected.revision_id ? { source_id: selected.source_id, source_version: selected.source_version, title: selected.title } : undefined} />
+    <KnowledgeImports openRequest={importRequest} callKnowledge={callKnowledge} pickDirectory={pickDirectory} openTask={openTask} replacement={selected && !selected.revision_id ? { source_id: selected.source_id, source_version: selected.source_version, title: selected.title } : undefined} />
     <form className={css.filters} onSubmit={event => { event.preventDefault(); void searchText() }}>
-      <input maxLength={4000} aria-label="搜索知识" placeholder="筛选标题，或检索原文内容" value={query} onChange={event => { generation.current++; request.current?.abort(); setBusy(false); setQuery(event.target.value); setSearch(undefined) }} />
-      <select aria-label="知识类型" value={layer} onChange={event => { generation.current++; request.current?.abort(); setBusy(false); setLayer(event.target.value); setSearch(undefined) }}><option value="all">全部类型</option>{Object.entries(layerNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+      <input maxLength={4000} aria-label="搜索知识" placeholder="筛选标题，或检索原文内容" value={query} onChange={event => { draftRequest.current?.abort(); setDrafting(false); generation.current++; request.current?.abort(); setBusy(false); setQuery(event.target.value); setSearch(undefined) }} />
+      <select aria-label="知识类型" value={layer} onChange={event => { draftRequest.current?.abort(); setDrafting(false); generation.current++; request.current?.abort(); setBusy(false); setLayer(event.target.value); setSearch(undefined) }}><option value="all">全部类型</option>{Object.entries(layerNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
       <button type="submit" disabled={busy || !query.trim() || !graph}>检索原文</button>
       <div className={css.viewChoice} aria-label="浏览方式"><button type="button" aria-pressed={view === 'graph' && !reduced && !unavailable} onClick={() => setView('graph')} disabled={reduced || unavailable}>图谱</button><button type="button" aria-pressed={view === 'list' || reduced || unavailable} onClick={() => setView('list')}>列表</button></div>
     </form>
@@ -178,7 +206,14 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
         {graphical && <div className={css.graphStage}><GraphView nodes={nodes} edges={graph!.edges} selected={selected?.id} select={id => { const node = nodes.find(value => value.id === id); if (node) void read(node) }} loadGraph={loadGraph} failed={() => setUnavailable(true)} /><span className={css.graphHint}>拖动旋转 · 滚轮缩放 · 点击查看来源</span></div>}
         {nodes.length > 0 && <ul ref={listElement} className={`${css.list} ${graphical ? css.graphList : ''}`} aria-label="知识条目列表">{nodes.map(node => <li key={node.id}><button type="button" aria-pressed={selected?.id === node.id} onClick={() => void read(node)}><span className={css.dot} /><span><strong>{node.title}</strong><small>{layerNames[node.layer]} · {node.revision_id ? '编译知识' : node.source_only ? '来源资料' : '知识节点'} · {node.source_version.slice(0, 8)}</small></span><span aria-hidden="true">↗</span></button></li>)}</ul>}
       </section>
-      {selected && <aside className={css.detail} aria-label="知识原文"><header><span>{layerNames[selected.layer]}</span><button type="button" onClick={() => { reads.current++; readingRequest.current?.abort(); setSelected(undefined); setDetail(undefined) }}>关闭</button></header><h2>{selected.title}</h2><details><summary>来源与版本</summary><p>{selected.revision_id ? `修订 ${selected.revision_id}` : `来源 ${selected.source_id}`}</p><code>sha256:{selected.source_version}</code></details>
+      {selected && <aside className={css.detail} aria-label="知识原文"><header><span>{layerNames[selected.layer]}</span><button type="button" onClick={() => { draftRequest.current?.abort(); setDrafting(false); reads.current++; readingRequest.current?.abort(); setSelected(undefined); setDetail(undefined) }}>关闭</button></header><h2>{selected.title}</h2><details><summary>来源与版本</summary><p>{selected.revision_id ? `修订 ${selected.revision_id}` : `来源 ${selected.source_id}`}</p><code>sha256:{selected.source_version}</code></details>
+        {detail && <div className={css.filters} aria-label="知识阅读操作">
+          <button type="button" disabled={drafting || !prepareDraft} onClick={() => void prepareReading('question')}>基于此提问</button>
+          <button type="button" disabled={drafting || !prepareDraft} onClick={() => void prepareReading('report')}>加入方案/报表</button>
+          <button type="button" onClick={() => setImportRequest(value => value + 1)}>补充资料</button>
+          <button type="button" disabled={drafting || !prepareDraft} onClick={() => void prepareReading('correction')}>纠错</button>
+          <small>提问、方案与纠错会追加到聊天草稿，由你确认后发送。</small>
+        </div>}
         {selected.revision_id && <h3>引用的原始资料</h3>}
         {originals.map((original, index) => <button key={original.source_id} type="button" className={css.download} disabled={downloading} onClick={() => void download(original)}>{downloading ? '正在核验原件' : selected.revision_id ? `下载原件：${graph?.nodes.find(node => node.revision_id === undefined && node.source_id === original.source_id && node.source_version === original.source_version)?.title ?? `原始资料 ${index + 1}`}` : '下载此版本原件'}</button>)}
         {selected.excerpt && <section><h3>检索片段</h3><p className={css.bodyText}>{selected.excerpt}</p></section>}

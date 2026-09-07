@@ -149,3 +149,130 @@ it('does not expose original download actions for a mismatched or incomplete com
   expect(screen.queryByRole('button', { name: /下载原件/ })).toBeNull()
   expect(screen.queryByText('错误修订')).toBeNull()
 })
+
+it.each(['基于此提问', '加入方案/报表', '纠错'])('prepares %s with actual versions and query snapshot', async (label) => {
+  const queryId = 'd'.repeat(36), original = fixture([one]), prepareDraft = vi.fn(async (_text: string, _signal: AbortSignal) => {})
+  const call = vi.fn(async (endpoint: string, body: any) => endpoint === 'search'
+    ? answer({ query_id: queryId, data: [{ source_id: one.source_id, text: '检索原文' }], sources: [{ id: one.source_id, file_hash: one.source_version, title: one.title }] }) : original(endpoint, body))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} prepareDraft={prepareDraft} />)
+  await screen.findByRole('list')
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索知识' }), { target: { value: '查询条件' } })
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '检索原文' })))
+  fireEvent.click(within(screen.getByRole('list')).getByRole('button'))
+  await screen.findByText(/原文内容：接口夹具/)
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: label })))
+  const draft = prepareDraft.mock.calls[0]![0]
+  for (const value of [one.source_id, one.source_version, revision, scope, queryId, '查询条件', '区分原文事实、模型整理、推断和冲突']) expect(draft).toContain(value)
+  expect(draft).not.toContain('<script>')
+  expect(call.mock.calls.every(([endpoint]) => ['catalog', 'graph', 'search', 'node'].includes(endpoint))).toBe(true)
+})
+
+it('keeps compiled revision identity and all exact original versions in the draft', async () => {
+  const compiled = { ...one, revision_id: 'c'.repeat(36), source_version: 'f'.repeat(64) }
+  const sourceVersions = [one, two].map(node => ({ source_id: node.source_id, source_version: node.source_version, parse_revision: 'e'.repeat(64) }))
+  const original = fixture([compiled]), prepareDraft = vi.fn(async (_text: string, _signal: AbortSignal) => {})
+  const call = vi.fn(async (endpoint: string, body: any) => endpoint === 'node'
+    ? answer({ ...compiled, untrusted: true, content: '编译引用', source_versions: sourceVersions }) : original(endpoint, body))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} prepareDraft={prepareDraft} />)
+  fireEvent.click(within(await screen.findByRole('list')).getByRole('button'))
+  await screen.findByText('编译引用')
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '加入方案/报表' })))
+  const draft = prepareDraft.mock.calls[0]![0]
+  expect(draft).toContain(`"revision_id": "${compiled.revision_id}"`)
+  expect(draft).toContain(`"revision_version": "${compiled.source_version}"`)
+  for (const source of sourceVersions) for (const value of Object.values(source)) expect(draft).toContain(value)
+  expect(draft).not.toContain('query_id')
+})
+
+it('refuses changed corpus and cancels late draft preparation on identity change', async () => {
+  const original = fixture([one]), prepareDraft = vi.fn(async (_text: string, _signal: AbortSignal) => {})
+  let later: (() => Promise<any>) | undefined
+  const call = vi.fn(async (endpoint: string, body: any) => endpoint === 'catalog' && later ? later() : original(endpoint, body))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} prepareDraft={prepareDraft} />)
+  fireEvent.click(within(await screen.findByRole('list')).getByRole('button'))
+  await screen.findByText(/原文内容：接口夹具/)
+  later = async () => answer({ corpus_revision: 'f'.repeat(64) })
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '基于此提问' })))
+  expect(screen.getByRole('alert').textContent).toContain('资料快照已变化')
+  expect(prepareDraft).not.toHaveBeenCalled()
+  let release!: (value: any) => void
+  later = () => new Promise(resolve => { release = resolve })
+  fireEvent.click(screen.getByRole('button', { name: '基于此提问' }))
+  act(() => dispatchEvent(new Event('emate:identity-changed')))
+  await act(async () => release(answer({ source_count: 1 })))
+  expect(prepareDraft).not.toHaveBeenCalled()
+})
+
+it('supplement opens existing private importer without uploading', async () => {
+  const original = fixture([one])
+  const call = vi.fn(async (endpoint: string, body: any) => endpoint === 'ui.import.recent' ? answer({ items: [], has_more: false }) : original(endpoint, body))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  fireEvent.click(within(await screen.findByRole('list')).getByRole('button'))
+  await screen.findByText(/原文内容：接口夹具/)
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '补充资料' })))
+  expect(screen.getByRole('button', { name: '选择文件' })).toBe(document.activeElement)
+  expect((screen.getByRole('combobox', { name: '资料范围' }) as HTMLSelectElement).value).toBe('uploader-private')
+  expect(call.mock.calls.some(([endpoint]) => endpoint === 'ui.import.prepare' || endpoint === 'ui.import.start')).toBe(false)
+})
+
+// Load only the exported client bridge, retaining the production body. Slot/UI
+// imports are not required for these native input boundary tests.
+async function draftBridge() {
+  const { readFileSync } = await import('node:fs')
+  const { stripTypeScriptTypes } = await import('node:module')
+  const source = readFileSync('src/client/index.ts', 'utf8')
+  const body = source.slice(source.indexOf('export async function prepareKnowledgeDraft'), source.indexOf('export function apply'))
+  return new Function(stripTypeScriptTypes(body).replace('export async function', 'async function') + '; return prepareKnowledgeDraft')()
+}
+async function nativeDraftFixture(initial: string | undefined = 'session-one') {
+  const { InputMachine } = await import('../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/machine.ts')
+  const machine = new InputMachine()
+  machine.dispatch({ type: 'draft-changed', draft: '已有文字 @document.txt' })
+  const fileRefs = [{ relative_path: 'document.txt', stored_name: 'document.txt' }], imageIds = ['existing-image']
+  const input = { state: { getSnapshot: () => ({ ...machine.state, fileRefs, imageIds }) }, setDraft: vi.fn((draft: string) => { machine.dispatch({ type: 'draft-changed', draft }) }), submit: vi.fn() }
+  const state = { current: initial }, actions = { setView: vi.fn() }, beforeNavigate = vi.fn(async () => {})
+  const ctx = { get: () => ({ beforeNavigate }), conversation: { input: { for: vi.fn(() => input) } },
+    sessions: { list: { getSnapshot: () => state }, scope: vi.fn((id: string) => ({ id })), open: vi.fn((id: string) => { state.current = id }) },
+    workspaces: { list: { getSnapshot: () => ({ baselinesReady: true, recentWorkspaceId: 'native-default' }) }, connectWorkspace: vi.fn(async () => 'new-native-session') } }
+  return { prepare: await draftBridge(), ctx, input, state, actions, beforeNavigate, machine, fileRefs, imageIds }
+}
+it('appends through native input without losing text/files/images, saves canvas and opens chat without sending', async () => {
+  const f = await nativeDraftFixture()
+  await f.prepare(f.ctx, '核验引用草稿', new AbortController().signal, () => f.actions)
+  expect(f.machine.state.draft).toBe('已有文字 @document.txt\n\n核验引用草稿')
+  expect(f.input.state.getSnapshot().fileRefs).toBe(f.fileRefs)
+  expect(f.input.state.getSnapshot().imageIds).toBe(f.imageIds)
+  expect(f.input.submit).not.toHaveBeenCalled()
+  expect(f.beforeNavigate).toHaveBeenCalledOnce()
+  expect(f.actions.setView).toHaveBeenCalledWith('chat')
+  expect(location.pathname).toBe('/chat/session-one')
+})
+it('uses native Workspace default only when no Session exists', async () => {
+  const f = await nativeDraftFixture()
+  f.state.current = undefined
+  await f.prepare(f.ctx, '引用', new AbortController().signal, () => undefined)
+  expect(f.ctx.workspaces.connectWorkspace).toHaveBeenCalledWith('native-default')
+  expect(f.ctx.sessions.open).toHaveBeenCalledWith('new-native-session')
+  expect(f.input.submit).not.toHaveBeenCalled()
+})
+it('preserves page and draft on canvas save failure and rejects late identity changes', async () => {
+  const f = await nativeDraftFixture()
+  f.beforeNavigate.mockRejectedValueOnce(Error('画布保存失败'))
+  await expect(f.prepare(f.ctx, '引用', new AbortController().signal, () => f.actions)).rejects.toThrow('画布保存失败')
+  expect(f.input.setDraft).not.toHaveBeenCalled()
+  expect(location.pathname).toBe('/knowledge')
+  let release!: () => void
+  f.beforeNavigate.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+  const pending = f.prepare(f.ctx, '旧账号引用', new AbortController().signal, () => f.actions)
+  dispatchEvent(new Event('emate:identity-changed')); release()
+  await expect(pending).rejects.toThrow()
+  expect(f.input.setDraft).not.toHaveBeenCalled()
+  expect(f.ctx.sessions.open).not.toHaveBeenCalled()
+})
+it('refuses a submitting composer without changing its pending draft', async () => {
+  const f = await nativeDraftFixture()
+  f.machine.dispatch({ type: 'draft-changed', draft: '/goal 已有文字' })
+  f.machine.dispatch({ type: 'enter', mode: 'queue' })
+  await expect(f.prepare(f.ctx, '引用', new AbortController().signal, () => f.actions)).rejects.toThrow('输入框正在提交')
+  expect(f.input.setDraft).not.toHaveBeenCalled()
+})

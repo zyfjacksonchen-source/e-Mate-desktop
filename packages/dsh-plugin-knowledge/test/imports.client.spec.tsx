@@ -117,3 +117,17 @@ it('freezes every file admission path while prepare waits and unlocks after star
   fireEvent.change(screen.getByLabelText('选择知识原件'), { target: { files: [later] } })
   expect(screen.getByRole('button', { name: '移除 later.pdf' })).toBeTruthy()
 })
+
+it('reading supplement reopens the same import selection without clearing files or changing explicit scope', async () => {
+  const call = vi.fn(async (_endpoint: string) => reply({ items: [], has_more: false }))
+  const view = render(<KnowledgeImports callKnowledge={call} openRequest={0} />)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' }))
+  selectOriginal()
+  fireEvent.change(screen.getByRole('combobox', { name: '资料范围' }), { target: { value: 'public' } })
+  fireEvent.click(screen.getByRole('button', { name: '收起知识导入' }))
+  await act(async () => view.rerender(<KnowledgeImports callKnowledge={call} openRequest={1} />))
+  expect(screen.getByText('report.pdf')).toBeTruthy()
+  expect((screen.getByRole('combobox', { name: '资料范围' }) as HTMLSelectElement).value).toBe('public')
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '选择文件' }))
+  expect(call.mock.calls.every(([endpoint]) => endpoint === 'ui.import.recent')).toBe(true)
+})
