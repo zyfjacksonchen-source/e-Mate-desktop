@@ -329,11 +329,15 @@ const readOutput = {
 export function apply(ctx: OfficeContext): void {
   let svgRenderer: Partial<SvgRenderer> | undefined
   let preview: ReturnType<typeof createOfficePreview> | undefined
-  ctx.inject(['desktopRuntime', 'emateIdentity', 'connection', 'workspaceRegistry', 'sessions', 'subprocess', 'shellEnv', 'fs'], host => {
+  ctx.inject(['desktopRuntime', 'emateIdentity', 'emateAudit', 'connection', 'workspaceRegistry', 'sessions', 'subprocess', 'shellEnv', 'fs'], host => {
     const service = createOfficePreview(host); preview = service
     host.effect(() => host.connection.rpc.handle(PREVIEW_CHANNEL, async (action: string, payload: unknown, signal: AbortSignal) => {
       try { return { ok: true, value: await service.call(action, payload, signal) } }
-      catch (error) { return { ok: false, error: { message: error instanceof Error ? error.message : '预览失败。', ...(error instanceof Error && 'code' in error && error.code === 'preview-expired' ? { code: 'preview-expired' } : {}) } } }
+      catch (error) {
+        const code = error instanceof Error && 'code' in error && (error.code === 'preview-expired' || error.code === 'preview-unauthorized') ? error.code : 'preview-failed'
+        // Native RPC errors have a closed enum; preview failures belong to the channel value.
+        return { ok: true, value: { error: { code, message: error instanceof Error ? error.message : '预览失败。' } } }
+      }
     }, { authority: 'loopback' }))
     host.on('credentials/updated', (ref: string) => { if (String(ref) === 'E_MATE_ENTERPRISE_SESSION') { service.changed(); host.timeout(() => service.changed(), 0) } })
     host.effect(() => () => { service.dispose(); if (preview === service) preview = undefined })

@@ -17,13 +17,25 @@ interface Binding {
 /** Transient view leases only. Source files and original native Jobs remain authoritative. */
 export function createOfficePreview(ctx: any) {
   const bindings = new Map<string, Binding>()
+  const restoring = new Map<string, { controller: AbortController; promise: Promise<Binding>; sessionId: string; owner: string }>()
+  let generation = 0, disposed = false
   const owner = () => {
     const identity = ctx.emateIdentity.localAccountPrincipal()
-    if (!identity?.tenantId || !identity?.userId) throw new Error('请先登录企业账号。')
+    if (!identity?.tenantId || !identity?.userId) throw Object.assign(new Error('请先登录企业账号。'), { code: 'preview-unauthorized' })
     return hash(JSON.stringify([identity.tenantId, identity.userId]))
   }
+  let knownOwner: string | undefined
+  try { knownOwner = owner() } catch { /* Enterprise login may not be ready at injection. */ }
   const release = (binding: Binding) => { binding.active = false; binding.closed = true; binding.controller.abort(); binding.cache.clear() }
-  const dispose = () => { for (const binding of bindings.values()) release(binding); bindings.clear() }
+  const clear = () => { generation++; for (const pending of restoring.values()) pending.controller.abort(); restoring.clear(); for (const binding of bindings.values()) release(binding); bindings.clear() }
+  const dispose = () => { disposed = true; clear() }
+  const unauthorized = () => Object.assign(new Error('账号归属无法验证，原预览已关闭。请切回原账号。'), { code: 'preview-unauthorized' })
+  const expired = () => Object.assign(new Error('无法验证原预览的任务归属，请在原账号和任务重新打开。'), { code: 'preview-expired' })
+  function remember(binding: Binding) {
+    for (const [id, item] of bindings) if (item.closed || Date.now() - item.touched > 30 * 60_000) { release(item); bindings.delete(id) }
+    if (bindings.size >= 8) { const oldest = bindings.values().next().value!; release(oldest); bindings.delete(oldest.id) }
+    bindings.set(binding.id, binding)
+  }
   async function projectPath(root: string, path: unknown) {
     if (typeof path !== 'string' || !path || isAbsolute(path)) throw new Error('请选择当前工作区内的 PPT 项目。')
     const resolved = await realpath(join(root, path))
@@ -32,7 +44,7 @@ export function createOfficePreview(ctx: any) {
   }
   async function check(binding: Binding, signal: AbortSignal) {
     signal.throwIfAborted()
-    if (binding.owner !== owner()) { dispose(); throw Object.assign(new Error('账号已变化，请重新打开预览。'), { code: 'preview-expired' }) }
+    if (binding.owner !== owner()) { clear(); throw unauthorized() }
     const session = ctx.sessions.get(binding.sessionId)
     const workspace = ctx.workspaceRegistry.list().find((row: any) => row.sessionIds.includes(binding.sessionId))
     if (!session || !workspace || ctx.workspaceRegistry.archivedSessionIds.includes(binding.sessionId)
@@ -40,8 +52,58 @@ export function createOfficePreview(ctx: any) {
       || await projectPath(binding.root, relative(binding.root, binding.project) || '.') !== binding.project) {
       release(binding); throw Object.assign(new Error('会话与项目绑定已变化，请重新打开预览。'), { code: 'preview-expired' })
     }
+    signal.throwIfAborted()
+    if (disposed) throw expired()
+    if (binding.owner !== owner()) { clear(); throw unauthorized() }
     binding.touched = Date.now()
     return session
+  }
+  async function restore(id: string, sessionId: string, signal: AbortSignal): Promise<Binding> {
+    signal.throwIfAborted()
+    const expected = owner(), epoch = generation
+    const session = ctx.sessions.get(sessionId)
+    if (disposed || !session || session.header.id !== sessionId || !Array.isArray(session.events)) throw expired()
+    // Only the physical native Tool result and its paired call establish the project.
+    // Renderer paths and assistant text are never recovery evidence.
+    const result = session.events.find((event: any) => event.type === 'tool/result' && !event.data.error
+      && event.data.meta?.operation === 'preview' && event.data.meta.preview?.kind === 'ppt-preview'
+      && event.data.meta.preview.preview_id === id && event.data.meta.preview.session_id === sessionId)
+    const blocks = result?.data.message?.content
+    const block = Array.isArray(blocks) && blocks.length === 1 ? blocks[0] : undefined
+    if (block?.type !== 'tool-result' || block.isError || !Number.isSafeInteger(result.data.turn) || result.data.turn < 1) throw expired()
+    if (!ctx.emateAudit.ownsTask(sessionId, result.data.turn)) throw unauthorized()
+    const call = session.events.find((event: any) => event.type === 'tool/call' && event.seq < result.seq
+      && event.data.callId === block.toolCallId && event.data.name === 'office_read'
+      && event.data.turn === result.data.turn && event.data.step === result.data.step)
+    let args: any
+    try { args = JSON.parse(call?.data.arguments) } catch { throw expired() }
+    if (args?.operation !== 'preview') throw expired()
+    const root = await realpath(session.header.cwd)
+    const project = await projectPath(root, result.data.meta.preview.project_path)
+    if (await projectPath(root, args.path) !== project) throw expired()
+    const binding: Binding = { id, owner: expected, sessionId, project, root, controller: new AbortController(), active: false, closed: false, busy: false, touched: Date.now(), cache: new Map() }
+    await check(binding, signal)
+    signal.throwIfAborted()
+    if (disposed || epoch !== generation || ctx.sessions.get(sessionId) !== session) throw expired()
+    if (owner() !== expected || !ctx.emateAudit.ownsTask(sessionId, result.data.turn)) throw unauthorized()
+    remember(binding)
+    return binding
+  }
+  async function recover(id: string, sessionId: string, signal: AbortSignal) {
+    let pending = restoring.get(id)
+    if (pending && pending.sessionId !== sessionId) throw expired()
+    if (!pending) {
+      const expected = owner()
+      const controller = new AbortController()
+      const promise = restore(id, sessionId, AbortSignal.any([signal, controller.signal]))
+        .finally(() => { if (restoring.get(id)?.controller === controller) restoring.delete(id) })
+      pending = { controller, promise, sessionId, owner: expected }; restoring.set(id, pending)
+    }
+    let binding: Binding
+    try { binding = await pending.promise } catch (error) { if (pending.owner !== owner()) throw unauthorized(); throw error }
+    signal.throwIfAborted()
+    if (binding.sessionId !== sessionId) throw expired()
+    return binding
   }
   async function helper(binding: Binding, page: string, signal: AbortSignal, change?: unknown) {
     const python = ctx.shellEnv.collect({}).DSH_EMATE_PYTHON
@@ -83,26 +145,35 @@ export function createOfficePreview(ctx: any) {
   }
   return {
     dispose,
-    changed() { let key: string; try { key = owner() } catch { dispose(); return }
-      if ([...bindings.values()].some(binding => binding.owner !== key)) dispose()
+    changed() { let key: string | undefined; try { key = owner() } catch { /* Logged out or expired. */ }
+      if (key !== knownOwner || [...bindings.values()].some(binding => binding.owner !== key) || [...restoring.values()].some(pending => pending.owner !== key)) { knownOwner = key; clear() }
     },
     async open(path: unknown, exec: any) {
-      const sessionId = exec.agent?.session?.header?.id
-      if (typeof sessionId !== 'string') throw new Error('预览需要当前原生任务。')
-      const root = await realpath(exec.agent.session.header.cwd)
+      if (disposed) throw expired()
+      const expected = owner(), epoch = generation, session = exec.agent?.session
+      const sessionId = session?.header?.id
+      if (typeof sessionId !== 'string' || ctx.sessions.get(sessionId) !== session) throw new Error('预览需要当前原生任务。')
+      exec.signal.throwIfAborted()
+      const root = await realpath(session.header.cwd)
       const project = await projectPath(root, path)
-      for (const [id, item] of bindings) if (item.closed || Date.now() - item.touched > 30 * 60_000) { release(item); bindings.delete(id) }
-      if (bindings.size >= 8) { const oldest = bindings.values().next().value!; release(oldest); bindings.delete(oldest.id) }
-      const binding: Binding = { id: randomUUID(), owner: owner(), sessionId, project, root, controller: new AbortController(), active: false, closed: false, busy: false, touched: Date.now(), cache: new Map() }
+      const binding: Binding = { id: randomUUID(), owner: expected, sessionId, project, root, controller: new AbortController(), active: false, closed: false, busy: false, touched: Date.now(), cache: new Map() }
       await check(binding, exec.signal)
-      bindings.set(binding.id, binding)
-      return { kind: 'ppt-preview', preview_id: binding.id, session_id: sessionId, project_path: relative(root, project) || '.', pages: await roster(binding) }
+      const pages = await roster(binding)
+      await check(binding, exec.signal)
+      if (disposed || epoch !== generation || ctx.sessions.get(sessionId) !== session) throw expired()
+      if (owner() !== expected) throw unauthorized()
+      remember(binding)
+      return { kind: 'ppt-preview', preview_id: binding.id, session_id: sessionId, project_path: relative(root, project) || '.', pages }
     },
     async call(action: string, payload: any, requestSignal = new AbortController().signal) {
-      if (!payload || typeof payload !== 'object') throw new Error('预览请求无效。')
-      const binding = bindings.get(payload.preview_id)
-      if (!binding || binding.sessionId !== payload.session_id) throw Object.assign(new Error('预览已失效，请在当前任务重新打开。'), { code: 'preview-expired' })
-      if (action === 'close') { release(binding); return {} }
+      if (disposed) throw expired()
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !['roster', 'page', 'save', 'close'].includes(action)
+        || typeof payload.preview_id !== 'string' || !payload.preview_id || payload.preview_id.length > 128
+        || typeof payload.session_id !== 'string' || !payload.session_id || payload.session_id.length > 128) throw new Error('预览请求无效。')
+      let binding = bindings.get(payload.preview_id)
+      if (binding && binding.sessionId !== payload.session_id || restoring.has(payload.preview_id) && restoring.get(payload.preview_id)!.sessionId !== payload.session_id) throw expired()
+      if (action === 'close') { if (binding) release(binding); restoring.get(payload.preview_id)?.controller.abort(); return {} }
+      binding ??= await recover(payload.preview_id, payload.session_id, requestSignal)
       if (binding.busy) throw new Error('页面正在处理，请稍后重试。')
       if (!binding.active) { binding.controller = new AbortController(); binding.active = true; binding.closed = false }
       const signal = AbortSignal.any([requestSignal, binding.controller.signal, AbortSignal.timeout(45_000)])
@@ -158,7 +229,8 @@ export function createOfficePreview(ctx: any) {
         }
         return { page, revision: prepared.revision, source_hash: prepared.source_hash, width: prepared.width, height: prepared.height, elements: prepared.elements,
           ...(payload.known_revision === cached.revision ? {} : { png: cached.png }) }
-      } finally { binding.busy = false }
+      } catch (error) { if (binding.owner !== owner()) throw unauthorized(); throw error }
+      finally { binding.busy = false }
     },
   }
 }

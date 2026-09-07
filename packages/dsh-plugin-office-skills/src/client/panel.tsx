@@ -24,6 +24,7 @@ export function PreviewPanel({ ctx, preview, sessionId, close }: any) {
   const rpc = (action: string, payload: any = {}, signal?: AbortSignal) => ctx.connection.rpc.call(CHANNEL, action,
     { ...payload, preview_id: preview.preview_id, session_id: preview.session_id }, signal).then((result: any) => {
     if (!result?.ok) throw Object.assign(new Error(result?.error?.message ?? '预览暂不可用。'), { code: result?.error?.code })
+    if (result.value?.error) throw Object.assign(new Error(result.value.error.message ?? '预览暂不可用。'), { code: result.value.error.code })
     return result.value
   })
   const call = (action: string, payload: any = {}, signal?: AbortSignal): Promise<any> => {
@@ -59,7 +60,8 @@ export function PreviewPanel({ ctx, preview, sessionId, close }: any) {
           setError('')
         }
       } catch (cause) { if (!stopped && !controller.signal.aborted) {
-        if ((cause as { code?: string }).code === 'preview-expired') { stopped = true; stopRead(); setSnapshot(undefined); setValue(''); setInstruction(''); close() }
+        if ((cause as { code?: string }).code === 'preview-unauthorized') { stopped = true; stopRead(); setSnapshot(undefined); setValue(''); setInstruction(''); close() }
+        else if ((cause as { code?: string }).code === 'preview-expired') { stopped = true; stopRead(); setError((cause as Error).message) }
         else setError((cause as Error).message)
       } }
       finally { running = false; if (available()) timer = setTimeout(() => { void tick() }, 2000) }
@@ -81,7 +83,10 @@ export function PreviewPanel({ ctx, preview, sessionId, close }: any) {
       const result = await call('save', { page, expected_revision: snapshot.revision, change: { kind, element_id: elementId, value } }, controller.signal)
       if (controller.signal.aborted) return
       setInstruction(result.instruction); setValue(''); setNotice('源文件已保存。请交给助手检查并重新导出；当前 PPTX 尚未更新。')
-    } catch (cause) { setError((cause as Error).message) }
+    } catch (cause) {
+      if ((cause as { code?: string }).code === 'preview-unauthorized') { setSnapshot(undefined); setValue(''); setInstruction(''); close() }
+      else setError((cause as Error).message)
+    }
     finally { setBusy(false) }
   }
   const send = async () => {
