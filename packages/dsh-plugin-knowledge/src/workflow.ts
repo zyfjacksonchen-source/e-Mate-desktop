@@ -342,6 +342,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
 
   return {
     ...imports, openOperation, status,
+    async authorize(exec: Execution) { const owner = await transport.capture(); assertExecution(exec, owner); return owner },
     async start(exec: Execution, options: { operationId: string; sourceVersions: any[]; topics: any[]; model: { id: string; reasoning_effort: string }; scope?: Scope; benchmarkQueryIds?: string[]; sourceReplacements?: { source_id: string; source_version: string; replacement_source_id: string }[] }) {
       const owner = await transport.capture(); assertExecution(exec, owner)
       const key = owner + ':' + options.operationId; const hash = digest(options)

@@ -491,3 +491,19 @@ test('benchmark selections produce only the fixed Host explanation, never model-
   const schema = run.adapter.requests[0].tools.find(tool => tool.name === 'structured_output').parameters
   assert.match(schema.properties.claims.items.properties.text.description, /结构化指标见下方快照/)
 })
+
+
+test('read-only Host tools reuse the same native execution owner authorization before and after account changes', async t => {
+  const run = await runtime(t)
+  const parent = run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
+  let captured, owner
+  run.ctx.tools.register({ name: 'authorize_knowledge_read', description: 'Authorize a knowledge read.', parameters: { type: 'object', properties: {} }, output: { schema: { type: 'object', properties: { owner: { type: 'string' } } }, render: () => [] },
+    async execute(_args, exec) { captured = exec; owner = await run.workflow.authorize(exec); exec.concludeTurn(); return { owner } },
+  })
+  run.adapter.script.push(toolChunks('authorize', 'authorize_knowledge_read', {}))
+  parent.followup(createUserMessage({ content: [{ type: 'text', text: '查询知识资料' }], source: { kind: 'user' } })); await parent.whenIdle()
+  assert.match(owner, /^[a-f0-9]{64}$/)
+  assert.equal(await run.workflow.authorize(captured), owner)
+  run.changeAccount()
+  await assert.rejects(run.workflow.authorize(captured), { code: 'scope-changed' })
+})
