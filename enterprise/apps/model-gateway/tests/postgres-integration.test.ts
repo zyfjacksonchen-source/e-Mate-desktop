@@ -327,6 +327,35 @@ test(
         /conflict/i
       );
       assert.equal((await store.currentAccountUsage({ tenantId, userId, modelIds: ['gpt-5.6-sol'] })).totalTokens, 11);
+      const multiTask = Array.from({ length: 3 }, (_, index) => {
+        const batchFactId = `auditfact_${createHash('sha256').update(`${factId}:batch:${index}`).digest('hex')}`;
+        return {
+          ...record,
+          factId: batchFactId,
+          fact: { ...record.fact, taskId: `${sourceId}:batch:${index}`, providerResponseId: batchFactId },
+        };
+      });
+      const orders = Array.from({ length: 10 }, (_, index) => index % 2 ? [...multiTask].reverse() : multiTask);
+      const concurrentBatches = await Promise.all(orders.map(batch => store.ingestAuditUsage(batch)));
+      for (const [index, batch] of concurrentBatches.entries()) {
+        assert.deepEqual(batch.map(receipt => receipt.factId), orders[index]!.map(item => item.factId));
+      }
+      assert.equal((await store.currentAccountUsage({ tenantId, userId, modelIds: ['gpt-5.6-sol'] })).totalTokens, 44);
+      const freshFactId = `auditfact_${createHash('sha256').update(`${factId}:rollback`).digest('hex')}`;
+      const fresh = {
+        ...record, factId: freshFactId,
+        fact: { ...record.fact, taskId: `${sourceId}:rollback`, providerResponseId: freshFactId },
+      };
+      const conflictingScope = { ...record, fact: { ...record.fact, taskId: `${sourceId}:wrong-scope` } };
+      await Promise.all([[fresh, conflictingScope], [conflictingScope, fresh]].map(batch =>
+        assert.rejects(store.ingestAuditUsage(batch), /conflict/i)
+      ));
+      const rolledBackTasks = await database.query(
+        'SELECT task_id FROM e_mate_model_usage_task WHERE tenant_id = $1 AND user_id = $2 AND task_id = ANY($3::text[])',
+        [tenantId, userId, [fresh.fact.taskId, conflictingScope.fact.taskId]]
+      );
+      assert.equal(rolledBackTasks.rowCount, 0);
+      assert.equal((await store.currentAccountUsage({ tenantId, userId, modelIds: ['gpt-5.6-sol'] })).totalTokens, 44);
     } finally {
       await database.query('DELETE FROM e_mate_model_usage_task WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
       await database

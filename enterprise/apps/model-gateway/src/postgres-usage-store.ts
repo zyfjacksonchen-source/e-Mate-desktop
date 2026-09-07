@@ -1274,7 +1274,7 @@ export class PostgresUsageStore implements UsageStore {
     }
   }
 
-  async #add(client: PoolClient, fact: UsageFact, allowPrepared = false, recordedAt?: Date): Promise<void> {
+  async #lockUsageTask(client: PoolClient, fact: UsageFact): Promise<TaskRow | undefined> {
     await client.query(
       `
         INSERT INTO e_mate_model_usage_task (
@@ -1296,7 +1296,11 @@ export class PostgresUsageStore implements UsageStore {
       `,
       [fact.tenantId, fact.userId, fact.taskId]
     );
-    const taskRow = task.rows[0];
+    return task.rows[0];
+  }
+
+  async #add(client: PoolClient, fact: UsageFact, allowPrepared = false, recordedAt?: Date): Promise<void> {
+    const taskRow = await this.#lockUsageTask(client, fact);
     if (
       !taskRow ||
       taskRow.trace_id !== fact.traceId ||
@@ -1418,8 +1422,15 @@ export class PostgresUsageStore implements UsageStore {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
-      const receipts: AuditUsageReceipt[] = [];
-      for (const record of input) {
+      // Match completion's task-before-invocation order, including batches whose
+      // callers submitted the same tasks in opposite orders. Receipt uniqueness
+      // is global, so acquire those locks in their own stable order afterwards.
+      const tasks = new Map(input.map(({ fact }) => [JSON.stringify([fact.tenantId, fact.userId, fact.taskId]), fact]));
+      for (const [, fact] of [...tasks].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+        await this.#lockUsageTask(client, fact);
+      }
+      const receipts = new Map<string, AuditUsageReceipt>();
+      for (const record of [...input].sort((a, b) => a.receiptId < b.receiptId ? -1 : a.receiptId > b.receiptId ? 1 : 0)) {
         const existing = await client.query<AuditInvocationRow>(
           `
           SELECT invocation_id, tenant_id, user_id, task_id, trace_id,
@@ -1552,7 +1563,7 @@ export class PostgresUsageStore implements UsageStore {
         ) {
           throw new AuditUsageConflictError('Audit usage fact conflicts with the finalized ledger');
         }
-        receipts.push({
+        receipts.set(record.factId, {
           factId: record.factId,
           payloadSha256: record.payloadSha256,
           receiptId: record.receiptId,
@@ -1560,7 +1571,7 @@ export class PostgresUsageStore implements UsageStore {
         });
       }
       await client.query('COMMIT');
-      return receipts;
+      return input.map(record => receipts.get(record.factId)!);
     } catch (error) {
       await rollback(client);
       throw error;
