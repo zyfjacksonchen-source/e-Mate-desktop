@@ -13,7 +13,7 @@ function freezeSelection(value: any, model: any): FrozenSelection {
   if (typeof value?.provider !== 'string' || !value.provider || value.provider.length > 128 || value.model !== model.id || (value.reasoningEffort ?? 'none') !== model.reasoning_effort) fail('model-changed')
   return { provider: value.provider, model: value.model, ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort }) }
 }
-type Running = { owner: string; controller: AbortController; agent: any; jobId: string; done?: Promise<any> }
+type Running = { owner: string; scope: Scope; controller: AbortController; agent: any; jobId: string; done?: Promise<any> }
 function receipt(value: any): Compilation {
   if (!UUID.test(value?.id) || !OPERATION.test(value?.operation_id) || !Number.isSafeInteger(value?.version) || value.version < 1 || !['created', 'pending', 'running', 'paused', 'failed', 'committed'].includes(value?.state)
     || !['public', 'uploader-private', 'project'].includes(value.request?.scope?.kind) || !Array.isArray(value.request?.source_versions) || !Array.isArray(value.request?.topics) || !value.checkpoint || typeof value.revision_ids !== 'object') fail('invalid-response')
@@ -184,7 +184,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       if (!goal) { ctx.goals.create(agent, { objective: '整理并发布知识编译 ' + initial.id }); ctx.goals.disarm(agent) }
       else if (goal.phase !== 'complete') { if (goal.phase !== 'active' || goal.activation !== 'armed') ctx.goals.resume(agent, { id: goal.id, revision: goal.revision }); ctx.goals.disarm(agent) }
       if (events(agent).findLast(event => ['user-stop', 'user-resume'].includes(event.kind) && event.owner === owner && event.compilationId === initial.id)?.kind === 'user-stop') fail('cancelled', '该知识任务已被用户停止。')
-      const entry: Running = { owner, controller, agent, jobId: '' }
+      const entry: Running = { owner, scope: structuredClone(initial.request.scope), controller, agent, jobId: '' }
       // Reserve before Job.start so two concurrent UI/Tool starts share one native producer.
       running.set(initial.id, entry)
       try {
@@ -340,7 +340,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
     } catch (error) {
       heartbeat?.(); heartbeat = undefined; await chain
       if (currentOwner() === owner && HASH.test(value.lease_token ?? '') && value.state === 'running') {
-        try { await io.request(owner, 'PATCH', `/compilations/${value.id}`, { expected_version: value.version, lease_token: value.lease_token, state: 'paused', checkpoint }) } catch { /* Unknown lease outcome remains server-owned; resume always rereads. */ }
+        try { await io.request(owner, 'PATCH', `/compilations/${value.id}`, { expected_version: value.version, lease_token: value.lease_token, state: 'paused', checkpoint }, AbortSignal.timeout(3000)) } catch { /* Unknown lease outcome remains server-owned; resume always rereads. */ }
       }
       const goal = ctx.goals.get(agent); if (goal?.phase === 'active') ctx.goals.pause(agent, { id: goal.id, revision: goal.revision })
       await persist(ctx, agent, { kind: 'paused', owner, compilationId: value.id, unknownSubmission: !!checkpoint.unknown_submission })
@@ -436,6 +436,27 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       const owner = await transport.capture(); assertExecution(exec, owner); if (!UUID.test(compilationId)) fail('invalid-request')
       await launches.get(owner + ':' + compilationId)
       assertExecution(exec, owner)
+      const active = running.get(compilationId)
+      if (active) {
+        if (active.owner !== owner) fail('scope-changed')
+        // A remote outage or revoked project grant must not gate the user's
+        // control of their own local producer. Use its already verified scope.
+        await persist(ctx, active.agent, { kind: 'user-stop', owner, compilationId, scope: active.scope, controlVersion: 1 })
+        transport.check(owner)
+        ctx.jobs.kill(active.jobId, active.agent, '用户停止知识整理')
+        await active.done
+        assertExecution(exec, owner)
+        try {
+          const signal = AbortSignal.any([AbortSignal.timeout(3000), ...(exec.signal ? [exec.signal] : [])])
+          const observed = await status({ ...exec, signal }, compilationId, active.scope)
+          assertExecution(exec, owner)
+          return { ...observed, local_stopped: true as const, remote_state: observed.state }
+        } catch {
+          assertExecution(exec, owner)
+          return { scope_key: owner, compilation_id: compilationId, scope: active.scope,
+            job_id: active.jobId, session_id: active.agent.id, local_stopped: true as const, remote_state: 'unknown' as const }
+        }
+      }
       const value = receipt(await selectedTransport(exec, scope).request(owner, 'GET', `/compilations/${compilationId}`, undefined, exec.signal))
       if (value.state === 'committed') return statusResult(value, owner)
       const { agent } = await canonicalAgent(exec, value, owner, await recoverySelection(exec, value, owner))

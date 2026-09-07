@@ -674,3 +674,95 @@ test('a legacy paused canonical session without control intent is never resumed 
   assert.equal(events(legacy.agent).some(event => event.kind === 'user-resume'), false)
   await legacy.dispose()
 })
+
+test('local stop ends a real model stream before network status and durable intent blocks later automatic recovery', async t => {
+  const backing = server(); let offline = false, run
+  const observed = []
+  const backend = { async request(url, init) {
+    if (offline) {
+      observed.push({ method: init.method, modelAborted: run.adapter.requests[0]?.signal.aborted })
+      throw Error('offline private service diagnostic')
+    }
+    return backing.request(url, init)
+  } }
+  run = await runtime(t, backend); run.adapter.script.push('hang')
+  const started = await run.workflow.start({ agent: run.caller }, request())
+  while (!run.adapter.requests.length) await new Promise(resolve => setTimeout(resolve, 5))
+  offline = true
+  const stopped = await run.workflow.stop({ agent: run.caller }, started.compilation_id)
+  assert.equal(stopped.local_stopped, true); assert.equal(stopped.remote_state, 'unknown')
+  assert.equal(Object.hasOwn(stopped, 'state'), false)
+  assert.equal((await done(run, started)).status, 'killed')
+  assert(run.adapter.requests[0].signal.aborted)
+  assert(observed.length > 0 && observed.every(call => call.modelAborted === true))
+  assert(!JSON.stringify(stopped).includes('private service'))
+  const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
+  assert(stored.events.some(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop' && event.data.compilationId === started.compilation_id))
+  const directory = run.root
+  await run.dispose(); offline = false
+  const reopened = await runtime(t, backend, directory)
+  await assert.rejects(reopened.workflow.resume({ agent: reopened.caller }, started.compilation_id, undefined, { automatic: true }), { code: 'cancelled' })
+  assert.equal(reopened.adapter.requests.length, 0)
+})
+
+test('revoked project authorization cannot prevent stopping this owners local native Job', async t => {
+  const backing = server(); let revoked = false, run
+  const methods = {
+    create_knowledge_compilation: args => ['POST', '/compilations', args.request],
+    find_knowledge_compilation: args => ['GET', '/compilations?operation_id=' + args.operation_id],
+    get_knowledge_compilation: args => ['GET', '/compilations/' + args.compilation_id],
+    claim_knowledge_compilation: args => ['POST', '/compilations/' + args.compilation_id + '/claim', args.request],
+    checkpoint_knowledge_compilation: args => ['PATCH', '/compilations/' + args.compilation_id, args.request],
+    get_knowledge_revision: args => ['GET', '/revisions/' + args.revision_id],
+  }
+  const deniedCalls = []
+  const dependencies = { async xinKnowledgeCall(name, args, _exec, signal) {
+    if (revoked) { deniedCalls.push({ name, modelAborted: run.adapter.requests[0]?.signal.aborted }); return { structuredContent: { schema_version: 1, status: 'failed', error: 'FORBIDDEN' } } }
+    signal?.throwIfAborted()
+    const [method, path, body] = methods[name](args)
+    const response = await backing.request(new URL('https://fixture/knowledge/v1' + path), { method, body: body === undefined ? undefined : JSON.stringify(body) })
+    let value = await response.json(); if (!response.ok) value = { schema_version: 1, status: 'failed', error: value.error }
+    return { structuredContent: value }
+  } }
+  run = await runtime(t, { request() { throw Error('Project must stay on Xin transport') } }, undefined, dependencies)
+  run.adapter.script.push('hang')
+  const scope = { kind: 'project', project_id: 42 }
+  const started = await run.workflow.start({ agent: run.caller }, { ...request(), scope })
+  while (!run.adapter.requests.length) await new Promise(resolve => setTimeout(resolve, 5))
+  revoked = true
+  const stopped = await run.workflow.stop({ agent: run.caller }, started.compilation_id, scope)
+  assert.equal(stopped.local_stopped, true); assert.equal(stopped.remote_state, 'unknown')
+  assert.deepEqual(stopped.scope, scope)
+  assert.equal((await done(run, started)).status, 'killed')
+  assert(deniedCalls.length > 0 && deniedCalls.every(call => call.modelAborted === true))
+  const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
+  assert.deepEqual(stored.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop').data.scope, scope)
+  revoked = false
+  await assert.rejects(run.workflow.resume({ agent: run.caller }, started.compilation_id, scope, { automatic: true }), { code: 'cancelled' })
+  assert.equal(run.adapter.requests.length, 1)
+})
+
+test('stopping a committed compilation preserves published state and does not append a stop or replay publication', async t => {
+  const run = await runtime(t); run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const started = await run.workflow.start({ agent: run.caller }, request())
+  assert.equal((await done(run, started)).status, 'completed')
+  const before = run.backend.calls.length
+  const stopped = await run.workflow.stop({ agent: run.caller }, started.compilation_id)
+  assert.equal(stopped.state, 'committed')
+  assert.equal(run.backend.compilation.state, 'committed')
+  assert(run.backend.calls.slice(before).every(call => call.method === 'GET'))
+  const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
+  assert.equal(stored.events.some(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop'), false)
+  assert.equal(run.adapter.requests.length, 1)
+})
+
+test('a replacement enterprise owner cannot record a stop in the previous owners canonical task', async t => {
+  const run = await runtime(t); run.adapter.script.push('hang')
+  const started = await run.workflow.start({ agent: run.caller }, request())
+  while (!run.adapter.requests.length) await new Promise(resolve => setTimeout(resolve, 5))
+  run.changeAccount()
+  await assert.rejects(run.workflow.stop({ agent: run.caller }, started.compilation_id))
+  await done(run, started)
+  const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
+  assert.equal(stored.events.some(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop'), false)
+})
