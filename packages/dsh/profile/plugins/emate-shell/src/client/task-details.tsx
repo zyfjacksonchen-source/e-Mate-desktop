@@ -6,7 +6,7 @@ import { createPetWorkFactsReader } from './pet-image-facts.ts'
 const phaseLabels: Record<string, string> = {
   active: '进行中', blocked: '等待处理', paused: '已暂停', completed: '已完成',
   pending: '待处理', in_progress: '进行中', running: '进行中', stopping: '正在停止',
-  failed: '失败', cancelled: '已取消',
+  failed: '失败', cancelled: '已取消', killed: '已取消',
 }
 
 interface TaskDetailsProps {

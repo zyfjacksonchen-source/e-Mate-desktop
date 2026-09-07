@@ -105,3 +105,19 @@ it('opens the existing pet settings section only after canvas save succeeds', as
     expect(sectionClick).toHaveBeenCalledOnce()
   } finally { document.body.replaceChildren() }
 })
+
+it('labels native killed Jobs as cancelled while preserving completed and failed states', () => {
+  render(<TaskDetails {...{
+    sessionId: 'task', taskId: 'task', close: vi.fn(),
+    useSession: (read: any) => read({ running: false, lastAgentError: null, pending: [], runningCalls: [], queue: [] }),
+    useSessions: (read: any) => read({ byId: { task: { title: '任务状态' } }, jobsBySession: { task: [
+      { id: 'killed-job', status: 'killed' }, { id: 'completed-job', status: 'completed' }, { id: 'failed-job', status: 'failed' },
+    ] } }),
+    useProjection: () => undefined,
+  } as any} />)
+  expect(screen.getByText('作业 1 · 已取消')).toBeTruthy()
+  expect(screen.getByText('作业 2 · 已完成')).toBeTruthy()
+  expect(screen.getByText('作业 3 · 失败')).toBeTruthy()
+  expect(screen.getByRole('status').textContent).toBe('当前未执行')
+  expect(screen.queryByText(/状态待同步/)).toBeNull()
+})
