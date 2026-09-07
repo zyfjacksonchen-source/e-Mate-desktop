@@ -1,5 +1,5 @@
-# Register the self-contained pure-JavaScript Office Tools and Skills through
-# the target rc.7 Harness profile. No Python, native Office, or browser runtime.
+# Register Office Tools, bundled Skills and the native preview client through
+# the target rc.7 Harness profile and its existing managed runtimes.
 - insert:
     - id: emate-office-skills
       name: '@e-mate/dsh-plugin-office-skills'

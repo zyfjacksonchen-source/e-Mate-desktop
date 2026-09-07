@@ -173,6 +173,8 @@ describe('e-Mate desktop profile', { timeout: 30_000 }, () => {
     expect(findSkillPatch).not.toContain('/tree/main/skills/connect-feishu-cli')
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-mcp-manage', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'client.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'ppt-preview.py'))).toBe(true)
     expect(lstatSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets')).isSymbolicLink())
       .toBe(process.platform !== 'win32')
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant'))).toBe(false)
@@ -282,7 +284,7 @@ describe('e-Mate desktop profile', { timeout: 30_000 }, () => {
     }))
     expect(rows.map(row => row.id)).not.toContain('emate-xin-assistant')
     expect(rows.find(row => row.id === 'emate-office-skills')).toEqual(expect.objectContaining({
-      name: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
+      name: '@e-mate/dsh-plugin-office-skills',
     }))
     expect(rows.find(row => row.id === 'emate-agent-operations')?.disabled).toBe(true)
     expect(rows.find(row => row.id === 'emate-schedules')).toEqual(expect.objectContaining({

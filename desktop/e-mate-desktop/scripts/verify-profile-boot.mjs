@@ -243,6 +243,7 @@ try {
   for (const id of [
     '@e-mate/desktop',
     '@e-mate/dsh-plugin-file-import',
+    '@e-mate/dsh-plugin-office-skills',
     '@e-mate/dsh-plugin-skill-hub',
     '@e-mate/dsh-plugin-genui',
     '@e-mate/dsh-plugin-vision-toolkit',
