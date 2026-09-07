@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopShellSpec } from '../src/runtime.ts'
 
 const terminal = vi.hoisted(() => ({ open: vi.fn() }))
+const svgRenderer = vi.hoisted(() => ({ render: vi.fn() }))
+vi.mock('../src/svg-page-renderer.ts', () => ({ renderSvgPage: svgRenderer.render }))
 const childProcess = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void
   const listeners = new Map<string, Listener[]>()
@@ -251,6 +253,7 @@ describe('Electron compatibility runtime', () => {
     electron.notifications.length = 0
     childProcess.reset()
     vi.clearAllMocks()
+    svgRenderer.render.mockReset()
     electron.loadURL.mockReset()
     electron.loadURL.mockResolvedValue(undefined)
     electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
@@ -265,6 +268,34 @@ describe('Electron compatibility runtime', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('forwards native SVG rendering and propagates caller cancellation', async () => {
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const controller = new AbortController()
+    const result = { png: Buffer.from('renderer result'), width: 320, height: 180 }
+    svgRenderer.render.mockResolvedValue(result)
+    expect(await runtime.renderSvgPage({ svg: '<svg/>', width: 320, height: 180, signal: controller.signal })).toBe(result)
+    const request = svgRenderer.render.mock.calls[0]![0]
+    expect(request).toMatchObject({ svg: '<svg/>', width: 320, height: 180 })
+    expect(request.signal.aborted).toBe(false)
+    controller.abort()
+    expect(request.signal.aborted).toBe(true)
+  })
+
+  it('cancels native SVG work on quit and rejects new renders', async () => {
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    svgRenderer.render.mockImplementation(({ signal }: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    }))
+    const pending = runtime.renderSvgPage({ svg: '<svg/>', width: 320, height: 180 })
+    const rejected = expect(pending).rejects.toThrow('Desktop is shutting down')
+    runtime.prepareToQuit()
+    await rejected
+    await expect(runtime.renderSvgPage({ svg: '<svg/>', width: 320, height: 180 })).rejects.toThrow('Desktop is shutting down')
+    expect(svgRenderer.render).toHaveBeenCalledTimes(1)
   })
 
   it('uses the native macOS frame, Dock icon, and template tray image', async () => {

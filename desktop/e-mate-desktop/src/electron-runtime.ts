@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
+import { renderSvgPage as renderNativeSvgPage } from './svg-page-renderer.ts'
 import type { DesktopRendererBootstrap } from './desktop-bootstrap-contract.ts'
 import { DESKTOP_UPDATE_RUN_INTERACTIVE } from './desktop-update-trigger-contract.ts'
 import type { DesktopInstallationId } from './desktop-installation-id.ts'
@@ -32,6 +33,8 @@ import type {
   DesktopNotification,
   DesktopPlatform,
   DesktopRuntime,
+  DesktopSvgRenderRequest,
+  DesktopSvgRenderResult,
   DesktopShellSpec,
   DesktopTerminalSpec,
   DesktopThemeSource,
@@ -173,6 +176,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private mountTask: Promise<void> | undefined
   private release: (() => Promise<void>) | undefined
   private quitting = false
+  private readonly svgRenderShutdown = new AbortController()
   private readonly trayItems = new Map<symbol, DesktopTrayItem>()
   private terminalSpec: DesktopTerminalSpec | undefined
   private rendererBootReported = false
@@ -299,6 +303,15 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     }
   }
 
+  /** @inheritdoc */
+  async renderSvgPage(request: DesktopSvgRenderRequest): Promise<DesktopSvgRenderResult> {
+    this.svgRenderShutdown.signal.throwIfAborted()
+    const signal = request.signal === undefined
+      ? this.svgRenderShutdown.signal
+      : AbortSignal.any([request.signal, this.svgRenderShutdown.signal])
+    return await renderNativeSvgPage({ ...request, signal })
+  }
+
   private async showDirectoryPicker(): Promise<string | null> {
     const options: Electron.OpenDialogOptions = {
       title: '选择工作区目录',
@@ -415,6 +428,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   /** @inheritdoc */
   prepareToQuit(): void {
     this.quitting = true
+    this.svgRenderShutdown.abort(new Error('Desktop is shutting down'))
     this.stopRendererBootMonitoring()
   }
 
