@@ -150,24 +150,28 @@ export function apply(ctx: any): void {
   const host = createKnowledgeHost(ctx.get('emateIdentity'), (callback, delay) => ctx.timeout(callback, delay))
   let uiOperations: ReturnType<typeof createKnowledgeUiOperations> | undefined
   const xinOperations = new WeakMap<object, { call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> }>()
+  const captureXin = (exec?: any) => {
+    // A Host operation spans many reads with fresh execution wrappers. Keep
+    // its native Xin subject closure bound to the same canonical Agent.
+    const key = exec?.rootCallId ? exec : exec?.agent
+    let operation = key ? xinOperations.get(key) : undefined
+    if (!operation) {
+      operation = ctx.emateXinKnowledge.capture(exec?.rootCallId ? exec : {})
+      if (key) xinOperations.set(key, operation!)
+    }
+    return operation!
+  }
   const workflow = createKnowledgeWorkflow(ctx, { installModelSelection,
     resolveSelection: exec => resolveKnowledgeSelection(ctx, exec, exec?.signal, exec?.agent ? uiOperations?.selectionFor(exec.agent) : undefined),
     xinKnowledgeCall(name, args, exec, signal) {
-      let operation = xinOperations.get(exec)
-      if (!operation) {
-        // The workflow validates a Host-created operation Agent before reaching
-        // this seam; model-initiated operations must also bind their root call.
-        operation = ctx.emateXinKnowledge.capture(exec.rootCallId ? exec : { signal: exec.signal })
-        xinOperations.set(exec, operation!)
-      }
-      return operation!.call(name, args, signal)
+      return captureXin(exec).call(name, args, signal)
     },
   })
   ctx.provide('emateKnowledgeWorkflow', workflow)
   const uiRead = createKnowledgeUiRead({ host, workflow, xinCapture(exec: any) {
     const scope_key = ownerOf(ctx.get('emateIdentity'))
     if (!scope_key) reject('请先完成企业登录。', 'unauthorized')
-    const operation = ctx.emateXinKnowledge.capture(exec?.rootCallId ? exec : { signal: exec?.signal })
+    const operation = captureXin(exec)
     return { scope_key: scope_key!, call: operation.call.bind(operation) }
   } })
   uiOperations = createKnowledgeUiOperations(ctx, { workflow, read: uiRead, resolveSelection: exec => resolveKnowledgeSelection(ctx, exec) })
