@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { diskFiles, KnowledgeImports } from '../src/client/imports.tsx'
 const scope = 'a'.repeat(64)
 const prepared = { operation_id: '1'.repeat(36), session_id: '2'.repeat(36), title: '导入并整理知识', scope: { kind: 'uploader-private' }, model: { id: 'model', reasoning_effort: 'medium' }, phase: 'prepared', sources: [], compiled_count: 0, updated_at: 1 }
 const reply = (result: any) => ({ scope_key: scope, result })
-afterEach(() => { cleanup(); delete (window as any).__DSH_DESKTOP_FILE_PATH__ })
+beforeEach(() => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
+})
+afterEach(() => { cleanup(); vi.useRealTimers(); delete (window as any).__DSH_DESKTOP_FILE_PATH__ })
 function file() { return new File(['original'], 'report.pdf', { type: 'application/pdf' }) }
 function selectOriginal() {
   const original = file()
@@ -130,4 +134,128 @@ it('reading supplement reopens the same import selection without clearing files 
   expect((screen.getByRole('combobox', { name: '资料范围' }) as HTMLSelectElement).value).toBe('public')
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '选择文件' }))
   expect(call.mock.calls.every(([endpoint]) => endpoint === 'ui.import.recent')).toBe(true)
+})
+
+it('serializes slow recent reads and coalesces repeated refresh clicks into one follow-up', async () => {
+  vi.useFakeTimers()
+  const releases: ((value: any) => void)[] = []
+  const call = vi.fn(() => new Promise<any>(resolve => releases.push(resolve)))
+  render(<KnowledgeImports callKnowledge={call} />)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' }))
+  await act(async () => vi.advanceTimersByTimeAsync(10000))
+  expect(call).toHaveBeenCalledOnce()
+  act(() => { fireEvent.click(screen.getByRole('button', { name: '刷新' })); fireEvent.click(screen.getByRole('button', { name: '刷新' })) })
+  expect(call).toHaveBeenCalledOnce()
+  await act(async () => releases[0]!(reply({ items: [], has_more: false })))
+  expect(call).toHaveBeenCalledTimes(2)
+  await act(async () => vi.advanceTimersByTimeAsync(10000))
+  expect(call).toHaveBeenCalledTimes(2)
+  await act(async () => releases[1]!(reply({ items: [], has_more: false })))
+  await act(async () => vi.advanceTimersByTimeAsync(1999))
+  expect(call).toHaveBeenCalledTimes(2)
+  await act(async () => vi.advanceTimersByTimeAsync(1))
+  expect(call).toHaveBeenCalledTimes(3)
+})
+
+it.each(['hidden', 'offline'])('pauses and aborts only UI recent reads while %s, then catches up immediately', async (state) => {
+  vi.useFakeTimers()
+  let releaseRecent!: (value: any) => void, releaseStart!: (value: any) => void
+  let recentSignal!: AbortSignal, startSignal!: AbortSignal, recentCount = 0
+  const call = vi.fn((endpoint: string, _body: any, signal: AbortSignal) => {
+    if (endpoint === 'ui.import.recent') {
+      recentCount++
+      if (recentCount > 1) return Promise.resolve(reply({ items: [{ ...prepared, phase: 'importing' }], has_more: false }))
+      recentSignal = signal; return new Promise<any>(resolve => { releaseRecent = resolve })
+    }
+    if (endpoint === 'ui.import.prepare') return Promise.resolve(reply(prepared))
+    if (endpoint === 'ui.import.start') { startSignal = signal; return new Promise<any>(resolve => { releaseStart = resolve }) }
+    throw Error(endpoint)
+  })
+  render(<KnowledgeImports callKnowledge={call} />)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' })); selectOriginal()
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '导入并整理所选资料' })))
+  if (state === 'hidden') {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+  } else {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false })
+    act(() => dispatchEvent(new Event('offline')))
+  }
+  expect(recentSignal.aborted).toBe(true)
+  expect(startSignal.aborted).toBe(false)
+  await act(async () => releaseRecent(reply({ items: [{ ...prepared, title: '取消读取的旧回执' }], has_more: false })))
+  await act(async () => releaseStart(reply({ ...prepared, phase: 'importing' })))
+  expect(screen.getByText('导入中')).toBeTruthy()
+  expect(screen.queryByText('取消读取的旧回执')).toBeNull()
+  await act(async () => vi.advanceTimersByTimeAsync(10000))
+  expect(recentCount).toBe(1)
+  if (state === 'hidden') {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  } else {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
+    await act(async () => dispatchEvent(new Event('online')))
+  }
+  expect(recentCount).toBe(2)
+  expect(call.mock.calls.some(([endpoint]) => endpoint === 'ui.import.stop')).toBe(false)
+})
+
+it('cancels collapsed and unmounted reads, and immediately refreshes a reopened panel', async () => {
+  vi.useFakeTimers()
+  const pending: { signal: AbortSignal; resolve(value: any): void }[] = []
+  const call = vi.fn((_endpoint: string, _body: any, signal: AbortSignal) => new Promise<any>(resolve => pending.push({ signal, resolve })))
+  const view = render(<KnowledgeImports callKnowledge={call} />)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' }))
+  fireEvent.click(screen.getByRole('button', { name: '收起知识导入' }))
+  expect(pending[0]!.signal.aborted).toBe(true)
+  await act(async () => pending[0]!.resolve(reply({ items: [{ ...prepared, title: '旧关闭回执' }], has_more: false })))
+  await act(async () => vi.advanceTimersByTimeAsync(10000))
+  expect(call).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' }))
+  expect(call).toHaveBeenCalledTimes(2)
+  expect(screen.queryByText('旧关闭回执')).toBeNull()
+  view.unmount()
+  expect(pending[1]!.signal.aborted).toBe(true)
+  await act(async () => pending[1]!.resolve(reply({ items: [], has_more: false })))
+  await act(async () => vi.advanceTimersByTimeAsync(10000))
+  expect(call).toHaveBeenCalledTimes(2)
+})
+
+it('discards old-account reads before loading the new account after identity changes', async () => {
+  vi.useFakeTimers()
+  let finish!: (value: any) => void, signal!: AbortSignal
+  const call = vi.fn((_endpoint: string, _body: any, nextSignal: AbortSignal) => {
+    if (call.mock.calls.length === 1) { signal = nextSignal; return new Promise<any>(resolve => { finish = resolve }) }
+    return Promise.resolve({ scope_key: 'b'.repeat(64), result: { items: [{ ...prepared, title: '新账号任务' }], has_more: false } })
+  })
+  render(<KnowledgeImports callKnowledge={call} />)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' }))
+  act(() => dispatchEvent(new Event('emate:identity-changed')))
+  expect(signal.aborted).toBe(true)
+  await act(async () => finish(reply({ items: [{ ...prepared, title: '旧账号任务' }], has_more: true })))
+  expect(screen.queryByText('旧账号任务')).toBeNull()
+  expect(screen.getByText('新账号任务')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '继续加载任务' })).toBeNull()
+})
+
+it('does not replace an acknowledged task action with an older in-flight recent receipt', async () => {
+  vi.useFakeTimers()
+  let finish!: (value: any) => void, recentCount = 0
+  const current = { ...prepared, phase: 'compiling' }
+  const call = vi.fn(async (endpoint: string) => {
+    if (endpoint === 'ui.import.recent') {
+      if (++recentCount === 1) return new Promise(resolve => { finish = resolve })
+      return reply({ items: [current], has_more: false })
+    }
+    if (endpoint === 'ui.import.prepare') return reply(prepared)
+    if (endpoint === 'ui.import.start') return reply(current)
+    throw Error(endpoint)
+  })
+  render(<KnowledgeImports callKnowledge={call} />)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' })); selectOriginal()
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '导入并整理所选资料' })))
+  expect(screen.getByText('整理中')).toBeTruthy()
+  await act(async () => finish(reply({ items: [], has_more: false })))
+  expect(screen.getByText('整理中')).toBeTruthy()
+  expect(recentCount).toBe(2)
 })

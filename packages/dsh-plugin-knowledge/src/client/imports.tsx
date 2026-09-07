@@ -27,9 +27,10 @@ export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, repla
   const [items, setItems] = useState<UiImportStatus[]>([]), [more, setMore] = useState(false)
   const [projects, setProjects] = useState<{ items: { id: number; title: string; can_import?: boolean }[]; complete: boolean }>()
   const chooser = useRef<HTMLInputElement>(null), generation = useRef(0), owner = useRef(''), action = useRef(false)
+  const refreshRead = useRef<(() => void) | undefined>(undefined), taskUpdates = useRef(0)
   const requests = useRef(new Set<AbortController>()), call = useRef(callKnowledge); call.current = callKnowledge
-  const run = async (endpoint: string, payload: Record<string, unknown>) => {
-    const epoch = generation.current, controller = new AbortController(); requests.current.add(controller)
+  const run = async (endpoint: string, payload: Record<string, unknown>, controller = new AbortController()) => {
+    const epoch = generation.current; requests.current.add(controller)
     try {
       const reply = await call.current(endpoint, payload, controller.signal)
       if (epoch !== generation.current || controller.signal.aborted) throw new DOMException('cancelled', 'AbortError')
@@ -38,19 +39,57 @@ export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, repla
     } finally { requests.current.delete(controller) }
   }
   const report = (reason: any) => { if (reason?.name !== 'AbortError') setError(reason instanceof Error ? reason.message : '操作未完成，请查看最近任务。') }
-  const refresh = async () => {
-    try { const result = await run('ui.import.recent', {}); if (!Array.isArray(result.items)) throw Error('任务回执无效。'); setItems(result.items); setMore(result.has_more === true) }
-    catch (reason) { report(reason) }
-  }
+  const refresh = () => refreshRead.current?.()
   useEffect(() => {
     const clear = () => {
       generation.current++; requests.current.forEach(controller => controller.abort()); requests.current.clear(); owner.current = ''; action.current = false
-      setItems([]); setFiles([]); setProjects(undefined); setKind('uploader-private'); setProjectId(''); setReplace(false); setTitle(''); setBusy(false); setPending(undefined); setError('登录状态已变化，请重新选择资料。')
+      taskUpdates.current++; setItems([]); setMore(false); setFiles([]); setProjects(undefined); setKind('uploader-private'); setProjectId(''); setReplace(false); setTitle(''); setBusy(false); setPending(undefined); setError('登录状态已变化，请重新选择资料。')
     }
     addEventListener('emate:identity-changed', clear)
     return () => { generation.current++; requests.current.forEach(controller => controller.abort()); requests.current.clear(); removeEventListener('emate:identity-changed', clear) }
   }, [])
-  useEffect(() => { if (!open) return; void refresh(); const timer = setInterval(() => { void refresh() }, 2000); return () => clearInterval(timer) }, [open])
+  useEffect(() => {
+    if (!open) return
+    let disposed = false, running = false, rerun = false, controller: AbortController | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const enabled = () => !disposed && document.visibilityState !== 'hidden' && navigator.onLine !== false
+    const poll = async () => {
+      if (timer) clearTimeout(timer)
+      if (!enabled()) return
+      if (running) { rerun = true; return }
+      running = true; controller = new AbortController()
+      const updates = taskUpdates.current
+      try {
+        const result = await run('ui.import.recent', {}, controller)
+        if (!enabled() || controller.signal.aborted) return
+        if (!Array.isArray(result.items)) throw Error('任务回执无效。')
+        // A completed user action owns its newer receipt; catch up with a fresh read.
+        if (updates !== taskUpdates.current) { rerun = true; return }
+        setItems(result.items); setMore(result.has_more === true)
+      } catch (reason) { if (!disposed && !controller.signal.aborted) report(reason) }
+      finally {
+        running = false; controller = undefined
+        if (enabled()) {
+          if (rerun) { rerun = false; void poll() }
+          else timer = setTimeout(() => void poll(), 2000)
+        }
+      }
+    }
+    const lifecycle = () => {
+      if (timer) clearTimeout(timer)
+      if (!enabled()) { rerun = false; controller?.abort() }
+      else void poll()
+    }
+    refreshRead.current = () => void poll()
+    document.addEventListener('visibilitychange', lifecycle)
+    addEventListener('online', lifecycle); addEventListener('offline', lifecycle); addEventListener('emate:identity-changed', lifecycle)
+    void poll()
+    return () => {
+      disposed = true; refreshRead.current = undefined; if (timer) clearTimeout(timer); controller?.abort()
+      document.removeEventListener('visibilitychange', lifecycle)
+      removeEventListener('online', lifecycle); removeEventListener('offline', lifecycle); removeEventListener('emate:identity-changed', lifecycle)
+    }
+  }, [open])
   useEffect(() => { setReplace(false) }, [replacement?.source_id, replacement?.source_version])
   useEffect(() => {
     if (!open || kind !== 'project') return
@@ -68,17 +107,17 @@ export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, repla
       if (kind === 'project' && !projects?.items.some(item => item.id === Number(projectId) && item.can_import === true)) throw Error('请选择有导入权限的项目。')
       const prepared = await run('ui.import.prepare', { paths: files.map(file => file.path), scope, ...(title.trim() ? { title: title.trim() } : {}), ...(replace && replacement ? { supersedes: { source_id: replacement.source_id, source_version: replacement.source_version } } : {}) })
       reference = { operation_id: prepared.operation_id, session_id: prepared.session_id }
-      setItems(previous => [prepared, ...previous.filter(item => item.operation_id !== prepared.operation_id)])
+      taskUpdates.current++; setItems(previous => [prepared, ...previous.filter(item => item.operation_id !== prepared.operation_id)])
       const started = await run('ui.import.start', reference)
-      setItems(previous => [started, ...previous.filter(item => item.operation_id !== started.operation_id)]); setFiles([]); setTitle(''); setReplace(false)
+      taskUpdates.current++; setItems(previous => [started, ...previous.filter(item => item.operation_id !== started.operation_id)]); setFiles([]); setTitle(''); setReplace(false)
     } catch (reason) {
-      if (epoch === generation.current) { report(reason); if (reference) { try { const status = await run('ui.import.status', reference); setItems(previous => [status, ...previous.filter(item => item.operation_id !== status.operation_id)]) } catch { /* Keep the issued reference for explicit retry. */ } } else void refresh() }
+      if (epoch === generation.current) { report(reason); if (reference) { try { const status = await run('ui.import.status', reference); taskUpdates.current++; setItems(previous => [status, ...previous.filter(item => item.operation_id !== status.operation_id)]) } catch { /* Keep the issued reference for explicit retry. */ } } else void refresh() }
     } finally { if (epoch === generation.current) { action.current = false; setBusy(false) } }
   }
   const changeTask = async (item: UiImportStatus, actionName: 'stop' | 'resume' | 'start') => {
     if (pending) return
     setPending(item.operation_id); setError(''); const epoch = generation.current
-    try { const status = await run('ui.import.' + actionName, { operation_id: item.operation_id, session_id: item.session_id }); setItems(previous => previous.map(value => value.operation_id === item.operation_id ? status : value)) }
+    try { const status = await run('ui.import.' + actionName, { operation_id: item.operation_id, session_id: item.session_id }); taskUpdates.current++; setItems(previous => previous.map(value => value.operation_id === item.operation_id ? status : value)) }
     catch (reason) { if (epoch === generation.current) report(reason) }
     finally { if (epoch === generation.current) setPending(undefined) }
   }
