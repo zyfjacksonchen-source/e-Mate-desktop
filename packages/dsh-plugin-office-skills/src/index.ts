@@ -78,11 +78,12 @@ interface SkillSpec {
   directory: string
   format?: OfficeFormat
   hostGuide?: string
+  runtimePending?: boolean
 }
 
 const skillRoot = fileURLToPath(new URL('../skills/', import.meta.url))
 const SPECS: readonly SkillSpec[] = [
-  { name: 'documents', description: 'Create, read, and safely regenerate DOCX documents locally.', whenToUse: 'Use for text-first DOCX authoring, reading, review, and supported edits.', directory: `${skillRoot}documents`, format: 'docx' },
+  { name: 'documents', description: 'Word 文档：创建、编辑和套用模板，支持中文排版、批注与修订。', whenToUse: '用于 Word 文档创建、模板填充、格式保留编辑、批注和修订；使用前验证 Python 依赖。', directory: `${skillRoot}documents`, format: 'docx', hostGuide: 'HOST.md', runtimePending: true },
   { name: 'pdf', description: 'Create, read, and safely regenerate PDF documents locally.', whenToUse: 'Use for text-first PDF creation, extraction, review, and supported edits.', directory: `${skillRoot}pdf`, format: 'pdf' },
   { name: 'spreadsheets', description: 'Create, read, and safely regenerate XLSX workbooks locally.', whenToUse: 'Use for tabular XLSX authoring, reading, analysis, and supported edits.', directory: `${skillRoot}spreadsheets`, format: 'xlsx' },
   { name: 'presentations', description: 'Create, read, and safely regenerate PPTX presentations locally.', whenToUse: 'Use for text-first PPTX authoring, extraction, review, and supported edits.', directory: `${skillRoot}presentations`, format: 'pptx' },
@@ -101,7 +102,7 @@ function candidate(spec: SkillSpec): SkillCandidate {
     rank: BUNDLED_SKILL_RANK,
     locator: spec.name,
     path: `${spec.directory}/SKILL.md`,
-    metadata: { eMateCapability: 'office', ...(spec.format === undefined ? {} : { format: spec.format }), adapter: spec.hostGuide === undefined ? 'clean-room' : 'upstream', state: 'ready' },
+    metadata: { eMateCapability: 'office', ...(spec.format === undefined ? {} : { format: spec.format }), adapter: spec.hostGuide === undefined ? 'clean-room' : 'upstream', state: spec.runtimePending ? 'needs-runtime' : 'ready' },
   }
 }
 

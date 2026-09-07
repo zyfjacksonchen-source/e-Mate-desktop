@@ -25,3 +25,10 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - e-Mate additions: `HOST.md` is prepended by the existing provider with the actual absolute resource directory. It retains the original transcript as authority, makes cleaning optional, uses only existing native Python if available, and does not claim audio transcription or require a connection.
 - e-Mate script change (2026-09-07): `clean_transcript.py` now drops an all-digit line only when immediately followed by a subtitle timestamp. Standalone numeric meeting facts survive. All other upstream cleanup behavior remains; timestamps are still removed from the optional derivative, so citations and facts must be checked against the untouched original.
 - The helper requires only Python standard-library modules; no Python dependency or runtime is bundled by this addition. The Agent performs synthesis through its existing model channel. The original four Office presets and two Tool/Job paths remain available while their replacements are prepared.
+
+## Word replacement
+
+- NousResearch/hermes-agent, `skills/productivity/docx` v1.1.0, fixed commit `9fc80ac70f6b97e36556c33bc4895b75558d4136`.
+- MIT, Copyright (c) 2026 Nous Research; full license in `skills/documents/LICENSE`. Only the current MIT rewrite is included, not its proprietary predecessor or the Hermes runtime.
+- Local differences and retained upstream references are recorded in `skills/documents/UPSTREAM.md`. Fixes cover replacement rescanning, shared parts, Chinese styles and relationship validation.
+- Python, python-docx/lxml and real document rendering are separate runtime requirements. This source replacement is marked `needs-runtime` until the packaged environment is integrated and verified. It is not an installed-readiness claim.

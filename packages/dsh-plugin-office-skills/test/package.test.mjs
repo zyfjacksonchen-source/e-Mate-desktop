@@ -35,11 +35,17 @@ test('registers five ready Skills and two target Tool/Job paths', async () => {
   for (const skill of skills) {
     assert.equal(skill.rank, 600)
     assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
-    assert.equal(skill.metadata.state, 'ready')
+    assert.equal(skill.metadata.state, skill.name === 'documents' ? 'needs-runtime' : 'ready')
     const loaded = await provider.get(skill, {})
     assert.ok(loaded.content.length > 300)
     assert.doesNotMatch(loaded.content, /^---/u)
     assert.doesNotMatch(loaded.content, /EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE/u)
+    if (skill.name === 'documents') {
+      assert.equal(skill.metadata.adapter, 'upstream')
+      assert.ok(loaded.content.includes(loaded.resourceBase.path))
+      assert.match(loaded.content, /python-docx/u)
+      assert.match(await readFile(join(loaded.resourceBase.path, 'LICENSE'), 'utf8'), /Nous Research/u)
+    }
     if (skill.name === 'meeting-summary') {
       assert.match(skill.description, /^会议总结/u)
       assert.equal(skill.metadata.adapter, 'upstream')

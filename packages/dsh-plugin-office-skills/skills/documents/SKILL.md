@@ -9,7 +9,7 @@ metadata:
   eMateCapability: office
   format: docx
   adapter: hermes-docx-mit
-  state: ready
+  state: needs-runtime
 ---
 
 # Word 文档
