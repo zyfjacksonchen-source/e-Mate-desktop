@@ -28,7 +28,10 @@ test('keeps one native Composer owner and decorates its semantic frame host', as
   assert.doesNotMatch(`${client}\n${css}`, /data-composer-card|emate-composer-frame-bottom/)
   assert.match(css, /linear-gradient\([^;]+padding-box,[^;]+conic-gradient\([^;]+border-box/s)
   assert.doesNotMatch(css, /::before|position:\s*absolute|\binset:|\bmask(?:-composite)?:/)
-  assert.match(css, /animation:\s*emate-glass-orbit 4s linear infinite/)
+  assert.match(css, /\[data-emate-composer-frame-host\]:has\([^{}]+\)\)\s*\{[^{}]+--emate-glass-angle:\s*45deg;/)
+  assert.match(css, /@media \(prefers-reduced-motion: no-preference\) and \(forced-colors: none\)\s*\{\s*:global\(\[data-emate-composer-frame-host\]:focus-within:has\([^{}]+\)\)\s*\{\s*animation:\s*emate-glass-orbit 4s linear 2;/)
+  assert.equal(css.match(/animation:\s*emate-glass-orbit/g)?.length, 1)
+  assert.doesNotMatch(css, /\binfinite\b/)
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
   assert.match(css, /@media \(forced-colors: active\)/)
   assert.doesNotMatch(`${host}\n${client}\n${css}`, /MutationObserver|localStorage|tapIndex|backdrop-filter/)
@@ -37,7 +40,9 @@ test('keeps one native Composer owner and decorates its semantic frame host', as
 
 test('emitted client retains the native frame animation and reduced-motion rule', async () => {
   const emittedClient = await readFile(resolve(root, 'lib/client.js'), 'utf8')
-  assert.match(emittedClient, /animation:4s linear infinite/)
+  assert.match(emittedClient, /\[data-emate-composer-frame-host\]:focus-within[^{}]+\{animation:4s linear 2/)
+  assert.match(emittedClient, /prefers-reduced-motion:no-preference[\s\S]*forced-colors:none/)
+  assert.doesNotMatch(emittedClient, /animation:[^;}]*infinite/)
   assert.match(emittedClient, /prefers-reduced-motion:reduce[\s\S]*animation:none/)
   assert.doesNotMatch(emittedClient, /animation:(?:6|12)s linear infinite/)
 })

@@ -43,7 +43,14 @@
   background:
     linear-gradient(var(--emate-color-surface), var(--emate-color-surface)) padding-box,
     conic-gradient(from var(--emate-glass-angle), var(--emate-glass-a), var(--emate-glass-b), var(--emate-glass-c), var(--emate-glass-a)) border-box;
-  animation: emate-glass-orbit 4s linear infinite;
+  --emate-glass-angle: 45deg;
+}
+
+/* A retained input focus must also settle; refocusing starts a new short orbit. */
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  :global([data-emate-composer-frame-host]:focus-within:has([data-emate-glass-control][data-emate-glass-palette]:not([data-emate-glass-palette='off']))) {
+    animation: emate-glass-orbit 4s linear 2;
+  }
 }
 
 :global([data-emate-composer-frame-host]:has([data-emate-glass-control][data-emate-glass-palette='brand'])) {
