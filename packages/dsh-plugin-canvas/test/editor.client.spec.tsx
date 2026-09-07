@@ -595,3 +595,32 @@ it('does not announce an output when only the viewport changes while outputs are
   expect(h.read().pages[0].view).toMatchObject({ scrollX: 30, zoom: .5 })
   expect(h.read().intents[0].imported).toEqual([])
 })
+
+it('retries hydration of already persisted output after transient image failure', async () => {
+  const h = hydrationHarness(1), fallback = h.bridge.call.getMockImplementation()!
+  let notify = () => {}, reads = 0, ready = false
+  h.bridge.subscribe = (fn: () => void) => { notify = fn; return () => {} }
+  h.read().intents.push({ id: 'pending', pageId: 'page-1', kind: 'edit', sessionId: 'parent', sourceIds: [], imported: [] })
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'outputs') return { kind: 'images', assets: ready ? [h.fixtures[1].asset] : [] }
+    if (endpoint === 'image' && payload.attachment_id === h.fixtures[1].asset.ref.attachmentId) {
+      reads++
+      if (reads === 1) throw new Error('synthetic transient image read failure')
+    }
+    return fallback(endpoint, payload)
+  })
+  render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  await act(async () => { ready = true; notify(); await new Promise(resolve => setTimeout(resolve, 220)) })
+  expect(reads).toBe(1)
+  expect(h.read().intents[0].imported).toEqual([h.fixtures[1].asset.ref.attachmentId.slice(7)])
+  expect(native.api.addFiles).not.toHaveBeenCalled()
+  await act(async () => { notify(); await new Promise(resolve => setTimeout(resolve, 220)) })
+  expect(reads, 'same output must retry its missing hydration without reopening project').toBe(2)
+  expect(native.api.addFiles).toHaveBeenCalledOnce()
+  expect(h.read().pages[0].elements).toHaveLength(2)
+  await act(async () => { notify(); await new Promise(resolve => setTimeout(resolve, 220)) })
+  expect(reads).toBe(2)
+  expect(native.api.addFiles).toHaveBeenCalledOnce()
+  expect(h.read().intents[0].imported).toHaveLength(1)
+})

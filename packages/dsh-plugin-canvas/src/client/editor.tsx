@@ -60,6 +60,8 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   const selected = useRef<string[]>([])
   const selectedElements = useRef<string[]>([])
   const syncLane = useRef(false)
+  // Output receipt deduplication must not discard a failed image hydration retry.
+  const pendingHydration = useRef(false)
   const hydrated = useRef<{ bridge: CanvasBridge; projectId: string; generation: number; entries: Map<string, BinaryFiles[string]> } | undefined>(undefined)
   const instructionInput = useRef<HTMLTextAreaElement>(null)
   const arrowGesture = useRef<{ previous: Set<string>; released: boolean; imageOrder: string[]; preferredImageId: string | undefined } | null>(null)
@@ -192,6 +194,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
       if (!alive.current || token !== generation.current) return
       // Keep the outgoing document/revision intact until the complete next project can be shown.
       state.current = { project: next, revision, dirty: false, blocked: false }
+      pendingHydration.current = false
       setSceneLoad(value => value + 1)
       api.current = null; arrowGesture.current = null; selected.current = []; selectedElements.current = []; setSelectionCount(0); setActiveTool('selection'); setFiles(loaded); setProject(next); setPageId(next.pages[0]!.id); setRecovered(result?.recovered ?? false)
       setNotice(result?.recovered ? '已恢复上一份完整保存，损坏原件保留。请检查后保存。' : '已恢复项目')
@@ -202,7 +205,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     alive.current = true
     void openProject(initialProjectId, initialAsset).catch(error => { if (alive.current) setError(error.message) })
     const unload = (event: BeforeUnloadEvent) => { if (state.current.dirty) { event.preventDefault(); event.returnValue = '' } }
-    const identity = () => { hydrated.current = undefined; pendingFit.current = null; arrowGesture.current = null; generation.current += 1 }
+    const identity = () => { pendingHydration.current = false; hydrated.current = undefined; pendingFit.current = null; arrowGesture.current = null; generation.current += 1 }
     addEventListener('beforeunload', unload); addEventListener('emate:identity-changed', identity)
     return () => { alive.current = false; hydrated.current = undefined; pendingFit.current = null; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current); if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current); generation.current += 1; if (timer.current) clearTimeout(timer.current); removeEventListener('beforeunload', unload); removeEventListener('emate:identity-changed', identity); void flush().catch(() => {}) }
   }, [initialProjectId, initialAsset, openProject, flush])
@@ -226,7 +229,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
             if (intent.imported.includes(hash)) continue
             next = insertAsset(next, intent.pageId, asset)
             next.intents.find(item => item.id === intent.id)!.imported.push(hash)
-            update(next); imported = true
+            update(next); imported = true; pendingHydration.current = true
           }
         } else if (typeof result.html === 'string' && typeof result.sha256 === 'string' && !intent.imported.includes(result.sha256)) {
           next = structuredClone(next)
@@ -240,12 +243,12 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
             next.pages.splice(index, 1, ...incoming)
           } else target.html = result.html
           next.intents.find(item => item.id === intent.id)!.imported.push(result.sha256)
-          update(next); imported = true
+          update(next); imported = true; pendingHydration.current = true
         }
       }
-      if (imported && state.current.project) {
+      if ((imported || pendingHydration.current) && state.current.project) {
         await flush(); const token = generation.current; const loaded = await imageFiles(state.current.project)
-        if (alive.current && generation.current === token && state.current.project?.id === original.id) { setFiles(loaded); api.current?.addFiles(Object.values(loaded)); setNotice('原生任务的成功产物已插入，已有素材已去重。') }
+        if (alive.current && generation.current === token && state.current.project?.id === original.id) { setFiles(loaded); api.current?.addFiles(Object.values(loaded)); pendingHydration.current = false; setNotice('原生任务的成功产物已插入，已有素材已去重。') }
       }
     } catch (error) { if (alive.current) setError((error as Error).message) }
     finally { syncLane.current = false }
