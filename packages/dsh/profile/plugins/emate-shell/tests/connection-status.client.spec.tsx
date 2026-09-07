@@ -58,6 +58,14 @@ describe('Xin shared Host contract', () => {
     for (const action of ['status', 'ensure', 'disconnect'] as const) await callXinConnection(call, action, signal)
     expect(call.mock.calls).toEqual(['status','ensure','disconnect'].map(action => ['/emate.mcpManage', `xin.${action}`, {}, signal]))
   })
+  it('keeps local removal and remote revocation separate and rejects credential-bearing receipts', () => {
+    const disconnection = { local_stopped: true, local_forgotten: true, remote_revocation: 'unknown' }
+    const stopped = { ...xinProof, state: 'authorization-required', active: false, authorized: false, disconnection }
+    expect(parseXinConnection(stopped).disconnection?.remote_revocation).toBe('unknown')
+    expect(() => parseXinConnection({ ...xinProof, disconnection })).toThrow()
+    expect(() => parseXinConnection({ ...stopped, disconnection: { ...disconnection, local_stopped: false } })).toThrow()
+    expect(() => parseXinConnection({ ...stopped, disconnection: { ...disconnection, token: 'secret' } })).toThrow()
+  })
   it('rejects a late native response after cancellation without exposing its account', async () => {
     const controller = new AbortController()
     const call = vi.fn(async () => { controller.abort(); return xinProof })

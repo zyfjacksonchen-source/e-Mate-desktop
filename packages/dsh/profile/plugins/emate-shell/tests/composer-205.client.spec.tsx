@@ -65,10 +65,11 @@ describe('e-Mate 2.0.17 composer projection', () => {
       verified_at: '2026-09-07T01:00:00.000Z',
     }
     const idle = { ...ready, state: 'authorization-required' as const, active: false, authorized: false, binding: undefined, permissions: undefined, verified_at: undefined }
-    let current = idle as typeof ready | typeof idle
+    const disconnected = { ...idle, disconnection: { local_stopped: true as const, local_forgotten: true, remote_revocation: 'unknown' as const } }
+    let current = idle as typeof ready | typeof idle | typeof disconnected
     const prepareDraft = vi.fn()
     const ensureXin = vi.fn(async () => { current = ready; return ready })
-    const disconnectXin = vi.fn(async () => { current = idle; return idle })
+    const disconnectXin = vi.fn(async () => { current = disconnected; return disconnected })
     render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={async () => []} prepareDraft={prepareDraft} loadXin={async () => current} ensureXin={ensureXin} disconnectXin={disconnectXin} />)
     fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
     await waitFor(() => expect(screen.getByText('待授权')).toBeTruthy())
@@ -79,10 +80,13 @@ describe('e-Mate 2.0.17 composer projection', () => {
     expect(prepareDraft).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '重新连接芯助手' }))
     await waitFor(() => expect(ensureXin).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(screen.getByRole('button', { name: '断开芯助手' }).hasAttribute('disabled')).toBe(false))
-    fireEvent.click(screen.getByRole('button', { name: '断开芯助手' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '断开并忘记芯助手' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '断开并忘记芯助手' }))
     await waitFor(() => expect(screen.queryByText('xin-tenant / 用户 8')).toBeNull())
     expect(disconnectXin).toHaveBeenCalledOnce()
+    expect(await screen.findByText('本机已停用并清除凭据；服务端授权撤销未确认。')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await waitFor(() => expect(screen.getByText('本机已停用并清除凭据；服务端授权撤销未确认。')).toBeTruthy())
   })
 
   it('deduplicates pending ensure, allows native authorization outside the popup, and rejects results after identity change', async () => {

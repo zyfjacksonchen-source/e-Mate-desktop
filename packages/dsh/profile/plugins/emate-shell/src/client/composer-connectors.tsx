@@ -105,7 +105,7 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
       if (!current()) return
       setXin(value)
       setXinNotice(value.state === 'ready' ? '芯助手已连接，账号和权限已验证。' : value.state === 'cancelled' ? '连接已取消。' : action === 'disconnect' && value.state === 'authorization-required' ? '已断开当前账号的芯助手连接。' : '')
-      if (value.state === 'unavailable') setXinError('芯助手暂不可用，请重新检查连接。')
+      if (value.state === 'unavailable' && !value.disconnection) setXinError('芯助手暂不可用，请重新检查连接。')
     }, () => { if (current()) { setXin(undefined); setXinError('芯助手连接未完成，请检查最新状态后重试。') } }).finally(() => {
       if (!current()) return
       operation.current = null; setXinBusy(null); setXinReload(value => value + 1)
@@ -125,7 +125,7 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
       setXinChecking(true)
       try {
         const next = await xinLoader.current!(controller.signal)
-        if (!controller.signal.aborted && revision === xinRevision.current) { setXin(next); setXinNotice(''); setXinError(next.state === 'unavailable' ? '芯助手暂不可用，请重新检查连接。' : '') }
+        if (!controller.signal.aborted && revision === xinRevision.current) { setXin(next); setXinNotice(''); setXinError(next.state === 'unavailable' && !next.disconnection ? '芯助手暂不可用，请重新检查连接。' : '') }
       } catch {
         if (!controller.signal.aborted && revision === xinRevision.current) { setXin(undefined); setXinError('芯助手状态暂不可用，请重试。') }
       } finally { if (!controller.signal.aborted && revision === xinRevision.current) setXinChecking(false) }
@@ -219,8 +219,13 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
         </div>}
         <div className={css.xinActions}>
           <button type="button" disabled={!ensureXin || xinBusy !== null || xin?.state === 'connecting'} onClick={() => runXin('ensure')}>{xin?.state === 'ready' || xin?.state === 'unavailable' ? '重新连接芯助手' : '连接芯助手'}</button>
-          {xinBusy ? <button type="button" onClick={cancelXin}>取消等待</button> : <button type="button" disabled={!disconnectXin || xin === undefined || xin.state === 'authorization-required' && !xin.binding} onClick={() => runXin('disconnect')}>断开芯助手</button>}
+          {xinBusy ? <button type="button" onClick={cancelXin}>取消等待</button> : <button type="button" disabled={!disconnectXin || xin === undefined || xin.state === 'authorization-required' && !xin.binding} onClick={() => runXin('disconnect')}>断开并忘记芯助手</button>}
         </div>
+        {xin?.disconnection && <p role={xin.disconnection.local_forgotten && xin.disconnection.remote_revocation !== 'unknown' ? 'status' : 'alert'}>
+          {!xin.disconnection.local_forgotten ? '本机调用已停用，但凭据清理未完成，请重试断开。'
+            : xin.disconnection.remote_revocation === 'unknown' ? '本机已停用并清除凭据；服务端授权撤销未确认。'
+              : xin.disconnection.remote_revocation === 'revoked' ? '本机凭据已清除，服务端授权已撤销。' : '本机已清除连接信息，没有可撤销的凭据。'}
+        </p>}
         {xinNotice && <p role="status">{xinNotice}</p>}
         {xinError && <p role="alert">{xinError}</p>}
       </section>

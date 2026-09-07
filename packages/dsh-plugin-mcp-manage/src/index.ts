@@ -8,7 +8,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { auth as authorizeMcp, type OAuthClientProvider, type OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
+import { auth as authorizeMcp, discoverOAuthServerInfo, type OAuthClientProvider, type OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
@@ -612,11 +612,43 @@ async function currentOAuthToken(ctx: Context, spec: McpServerSpec, lease?: OAut
   return state.expires_at > Date.now() ? token : ''
 }
 
+type RemoteRevocation = 'revoked' | 'unknown' | 'not-required'
+
+/** Native discovery and the existing bounded HTTPS path; tokens are never returned to callers. */
+export async function revokeXinCredential(raw: string | undefined, signal?: AbortSignal, fetchImplementation = secureOAuthFetch): Promise<RemoteRevocation> {
+  if (!raw) return 'not-required'
+  try {
+    const state = JSON.parse(raw) as OAuthCredentialState
+    if (state?.schema_version !== 1) return 'unknown'
+    if (!state.tokens) return 'not-required'
+    const token = state.tokens.refresh_token ?? state.tokens.access_token
+    if (!token) return 'not-required'
+    if (typeof token !== 'string' || token.length > TOKEN_MAX || /\s/u.test(token)
+      || typeof state.client?.client_id !== 'string' || !state.client.client_id || state.client.client_id.length > 2048) return 'unknown'
+    const spec = MCP_CATALOG.get(XIN_SERVICE)!
+    const fetcher = oauthRequestFetch(signal, undefined, fetchImplementation)
+    const discovery = state.discovery ?? await discoverOAuthServerInfo(spec.url, { fetchFn: fetcher })
+    const metadata = discovery.authorizationServerMetadata
+    if (!metadata?.issuer || !metadata.revocation_endpoint) return 'unknown'
+    const issuer = new URL(metadata.issuer)
+    const endpoint = new URL(metadata.revocation_endpoint)
+    if (issuer.protocol !== 'https:' || issuer.username || issuer.password || issuer.hash || issuer.search
+      || issuer.href !== new URL(discovery.authorizationServerUrl).href || issuer.origin !== new URL(spec.url).origin
+      || endpoint.origin !== issuer.origin || endpoint.username || endpoint.password || endpoint.hash || endpoint.search
+      || discovery.resourceMetadata?.resource && discovery.resourceMetadata.resource !== spec.url) return 'unknown'
+    const response = await fetcher(endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: state.client.client_id, token,
+        token_type_hint: state.tokens.refresh_token ? 'refresh_token' : 'access_token' }) })
+    return response.status === 200 || response.status === 204 ? 'revoked' : 'unknown'
+  } catch { return 'unknown' }
+}
+
 export interface XinConnectionResult {
   schema_version: 1; service: typeof XIN_SERVICE; name: typeof XIN_SERVICE; transport: 'streamable-http'
   state: 'ready' | 'authorization-required' | 'connecting' | 'unavailable' | 'cancelled'
   active: boolean; authorized: boolean
   binding?: XinCapabilityProof['binding']; permissions?: XinCapabilityProof['permissions']; verified_at?: string
+  disconnection?: { local_stopped: true; local_forgotten: boolean; remote_revocation: RemoteRevocation }
 }
 type XinExecution = Partial<Parameters<Context['tools']['execute']>[0]> & { token?: Parameters<Context['tools']['execute']>[0]['parent'] }
 
@@ -624,7 +656,7 @@ type XinExecution = Partial<Parameters<Context['tools']['execute']>[0]> & { toke
 export function createXinConnection(ctx: Context, operations: {
   authorize(lease: OAuthLease, agent?: UserQuestionAgent): Promise<void>
   token(lease: OAuthLease): Promise<string>
-  confirm(signal: AbortSignal, agent?: UserQuestionAgent): Promise<boolean>
+  revoke?(raw: string | undefined, signal?: AbortSignal): Promise<RemoteRevocation>
   configured(): boolean
   install(): Promise<void>
 }) {
@@ -642,6 +674,7 @@ export function createXinConnection(ctx: Context, operations: {
   let proof: (XinCapabilityProof & { owner: string; verified_at: string }) | undefined
   let tail: Promise<unknown> = Promise.resolve()
   const pending = new Map<string, { promise: Promise<XinConnectionResult>; interactive: boolean; reauthorize: boolean }>()
+  const disconnected = new Map<string, NonNullable<XinConnectionResult['disconnection']> | null>()
   const principal = () => {
     const identity = ctx.get('emateIdentity') as { localAccountPrincipal?(): unknown } | undefined
     const value = identity?.localAccountPrincipal?.()
@@ -671,7 +704,7 @@ export function createXinConnection(ctx: Context, operations: {
     return call?.type === 'tool/call' && call.data.turn === binding.turn ? binding.owner : undefined
   }
   let observedOwner = owner()?.key
-  const result = (state: XinConnectionResult['state'], expectedOwner = owner()?.key): XinConnectionResult => ({ schema_version: 1, service: XIN_SERVICE, name: XIN_SERVICE, transport: 'streamable-http', state, active: state === 'ready', authorized: state === 'ready', ...(proof && proof.owner === expectedOwner && expectedOwner === owner()?.key ? { binding: { ...proof.binding }, permissions: { ...proof.permissions, tools: [...proof.permissions.tools] }, verified_at: proof.verified_at } : {}) })
+  const result = (state: XinConnectionResult['state'], expectedOwner = owner()?.key): XinConnectionResult => ({ schema_version: 1, service: XIN_SERVICE, name: XIN_SERVICE, transport: 'streamable-http', state, active: state === 'ready', authorized: state === 'ready', ...(expectedOwner && expectedOwner === owner()?.key && disconnected.get(expectedOwner) ? { disconnection: { ...disconnected.get(expectedOwner)! } } : {}), ...(proof && proof.owner === expectedOwner && expectedOwner === owner()?.key ? { binding: { ...proof.binding }, permissions: { ...proof.permissions, tools: [...proof.permissions.tools] }, verified_at: proof.verified_at } : {}) })
   const serial = <T>(task: () => Promise<T>): Promise<T> => {
     const run = tail.catch(() => {}).then(task); tail = run.then(() => {}, () => {}); return run
   }
@@ -717,6 +750,7 @@ export function createXinConnection(ctx: Context, operations: {
     if (!scope) return result('authorization-required')
     const priorOwner = executionOwner(exec)
     if (exec.agent && priorOwner !== scope.key) return result('unavailable', priorOwner ?? '')
+    if (disconnected.has(scope.key)) return result(disconnected.get(scope.key)?.local_forgotten ? 'authorization-required' : 'unavailable')
     if (pending.has(scope.key)) return result('connecting')
     if (verified === scope.key && entry?.key === scope.key && isMcpServerActive(ctx.loader, ctx.tools, entry.id, XIN_SERVICE)) return result('ready')
     const generation = epoch
@@ -739,6 +773,11 @@ export function createXinConnection(ctx: Context, operations: {
     if (exec.agent) {
       const previous = executionOwner(exec)
       if (previous !== scope.key) return Promise.resolve(result('unavailable', previous ?? ''))
+    }
+    if (disconnected.has(scope.key)) {
+      if (!disconnected.get(scope.key)?.local_forgotten) return Promise.resolve(scopedResult('unavailable'))
+      if (options.interactive === false) return Promise.resolve(scopedResult('authorization-required'))
+      disconnected.delete(scope.key)
     }
     const shared = pending.get(scope.key)
     if (shared) {
@@ -773,8 +812,7 @@ export function createXinConnection(ctx: Context, operations: {
           await removeEntry()
           lease.assertCurrent()
           if (options.interactive === false) return scopedResult('authorization-required')
-          if (!await operations.confirm(signal, exec.agent)) return scopedResult('cancelled')
-          lease.assertCurrent()
+          // Both entries go directly to the real OAuth consent page.
           authorizing = true
           await operations.authorize(lease, exec.agent)
           lease.assertCurrent()
@@ -835,14 +873,22 @@ export function createXinConnection(ctx: Context, operations: {
     if (exec.agent && previousOwner !== scope.key) return result('unavailable', previousOwner ?? '')
     const signal = exec.signal
     epoch++; controller.abort(); controller = new AbortController(); verified = undefined
+    const earlier = disconnected.get(scope.key)
+    disconnected.set(scope.key, null)
     return serial(async () => {
-      try {
-        signal?.throwIfAborted()
-        await removeEntry()
-        await ctx.credentials.unset(scope.ref)
-        proof = undefined
-        return result(owner()?.key === scope.key ? 'authorization-required' : 'cancelled', scope.key)
-      } catch { return result(signal?.aborted ? 'cancelled' : 'unavailable', scope.key) }
+      let removed = false
+      try { await removeEntry(); removed = true } catch { /* The new epoch already blocks local calls. */ }
+      let remote: RemoteRevocation = 'unknown'
+      try { remote = await (operations.revoke ?? revokeXinCredential)((await ctx.credentials.resolve(scope.ref))?.value, signal) } catch { /* Forget locally even when revocation is unknown. */ }
+      const previous = disconnected.get(scope.key) ?? earlier
+      if (remote === 'not-required' && previous) remote = previous.remote_revocation
+      let forgotten = false
+      // A secret-free native marker also survives a failed file deletion.
+      try { await ctx.credentials.set(scope.ref, JSON.stringify({ schema_version: 1 })); forgotten = true } catch { /* Try deletion too. */ }
+      try { await ctx.credentials.unset(scope.ref); forgotten = true } catch { /* Never restore the former token. */ }
+      disconnected.set(scope.key, { local_stopped: true, local_forgotten: forgotten, remote_revocation: remote })
+      proof = undefined
+      return result(owner()?.key !== scope.key ? 'cancelled' : removed && forgotten ? 'authorization-required' : 'unavailable', scope.key)
     })
   }
   const changed = () => {
@@ -877,7 +923,6 @@ export function apply(ctx: Context, config: ConfigShape): void {
   const xin = createXinConnection(ctx, {
     authorize: lease => oauthSerial(() => authorizeOAuth(ctx, MCP_CATALOG.get(XIN_SERVICE)!, lease.signal, lease)).then(() => {}),
     token: lease => oauthSerial(() => currentOAuthToken(ctx, MCP_CATALOG.get(XIN_SERVICE)!, lease)),
-    confirm: (signal, agent) => confirmed(ctx, '连接并授权芯助手？', '使用芯助手本人授权连接企业业务与知识服务。', signal, agent),
     configured: () => current().servers.some(spec => spec.name === XIN_SERVICE && supportedServer(spec)),
     install: () => ctx.settings.update(SETTINGS_NAMESPACE, { servers: [...current().servers.filter(spec => spec.name !== XIN_SERVICE), MCP_CATALOG.get(XIN_SERVICE)!] }),
   })

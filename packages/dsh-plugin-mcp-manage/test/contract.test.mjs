@@ -5,7 +5,7 @@ import { readCollectedOutput } from '../lib/collected-output.mjs'
 import { parseOAuthCallback } from '../lib/oauth-callback.mjs'
 import { validatePluginInstall, validatePluginPackageName } from '../lib/plugin-source.mjs'
 import { isMcpServerActive, validXinPrincipal, verifiedXinCapabilities, hasUnexpiredOAuthAccess, oauthFailureKind, parseXinCapabilities } from '../lib/status.mjs'
-import { createXinConnection, XIN_SERVICE, oauthRequestFetch } from '../lib/index.mjs'
+import { createXinConnection, XIN_SERVICE, oauthRequestFetch, revokeXinCredential } from '../lib/index.mjs'
 import { feishuConnectionState, readFeishuConnection } from '../lib/feishu-status.mjs'
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
@@ -136,7 +136,7 @@ test('OAuth callback accepts one matching state and rejects callback smuggling',
   ), /Invalid OAuth callback/u)
 })
 
-function xinHarness() {
+function xinHarness(revoke) {
   let principal = { tenantId: 'tenant-a', userId: 'user-a' }
   const credentials = new Map()
   const seenRefs = []
@@ -185,6 +185,7 @@ function xinHarness() {
     },
   }
   const owner = createXinConnection(ctx, {
+    revoke,
     async token(lease) { await tokenGate?.(); lease.assertCurrent(); return credentials.has(lease.ref) ? JSON.parse(credentials.get(lease.ref)).tokens?.access_token ?? '' : '' },
     async authorize(lease) { authorizeCount++; await authorizeGate?.(); lease.assertCurrent(); await ctx.credentials.set(lease.ref, JSON.stringify({ schema_version: 1, tokens: { access_token: 'synthetic-access-token' } })); lease.assertCurrent() },
     async confirm() { confirmCount++; return true },
@@ -215,11 +216,11 @@ test('Xin ensure shares one authorization between UI and Agent and reuses a veri
   assert.deepEqual(ui.binding, { tenant_id: 'xin-tenant', user_id: 1, principal_id: 2 })
   assert.deepEqual(ui.permissions, { tools: ['query_projects'], project_count: 1, knowledge_project_count: 2, writable_project_count: 0, scope_revision: 'scope-1' })
   assert(Number.isFinite(Date.parse(ui.verified_at)))
-  assert.deepEqual(h.counts(), { authorizeCount: 1, confirmCount: 1 })
+  assert.deepEqual(h.counts(), { authorizeCount: 1, confirmCount: 0 })
   assert.equal(h.entries.size, 1)
   assert.equal(h.calls.filter(([kind]) => kind === 'create').length, 1)
   assert.equal((await h.owner.ensure(h.execution(agent))).state, 'ready')
-  assert.deepEqual(h.counts(), { authorizeCount: 1, confirmCount: 1 })
+  assert.deepEqual(h.counts(), { authorizeCount: 1, confirmCount: 0 })
   assert.equal(h.calls.filter(([kind]) => kind === 'create').length, 1)
   assert.equal((await h.ctx.tools.execute({ name: `mcp__${XIN_SERVICE}__query_projects`, ...h.execution(agent, 1, 'business-read') })).isError, false)
   assert.doesNotMatch(JSON.stringify(ui), /synthetic-access-token|tokens|Authorization|https:/)
@@ -235,7 +236,7 @@ test('Xin owner tuple separates tenant, user and delimiter collisions; old globa
   assert(!h.seenRefs.includes('EMATE_MCP_XIN_BUSINESS_ASSISTANT_OAUTH'))
   await h.owner.disconnect(); assert.equal(h.credentials.size, 3)
   h.principal(scopes[0]); h.owner.changed(); assert.equal((await h.owner.ensure()).state, 'ready')
-  assert.deepEqual(h.counts(), { authorizeCount: 3, confirmCount: 3 })
+  assert.deepEqual(h.counts(), { authorizeCount: 3, confirmCount: 0 })
 })
 
 test('expired or missing enterprise identity cannot use retained Xin tools or credentials', async t => {
@@ -246,6 +247,64 @@ test('expired or missing enterprise identity cannot use retained Xin tools or cr
   assert.equal((await h.owner.ensure(h.execution(agent))).state, 'authorization-required')
   assert.equal((await h.ctx.tools.execute({ name: `mcp__${XIN_SERVICE}__query_projects`, ...h.execution(agent, 1, 'after-logout') })).isError, true)
   await h.owner.disconnect(); assert.equal(h.credentials.size, 1)
+})
+
+test('Xin forget stops native calls before revocation and keeps network failure distinct from local removal', async t => {
+  const h = xinHarness(async raw => {
+    assert.equal(h.entries.size, 0)
+    assert.equal(JSON.parse(raw).tokens.access_token, 'synthetic-access-token')
+    return 'unknown'
+  })
+  t.after(() => h.owner.dispose())
+  await h.owner.ensure()
+  const stopped = await h.owner.disconnect()
+  assert.deepEqual(stopped.disconnection, { local_stopped: true, local_forgotten: true, remote_revocation: 'unknown' })
+  assert.equal(h.credentials.size, 0)
+  assert.equal((await h.owner.ensure({}, { interactive: false })).state, 'authorization-required')
+  assert.equal((await h.owner.status()).disconnection.remote_revocation, 'unknown')
+  assert.equal(h.counts().authorizeCount, 1)
+})
+
+test('failed native deletion leaves a secret-free marker; failed marker and deletion cannot reconnect retained tokens', async t => {
+  for (const failMarker of [false, true]) {
+    const h = xinHarness(async () => 'revoked'); t.after(() => h.owner.dispose())
+    await h.owner.ensure()
+    const set = h.ctx.credentials.set; const unset = h.ctx.credentials.unset
+    if (failMarker) h.ctx.credentials.set = async () => { throw Error('synthetic write failure') }
+    h.ctx.credentials.unset = async () => { throw Error('synthetic delete failure') }
+    const stopped = await h.owner.disconnect()
+    assert.equal(stopped.disconnection.local_forgotten, !failMarker)
+    if (!failMarker) assert.equal(JSON.parse([...h.credentials.values()][0]).tokens, undefined)
+    assert.equal((await h.owner.ensure({}, { interactive: false })).state, failMarker ? 'unavailable' : 'authorization-required')
+    assert.equal(h.counts().authorizeCount, 1)
+    if (failMarker) assert.equal((await h.owner.ensure()).state, 'unavailable')
+    h.ctx.credentials.set = set; h.ctx.credentials.unset = unset
+    await h.owner.disconnect()
+    assert.equal(h.credentials.size, 0)
+  }
+})
+
+test('Xin revocation uses verified native discovery, posts only to its issuer and never returns credentials', async () => {
+  const saved = { schema_version: 1, client: { client_id: 'fixture-client' }, tokens: { access_token: 'xin_at_fixture', refresh_token: 'xin_rt_fixture' },
+    discovery: { authorizationServerUrl: 'https://mvdcm.ecoremedia.net',
+      authorizationServerMetadata: { issuer: 'https://mvdcm.ecoremedia.net', revocation_endpoint: 'https://mvdcm.ecoremedia.net/agent/oauth/revoke' },
+      resourceMetadata: { resource: 'https://mvdcm.ecoremedia.net/business-assistant/mcp' } } }
+  let count = 0
+  const post = async (url, init) => {
+    count++
+    assert.equal(String(url), saved.discovery.authorizationServerMetadata.revocation_endpoint)
+    assert.equal(init.method, 'POST')
+    assert.deepEqual(Object.fromEntries(init.body), { client_id: 'fixture-client', token: 'xin_rt_fixture', token_type_hint: 'refresh_token' })
+    return new Response(null, { status: 200 })
+  }
+  assert.equal(await revokeXinCredential(JSON.stringify(saved), undefined, post), 'revoked')
+  const malicious = structuredClone(saved)
+  malicious.discovery.authorizationServerMetadata.revocation_endpoint = 'https://unrelated.invalid/revoke'
+  assert.equal(await revokeXinCredential(JSON.stringify(malicious), undefined, post), 'unknown')
+  assert.equal(count, 1)
+  assert.equal(await revokeXinCredential(JSON.stringify(saved), undefined, async () => { throw Error('network down') }), 'unknown')
+  assert.equal(await revokeXinCredential(undefined, undefined, post), 'not-required')
+  assert.equal(await revokeXinCredential('invalid', undefined, post), 'unknown')
 })
 
 test('an old Agent and late native result cannot cross into the next account', async t => {
@@ -340,7 +399,7 @@ test('an explicit ensure arriving during background restore can continue into on
   h.tokenGate(undefined); finish()
   assert.equal((await background).state, 'authorization-required')
   assert.equal((await clicked).state, 'ready')
-  assert.deepEqual(h.counts(), { authorizeCount: 1, confirmCount: 1 })
+  assert.deepEqual(h.counts(), { authorizeCount: 1, confirmCount: 0 })
 })
 
 
@@ -529,7 +588,7 @@ test('UI ensure followers cannot restart authorization under another account aft
   const reconnect = h.owner.ensure({}, { reauthorize: true })
   h.principal({ tenantId: 'tenant-b', userId: 'user-b' }); h.owner.changed(); finish()
   for (const value of await Promise.all([background, ui, reconnect])) { assert.equal(value.state, 'cancelled'); assert.equal(value.binding, undefined) }
-  assert.deepEqual(h.counts(), { authorizeCount: 1, confirmCount: 1 })
+  assert.deepEqual(h.counts(), { authorizeCount: 1, confirmCount: 0 })
   assert.equal(h.calls.filter(([kind]) => kind === 'create').length, 1)
 })
 

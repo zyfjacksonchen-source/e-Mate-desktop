@@ -79,6 +79,7 @@ export interface XinConnection {
   binding?: { tenant_id: string; user_id: number; principal_id: number }
   permissions?: { tools: string[]; project_count: number; knowledge_project_count: number; writable_project_count: number; scope_revision: string }
   verified_at?: string
+  disconnection?: { local_stopped: true; local_forgotten: boolean; remote_revocation: 'revoked' | 'unknown' | 'not-required' }
 }
 const XIN_STATES: readonly XinState[] = ['ready', 'authorization-required', 'connecting', 'unavailable', 'cancelled']
 function exactKeys(value: Record<string, unknown>, required: string[], optional: string[] = []): boolean {
@@ -87,9 +88,15 @@ function exactKeys(value: Record<string, unknown>, required: string[], optional:
 export function parseXinConnection(response: unknown): XinConnection {
   const value = valueOf(response)
   const required = ['schema_version', 'service', 'name', 'transport', 'state', 'active', 'authorized']
-  if (!record(value) || !exactKeys(value, required, ['binding', 'permissions', 'verified_at']) || value.schema_version !== 1
+  if (!record(value) || !exactKeys(value, required, ['binding', 'permissions', 'verified_at', 'disconnection']) || value.schema_version !== 1
     || value.service !== 'xin-business-assistant' || value.name !== value.service || value.transport !== 'streamable-http'
     || !XIN_STATES.includes(value.state as XinState) || value.active !== (value.state === 'ready') || value.authorized !== value.active) throw new Error('芯助手返回的连接状态无效。')
+  if (value.disconnection !== undefined) {
+    const stopped = value.disconnection
+    if (!record(stopped) || !exactKeys(stopped, ['local_stopped', 'local_forgotten', 'remote_revocation'])
+      || stopped.local_stopped !== true || typeof stopped.local_forgotten !== 'boolean'
+      || !['revoked', 'unknown', 'not-required'].includes(String(stopped.remote_revocation)) || value.state === 'ready') throw new Error('芯助手断开回执无效。')
+  }
   const hasProof = ['binding', 'permissions', 'verified_at'].some(key => Object.hasOwn(value, key))
   if (value.state === 'ready' && !hasProof) throw new Error('芯助手尚未验证绑定账号和权限。')
   if (hasProof) {
