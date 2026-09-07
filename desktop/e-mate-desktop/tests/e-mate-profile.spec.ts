@@ -504,7 +504,8 @@ describe('e-Mate desktop profile', () => {
       for (const entry of entries) rmSync(join(source, entry), { force: true })
       rmSync(join(source, '..', 'outside.js'), { force: true })
     }
-  })
+    // This exercises repeated full on-disk repairs, not the warm-start latency budget.
+  }, 30_000)
 
   it('defers removal of replaced managed packages until the desktop is interactive', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))

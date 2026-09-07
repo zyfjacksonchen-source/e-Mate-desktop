@@ -31,15 +31,22 @@ test('registers five Skills with accurate runtime states and two target Tool/Job
   })
   assert.equal(provider.name, 'emate-office-skills')
   const skills = await provider.list({})
-  assert.deepEqual(skills.map(skill => skill.name), ['documents', 'pdf', 'spreadsheets', 'presentations', 'meeting-summary'])
+  assert.deepEqual(skills.map(skill => skill.name), ['documents', 'pdf', 'spreadsheets', 'ppt-master', 'meeting-summary'])
   for (const skill of skills) {
     assert.equal(skill.rank, 600)
     assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
-    assert.equal(skill.metadata.state, ['pdf', 'spreadsheets'].includes(skill.name) ? 'needs-runtime' : 'ready')
+    assert.equal(skill.metadata.state, ['pdf', 'spreadsheets', 'ppt-master'].includes(skill.name) ? 'needs-runtime' : 'ready')
     const loaded = await provider.get(skill, {})
     assert.ok(loaded.content.length > 300)
     assert.doesNotMatch(loaded.content, /^---/u)
     assert.doesNotMatch(loaded.content, /EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE/u)
+    if (skill.name === 'ppt-master') {
+      assert.equal(skill.metadata.adapter, 'upstream')
+      assert.ok(loaded.content.includes(loaded.resourceBase.path))
+      assert.doesNotMatch(loaded.content, /\{\{SKILL_DIR\}\}/u)
+      const original = await readFile(join(loaded.resourceBase.path, 'SKILL.md'))
+      assert.equal(createHash('sha256').update(original).digest('hex'), 'e1c5a8c1af2c326bbe72de65b8a867c8099326bf2986ac76383d1fec0373f8fa')
+    }
     if (skill.name === 'documents') {
       assert.equal(skill.metadata.adapter, 'docx-typescript')
       assert.ok(loaded.content.includes(loaded.resourceBase.path))

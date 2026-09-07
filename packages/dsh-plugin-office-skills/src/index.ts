@@ -88,7 +88,7 @@ const SPECS: readonly SkillSpec[] = [
   { name: 'documents', description: 'Word 文档：中文商务排版、模板填充和保留图片样式的文字修改。', whenToUse: '用于创建 Word 报告、填充 DOCX 模板和定向替换文字，使用内置 TypeScript 工具。', directory: `${skillRoot}documents`, format: 'docx', hostGuide: 'HOST.md', adapter: 'docx-typescript' },
   { name: 'pdf', description: 'PDF 文档：创建、提取、填写和检查版式，交付前渲染验证。', whenToUse: '用于 PDF 阅读、生成、表单填写及视觉检查；使用前验证 Python 和渲染依赖。', directory: `${skillRoot}pdf`, format: 'pdf', hostGuide: 'HOST.md', runtimePending: true },
   { name: 'spreadsheets', description: '电子表格：创建、编辑、分析和检查工作簿，保留公式与格式。', whenToUse: '用于 XLSX/CSV 数据、公式、图表和排版；按预置指南检查真实运行依赖。', directory: `${skillRoot}spreadsheets`, format: 'xlsx', hostGuide: 'HOST.md', runtimePending: true },
-  { name: 'presentations', description: 'Create, read, and safely regenerate PPTX presentations locally.', whenToUse: 'Use for text-first PPTX authoring, extraction, review, and supported edits.', directory: `${skillRoot}presentations`, format: 'pptx' },
+  { name: 'ppt-master', description: 'PPT Master：演示文稿设计、模板制作、图表编排和可编辑 PPTX 交付。', whenToUse: '用于创建、修改与审阅 PPT 演示文稿；按预置流程核验运行依赖、真实渲染和可编辑性。', directory: `${skillRoot}ppt-master`, format: 'pptx', hostGuide: 'HOST.md', runtimePending: true },
   { name: 'meeting-summary', description: '会议总结：从本地转录文本整理会议纪要、决策与行动项，保留事实来源。', whenToUse: '用于会议转录文本、VTT、SRT 的总结和行动项整理；不负责录音或音频转录。', directory: `${skillRoot}meeting-summary`, hostGuide: 'HOST.md' },
 ]
 
