@@ -14,8 +14,27 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "rewriteRelativeImportExtensions": true,
-    "types": ["node"],
-    "typeRoots": ["../../upstream/deepseek-harness/node_modules/@types"]
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "../../upstream/deepseek-harness/node_modules/@types"
+    ],
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "paths": {
+      "react": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react"
+      ],
+      "react/*": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react/*"
+      ],
+      "@deepseek-ai/dsh-sandbox-policy": [
+        "../../upstream/deepseek-harness/packages/sandbox/sandbox-policy/lib/types/index.d.ts"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

@@ -94,6 +94,7 @@ test('registers five Skills with accurate runtime states and two target Tool/Job
     }
   }
   assert.deepEqual(tools.map(tool => tool.name), ['office_write', 'office_read'])
+  assert.equal(tools[0].presentCall({ format: 'png', filename: '预览.png' }).rawInput, '预览.png')
   assert.equal(tools.every(tool => tool.timeoutMs === 120_000), true)
   assert.deepEqual(tools[0].presentCall({ format: 'docx', filename: '交付.docx' }), {
     card: 'generic',
@@ -254,6 +255,7 @@ test('Tools stay inside the current workspace and never overwrite output', async
   const previewPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jKAAAAABJRU5ErkJggg==', 'base64')
   apply({
     inject(dependencies, callback) {
+      if (dependencies.includes('connection')) return // Optional native preview services are absent in this CLI fixture.
       assert.deepEqual(dependencies, ['desktopRuntime'])
       callback({ desktopRuntime: { async renderSvgPage(request) {
         request.signal.throwIfAborted()

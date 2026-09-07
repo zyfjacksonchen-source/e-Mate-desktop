@@ -12,7 +12,8 @@
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./skills/*": "./skills/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": "./lib/client.js"
   },
   "files": [
     "assets",
@@ -41,7 +42,9 @@
   "scripts": {
     "prepare:assets": "node scripts/copy-font-assets.mjs",
     "build": "pnpm run prepare:assets && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
-    "test": "node --test"
+    "test": "pnpm test:source && pnpm test:client",
+    "test:client": "../../upstream/deepseek-harness/node_modules/.bin/vitest run --config vitest.config.ts",
+    "test:source": "node --test test/*.test.mjs"
   },
   "dsh": {
     "bundle": {
@@ -51,6 +54,15 @@
       "adapterState": "ready",
       "runtimeInstalled": true,
       "toolsRegistered": 2
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
     }
   },
   "eMate": {

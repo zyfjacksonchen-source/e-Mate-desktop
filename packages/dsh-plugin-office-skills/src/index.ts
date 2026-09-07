@@ -10,6 +10,7 @@ import {
   readOfficeBuffer,
   writeOfficeBuffer,
 } from './office-runtime.ts'
+import { createOfficePreview, PREVIEW_CHANNEL } from './preview.ts'
 import { createDocxBuffer, replaceDocxBuffer, templateDocxBuffer, type NativeDocxSpec } from './docx-native.ts'
 
 interface SkillLookupOptions { signal?: AbortSignal }
@@ -39,7 +40,7 @@ interface SvgRenderer {
   renderSvgPage(request: { svg: string; width: number; height: number; signal?: AbortSignal }): Promise<{ png: Uint8Array; width: number; height: number }>
 }
 interface OfficeContext {
-  inject(dependencies: string[], callback: (context: { desktopRuntime: Partial<SvgRenderer>; effect(effect: () => () => void): void }) => void): unknown
+  inject(dependencies: string[], callback: (context: any) => void): unknown
   skills: { registerProvider(create: () => SkillProvider): () => void }
   tools: { register(definition: unknown): () => void }
   jobs: {
@@ -318,14 +319,25 @@ const readOutput = {
   render: (_args: unknown, value: { document: unknown; format: OfficeFormat; relative_path: string }) => [{
     type: 'text', text: `已读取 ${value.relative_path}。规范化内容：\n${JSON.stringify(value.document)}`,
   }],
-  presentationMeta: (_args: unknown, value: PublishedFile & { job_id: string }) => ({
-    operation: 'read', format: value.format, job_id: value.job_id, relative_path: value.relative_path, bytes: value.bytes,
-  }),
+  presentationMeta: (args: unknown, value: PublishedFile & { job_id: string; document?: { kind?: string } }) =>
+    (args as { operation?: string } | undefined)?.operation === 'preview'
+      ? { operation: 'preview', job_id: value.job_id, preview: value.document }
+      : { operation: 'read', format: value.format, job_id: value.job_id, relative_path: value.relative_path, bytes: value.bytes },
 }
 
 /** Register bundled Skills and two real Tool/Job paths on target Harness seams. */
 export function apply(ctx: OfficeContext): void {
   let svgRenderer: Partial<SvgRenderer> | undefined
+  let preview: ReturnType<typeof createOfficePreview> | undefined
+  ctx.inject(['desktopRuntime', 'emateIdentity', 'connection', 'workspaceRegistry', 'sessions', 'subprocess', 'shellEnv', 'fs'], host => {
+    const service = createOfficePreview(host); preview = service
+    host.effect(() => host.connection.rpc.handle(PREVIEW_CHANNEL, async (action: string, payload: unknown, signal: AbortSignal) => {
+      try { return { ok: true, value: await service.call(action, payload, signal) } }
+      catch (error) { return { ok: false, error: { message: error instanceof Error ? error.message : '预览失败。', ...(error instanceof Error && 'code' in error && error.code === 'preview-expired' ? { code: 'preview-expired' } : {}) } } }
+    }, { authority: 'loopback' }))
+    host.on('credentials/updated', (ref: string) => { if (String(ref) === 'E_MATE_ENTERPRISE_SESSION') { service.changed(); host.timeout(() => service.changed(), 0) } })
+    host.effect(() => () => { service.dispose(); if (preview === service) preview = undefined })
+  })
   // Native injection stays optional to the existing CLI Office workflows.
   ctx.inject(['desktopRuntime'], host => {
     const runtime = host.desktopRuntime
@@ -392,7 +404,7 @@ export function apply(ctx: OfficeContext): void {
     },
     presentCall: (args: unknown) => {
       const input = args as Record<string, unknown>
-      const targetName = filename(input.filename, format(input.format))
+      const targetName = filename(input.filename, input.format === 'png' ? 'png' : format(input.format))
       return {
         card: 'generic',
         title: '生成 Office 文件',
@@ -404,17 +416,28 @@ export function apply(ctx: OfficeContext): void {
   }), 'emate.office: write Tool')
   ctx.effect(() => ctx.tools.register({
     name: 'office_read',
-    description: 'Read one workspace-relative DOCX, XLSX, PPTX, or PDF into normalized JSON. This extracts content, not a lossless editable rendering of arbitrary third-party layout.',
+    description: 'Read one workspace-relative DOCX, XLSX, PPTX, or PDF into normalized JSON. This extracts content. operation=preview opens the current workspace PPT Master project for native continuous preview; path is then its directory, even before its first SVG exists. No extra server.',
     parameters: {
       type: 'object', additionalProperties: false, required: ['path'],
-      properties: { path: { type: 'string', description: 'Workspace-relative .docx, .xlsx, .pptx, or .pdf path.' } },
+      properties: { path: { type: 'string', description: 'Workspace-relative Office file, or PPT project directory for preview.' }, operation: { type: 'string', enum: ['read', 'preview'] } },
     },
     output: readOutput,
     isConcurrencySafe: () => true,
     timeoutMs: OFFICE_TIMEOUT_MS,
     async execute(args: unknown, exec: ToolExecution) {
       const root = await workspace(exec.agent)
-      const source = await sourceFile(root, (args as Record<string, unknown>).path)
+      const input = args as Record<string, unknown>
+      if (input.operation === 'preview') {
+        if (!preview) throw new Error('原生 PPT 预览尚不可用。')
+        const service = preview
+        const started = startJob(ctx, exec.agent, exec.signal, '准备 PPT 持续预览', async signal => {
+          const document = await service.open(input.path, { ...exec, signal })
+          return { bytes: 0, document, format: 'pptx' as const, name: 'PPT 持续预览', relative_path: document.project_path }
+        })
+        const [result] = await Promise.all([started.result, ctx.jobs.wait(started.id, OFFICE_TIMEOUT_MS, exec.agent as AgentOwner, exec.signal)])
+        return { ...result, job_id: started.id }
+      }
+      const source = await sourceFile(root, input.path)
       const started = startJob(ctx, exec.agent, exec.signal, `Read ${source.name}`, async jobSignal => {
         jobSignal.throwIfAborted()
         const document = await readOfficeBuffer(source.format, source.buffer)

@@ -1,3 +1,4 @@
+import { clientBundle } from '../../upstream/deepseek-harness/packages/client/tsdown.client.ts'
 const officeDependencies = [
   '@pdf-lib/fontkit',
   '@xmldom/xmldom',
@@ -7,8 +8,7 @@ const officeDependencies = [
   'pptxgenjs',
 ]
 
-export default {
-  entry: { index: 'src/index.ts' },
+const host = {
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',
@@ -22,3 +22,5 @@ export default {
     alwaysBundle: officeDependencies,
   },
 }
+
+export default clientBundle('@e-mate/dsh-plugin-office-skills', ['src/index.ts', 'src/preview.ts'], { lib: { ...host, clean: false } })
