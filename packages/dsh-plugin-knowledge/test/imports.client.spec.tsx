@@ -83,3 +83,37 @@ it('leaving the panel does not issue stop and failed start responses are queried
   view.unmount()
   expect(call.mock.calls.some(args => args[0] === 'ui.import.stop')).toBe(false)
 })
+
+
+it('freezes every file admission path while prepare waits and unlocks after start acknowledges', async () => {
+  let finish: (value: any) => void = () => {}
+  const call = vi.fn(async (endpoint: string, payload: any) => {
+    if (endpoint === 'ui.import.recent') return reply({ items: [], has_more: false })
+    if (endpoint === 'ui.import.prepare') { expect(payload.paths).toEqual(['/sources/report.pdf']); return new Promise(resolve => { finish = resolve }) }
+    if (endpoint === 'ui.import.start') return reply({ ...prepared, phase: 'importing' })
+    throw Error(endpoint)
+  })
+  const pickDirectory = vi.fn(async () => '/sources/folder')
+  render(<KnowledgeImports callKnowledge={call} pickDirectory={pickDirectory} />)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' })); selectOriginal()
+  const bridge = (window as any).__DSH_DESKTOP_FILE_PATH__.getPathForFile
+  bridge.mockImplementation((file: File) => '/sources/' + file.name)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理所选资料' }))
+  for (const name of ['选择文件', '选择文件夹', '移除 report.pdf']) expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByLabelText('选择知识原件').hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('combobox', { name: '资料范围' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('textbox', { name: '整理主题（可选）' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: '收起知识导入' }).hasAttribute('disabled')).toBe(false)
+  const later = new File(['next'], 'later.pdf', { type: 'application/pdf' })
+  fireEvent.change(screen.getByLabelText('选择知识原件'), { target: { files: [later] } })
+  const drop = screen.getByText('拖入磁盘文件，或').parentElement!
+  fireEvent.drop(drop, { dataTransfer: { types: ['Files'], files: [later] } })
+  fireEvent.click(screen.getByRole('button', { name: '选择文件夹' }))
+  expect(pickDirectory).not.toHaveBeenCalled(); expect(bridge).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('button', { name: '移除 later.pdf' })).toBeNull()
+  await act(async () => finish(reply(prepared)))
+  await screen.findByText('导入中')
+  expect(screen.getByRole('button', { name: '选择文件' }).hasAttribute('disabled')).toBe(false)
+  fireEvent.change(screen.getByLabelText('选择知识原件'), { target: { files: [later] } })
+  expect(screen.getByRole('button', { name: '移除 later.pdf' })).toBeTruthy()
+})

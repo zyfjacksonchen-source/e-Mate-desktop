@@ -55,7 +55,7 @@ export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, repla
     void run('ui.import.projects', {}).then(result => { if (!active) return; if (!Array.isArray(result.items) || typeof result.complete !== 'boolean' || result.items.some((item: any) => !Number.isSafeInteger(item.id) || item.id < 1 || typeof item.title !== 'string')) throw Error('项目目录返回无效。'); setProjects(result) }).catch(reason => { if (active) report(reason) })
     return () => { active = false }
   }, [open, kind])
-  const addFiles = (next: Picked[]) => setFiles(previous => { const result = [...new Map([...previous, ...next].map(file => [file.path, file])).values()]; if (result.length > 100) { setError('一次最多选择100份原件；大目录自动分批尚未完成。'); return previous }; return result })
+  const addFiles = (next: Picked[]) => { if (busy || action.current) return; setFiles(previous => { const result = [...new Map([...previous, ...next].map(file => [file.path, file])).values()]; if (result.length > 100) { setError('一次最多选择100份原件；大目录自动分批尚未完成。'); return previous }; return result }) }
   const prepareAndStart = async () => {
     if (action.current || !files.length) return
     action.current = true; setBusy(true); setError(''); const epoch = generation.current
@@ -82,9 +82,9 @@ export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, repla
   return <section className={css.root} aria-label="导入并整理知识"><button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>导入并整理</button>
     {open && <div className={css.panel}>
       <div className={css.top}><div><strong>导入并整理知识</strong><p>导入原件，解析后自动整理发布。离开页面任务会继续。</p></div><button type="button" onClick={() => setOpen(false)} aria-label="收起知识导入">收起</button></div>
-      <div className={css.drop} onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }} onDrop={event => { event.preventDefault(); try { addFiles(diskFiles(Array.from(event.dataTransfer.files))) } catch (reason) { report(reason) } }}>
-        <input ref={chooser} type="file" multiple hidden aria-label="选择知识原件" onChange={event => { try { addFiles(diskFiles(Array.from(event.currentTarget.files ?? []))) } catch (reason) { report(reason) }; event.currentTarget.value = '' }} />
-        <span>拖入磁盘文件，或</span><button type="button" onClick={() => chooser.current?.click()}>选择文件</button>
+      <div className={css.drop} aria-disabled={busy} onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }} onDrop={event => { event.preventDefault(); if (busy || action.current) return; try { addFiles(diskFiles(Array.from(event.dataTransfer.files))) } catch (reason) { report(reason) } }}>
+        <input ref={chooser} type="file" multiple hidden disabled={busy} aria-label="选择知识原件" onChange={event => { if (busy || action.current) { event.currentTarget.value = ''; return }; try { addFiles(diskFiles(Array.from(event.currentTarget.files ?? []))) } catch (reason) { report(reason) }; event.currentTarget.value = '' }} />
+        <span>拖入磁盘文件，或</span><button type="button" disabled={busy} onClick={() => { if (!action.current) chooser.current?.click() }}>选择文件</button>
         <button type="button" disabled={!pickDirectory || busy} onClick={async () => { const epoch = generation.current; const controller = new AbortController(); requests.current.add(controller); try { const path = await pickDirectory?.(controller.signal); if (path && epoch === generation.current) addFiles([{ path, name: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path, mediaType: 'inode/directory' }]) } catch (reason) { if (epoch === generation.current) report(reason) } finally { requests.current.delete(controller) } }}>选择文件夹</button>
       </div>
       {!!files.length && <ul className={css.files} aria-label="待导入原件">{files.map(file => <li key={file.path}><FileIcon name={file.name} mediaType={file.mediaType} /><span>{file.name}</span><button type="button" aria-label={'移除 ' + file.name} disabled={busy} onClick={() => setFiles(previous => previous.filter(value => value.path !== file.path))}>×</button></li>)}</ul>}
