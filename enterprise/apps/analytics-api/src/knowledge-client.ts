@@ -58,7 +58,7 @@ export function knowledgeRoute(method: string | undefined, url: URL, payload: un
   }
   const identifierPath = /^\/(imports|compilations|revisions)\/([a-f0-9-]{36})(?:\/(claim|commit|content))?$/.exec(path);
   const writeKeys: Record<string, readonly string[]> = {
-    'imports.create': ['operation_id', 'filename', 'title', 'publisher', 'kind', 'sha256', 'byte_length', 'scope', 'provenance', 'supersedes'],
+    'imports.create': ['operation_id', 'filename', 'title', 'publisher', 'kind', 'sha256', 'byte_length', 'scope', 'provenance', 'supersedes', 'graph_path', 'source_ref'],
     'compilations.create': ['operation_id', 'source_versions', 'model', 'topics', 'scope', 'benchmark_query_ids'],
     'compilations.claim': ['expected_version', 'runner_id'],
     'compilations.checkpoint': ['expected_version', 'lease_token', 'state', 'checkpoint'],

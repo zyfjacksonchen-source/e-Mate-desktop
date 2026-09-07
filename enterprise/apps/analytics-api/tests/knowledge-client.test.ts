@@ -150,6 +150,25 @@ test('knowledge writes bind canonical paths and reject caller identities and for
   assert.throws(() => knowledgeRoute('PUT', url(`/imports/${id}/content?actor=another`), Buffer.from('file')));
 });
 
+test('knowledge import forwards versioned graph binding to the existing authority without changing legacy payloads', () => {
+  const url = new URL(KNOWLEDGE_PREFIX + '/imports', 'http://local');
+  const id = '12345678-1234-1234-1234-123456789abc';
+  const legacy = { operation_id: 'stable-operation-id', filename: '方法.md', provenance: null, supersedes: null };
+  assert.deepEqual(knowledgeRoute('POST', url, legacy).params, legacy);
+  const source = { source_id: id, source_version: 'a'.repeat(64), parse_revision: 'b'.repeat(64) };
+  for (const expected_binding of [null, { binding_revision: 'c'.repeat(64), source_id: id, source_version: source.source_version }]) {
+    const payload = { ...legacy, graph_path: { namespace_id: id, relative_path: '媒体/方法.md', layer: 'expert', expected_binding }, source_ref: source };
+    const result = knowledgeRoute('POST', url, payload);
+    assert.equal(result.action, 'imports.create');
+    assert.deepEqual(result.params, payload);
+    for (const injected of [{ tenant_id: 'other' }, { subject_id: 'other' }, { actor: { subject_id: 'other' } }]) {
+      assert.throws(() => knowledgeRoute('POST', url, { ...payload, ...injected }));
+    }
+  }
+  assert.deepEqual(knowledgeRoute('POST', url, { ...legacy, graph_path: null, source_ref: null }).params,
+    { ...legacy, graph_path: null, source_ref: null });
+});
+
 test('binary upload uses exact bytes and fixed verified UDS context without forwarding credentials', async () => {
   const id = '12345678-1234-1234-1234-123456789abc';
   const bytes = Buffer.from([0, 255, 127, 10, 13]);
