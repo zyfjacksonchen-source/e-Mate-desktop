@@ -11,6 +11,7 @@ import random
 import re
 import shutil
 import stat
+import sys
 import tempfile
 import uuid
 import zipfile
@@ -5122,7 +5123,12 @@ def _publish_output_file(temporary: Path, output: Path) -> None:
     backup = output.with_name(f'.{output.name}.replace-backup-{uuid.uuid4().hex}')
     if not replace_file(str(output), str(temporary), str(backup), 0, None, None):
         error = ctypes.WinError(ctypes.get_last_error())
-        if backup.exists() and not output.exists():
+        if backup.exists():
+            if output.exists():
+                raise OSError(
+                    f"PPTX replacement failed; original retained at {backup}. "
+                    f"Existing destination left unchanged: {output}"
+                ) from error
             try:
                 os.rename(backup, output)
             except OSError as restore_error:
@@ -5131,7 +5137,14 @@ def _publish_output_file(temporary: Path, output: Path) -> None:
                     f"Restore failed: {restore_error}"
                 ) from error
         raise error
-    backup.unlink()
+    try:
+        backup.unlink(missing_ok=True)
+    except OSError as cleanup_error:
+        print(
+            f"[warn] PPTX published at {output}; backup retained at {backup}. "
+            f"Backup cleanup failed: {cleanup_error}",
+            file=sys.stderr,
+        )
 
 
 _NOTES_MASTER_REL_TYPE = (

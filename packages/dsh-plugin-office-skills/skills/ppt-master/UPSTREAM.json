@@ -127,12 +127,16 @@
       "original_bytes": 319004,
       "original_git_blob_sha1": "7080ec06711f7bc825a9c446c7e1ad4f2eec0cde",
       "original_sha256": "f6425c38a70bb5601860e8a55ebe0e1e76d983b549bef98fc0ce9071e6ff158f",
-      "distributed_bytes": 319242,
-      "distributed_sha256": "336fa3d8335700ec3d093f9954eb51254f33a985fbf2655e40547c71b5fff937",
+      "distributed_bytes": 319724,
+      "distributed_sha256": "f89d1fcec1cb6d0aa91a4c243d24b513cc07c682a9034e6bcf3e08e7ff9bbe10",
       "changes": [
         {
           "type": "permission-preserving-publication",
           "description": "Replace post-export POSIX/Windows permission widening with atomic publication: preserve existing POSIX mode; use Windows ReplaceFileW with flags=0 and a retained/restorable backup; never fall back to overwriting after replacement failure."
+        },
+        {
+          "type": "publication-receipt-and-recovery",
+          "description": "Preserve successful publication when Windows backup cleanup fails: warn with retained backup path without retry. On replacement failure with a concurrent destination, retain both objects and report the backup path."
         }
       ]
     },
@@ -142,12 +146,16 @@
       "original_bytes": 35996,
       "original_git_blob_sha1": "3207b0cb79f3c483869c84ae13b1a095e5df39e5",
       "original_sha256": "67f4f10c6c16b27350a88d863d819399e63f46bf39b696fc7b831e2791640899",
-      "distributed_bytes": 42775,
-      "distributed_sha256": "d136172ce2944cac992d540cce19214252757a876e83f7da8800fc50752f1798",
+      "distributed_bytes": 45204,
+      "distributed_sha256": "686dcea2beb4d72ed18fe7706b88dff3408c30bea9e67607ffdc01d75aea2af8",
       "changes": [
         {
           "type": "permission-preserving-publication",
           "description": "Add real private-file export regression and focused native publication/Windows API failure and recovery checks."
+        },
+        {
+          "type": "publication-receipt-and-recovery",
+          "description": "Cover successful Windows publication with denied backup cleanup and failed replacement with a concurrent destination; assert one API call and retained original backup."
         }
       ]
     }

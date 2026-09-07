@@ -725,6 +725,54 @@ class NativeOutputPermissionTests(unittest.TestCase):
         self.windows_os.replace.assert_not_called()
         command.assert_not_called()
 
+    def test_windows_published_file_remains_success_when_backup_cleanup_fails(self) -> None:
+        def replace(output, replacement, backup, *_args):
+            self.native_os.rename(output, backup)
+            self.native_os.rename(replacement, output)
+            return 1
+
+        api, _, command = self._windows(replace)
+        original_unlink = Path.unlink
+
+        def deny_backup_cleanup(path, *args, **kwargs):
+            if '.replace-backup-' in path.name:
+                raise PermissionError('backup cleanup denied')
+            return original_unlink(path, *args, **kwargs)
+
+        stderr = io.StringIO()
+        with patch.object(Path, 'unlink', autospec=True, side_effect=deny_backup_cleanup), redirect_stderr(stderr):
+            self.assertIsNone(self.builder._publish_output_file(self.replacement, self.output))
+        api.assert_called_once()
+        command.assert_not_called()
+        self.assertEqual(self.output.read_bytes(), b'validated replacement')
+        self.assertFalse(self.replacement.exists())
+        backups = list(self.root.glob('*.replace-backup-*'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), b'private original')
+        self.assertIn('PPTX published', stderr.getvalue())
+        self.assertIn(str(self.output), stderr.getvalue())
+        self.assertIn(str(backups[0]), stderr.getvalue())
+
+    def test_windows_failed_replace_preserves_concurrent_output_and_reports_backup(self) -> None:
+        def partial(output, _replacement, backup, *_args):
+            self.native_os.rename(output, backup)
+            Path(output).write_bytes(b'concurrent document')
+            return 0
+
+        api, _, command = self._windows(partial, error=1177)
+        with self.assertRaises(OSError) as caught:
+            self.builder._publish_output_file(self.replacement, self.output)
+        backups = list(self.root.glob('*.replace-backup-*'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), b'private original')
+        self.assertIn(str(backups[0]), str(caught.exception))
+        self.assertEqual(self.output.read_bytes(), b'concurrent document')
+        self.assertEqual(self.replacement.read_bytes(), b'validated replacement')
+        self.windows_os.rename.assert_not_called()
+        self.windows_os.replace.assert_not_called()
+        api.assert_called_once()
+        command.assert_not_called()
+
     def test_windows_failure_never_falls_back_to_overwriting_original(self) -> None:
         api, _, command = self._windows(lambda *_args: 0)
         with self.assertRaises(OSError):
