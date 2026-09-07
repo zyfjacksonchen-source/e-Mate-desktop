@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -15,6 +16,8 @@ import {
   verifyPackagedNodePty,
   verifyPackagedCalc,
   preservePackagedCalcDirectories,
+  preserveCalcMetadataFile,
+  preservePackagedCalcMetadata,
   verifyPackagedRuntime,
   type ArchiveLister,
   type FileProbe,
@@ -301,6 +304,38 @@ describe('packaged desktop runtime verification', () => {
   })
 })
 
+
+it('preserves verified original Calc metadata and rejects corrupt sources or linked destinations', () => {
+  const base = mkdtempSync(join(tmpdir(), 'emate-calc-plist-'))
+  const source = join(base, 'source'), destination = join(base, 'destination')
+  const name = 'Contents/Info.plist', original = '<plist>original upstream metadata</plist>'
+  const digest = createHash('sha256').update(original).digest('hex')
+  try {
+    for (const root of [source, destination]) mkdirSync(join(root, 'Contents'), { recursive: true })
+    writeFileSync(join(source, name), original)
+    writeFileSync(join(destination, name), '<plist>injected Electron integrity</plist>')
+    preserveCalcMetadataFile(source, destination, name, digest)
+    expect(readFileSync(join(destination, name), 'utf8')).toBe(original)
+    const mtime = statSync(join(destination, name)).mtimeMs
+    preserveCalcMetadataFile(source, destination, name, digest)
+    expect(statSync(join(destination, name)).mtimeMs).toBe(mtime)
+    writeFileSync(join(source, name), 'corrupt')
+    expect(() => preserveCalcMetadataFile(source, destination, name, digest)).toThrow('digest mismatch')
+    expect(readFileSync(join(destination, name), 'utf8')).toBe(original)
+    writeFileSync(join(source, name), original)
+    rmSync(join(destination, name))
+    expect(() => preserveCalcMetadataFile(source, destination, name, digest)).toThrow()
+    if (process.platform !== 'win32') {
+      symlinkSync(join(source, name), join(destination, name))
+      expect(() => preserveCalcMetadataFile(source, destination, name, digest)).toThrow('regular file')
+      rmSync(join(destination, 'Contents'), { recursive: true })
+      symlinkSync(join(source, 'Contents'), join(destination, 'Contents'))
+      expect(() => preserveCalcMetadataFile(source, destination, name, digest)).toThrow('real directory')
+    }
+    expect(() => preservePackagedCalcMetadata(context('/missing', 'win32', 1))).not.toThrow()
+    expect(() => preservePackagedCalcMetadata(context('/missing', 'darwin', 1))).not.toThrow()
+  } finally { rmSync(base, { recursive: true, force: true }) }
+})
 
 it('preserves only pinned empty Calc directories and rejects symlink parents', () => {
   const base = mkdtempSync(join(tmpdir(), 'emate-calc-empty-'))
