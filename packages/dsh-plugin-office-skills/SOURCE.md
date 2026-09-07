@@ -37,6 +37,7 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - OpenAI PDF plugin `26.905.11957`; its original four Skill files are retained byte-for-byte. Exact file hashes, the original MIT plugin manifest and the licensing inspection scope are recorded in `skills/pdf/SOURCE.md` and `skills/pdf/UPSTREAM.json`.
 - `HOST.md` maps resource paths, the native Python environment and real attachment delivery to e-Mate. The marker helper only checks its arguments; it is not evidence of successful generation or rendering.
 - Python dependencies and a real renderer remain a separate acceptance gate. The provider reports `needs-runtime` until that gate is verified.
+- e-Mate adds `scripts/render_pdf.py` and `references/rendering.md` using publicly distributed pypdfium2/PDFium. Rendering tests use real PDFs and PNGs; the original four upstream Skill files remain unchanged. Packaged dependency verification is separate.
 
 ## Codex Spreadsheets replacement
 

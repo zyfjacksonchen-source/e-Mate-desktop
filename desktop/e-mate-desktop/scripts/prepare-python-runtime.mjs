@@ -34,7 +34,7 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const outputRoot = join(packageRoot, 'build', 'python-runtime')
 
 function targetsForHost() {
-  if (process.platform === 'darwin') return ['darwin-arm64', 'darwin-x64']
+  if (process.platform === 'darwin') return [`darwin-${process.arch}`, `darwin-${process.arch === 'arm64' ? 'x64' : 'arm64'}`]
   if (process.platform === 'win32' && process.arch === 'x64') return ['win32-x64']
   throw new Error(`e-Mate Python runtime is unsupported on ${process.platform}-${process.arch}`)
 }
@@ -46,7 +46,42 @@ function pythonExecutable(targetRoot, platform) {
 }
 
 function receipt(target, asset) {
-  return JSON.stringify({ release: RELEASE, python: PYTHON_VERSION, target, sha256: asset.sha256 })
+  return JSON.stringify({ release: RELEASE, python: PYTHON_VERSION, target, sha256: asset.sha256,
+    officeRequirementsSha256: sha256(join(packageRoot, 'scripts', 'office-python', `${target}.txt`)) })
+}
+
+function officeSitePackages(staging, platform) {
+  return join(staging, 'python', ...(platform === 'win32' ? ['Lib', 'site-packages'] : ['lib', 'python3.12', 'site-packages']))
+}
+
+const OFFICE_VERIFY_SCRIPT = `import importlib.metadata as metadata,json,sys
+expected=json.loads(sys.argv[1])
+normalize=lambda name:name.lower().replace('_','-').replace('.','-')
+installed={normalize(d.metadata['Name']):d for d in metadata.distributions(path=[sys.argv[2]])}
+verified={}
+for name,spec in expected.items():
+ d=installed[normalize(name)]
+ assert d.version==spec['version'],(name,d.version,spec['version'])
+ files=list(d.files or [])
+ for license_file in spec['license_files']:
+  matches=[f for f in files if str(f)==license_file or str(f).endswith('/'+license_file)]
+  assert matches and all(d.locate_file(f).is_file() for f in matches),(name,'missing license',license_file)
+ verified[name]={'version':d.version,'license_files':len(spec['license_files'])}
+if sys.argv[3]=='native':
+ sys.path.insert(0,sys.argv[2])
+ import reportlab,pypdf,pdfplumber,openpyxl,PIL.Image,pypdfium2
+print(json.dumps({'distributions':verified,'native_imports':sys.argv[3]=='native'},sort_keys=True))
+`
+
+export function officeInstallArguments(target, staging) {
+  const platform = target.startsWith('win32-') ? 'win32' : 'darwin'
+  const wheelPlatform = { 'darwin-arm64': 'macosx_12_0_arm64', 'darwin-x64': 'macosx_12_0_x86_64', 'win32-x64': 'win_amd64' }[target]
+  if (wheelPlatform === undefined) throw new Error('Unsupported office Python target')
+  return ['-I', '-m', 'pip', '--isolated', 'install', '--disable-pip-version-check',
+    '--no-deps', '--no-index', '--no-compile', '--only-binary=:all:', '--require-hashes',
+    '--platform', wheelPlatform, '--implementation', 'cp', '--python-version', '3.12', '--abi', 'cp312',
+    '--target', officeSitePackages(staging, platform),
+    '-r', join(packageRoot, 'scripts', 'office-python', `${target}.txt`)]
 }
 
 export async function download(url, destination, request = fetch) {
@@ -87,6 +122,7 @@ async function prepare(target) {
   const name = `cpython-${PYTHON_VERSION}+${RELEASE}-${asset.target}-install_only_stripped.tar.gz`
   const url = `https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE}/${encodeURIComponent(name)}`
   try {
+    console.log(`Preparing fixed Python runtime: ${target}`)
     await download(url, archive)
     const actual = sha256(archive)
     if (actual !== asset.sha256) throw new Error(`Python runtime SHA-256 mismatch for ${target}`)
@@ -100,6 +136,19 @@ async function prepare(target) {
     if (!existsSync(pythonExecutable(staging, platform))) {
       throw new Error(`Python runtime archive for ${target} is missing its interpreter`)
     }
+    const hostPython = target === `${process.platform}-${process.arch}`
+      ? pythonExecutable(staging, platform)
+      : pythonExecutable(join(outputRoot, `${process.platform}-${process.arch}`), process.platform)
+    const install = spawnSync(hostPython, officeInstallArguments(target, staging), { stdio: 'inherit' })
+    if (install.error !== undefined) throw install.error
+    if (install.status !== 0) throw new Error(`PDF/spreadsheet dependency installation failed for ${target}`)
+    const manifest = JSON.parse(readFileSync(join(packageRoot, 'scripts', 'office-python', 'manifest.json'), 'utf8'))
+    const expectedPackages = Object.fromEntries(manifest.targets[target].map(({ name, version, license_files }) => [name, { version, license_files }]))
+    const probe = spawnSync(hostPython, ['-I', '-c', OFFICE_VERIFY_SCRIPT,
+      JSON.stringify(expectedPackages), officeSitePackages(staging, platform),
+      target === `${process.platform}-${process.arch}` ? 'native' : 'metadata'], { stdio: 'inherit' })
+    if (probe.error !== undefined) throw probe.error
+    if (probe.status !== 0) throw new Error(`PDF/spreadsheet dependency verification failed for ${target}`)
     writeFileSync(join(staging, 'receipt.json'), expectedReceipt, { mode: 0o644 })
     rmSync(finalRoot, { recursive: true, force: true })
     renameSync(staging, finalRoot)

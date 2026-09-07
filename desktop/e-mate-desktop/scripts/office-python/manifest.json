@@ -1,0 +1,798 @@
+{
+  "python": "3.12.14",
+  "minimumMacOS": "12.0",
+  "targets": {
+    "darwin-arm64": [
+      {
+        "name": "cffi",
+        "version": "2.1.1",
+        "filename": "cffi-2.1.1-cp312-cp312-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/54/7d/16e5a096677b5e313ca80cd5e5170efa3ea44624a82bb111925522da64b1/cffi-2.1.1-cp312-cp312-macosx_11_0_arm64.whl",
+        "sha256": "f81b3b8f3d4e343550fa4baa0e479bba9f2d29ce9c2e9b51d1ce1718d7442fcf",
+        "size": 184719,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT-0",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "pycparser; implementation_name != \"PyPy\""
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/54/7d/16e5a096677b5e313ca80cd5e5170efa3ea44624a82bb111925522da64b1/cffi-2.1.1-cp312-cp312-macosx_11_0_arm64.whl.metadata",
+        "metadata_sha256": "558bafb9093a8e790175d9ecff9688382981d744877dad86fd6770db0f4dc918"
+      },
+      {
+        "name": "charset-normalizer",
+        "version": "3.5.1",
+        "filename": "charset_normalizer-3.5.1-cp312-cp312-macosx_10_13_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/30/27/78873dc8b6a56357517b74b6bb9568b80450e7bb4f6ef7e3fa9d22aa0bd7/charset_normalizer-3.5.1-cp312-cp312-macosx_10_13_universal2.whl",
+        "sha256": "5b6d1386bf0096d26d3a863dc0a487a5b4eb9aa93cf5ba69683d29dde6b9d60f",
+        "size": 344456,
+        "requires_python": ">=3.7",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/30/27/78873dc8b6a56357517b74b6bb9568b80450e7bb4f6ef7e3fa9d22aa0bd7/charset_normalizer-3.5.1-cp312-cp312-macosx_10_13_universal2.whl.metadata",
+        "metadata_sha256": "955c93827d59f1280f6d6a76b1e11bfb999cc65a55df83a6f9b28b7bc0e467f6"
+      },
+      {
+        "name": "cryptography",
+        "version": "48.0.1",
+        "filename": "cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/1b/bc/ee4137cbbe105652c0ee4252792b78fc8e7afa4b8e61d9d5dc05a7f45731/cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl",
+        "sha256": "3e4a1a3232eef2e6c732827d5722db29a0cc8b27af2a4d865b094cf954be9ca1",
+        "size": 8008324,
+        "requires_python": "!=3.9.0,!=3.9.1,>=3.9",
+        "license_expression": "Apache-2.0 OR BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE",
+          "LICENSE.APACHE",
+          "LICENSE.BSD"
+        ],
+        "active_requires_dist": [
+          "cffi>=2.0.0 ; platform_python_implementation != 'PyPy'"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/1b/bc/ee4137cbbe105652c0ee4252792b78fc8e7afa4b8e61d9d5dc05a7f45731/cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl.metadata",
+        "metadata_sha256": "5b62dcfcaddf62e26f8c28f6055c0aba858eea2a3697a3fc8e7aced427bf8d94"
+      },
+      {
+        "name": "et-xmlfile",
+        "version": "2.0.0",
+        "filename": "et_xmlfile-2.0.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl",
+        "sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+        "size": 18059,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENCE.python",
+          "LICENCE.rst",
+          "AUTHORS.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "0e97d7ea909ed0fbe03d88bc8b6f58677cee1b07bd3353ce361cd2405915204e"
+      },
+      {
+        "name": "openpyxl",
+        "version": "3.1.5",
+        "filename": "openpyxl-3.1.5-py2.py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl",
+        "sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+        "size": 250910,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENCE.rst"
+        ],
+        "active_requires_dist": [
+          "et-xmlfile"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl.metadata",
+        "metadata_sha256": "23f80ca9830dd89435da1710f26deda8f81e5409287e74540210c72627a4ad96"
+      },
+      {
+        "name": "pdfminer.six",
+        "version": "20251230",
+        "filename": "pdfminer_six-20251230-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/65/d7/b288ea32deb752a09aab73c75e1e7572ab2a2b56c3124a5d1eb24c62ceb3/pdfminer_six-20251230-py3-none-any.whl",
+        "sha256": "9ff2e3466a7dfc6de6fd779478850b6b7c2d9e9405aa2a5869376a822771f485",
+        "size": 6591909,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "charset-normalizer>=2.0.0",
+          "cryptography>=36.0.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/65/d7/b288ea32deb752a09aab73c75e1e7572ab2a2b56c3124a5d1eb24c62ceb3/pdfminer_six-20251230-py3-none-any.whl.metadata",
+        "metadata_sha256": "77a7aa49c45244383288e8b98cb567f19a9083ad0d74716e3011c831df801d44"
+      },
+      {
+        "name": "pdfplumber",
+        "version": "0.11.9",
+        "filename": "pdfplumber-0.11.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/8b/c8/cdbc975f5b634e249cfa6597e37c50f3078412474f21c015e508bfbfe3c3/pdfplumber-0.11.9-py3-none-any.whl",
+        "sha256": "33ec5580959ba524e9100138746e090879504c42955df1b8a997604dd326c443",
+        "size": 60045,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": null,
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE.txt"
+        ],
+        "active_requires_dist": [
+          "pdfminer.six==20251230",
+          "Pillow>=9.1",
+          "pypdfium2>=4.18.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/8b/c8/cdbc975f5b634e249cfa6597e37c50f3078412474f21c015e508bfbfe3c3/pdfplumber-0.11.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "24f9118940ac3810a6bf0dd1970094e29cc659c71c334a6fc2e65d7120a74b62"
+      },
+      {
+        "name": "pillow",
+        "version": "12.3.0",
+        "filename": "pillow-12.3.0-cp312-cp312-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/d8/66/9a386a92561f402389a4fc70c18838bf6d35eb5eb5c6850b4b2dc64f5048/pillow-12.3.0-cp312-cp312-macosx_11_0_arm64.whl",
+        "sha256": "ffd0c5368496f41b0944be820fcb7a838aa6e623d250b01acf2643939c3f99d7",
+        "size": 4780323,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT-CMU",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/d8/66/9a386a92561f402389a4fc70c18838bf6d35eb5eb5c6850b4b2dc64f5048/pillow-12.3.0-cp312-cp312-macosx_11_0_arm64.whl.metadata",
+        "metadata_sha256": "8fc07146cab33ef7582361dab6eac596d340b03ec648f18217da7894f73838c8"
+      },
+      {
+        "name": "pycparser",
+        "version": "3.0",
+        "filename": "pycparser-3.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl",
+        "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
+        "size": 48172,
+        "requires_python": ">=3.10",
+        "license_expression": "BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "f547a60b0ab54cc2f242213d1f87960ad80df7dd5dfeb98d17a444d48bfb6b93"
+      },
+      {
+        "name": "pypdf",
+        "version": "6.10.0",
+        "filename": "pypdf-6.10.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl",
+        "sha256": "90005e959e1596c6e6c84c8b0ad383285b3e17011751cedd17f2ce8fcdfc86de",
+        "size": 334459,
+        "requires_python": ">=3.9",
+        "license_expression": "BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "74db615a83dee1980ab4c4a73609d53cebf557e80ee822e9ac363cd575f7a61a"
+      },
+      {
+        "name": "pypdfium2",
+        "version": "5.11.0",
+        "filename": "pypdfium2-5.11.0-py3-none-macosx_12_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/d2/13/13571dc7f1d11a4e4bde6ab8961318b04ff70bdc2aea5e7f88be5ef53167/pypdfium2-5.11.0-py3-none-macosx_12_0_arm64.whl",
+        "sha256": "73fe55dd258f02332bc0a34128ddc2994fd610e664d1f2f7d78dd9e2570f15ee",
+        "size": 3586638,
+        "requires_python": ">=3.6",
+        "license_expression": null,
+        "license": "BSD-3-Clause, Apache-2.0, dependency licenses",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSES/Apache-2.0.txt",
+          "LICENSES/BSD-3-Clause.txt",
+          "LICENSES/CC-BY-4.0.txt",
+          "data/darwin_arm64/BUILD_LICENSES/abseil.txt",
+          "data/darwin_arm64/BUILD_LICENSES/agg23.txt",
+          "data/darwin_arm64/BUILD_LICENSES/fast_float.txt",
+          "data/darwin_arm64/BUILD_LICENSES/freetype.txt",
+          "data/darwin_arm64/BUILD_LICENSES/icu.txt",
+          "data/darwin_arm64/BUILD_LICENSES/lcms.txt",
+          "data/darwin_arm64/BUILD_LICENSES/libjpeg_turbo.ijg",
+          "data/darwin_arm64/BUILD_LICENSES/libjpeg_turbo.md",
+          "data/darwin_arm64/BUILD_LICENSES/libopenjpeg.txt",
+          "data/darwin_arm64/BUILD_LICENSES/libpng.txt",
+          "data/darwin_arm64/BUILD_LICENSES/libtiff.txt",
+          "data/darwin_arm64/BUILD_LICENSES/llvm-libc.txt",
+          "data/darwin_arm64/BUILD_LICENSES/pdfium-binaries.txt",
+          "data/darwin_arm64/BUILD_LICENSES/pdfium.txt",
+          "data/darwin_arm64/BUILD_LICENSES/simdutf.txt",
+          "data/darwin_arm64/BUILD_LICENSES/zlib.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/d2/13/13571dc7f1d11a4e4bde6ab8961318b04ff70bdc2aea5e7f88be5ef53167/pypdfium2-5.11.0-py3-none-macosx_12_0_arm64.whl.metadata",
+        "metadata_sha256": "5e402490e671ac29b75e4667607463648152f508eb8d0c13326a8efa6e638093"
+      },
+      {
+        "name": "reportlab",
+        "version": "4.4.9",
+        "filename": "reportlab-4.4.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl",
+        "sha256": "68e2d103ae8041a37714e8896ec9b79a1c1e911d68c3bd2ea17546568cf17bfd",
+        "size": 1954401,
+        "requires_python": "<4,>=3.9",
+        "license_expression": null,
+        "license": "BSD license (see license.txt for details), Copyright (c) 2000-2025, ReportLab Inc.",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "pillow>=9.0.0",
+          "charset-normalizer"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "c73111f8f0ce43fc2194b3e03d0a1e3dd5aa136a7f87b63261776fad7d023097"
+      }
+    ],
+    "darwin-x64": [
+      {
+        "name": "cffi",
+        "version": "2.1.1",
+        "filename": "cffi-2.1.1-cp312-cp312-macosx_10_15_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/10/69/43965eccfdead3b9220015fd1320e117be8c6ed01a62ffab76eeb752f5d5/cffi-2.1.1-cp312-cp312-macosx_10_15_x86_64.whl",
+        "sha256": "c8c69575568085ba0b1b10c0249d779a214aea6f6522e949a0fc9fb0fcb449d0",
+        "size": 184821,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT-0",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "pycparser; implementation_name != \"PyPy\""
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/10/69/43965eccfdead3b9220015fd1320e117be8c6ed01a62ffab76eeb752f5d5/cffi-2.1.1-cp312-cp312-macosx_10_15_x86_64.whl.metadata",
+        "metadata_sha256": "558bafb9093a8e790175d9ecff9688382981d744877dad86fd6770db0f4dc918"
+      },
+      {
+        "name": "charset-normalizer",
+        "version": "3.5.1",
+        "filename": "charset_normalizer-3.5.1-cp312-cp312-macosx_10_13_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/30/27/78873dc8b6a56357517b74b6bb9568b80450e7bb4f6ef7e3fa9d22aa0bd7/charset_normalizer-3.5.1-cp312-cp312-macosx_10_13_universal2.whl",
+        "sha256": "5b6d1386bf0096d26d3a863dc0a487a5b4eb9aa93cf5ba69683d29dde6b9d60f",
+        "size": 344456,
+        "requires_python": ">=3.7",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/30/27/78873dc8b6a56357517b74b6bb9568b80450e7bb4f6ef7e3fa9d22aa0bd7/charset_normalizer-3.5.1-cp312-cp312-macosx_10_13_universal2.whl.metadata",
+        "metadata_sha256": "955c93827d59f1280f6d6a76b1e11bfb999cc65a55df83a6f9b28b7bc0e467f6"
+      },
+      {
+        "name": "cryptography",
+        "version": "48.0.1",
+        "filename": "cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/1b/bc/ee4137cbbe105652c0ee4252792b78fc8e7afa4b8e61d9d5dc05a7f45731/cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl",
+        "sha256": "3e4a1a3232eef2e6c732827d5722db29a0cc8b27af2a4d865b094cf954be9ca1",
+        "size": 8008324,
+        "requires_python": "!=3.9.0,!=3.9.1,>=3.9",
+        "license_expression": "Apache-2.0 OR BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE",
+          "LICENSE.APACHE",
+          "LICENSE.BSD"
+        ],
+        "active_requires_dist": [
+          "cffi>=2.0.0 ; platform_python_implementation != 'PyPy'"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/1b/bc/ee4137cbbe105652c0ee4252792b78fc8e7afa4b8e61d9d5dc05a7f45731/cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl.metadata",
+        "metadata_sha256": "5b62dcfcaddf62e26f8c28f6055c0aba858eea2a3697a3fc8e7aced427bf8d94"
+      },
+      {
+        "name": "et-xmlfile",
+        "version": "2.0.0",
+        "filename": "et_xmlfile-2.0.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl",
+        "sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+        "size": 18059,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENCE.python",
+          "LICENCE.rst",
+          "AUTHORS.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "0e97d7ea909ed0fbe03d88bc8b6f58677cee1b07bd3353ce361cd2405915204e"
+      },
+      {
+        "name": "openpyxl",
+        "version": "3.1.5",
+        "filename": "openpyxl-3.1.5-py2.py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl",
+        "sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+        "size": 250910,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENCE.rst"
+        ],
+        "active_requires_dist": [
+          "et-xmlfile"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl.metadata",
+        "metadata_sha256": "23f80ca9830dd89435da1710f26deda8f81e5409287e74540210c72627a4ad96"
+      },
+      {
+        "name": "pdfminer.six",
+        "version": "20251230",
+        "filename": "pdfminer_six-20251230-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/65/d7/b288ea32deb752a09aab73c75e1e7572ab2a2b56c3124a5d1eb24c62ceb3/pdfminer_six-20251230-py3-none-any.whl",
+        "sha256": "9ff2e3466a7dfc6de6fd779478850b6b7c2d9e9405aa2a5869376a822771f485",
+        "size": 6591909,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "charset-normalizer>=2.0.0",
+          "cryptography>=36.0.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/65/d7/b288ea32deb752a09aab73c75e1e7572ab2a2b56c3124a5d1eb24c62ceb3/pdfminer_six-20251230-py3-none-any.whl.metadata",
+        "metadata_sha256": "77a7aa49c45244383288e8b98cb567f19a9083ad0d74716e3011c831df801d44"
+      },
+      {
+        "name": "pdfplumber",
+        "version": "0.11.9",
+        "filename": "pdfplumber-0.11.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/8b/c8/cdbc975f5b634e249cfa6597e37c50f3078412474f21c015e508bfbfe3c3/pdfplumber-0.11.9-py3-none-any.whl",
+        "sha256": "33ec5580959ba524e9100138746e090879504c42955df1b8a997604dd326c443",
+        "size": 60045,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": null,
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE.txt"
+        ],
+        "active_requires_dist": [
+          "pdfminer.six==20251230",
+          "Pillow>=9.1",
+          "pypdfium2>=4.18.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/8b/c8/cdbc975f5b634e249cfa6597e37c50f3078412474f21c015e508bfbfe3c3/pdfplumber-0.11.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "24f9118940ac3810a6bf0dd1970094e29cc659c71c334a6fc2e65d7120a74b62"
+      },
+      {
+        "name": "pillow",
+        "version": "12.3.0",
+        "filename": "pillow-12.3.0-cp312-cp312-macosx_10_13_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/37/bf/fb3ebff8ddcb76aac5a01389251bbbb9519922a9b520d8247c1ca864a25d/pillow-12.3.0-cp312-cp312-macosx_10_13_x86_64.whl",
+        "sha256": "ba09209fbe443b4acccebe845d8a138b89a8f4fbaeedd44953490b5315d5e965",
+        "size": 5345969,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT-CMU",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/37/bf/fb3ebff8ddcb76aac5a01389251bbbb9519922a9b520d8247c1ca864a25d/pillow-12.3.0-cp312-cp312-macosx_10_13_x86_64.whl.metadata",
+        "metadata_sha256": "8fc07146cab33ef7582361dab6eac596d340b03ec648f18217da7894f73838c8"
+      },
+      {
+        "name": "pycparser",
+        "version": "3.0",
+        "filename": "pycparser-3.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl",
+        "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
+        "size": 48172,
+        "requires_python": ">=3.10",
+        "license_expression": "BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "f547a60b0ab54cc2f242213d1f87960ad80df7dd5dfeb98d17a444d48bfb6b93"
+      },
+      {
+        "name": "pypdf",
+        "version": "6.10.0",
+        "filename": "pypdf-6.10.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl",
+        "sha256": "90005e959e1596c6e6c84c8b0ad383285b3e17011751cedd17f2ce8fcdfc86de",
+        "size": 334459,
+        "requires_python": ">=3.9",
+        "license_expression": "BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "74db615a83dee1980ab4c4a73609d53cebf557e80ee822e9ac363cd575f7a61a"
+      },
+      {
+        "name": "pypdfium2",
+        "version": "5.11.0",
+        "filename": "pypdfium2-5.11.0-py3-none-macosx_12_0_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/84/a2/9865e2822e97f6e4bed3b0e4838bd88444c62df6ebe0ccae352027133120/pypdfium2-5.11.0-py3-none-macosx_12_0_x86_64.whl",
+        "sha256": "badb4f4df98e25fb1b58301911c98fa18da60de98b0223a6ffa91717be068b96",
+        "size": 3649576,
+        "requires_python": ">=3.6",
+        "license_expression": null,
+        "license": "BSD-3-Clause, Apache-2.0, dependency licenses",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSES/Apache-2.0.txt",
+          "LICENSES/BSD-3-Clause.txt",
+          "LICENSES/CC-BY-4.0.txt",
+          "data/darwin_x64/BUILD_LICENSES/abseil.txt",
+          "data/darwin_x64/BUILD_LICENSES/agg23.txt",
+          "data/darwin_x64/BUILD_LICENSES/fast_float.txt",
+          "data/darwin_x64/BUILD_LICENSES/freetype.txt",
+          "data/darwin_x64/BUILD_LICENSES/icu.txt",
+          "data/darwin_x64/BUILD_LICENSES/lcms.txt",
+          "data/darwin_x64/BUILD_LICENSES/libjpeg_turbo.ijg",
+          "data/darwin_x64/BUILD_LICENSES/libjpeg_turbo.md",
+          "data/darwin_x64/BUILD_LICENSES/libopenjpeg.txt",
+          "data/darwin_x64/BUILD_LICENSES/libpng.txt",
+          "data/darwin_x64/BUILD_LICENSES/libtiff.txt",
+          "data/darwin_x64/BUILD_LICENSES/llvm-libc.txt",
+          "data/darwin_x64/BUILD_LICENSES/pdfium-binaries.txt",
+          "data/darwin_x64/BUILD_LICENSES/pdfium.txt",
+          "data/darwin_x64/BUILD_LICENSES/simdutf.txt",
+          "data/darwin_x64/BUILD_LICENSES/zlib.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/84/a2/9865e2822e97f6e4bed3b0e4838bd88444c62df6ebe0ccae352027133120/pypdfium2-5.11.0-py3-none-macosx_12_0_x86_64.whl.metadata",
+        "metadata_sha256": "8fbe983bc13201be9fd2e61aca00ee9b59658a00f53e964f842d97a18fb0ec66"
+      },
+      {
+        "name": "reportlab",
+        "version": "4.4.9",
+        "filename": "reportlab-4.4.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl",
+        "sha256": "68e2d103ae8041a37714e8896ec9b79a1c1e911d68c3bd2ea17546568cf17bfd",
+        "size": 1954401,
+        "requires_python": "<4,>=3.9",
+        "license_expression": null,
+        "license": "BSD license (see license.txt for details), Copyright (c) 2000-2025, ReportLab Inc.",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "pillow>=9.0.0",
+          "charset-normalizer"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "c73111f8f0ce43fc2194b3e03d0a1e3dd5aa136a7f87b63261776fad7d023097"
+      }
+    ],
+    "win32-x64": [
+      {
+        "name": "cffi",
+        "version": "2.1.1",
+        "filename": "cffi-2.1.1-cp312-cp312-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/d9/79/615cc094e2fb508cade7de88d3b4f6c4ec2bab695c97bce9153dc65aadf5/cffi-2.1.1-cp312-cp312-win_amd64.whl",
+        "sha256": "f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a",
+        "size": 185919,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT-0",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "pycparser; implementation_name != \"PyPy\""
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/d9/79/615cc094e2fb508cade7de88d3b4f6c4ec2bab695c97bce9153dc65aadf5/cffi-2.1.1-cp312-cp312-win_amd64.whl.metadata",
+        "metadata_sha256": "67b6a7595df7ede2195016a05d285faa7d362a8f57c238984edb8bb674b5770d"
+      },
+      {
+        "name": "charset-normalizer",
+        "version": "3.5.1",
+        "filename": "charset_normalizer-3.5.1-cp312-cp312-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/9d/7a/4c6c298171e6b3e745633180ff59350fc0ca0db1ffd28df1e369e0579f71/charset_normalizer-3.5.1-cp312-cp312-win_amd64.whl",
+        "sha256": "3617ac3cfd8b9888f145ad89dd6e692285834b0201c6074a5eeaad3fd4d668c2",
+        "size": 200551,
+        "requires_python": ">=3.7",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/9d/7a/4c6c298171e6b3e745633180ff59350fc0ca0db1ffd28df1e369e0579f71/charset_normalizer-3.5.1-cp312-cp312-win_amd64.whl.metadata",
+        "metadata_sha256": "f00192aad9979ce50bdab2bfd471ad0705aee5a33f4bf6d27c1bd24417c873e5"
+      },
+      {
+        "name": "cryptography",
+        "version": "48.0.1",
+        "filename": "cryptography-48.0.1-cp311-abi3-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/c5/69/0572c77dbace6fef72f33755bd52ea399c71367250d366237f8691826b9e/cryptography-48.0.1-cp311-abi3-win_amd64.whl",
+        "sha256": "39489bfca54c7a1f6b297efcd8bc608ab92d16c4ca631b0cad4da46724588b24",
+        "size": 3817138,
+        "requires_python": "!=3.9.0,!=3.9.1,>=3.9",
+        "license_expression": "Apache-2.0 OR BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE",
+          "LICENSE.APACHE",
+          "LICENSE.BSD"
+        ],
+        "active_requires_dist": [
+          "cffi>=2.0.0 ; platform_python_implementation != 'PyPy'"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/c5/69/0572c77dbace6fef72f33755bd52ea399c71367250d366237f8691826b9e/cryptography-48.0.1-cp311-abi3-win_amd64.whl.metadata",
+        "metadata_sha256": "5b62dcfcaddf62e26f8c28f6055c0aba858eea2a3697a3fc8e7aced427bf8d94"
+      },
+      {
+        "name": "et-xmlfile",
+        "version": "2.0.0",
+        "filename": "et_xmlfile-2.0.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl",
+        "sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+        "size": 18059,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENCE.python",
+          "LICENCE.rst",
+          "AUTHORS.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "0e97d7ea909ed0fbe03d88bc8b6f58677cee1b07bd3353ce361cd2405915204e"
+      },
+      {
+        "name": "openpyxl",
+        "version": "3.1.5",
+        "filename": "openpyxl-3.1.5-py2.py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl",
+        "sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+        "size": 250910,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENCE.rst"
+        ],
+        "active_requires_dist": [
+          "et-xmlfile"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl.metadata",
+        "metadata_sha256": "23f80ca9830dd89435da1710f26deda8f81e5409287e74540210c72627a4ad96"
+      },
+      {
+        "name": "pdfminer.six",
+        "version": "20251230",
+        "filename": "pdfminer_six-20251230-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/65/d7/b288ea32deb752a09aab73c75e1e7572ab2a2b56c3124a5d1eb24c62ceb3/pdfminer_six-20251230-py3-none-any.whl",
+        "sha256": "9ff2e3466a7dfc6de6fd779478850b6b7c2d9e9405aa2a5869376a822771f485",
+        "size": 6591909,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "charset-normalizer>=2.0.0",
+          "cryptography>=36.0.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/65/d7/b288ea32deb752a09aab73c75e1e7572ab2a2b56c3124a5d1eb24c62ceb3/pdfminer_six-20251230-py3-none-any.whl.metadata",
+        "metadata_sha256": "77a7aa49c45244383288e8b98cb567f19a9083ad0d74716e3011c831df801d44"
+      },
+      {
+        "name": "pdfplumber",
+        "version": "0.11.9",
+        "filename": "pdfplumber-0.11.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/8b/c8/cdbc975f5b634e249cfa6597e37c50f3078412474f21c015e508bfbfe3c3/pdfplumber-0.11.9-py3-none-any.whl",
+        "sha256": "33ec5580959ba524e9100138746e090879504c42955df1b8a997604dd326c443",
+        "size": 60045,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": null,
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE.txt"
+        ],
+        "active_requires_dist": [
+          "pdfminer.six==20251230",
+          "Pillow>=9.1",
+          "pypdfium2>=4.18.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/8b/c8/cdbc975f5b634e249cfa6597e37c50f3078412474f21c015e508bfbfe3c3/pdfplumber-0.11.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "24f9118940ac3810a6bf0dd1970094e29cc659c71c334a6fc2e65d7120a74b62"
+      },
+      {
+        "name": "pillow",
+        "version": "12.3.0",
+        "filename": "pillow-12.3.0-cp312-cp312-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/45/89/da2f7971a317f83d807fdd4065c0af40208e59e692cc43d315a71a0e96d1/pillow-12.3.0-cp312-cp312-win_amd64.whl",
+        "sha256": "a2b55dd6b2a4c4b7d87ffa56bdb33fdc5fdb9a462173861a7bc097f17d91cb09",
+        "size": 7227137,
+        "requires_python": ">=3.10",
+        "license_expression": "MIT-CMU",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/45/89/da2f7971a317f83d807fdd4065c0af40208e59e692cc43d315a71a0e96d1/pillow-12.3.0-cp312-cp312-win_amd64.whl.metadata",
+        "metadata_sha256": "2c4378001803cfac65809a50722d46e0da4ce8061e717f103e5d52734bab30f5"
+      },
+      {
+        "name": "pycparser",
+        "version": "3.0",
+        "filename": "pycparser-3.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl",
+        "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
+        "size": 48172,
+        "requires_python": ">=3.10",
+        "license_expression": "BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "f547a60b0ab54cc2f242213d1f87960ad80df7dd5dfeb98d17a444d48bfb6b93"
+      },
+      {
+        "name": "pypdf",
+        "version": "6.10.0",
+        "filename": "pypdf-6.10.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl",
+        "sha256": "90005e959e1596c6e6c84c8b0ad383285b3e17011751cedd17f2ce8fcdfc86de",
+        "size": 334459,
+        "requires_python": ">=3.9",
+        "license_expression": "BSD-3-Clause",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "74db615a83dee1980ab4c4a73609d53cebf557e80ee822e9ac363cd575f7a61a"
+      },
+      {
+        "name": "pypdfium2",
+        "version": "5.11.0",
+        "filename": "pypdfium2-5.11.0-py3-none-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/73/d4/8b8af6eedbc5c8af49817d8f37c2e55be8a2c7f75fca9bee78efbfeb40f6/pypdfium2-5.11.0-py3-none-win_amd64.whl",
+        "sha256": "d3b698e7b51bdf2d633cc834395677319e1d66757896b30c632dfac7d7236c81",
+        "size": 3778234,
+        "requires_python": ">=3.6",
+        "license_expression": null,
+        "license": "BSD-3-Clause, Apache-2.0, dependency licenses",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSES/Apache-2.0.txt",
+          "LICENSES/BSD-3-Clause.txt",
+          "LICENSES/CC-BY-4.0.txt",
+          "data/windows_x64/BUILD_LICENSES/abseil.txt",
+          "data/windows_x64/BUILD_LICENSES/agg23.txt",
+          "data/windows_x64/BUILD_LICENSES/fast_float.txt",
+          "data/windows_x64/BUILD_LICENSES/freetype.txt",
+          "data/windows_x64/BUILD_LICENSES/icu.txt",
+          "data/windows_x64/BUILD_LICENSES/lcms.txt",
+          "data/windows_x64/BUILD_LICENSES/libjpeg_turbo.ijg",
+          "data/windows_x64/BUILD_LICENSES/libjpeg_turbo.md",
+          "data/windows_x64/BUILD_LICENSES/libopenjpeg.txt",
+          "data/windows_x64/BUILD_LICENSES/libpng.txt",
+          "data/windows_x64/BUILD_LICENSES/libtiff.txt",
+          "data/windows_x64/BUILD_LICENSES/llvm-libc.txt",
+          "data/windows_x64/BUILD_LICENSES/pdfium-binaries.txt",
+          "data/windows_x64/BUILD_LICENSES/pdfium.txt",
+          "data/windows_x64/BUILD_LICENSES/simdutf.txt",
+          "data/windows_x64/BUILD_LICENSES/zlib.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/73/d4/8b8af6eedbc5c8af49817d8f37c2e55be8a2c7f75fca9bee78efbfeb40f6/pypdfium2-5.11.0-py3-none-win_amd64.whl.metadata",
+        "metadata_sha256": "a699c20f6cfbe86c8547d43e6790eac0de5d81d2607af32e917a2defb9b627c5"
+      },
+      {
+        "name": "reportlab",
+        "version": "4.4.9",
+        "filename": "reportlab-4.4.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl",
+        "sha256": "68e2d103ae8041a37714e8896ec9b79a1c1e911d68c3bd2ea17546568cf17bfd",
+        "size": 1954401,
+        "requires_python": "<4,>=3.9",
+        "license_expression": null,
+        "license": "BSD license (see license.txt for details), Copyright (c) 2000-2025, ReportLab Inc.",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "pillow>=9.0.0",
+          "charset-normalizer"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "c73111f8f0ce43fc2194b3e03d0a1e3dd5aa136a7f87b63261776fad7d023097"
+      }
+    ]
+  }
+}
