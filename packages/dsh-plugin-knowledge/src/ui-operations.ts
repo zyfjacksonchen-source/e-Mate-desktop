@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { SessionPersistenceSnapshot } from '../../../upstream/deepseek-harness/packages/session/session-persistence'
 import { digest, events, fail, HASH, ownerOf, persist, UUID, type Execution, type Scope } from './imports.ts'
 
 type Selection = { provider: string; model: string; reasoningEffort?: string }
@@ -43,12 +44,13 @@ function sourceVersion(source: any) {
 export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveSelection }: { workflow: any; read: KnowledgeUiRead; resolveSelection(exec?: Execution): Promise<Selection> }) {
   const identity = ctx.get('emateIdentity')
   let lifetime = new AbortController(), disposed = false, owner = ownerOf(identity), cursor = 0, recoveryCursor = 0
+  let recoverySnapshots: SessionPersistenceSnapshot[] | undefined
   const handles = new Map<string, any>(), active = new Map<string, Entry>(), recent = new Map<string, UiImportStatus>()
   const loading = new Map<string, Promise<any>>(), scanned = new Map<string, string>()
   function changed() {
     const next = ownerOf(identity)
     if (next === owner) return
-    owner = next; lifetime.abort(); lifetime = new AbortController(); cursor = 0; recoveryCursor = 0; recent.clear(); scanned.clear()
+    owner = next; lifetime.abort(); lifetime = new AbortController(); cursor = 0; recoveryCursor = 0; recoverySnapshots = undefined; recent.clear(); scanned.clear()
     for (const entry of active.values()) { entry.shutdown = true; entry.controller.abort() }
   }
   function check(expected: string, signal?: AbortSignal) {
@@ -330,8 +332,12 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
   }
   async function scan(expected: string, signal?: AbortSignal, forRecovery = false) {
     let candidate: Reference | undefined
-    const snapshots = await ctx.sessionPersistence.listSnapshots(signal); check(expected, signal)
-    snapshots.sort((a: any, b: any) => b.header.createdAt - a.header.createdAt)
+    let snapshots = forRecovery ? recoverySnapshots : undefined
+    if (!snapshots) {
+      snapshots = await ctx.sessionPersistence.listSnapshots(signal) as SessionPersistenceSnapshot[]; check(expected, signal)
+      snapshots.sort((a, b) => b.header.createdAt - a.header.createdAt)
+      if (forRecovery) { recoverySnapshots = snapshots; recoveryCursor = 0 }
+    }
     // Reading the recent-task panel must not advance background recovery.
     let offset = forRecovery ? recoveryCursor : cursor
     if (offset >= snapshots.length) offset = 0
@@ -355,7 +361,9 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         }
       } catch { /* Invalid local operation records never become successful UI rows. */ }
     }
-    return { list: { items: [...recent.values()].sort((a, b) => b.updated_at - a.updated_at).slice(0, 20), has_more: offset < snapshots.length }, candidate }
+    const hasMore = offset < snapshots.length
+    if (forRecovery && !hasMore) { recoverySnapshots = undefined; recoveryCursor = 0 }
+    return { list: { items: [...recent.values()].sort((a, b) => b.updated_at - a.updated_at).slice(0, 20), has_more: hasMore }, candidate }
   }
   return {
     changed, selectionFor,
@@ -407,17 +415,20 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
       }
       check(expected, signal); return { scope_key: expected, result: project(agent, marker) }
     },
-    async recover(signal?: AbortSignal) {
-      const expected = await capture(signal); const { list, candidate } = await scan(expected, signal, true)
-      if (active.size) return list
-      if (candidate) {
-        const { agent, marker } = await load(candidate, expected, signal)
-        if (control(agent, marker) !== 'stop') launch(agent, marker, true, true)
-      }
-      return list
+    async recover(signal?: AbortSignal, restart = false) {
+      if (restart) { recoverySnapshots = undefined; recoveryCursor = 0 }
+      try {
+        const expected = await capture(signal); const { list, candidate } = await scan(expected, signal, true)
+        if (active.size) return list
+        if (candidate) {
+          const { agent, marker } = await load(candidate, expected, signal)
+          if (control(agent, marker) !== 'stop') launch(agent, marker, true, true)
+        }
+        return list
+      } catch (error) { recoverySnapshots = undefined; recoveryCursor = 0; throw error }
     },
     async dispose() {
-      disposed = true; lifetime.abort()
+      disposed = true; lifetime.abort(); recoverySnapshots = undefined; recoveryCursor = 0
       for (const entry of active.values()) { entry.shutdown = true; entry.controller.abort() }
       await Promise.allSettled([...active.values()].map(entry => entry.done))
       await Promise.allSettled([...loading.values()]); await Promise.allSettled([...handles.values()].map(handle => handle.dispose())); handles.clear(); recent.clear(); scanned.clear()

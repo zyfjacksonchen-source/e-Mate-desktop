@@ -200,21 +200,22 @@ export function apply(ctx: any): void {
   const recovery = createKnowledgeRecovery(ctx, { workflow })
   let recoveryTimer: (() => void) | undefined
   let recovering = false, recoveryRequested = false
-  let scanImports = true, scanCompilations = true
+  let scanImports = true, scanCompilations = true, restartReaders = true
   let stopped = false
   const scheduleRecovery = (continuePass = false) => {
     if (stopped) return
     if (!continuePass) recoveryRequested = true
     if (recovering || recoveryTimer) return
-    if (recoveryRequested) { recoveryRequested = false; scanImports = true; scanCompilations = true }
+    if (recoveryRequested) { recoveryRequested = false; scanImports = true; scanCompilations = true; restartReaders = true }
     recoveryTimer = ctx.timeout(() => {
       recoveryTimer = undefined
       recovering = true
+      const restart = restartReaders; restartReaders = false
       void (async () => {
         // Each reader completes one pass independently; never wrap an exhausted
         // cursor merely because the other reader still has a remaining batch.
-        if (scanImports) scanImports = (await ui.recover()).has_more
-        if (scanCompilations) scanCompilations = (await recovery.scan()).has_more
+        if (scanImports) scanImports = (await ui.recover(undefined, restart)).has_more
+        if (scanCompilations) scanCompilations = (await recovery.scan(undefined, restart)).has_more
       })().catch(() => {
         scanImports = false; scanCompilations = false
         // Preserve physical checkpoints; later identity/Job events retry recovery.

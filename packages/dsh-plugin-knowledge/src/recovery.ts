@@ -1,4 +1,5 @@
 import { digest, OPERATION, ownerOf, UUID, type Scope, type Execution } from './imports.ts'
+import type { SessionPersistenceSnapshot } from '../../../upstream/deepseek-harness/packages/session/session-persistence'
 
 const EVENT = 'knowledge/workflow'
 const READ_BATCH = 24
@@ -52,6 +53,7 @@ function candidateOf(stored: any, owner: string): Candidate | undefined {
 export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Workflow }) {
   const identity = ctx.get?.('emateIdentity') ?? ctx.emateIdentity
   let owner = ownerOf(identity), lifetime = new AbortController(), disposed = false, cursor = 0
+  let snapshots: SessionPersistenceSnapshot[] | undefined
   let pending: { owner: string; promise: Promise<KnowledgeRecoveryResult> } | undefined
   const revisions = new Map<string, string>()
   const candidates = new Map<string, Candidate>()
@@ -68,7 +70,7 @@ export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Work
   function changed() {
     const next = ownerOf(identity)
     if (next === owner) return
-    owner = next; lifetime.abort(); lifetime = new AbortController(); cursor = 0
+    owner = next; lifetime.abort(); lifetime = new AbortController(); cursor = 0; snapshots = undefined
     revisions.clear(); candidates.clear(); requests.clear(); items.clear(); attempted.clear(); checked.clear()
     for (const handle of handles.values()) void handle.dispose().catch(() => {})
     handles.clear()
@@ -105,12 +107,15 @@ export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Work
     return own && ctx.jobs.list(agent).some((job: any) => job.kind === 'knowledge' && ['running', 'stopping'].includes(job.status))
   })
   async function run(expected: string, signal: AbortSignal): Promise<KnowledgeRecoveryResult> {
-    const snapshots = await ctx.sessionPersistence.listSnapshots(signal); check(expected, signal)
-    snapshots.sort((a: any, b: any) => b.header.createdAt - a.header.createdAt || a.header.id.localeCompare(b.header.id))
-    const known = new Set(snapshots.map((entry: any) => entry.header.id))
-    for (const [id, candidate] of candidates) if (!known.has(candidate.sessionId)) { candidates.delete(id); items.delete(id) }
-    if (cursor >= snapshots.length) cursor = 0
-    const batch = snapshots.slice(cursor, cursor + READ_BATCH); cursor += batch.length
+    if (!snapshots) {
+      const listed = await ctx.sessionPersistence.listSnapshots(signal) as SessionPersistenceSnapshot[]; check(expected, signal)
+      snapshots = listed.sort((a, b) => b.header.createdAt - a.header.createdAt || a.header.id.localeCompare(b.header.id))
+      cursor = 0
+      const known = new Set<string>(snapshots.map(entry => entry.header.id))
+      for (const [id, candidate] of candidates) if (!known.has(candidate.sessionId)) { candidates.delete(id); items.delete(id) }
+    }
+    const pass = snapshots
+    const batch = pass.slice(cursor, cursor + READ_BATCH); cursor += batch.length
     for (const snapshot of batch) {
       check(expected, signal)
       if (snapshot.header.parentSession || revisions.get(snapshot.header.id) === snapshot.revision) continue
@@ -180,20 +185,26 @@ export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Work
         }
       }
     }
-    return { items: recent(), recovered, has_more: cursor < snapshots.length }
+    const hasMore = cursor < pass.length
+    if (!hasMore) { snapshots = undefined; cursor = 0 }
+    return { items: recent(), recovered, has_more: hasMore }
   }
   return {
     recent, changed,
-    scan(signal?: AbortSignal): Promise<KnowledgeRecoveryResult> {
+    scan(signal?: AbortSignal, restart = false): Promise<KnowledgeRecoveryResult> {
       changed()
       if (disposed || !owner) return Promise.resolve({ items: [], recovered: 0, has_more: false })
       if (pending?.owner === owner) return pending.promise
+      if (restart) { snapshots = undefined; cursor = 0 }
       const expected = owner, combined = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])])
-      const promise = run(expected, combined).catch(() => ({ items: recent(), recovered: 0, has_more: false })).finally(() => { if (pending?.promise === promise) pending = undefined })
+      const promise = run(expected, combined).catch(() => {
+        if (owner === expected) { snapshots = undefined; cursor = 0 }
+        return { items: recent(), recovered: 0, has_more: false }
+      }).finally(() => { if (pending?.promise === promise) pending = undefined })
       pending = { owner: expected, promise }; return promise
     },
     async dispose() {
-      disposed = true; lifetime.abort(); await pending?.promise
+      disposed = true; lifetime.abort(); snapshots = undefined; cursor = 0; await pending?.promise
       await Promise.allSettled([...handles.values()].map(handle => handle.dispose())); handles.clear(); items.clear(); candidates.clear(); requests.clear(); revisions.clear(); attempted.clear(); checked.clear()
     },
   }

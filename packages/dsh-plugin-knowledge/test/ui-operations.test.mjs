@@ -404,7 +404,7 @@ test('UI recent scans cannot put background import and compilation recovery out 
       if (index < 2) await ui.call('ui.import.recent', {})
     }
     assert.deepEqual(rounds, [[true, true], [true, true], [false, false]])
-    assert.equal(lists, 9)
+    assert.equal(lists, 5, 'one directory snapshot per recovery reader; UI recent lists independently')
     assert.equal(reads, 150)
   } finally { await ui.dispose(); await recovery.dispose() }
 })

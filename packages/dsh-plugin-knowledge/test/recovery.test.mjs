@@ -226,3 +226,70 @@ test('legacy paused coordinators without durable stop semantics stay unknown unt
   assert.equal(run.recovery.recent().find(item => item.compilation_id === legacy.compilationId).reason, 'legacy-pause-unknown')
   assert(!remote.calls.some(call => call.path.endsWith('/claim')))
 })
+
+for (const kind of ['import', 'compilation']) {
+  test(`${kind} recovery reuses one directory snapshot per pass and refreshes completed or explicitly restarted passes`, async () => {
+    const { createKnowledgeUiOperations } = await import('../src/ui-operations.ts')
+    let principal = { tenantId: 'test', userId: 'test' }, lists = 0
+    const snapshots = Array.from({ length: 50 }, (_, index) => ({ header: { id: randomUUID(), createdAt: index }, revision: 'revision-1' }))
+    const readIds = []
+    const ctx = { get: () => ({ localAccountPrincipal: () => principal }), agents: { list: () => [], get: () => undefined }, jobs: { list: () => [] }, sessionPersistence: {
+      async listSnapshots() { lists++; return structuredClone(snapshots) },
+      async readFrom(id) { readIds.push(id); return { meta: { id }, events: [] } },
+    } }
+    const reader = kind === 'import'
+      ? createKnowledgeUiOperations(ctx, { workflow: {}, read: async () => { throw Error('Unexpected HTTP') }, resolveSelection: async () => { throw Error('Unexpected model') } })
+      : createKnowledgeRecovery(ctx, { workflow: {} })
+    const scan = (...args) => kind === 'import' ? reader.recover(...args) : reader.scan(...args)
+    try {
+      assert.equal((await scan()).has_more, true)
+      const extra = { header: { id: randomUUID(), createdAt: 100 }, revision: 'revision-1' }; snapshots.push(extra)
+      assert.equal((await scan()).has_more, true)
+      assert.equal((await scan()).has_more, false)
+      assert.equal(lists, 1)
+      assert.equal(readIds.length, 50)
+      assert(!readIds.includes(extra.header.id), 'a new directory entry does not reorder the active pass')
+      assert.equal((await scan()).has_more, true)
+      assert.equal(lists, 2)
+      assert(readIds.includes(extra.header.id), 'next full pass sees new sessions')
+      const newest = { header: { id: randomUUID(), createdAt: 101 }, revision: 'revision-1' }; snapshots.push(newest)
+      await scan(undefined, true)
+      assert.equal(lists, 3)
+      assert(readIds.includes(newest.header.id), 'a new recovery event restarts the directory snapshot mid-pass')
+      principal = { tenantId: 'test', userId: 'another-user' }; reader.changed()
+      await scan()
+      assert.equal(lists, 4, 'identity changes discard the previous directory snapshot')
+    } finally { await reader.dispose() }
+  })
+
+  test(`${kind} recovery discards cancelled or failed directory passes before retry`, async () => {
+    const { createKnowledgeUiOperations } = await import('../src/ui-operations.ts')
+    let lists = 0, failList = false, abortRead
+    const snapshots = Array.from({ length: 50 }, (_, index) => ({ header: { id: randomUUID(), createdAt: index }, revision: 'revision-1' }))
+    const readIds = []
+    const ctx = { get: () => ({ localAccountPrincipal: () => ({ tenantId: 'test', userId: 'test' }) }), agents: { list: () => [], get: () => undefined }, jobs: { list: () => [] }, sessionPersistence: {
+      async listSnapshots() { lists++; if (failList) throw Error('directory temporarily unavailable'); return structuredClone(snapshots) },
+      async readFrom(id) { if (abortRead) abortRead.abort(); readIds.push(id); return { meta: { id }, events: [] } },
+    } }
+    const reader = kind === 'import'
+      ? createKnowledgeUiOperations(ctx, { workflow: {}, read: async () => { throw Error('Unexpected HTTP') }, resolveSelection: async () => { throw Error('Unexpected model') } })
+      : createKnowledgeRecovery(ctx, { workflow: {} })
+    const scan = (...args) => kind === 'import' ? reader.recover(...args) : reader.scan(...args)
+    try {
+      await scan(); assert.equal(lists, 1)
+      const controller = new AbortController(); abortRead = controller
+      await scan(controller.signal).catch(error => assert.equal(error.name, 'AbortError'))
+      abortRead = undefined
+      const extra = { header: { id: randomUUID(), createdAt: 100 }, revision: 'revision-1' }; snapshots.push(extra)
+      await scan()
+      assert.equal(lists, 2)
+      assert(readIds.includes(extra.header.id), 'cancelled pass retries against a fresh directory')
+      failList = true
+      await scan(undefined, true).catch(error => assert.match(error.message, /directory/))
+      assert.equal(lists, 3)
+      failList = false
+      await scan()
+      assert.equal(lists, 4, 'failed listing is never retained as a completed snapshot')
+    } finally { await reader.dispose() }
+  })
+}

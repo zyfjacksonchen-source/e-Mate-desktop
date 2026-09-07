@@ -299,3 +299,50 @@ test('Host finishes unequal recovery passes without wrapping the completed reade
   assert.equal(imports, 4); assert.equal(compilations, 6)
   await run.dispose(); await rm(root, { recursive: true, force: true })
 })
+
+test('Job completion during a cached recovery batch restarts both directory readers and discovers a new import', async t => {
+  const { mkdtemp, rm } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const { randomUUID } = await import('node:crypto'), { ownerOf } = await import('../src/imports.ts')
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-recovery-new-session-'))
+  const run = await nativeApplyReview(t, root, { subject: 'xin-a', epoch: 1, captures: [], calls: [] })
+  const snapshots = Array.from({ length: 50 }, (_, index) => ({ header: { id: randomUUID(), createdAt: index }, revision: 'revision-1' }))
+  const added = { header: { id: randomUUID(), createdAt: 100 }, revision: 'revision-1' }
+  const marker = { schema_version: 1, kind: 'ui-import', owner: ownerOf(run.ctx.emateIdentity), operationId: randomUUID(), batchId: randomUUID(), paths: ['/fixture/original.txt'], scope: { kind: 'uploader-private' }, title: '新完成任务关联的知识导入', selection: { provider: 'mock', model: 'mock-model' } }
+  let lists = 0, found = false, finished = false, release
+  let entered; const atFirstBatch = new Promise(resolve => { entered = resolve })
+  const gate = new Promise(resolve => { release = resolve })
+  run.ctx.sessionPersistence.listSnapshots = async () => { lists++; return structuredClone(snapshots) }
+  run.ctx.sessionPersistence.readFrom = async id => ({ meta: { id }, events: id === added.header.id ? [{ type: 'knowledge/workflow', time: 100, data: marker }] : [] })
+  const ui = run.ctx.emateKnowledgeUi, recovery = run.ctx.emateKnowledgeRecovery
+  const originalImport = ui.recover.bind(ui), originalCompilation = recovery.scan.bind(recovery)
+  const imports = [], compilations = []
+  ui.recover = async (signal, restart) => {
+    imports.push(restart)
+    const result = await originalImport(signal, restart)
+    found ||= result.items.some(item => item.title === marker.title)
+    if (imports.length === 1) { entered(); await gate }
+    return result
+  }
+  recovery.scan = async (signal, restart) => {
+    compilations.push(restart)
+    const result = await originalCompilation(signal, restart)
+    if (!result.has_more) finished = true
+    return result
+  }
+  const waitFor = async predicate => {
+    const end = Date.now() + 5000
+    while (!predicate()) { assert(Date.now() < end, 'new recovery pass did not finish'); await new Promise(resolve => setTimeout(resolve, 20)) }
+  }
+  await atFirstBatch
+  snapshots.push(added)
+  const agent = await run.workflow.openOperation({ provider: 'mock', model: 'mock-model' })
+  const job = run.ctx.jobs.start({ kind: 'knowledge', label: 'completed fixture', owner: agent, run: () => ({ done: Promise.resolve({ status: 'completed' }), cancel() {} }) })
+  await run.ctx.jobs.wait(job, 3000, agent)
+  release()
+  await waitFor(() => found && finished)
+  await new Promise(resolve => setTimeout(resolve, 350))
+  assert.deepEqual(imports, [true, true, false, false])
+  assert.deepEqual(compilations, [true, true, false, false])
+  assert.equal(lists, 4, 'two directory reads for each of the two event-driven full passes')
+  await run.dispose(); await rm(root, { recursive: true, force: true })
+})
