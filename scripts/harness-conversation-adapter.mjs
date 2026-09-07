@@ -94,10 +94,35 @@ function emateQueuePreview(row) {
 
 // Explicit Markdown links may request a local file on click. Inline-code
 // mentions retain the native produced-file vocabulary and do not gain guesses.
-function emateArtifactFileMentions(ctx, owner) {
-  const native = ctx.get("chatFileMentions")?.forClosing(owner);
+function emateArtifactFileMentions(ctx, owner, sessions, sessionId) {
+  const service = ctx.get("chatFileMentions");
+  const native = service?.forClosing(owner);
+  const session = sessions?.binding(sessionId)?.session;
+  const current = () => session !== undefined && sessions.binding(sessionId)?.session === session
+    && sessions.list.getSnapshot().current === sessionId
+    && !(typeof document !== "undefined" && document.querySelector("[data-emate-identity-gate]"));
+  const previous = value => {
+    if (!current()) return undefined;
+    const timeline = session.getSnapshot().chat.timeline;
+    if (timeline.turns.get(owner.turn.turn) !== owner.turn) return undefined;
+    for (const number of timeline.turnOrder) {
+      if (number >= owner.turn.turn) continue;
+      const turn = timeline.turns.get(number);
+      // Only exact receipt paths; never reinterpret a prior basename or
+      // manufacture a new turn's produced-file facts from assistant prose.
+      if (!turn?.data.get("deliverables")?.produced.some(item => item.seq < owner.seq && item.path === value)) continue;
+      const resolved = service?.forClosing({ ...owner, turn })?.resolve(value);
+      if (resolved?.title === value) return resolved;
+    }
+    return undefined;
+  };
   return {
-    resolve: value => native?.resolve(value),
+    resolve: value => {
+      const own = native?.resolve(value);
+      if (own) return own;
+      const prior = previous(value);
+      return prior && { ...prior, open: () => { if (previous(value)) prior.open(); } };
+    },
     resolveLink: value => native?.resolve(value) ?? {
       open: () => owner.openFile(value),
       label: "打开 " + value.slice(Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\")) + 1),
@@ -146,7 +171,7 @@ export function adaptHarnessConversationSource(source) {
   const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
 
   change('fileMentions: (owner) => ctx.get("chatFileMentions")?.forClosing(owner),',
-    'fileMentions: (owner) => emateArtifactFileMentions(ctx, owner),', 'artifacts/explicit-link-owner')
+    'fileMentions: (owner) => emateArtifactFileMentions(ctx, owner, sessions, sessionId),', 'artifacts/explicit-link-owner')
   // Every native file chip and receipt-derived prose link shares this opener.
   change('workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => {});',
     'workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => { const scope = sessions.scope(sessionId); if (scope) ctx.conversation.input.for(scope).notify("error", "文件不存在、已移出项目或无法打开，请检查原产物后重试。"); });', 'artifacts/open-error')

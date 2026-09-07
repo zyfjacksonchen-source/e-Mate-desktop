@@ -6,8 +6,9 @@ import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { Script } from 'node:vm'
+import { createRequire } from 'node:module'
 import { adaptHarnessConversationSource } from './harness-conversation-adapter.mjs'
-import { adaptHarnessArtifactLinksSource } from './harness-artifact-links-adapter.mjs'
+import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactDeliverablesSource } from './harness-artifact-links-adapter.mjs'
 
 const native = readFileSync(process.env.EMATE_TEST_NATIVE_ROOT ? join(process.env.EMATE_TEST_NATIVE_ROOT, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js') : new URL('../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', import.meta.url), 'utf8')
 const adapted = adaptHarnessConversationSource(native)
@@ -559,4 +560,69 @@ test('explicit Markdown paths reuse native chat opener without promoting unknown
   mentions.resolveLink('/project/copied.png').open()
   mentions.resolveLink('known.pdf').open()
   assert.deepEqual(opened, ['/project/copied.png', 'known-owner'])
+})
+
+
+test('native multi-turn receipts support exact follow-up mentions without creating new deliverables', () => {
+  const root = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
+  const harness = join(root, 'upstream/deepseek-harness')
+  const requireNative = createRequire(join(harness, 'packages/client/ui-conversation/package.json'))
+  let runtime
+  new Function('window', readFileSync(join(harness, 'packages/client/runtime/lib/client.js'), 'utf8'))({ __ModuleLoader__: { load: module => { runtime = module.factory(requireNative) } } })
+  const source = adaptHarnessArtifactDeliverablesSource(readFileSync(join(harness, 'packages/client/ui-deliverables/lib/client.js'), 'utf8'))
+  const begin = source.indexOf('function producedPaths('), end = source.indexOf('//#region', source.indexOf('function onlyPathWithBasename('))
+  const real = new Function('_deepseek_ai_dsh_client_runtime_client', source.slice(begin, end) + '\nreturn { deliverablesDefinition, selectProducedFiles, producedFileMentions }')(runtime)
+  const serviceStart = source.indexOf('ctx.provide("chatFileMentions", '), serviceEnd = source.indexOf('} });', serviceStart) + 5
+  let service
+  new Function('ctx', 'selectProducedFiles', 'producedFileMentions', 't', source.slice(serviceStart, serviceEnd))({ provide: (_, value) => { service = value } }, real.selectProducedFiles, real.producedFileMentions, (_, args) => args.name)
+  const path = 'exports/中文演示.pptx', futurePath = 'exports/未来.pptx'
+  let seq = 0
+  const events = []
+  function event(type, data) { events.push({ seq: ++seq, type, time: seq, surfaceOp: 'append', data }) }
+  function turn(number, producedPath, operation = 'write') {
+    event('turn/start', { turn: number })
+    if (producedPath) {
+      event('tool/call', { turn: number, callId: 'office-' + number, name: 'office_' + operation })
+      event('tool/result', { turn: number, message: { source: { callId: 'office-' + number }, content: [{ type: 'tool-result', isError: false }] },
+        meta: { operation, format: 'pptx', job_id: 'emate-office-' + number, bytes: 100, relative_path: producedPath } })
+    }
+    event('assistant/message', { turn: number, message: { content: [{ type: 'text', text: '`' + (producedPath ?? path) + '`' }] } })
+    event('turn/end', { turn: number, reason: { kind: 'completed' } })
+  }
+  turn(2, path); turn(3, path, 'read'); turn(4); turn(5, futurePath)
+  for (const incremental of [false, true]) {
+    // Only the view transport is a fixture: the actual rc.7 assembler owns
+    // event order, turn boundaries and all deliverables Location data.
+    const assembler = new runtime.ConversationNodeAssembler({ entries: () => [real.deliverablesDefinition], fallbackEntry: () => undefined },
+      { entries: () => [{ target: 'chat', create: () => ({ replace: value => value, apply: value => value }) }] })
+    if (incremental) for (const event of events) { assembler.append({ event }); assembler.flush() }
+    else { assembler.replaceWindow(events.map(event => ({ event })), false); assembler.flush() }
+    const chat = assembler.snapshot('chat'), opened = []
+    const currentTurn = chat.timeline.turns.get(4), closing = events.find(event => event.type === 'assistant/message' && event.data.turn === 4)
+    const owner = { turn: currentTurn, seq: closing.seq, openFile: value => opened.push(value) }
+    const session = { getSnapshot: () => ({ chat }) }
+    let current = 'one', binding = { session }, gated = false
+    const sessions = { binding: id => id === 'one' ? binding : undefined, list: { getSnapshot: () => ({ current }) } }
+    const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: { querySelector: () => gated ? {} : null } })
+    try {
+      const ctx = { get: () => service }
+      const injected = adapted.slice(adapted.indexOf('fileMentions: (owner) =>'), adapted.indexOf('openFile: (path) =>', adapted.indexOf('fileMentions: (owner) =>')))
+      const mentions = new Function('ctx', 'sessions', 'sessionId', 'emateArtifactFileMentions', `return ({${injected}}).fileMentions`)(ctx, sessions, 'one', owners.emateArtifactFileMentions)(owner)
+      assert.equal(chat.timeline.turns.get(3).data.get('deliverables').produced[0].path, path, 'read receipt plus exact final prose remains authoritative')
+      assert.equal(real.selectProducedFiles(owner), null)
+      assert.equal(mentions.resolve(path)?.title, path, incremental ? 'incremental follow-up' : 'cold follow-up')
+      mentions.resolve(path).open(); assert.deepEqual(opened, [path])
+      assert.equal(mentions.resolve('中文演示.pptx'), undefined, 'no prior basename guessing')
+      assert.equal(mentions.resolve(futurePath), undefined, 'future turn excluded')
+      assert.equal(mentions.resolve('exports/unverified.pptx'), undefined)
+      assert.equal(real.selectProducedFiles(owner), null, 'follow-up has no produced card')
+      const old = mentions.resolve(path)
+      current = 'two'; assert.equal(mentions.resolve(path), undefined); old.open(); assert.equal(opened.length, 1)
+      current = 'one'; gated = true; assert.equal(mentions.resolve(path), undefined); old.open(); assert.equal(opened.length, 1)
+      gated = false; binding = { session: { getSnapshot: () => ({ chat }) } }
+      assert.equal(mentions.resolve(path), undefined); old.open(); assert.equal(opened.length, 1)
+      binding = undefined; assert.equal(mentions.resolve(path), undefined)
+    } finally { if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument); else delete globalThis.document }
+  }
 })
