@@ -80,10 +80,14 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
   const assertExecution = (exec: Execution, owner: string) => {
     exec.signal?.throwIfAborted(); transport.check(owner)
     if (!exec.agent || ctx.agents.get(exec.agent.id) !== exec.agent) fail('agent-unavailable')
+    // UI/canonical Agents keep the owner recorded by their native session;
+    // recapturing transport credentials cannot adopt a previous user's task.
+    const markers = events(exec.agent).filter(event => event.kind === 'operation-session' || event.kind === 'compilation-session')
+    if (markers.some(marker => marker.owner !== owner)) fail('scope-changed')
     if (exec.rootCallId) {
       const call = exec.agent.session.events.find((event: any) => event.type === 'tool/call' && event.data.callId === exec.rootCallId)
       if (!call || turns.get(exec.agent)?.get(call.data.turn) !== owner) fail('scope-changed')
-    }
+    } else if (!markers.length) fail('scope-changed')
   }
   const selectedTransport = (exec: Execution, scope?: Scope): KnowledgeTransport => {
     if (scope?.kind !== 'project') return transport

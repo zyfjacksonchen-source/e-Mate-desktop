@@ -766,3 +766,54 @@ test('a replacement enterprise owner cannot record a stop in the previous owners
   const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
   assert.equal(stored.events.some(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop'), false)
 })
+
+test('an existing UI operation session cannot be adopted by the next enterprise owner without a native root call', async t => {
+  const run = await runtime(t)
+  const owner = await run.workflow.authorize({ agent: run.caller })
+  run.caller.session.append('knowledge/workflow', { schema_version: 1, kind: 'ui-import', owner, operationId: randomUUID() }, { ignorable: true })
+  await run.ctx.sessions.flush(run.caller.session)
+  const before = run.caller.session.events.length
+  run.changeAccount()
+  await assert.rejects(run.workflow.authorize({ agent: run.caller }), { code: 'scope-changed' })
+  await assert.rejects(run.workflow.recordPublicIntent(run.caller, ['/private/old.pdf']), { code: 'scope-changed' })
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, { operationId: randomUUID(), paths: ['/private/old.pdf'] }), { code: 'scope-changed' })
+  await assert.rejects(run.workflow.start({ agent: run.caller }, request()), { code: 'scope-changed' })
+  assert.equal(run.backend.calls.length, 0)
+  assert.equal(run.caller.session.events.length, before)
+  assert.equal(events(run.caller).find(event => event.kind === 'operation-session').owner, owner)
+})
+
+test('a canonical compilation session retains its original owner for UI execution', async t => {
+  const run = await runtime(t); run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const started = await run.workflow.start({ agent: run.caller }, request()); await done(run, started)
+  const canonical = run.ctx.agents.get(started.session_id)
+  const owner = await run.workflow.authorize({ agent: canonical })
+  assert.equal(owner, events(canonical).find(event => event.kind === 'compilation-session').owner)
+  const calls = run.backend.calls.length
+  run.changeAccount()
+  await assert.rejects(run.workflow.authorize({ agent: canonical }), { code: 'scope-changed' })
+  await assert.rejects(run.workflow.status({ agent: canonical }, started.compilation_id), { code: 'scope-changed' })
+  assert.equal(run.backend.calls.length, calls)
+})
+
+test('ordinary chat needs its real native turn, and a later turn may bind the new current owner', async t => {
+  const run = await runtime(t)
+  const chat = run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
+  await assert.rejects(run.workflow.authorize({ agent: chat }), { code: 'scope-changed' })
+  const accepted = []; let oldExecution
+  run.ctx.tools.register({ name: 'check_knowledge_owner', description: 'Read this native turn owner.', parameters: {},
+    output: { schema: { type: 'object', properties: { owner: { type: 'string' } } }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+    async execute(_args, exec) {
+      const owner = await run.workflow.authorize(exec)
+      oldExecution ??= exec; accepted.push(owner); exec.concludeTurn(); return { owner }
+    },
+  })
+  run.adapter.script.push(toolChunks('owner-a', 'check_knowledge_owner', {}))
+  chat.followup(createUserMessage({ content: [{ type: 'text', text: '读取企业知识' }], source: { kind: 'user' } })); await chat.whenIdle()
+  assert.equal(accepted.length, 1)
+  run.changeAccount()
+  await assert.rejects(run.workflow.authorize({ ...oldExecution, signal: new AbortController().signal }), { code: 'scope-changed' })
+  run.adapter.script.push(toolChunks('owner-b', 'check_knowledge_owner', {}))
+  chat.followup(createUserMessage({ content: [{ type: 'text', text: '读取当前账号企业知识' }], source: { kind: 'user' } })); await chat.whenIdle()
+  assert.equal(accepted.length, 2); assert.notEqual(accepted[0], accepted[1])
+})
