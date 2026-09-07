@@ -46,8 +46,29 @@ function pythonExecutable(targetRoot, platform) {
 }
 
 function receipt(target, asset) {
+  officeNotices() // Validate the source notices even when the prepared runtime is reused.
   return JSON.stringify({ release: RELEASE, python: PYTHON_VERSION, target, sha256: asset.sha256,
-    officeRequirementsSha256: sha256(join(packageRoot, 'scripts', 'office-python', `${target}.txt`)) })
+    officeRequirementsSha256: sha256(join(packageRoot, 'scripts', 'office-python', `${target}.txt`)),
+    officeManifestSha256: sha256(join(packageRoot, 'scripts', 'office-python', 'manifest.json')) })
+}
+
+function officeNotices() {
+  const root = join(packageRoot, 'scripts', 'office-python')
+  const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'))
+  return manifest.supplementalNotices.map(({ filename, sha256: expected }) => {
+    if (basename(filename) !== filename) throw new Error('Invalid office notice filename')
+    const bytes = readFileSync(join(root, 'notices', filename))
+    if (createHash('sha256').update(bytes).digest('hex') !== expected) throw new Error(`Office notice SHA-256 mismatch: ${filename}`)
+    return { filename, bytes }
+  })
+}
+
+export function installOfficeNotices(staging) {
+  const destination = join(staging, 'office-notices')
+  mkdirSync(destination, { recursive: true })
+  for (const { filename, bytes } of officeNotices()) {
+    writeFileSync(join(destination, filename), bytes, { mode: 0o644, flag: 'wx' })
+  }
 }
 
 function officeSitePackages(staging, platform) {
@@ -70,6 +91,7 @@ for name,spec in expected.items():
 if sys.argv[3]=='native':
  sys.path.insert(0,sys.argv[2])
  import reportlab,pypdf,pdfplumber,openpyxl,PIL.Image,pypdfium2
+ import pptx,xlsxwriter,lxml.etree,pathops,uharfbuzz,yaml,typing_extensions
 print(json.dumps({'distributions':verified,'native_imports':sys.argv[3]=='native'},sort_keys=True))
 `
 
@@ -141,14 +163,15 @@ async function prepare(target) {
       : pythonExecutable(join(outputRoot, `${process.platform}-${process.arch}`), process.platform)
     const install = spawnSync(hostPython, officeInstallArguments(target, staging), { stdio: 'inherit' })
     if (install.error !== undefined) throw install.error
-    if (install.status !== 0) throw new Error(`PDF/spreadsheet dependency installation failed for ${target}`)
+    if (install.status !== 0) throw new Error(`Office dependency installation failed for ${target}`)
     const manifest = JSON.parse(readFileSync(join(packageRoot, 'scripts', 'office-python', 'manifest.json'), 'utf8'))
     const expectedPackages = Object.fromEntries(manifest.targets[target].map(({ name, version, license_files }) => [name, { version, license_files }]))
     const probe = spawnSync(hostPython, ['-I', '-c', OFFICE_VERIFY_SCRIPT,
       JSON.stringify(expectedPackages), officeSitePackages(staging, platform),
       target === `${process.platform}-${process.arch}` ? 'native' : 'metadata'], { stdio: 'inherit' })
     if (probe.error !== undefined) throw probe.error
-    if (probe.status !== 0) throw new Error(`PDF/spreadsheet dependency verification failed for ${target}`)
+    if (probe.status !== 0) throw new Error(`Office dependency verification failed for ${target}`)
+    installOfficeNotices(staging)
     writeFileSync(join(staging, 'receipt.json'), expectedReceipt, { mode: 0o644 })
     rmSync(finalRoot, { recursive: true, force: true })
     renameSync(staging, finalRoot)

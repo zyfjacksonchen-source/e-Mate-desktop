@@ -1,4 +1,4 @@
-# Official PyPI CPython 3.12 wheel preflight; not runtime acceptance
+# Fixed official PyPI CPython 3.12 wheels; runtime acceptance is separate
 https://files.pythonhosted.org/packages/d9/79/615cc094e2fb508cade7de88d3b4f6c4ec2bab695c97bce9153dc65aadf5/cffi-2.1.1-cp312-cp312-win_amd64.whl --hash=sha256:f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a
 https://files.pythonhosted.org/packages/9d/7a/4c6c298171e6b3e745633180ff59350fc0ca0db1ffd28df1e369e0579f71/charset_normalizer-3.5.1-cp312-cp312-win_amd64.whl --hash=sha256:3617ac3cfd8b9888f145ad89dd6e692285834b0201c6074a5eeaad3fd4d668c2
 https://files.pythonhosted.org/packages/c5/69/0572c77dbace6fef72f33755bd52ea399c71367250d366237f8691826b9e/cryptography-48.0.1-cp311-abi3-win_amd64.whl --hash=sha256:39489bfca54c7a1f6b297efcd8bc608ab92d16c4ca631b0cad4da46724588b24
@@ -11,3 +11,10 @@ https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604
 https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl --hash=sha256:90005e959e1596c6e6c84c8b0ad383285b3e17011751cedd17f2ce8fcdfc86de
 https://files.pythonhosted.org/packages/73/d4/8b8af6eedbc5c8af49817d8f37c2e55be8a2c7f75fca9bee78efbfeb40f6/pypdfium2-5.11.0-py3-none-win_amd64.whl --hash=sha256:d3b698e7b51bdf2d633cc834395677319e1d66757896b30c632dfac7d7236c81
 https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl --hash=sha256:68e2d103ae8041a37714e8896ec9b79a1c1e911d68c3bd2ea17546568cf17bfd
+https://files.pythonhosted.org/packages/3a/5b/6ed903e4e6278a020c8a6f0dbbe78030d041840a6b4a64ea441a1e414077/lxml-6.1.3-cp312-cp312-win_amd64.whl --hash=sha256:3e9a00d1c2c30936f7add097c41afc5da6556c580909104aafd382cac92a855c
+https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl --hash=sha256:160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba
+https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl --hash=sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b
+https://files.pythonhosted.org/packages/ff/96/bd1bfaf5335242a86d8af940ff2124861e9bc6a5520cf96fda374fd10945/skia_pathops-0.9.2-cp310-abi3-win_amd64.whl --hash=sha256:9ae72d801b5f4c5dbb937fb25476a12fa2da70860f28dd637da2b529dbd8271c
+https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+https://files.pythonhosted.org/packages/e3/c9/37cf8d1cfb45696bb88ee65805910d5f2d4784d6bd196a755ed3a305c40f/uharfbuzz-0.56.1-cp310-abi3-win_amd64.whl --hash=sha256:ee99ae2389d4f8c5651962d65bf8fe9296c781598e3f697ba26d51c4b20527f9
+https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl --hash=sha256:9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3

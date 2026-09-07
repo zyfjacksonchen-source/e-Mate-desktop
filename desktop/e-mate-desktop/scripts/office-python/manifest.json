@@ -264,6 +264,146 @@
         ],
         "metadata_source": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl.metadata",
         "metadata_sha256": "c73111f8f0ce43fc2194b3e03d0a1e3dd5aa136a7f87b63261776fad7d023097"
+      },
+      {
+        "name": "lxml",
+        "version": "6.1.3",
+        "filename": "lxml-6.1.3-cp312-cp312-macosx_10_13_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/dd/1f/a180b57d9eeabaab77f9d5aa30356898ea749c4795596a8f66d1eb6bef2e/lxml-6.1.3-cp312-cp312-macosx_10_13_universal2.whl",
+        "sha256": "0c0710ac085a157b593c38fbcacd950f15c4afa8e2057527185875ab302752bc",
+        "size": 8602094,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "BSD-3-Clause",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE.txt",
+          "LICENSES.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/dd/1f/a180b57d9eeabaab77f9d5aa30356898ea749c4795596a8f66d1eb6bef2e/lxml-6.1.3-cp312-cp312-macosx_10_13_universal2.whl.metadata",
+        "metadata_sha256": "aad89f8107bc74045b86c9b7f7c0984196102520dd7faed5e4e45693b7c315ef"
+      },
+      {
+        "name": "python-pptx",
+        "version": "1.0.2",
+        "filename": "python_pptx-1.0.2-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl",
+        "sha256": "160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba",
+        "size": 472788,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "Pillow >=3.3.2",
+          "XlsxWriter >=0.5.7",
+          "lxml >=3.1.0",
+          "typing-extensions >=4.9.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl.metadata",
+        "metadata_sha256": "d38c6af5f1817cc528706264d8343cd1c95dbdec5672f29b944f54f79134a3a2"
+      },
+      {
+        "name": "PyYAML",
+        "version": "6.0.3",
+        "filename": "pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/89/a0/6cf41a19a1f2f3feab0e9c0b74134aa2ce6849093d5517a0c550fe37a648/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl",
+        "sha256": "fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0",
+        "size": 173973,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/89/a0/6cf41a19a1f2f3feab0e9c0b74134aa2ce6849093d5517a0c550fe37a648/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl.metadata",
+        "metadata_sha256": "03c3b415ed38d09faedc49360e930769b40c58f68585e6de00e2e4916a858d34"
+      },
+      {
+        "name": "skia-pathops",
+        "version": "0.9.2",
+        "filename": "skia_pathops-0.9.2-cp310-abi3-macosx_10_9_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/75/10/45af3ea2dee706a340601da315e450c449f76aaa18651cfe2677b0c65161/skia_pathops-0.9.2-cp310-abi3-macosx_10_9_universal2.whl",
+        "sha256": "c7a925b919c050df1e0545d26a69b64d9c8e1959e4dca73b06df088bf01d30f0",
+        "size": 2897494,
+        "requires_python": ">=3.10",
+        "license_expression": null,
+        "license": "BSD-3-Clause",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/75/10/45af3ea2dee706a340601da315e450c449f76aaa18651cfe2677b0c65161/skia_pathops-0.9.2-cp310-abi3-macosx_10_9_universal2.whl.metadata",
+        "metadata_sha256": "727b03b3bc8e1e6ddc68acfeff8ab7846146899b95358204859d7f1a4b26f151"
+      },
+      {
+        "name": "typing-extensions",
+        "version": "4.16.0",
+        "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+        "size": 45571,
+        "requires_python": ">=3.9",
+        "license_expression": "PSF-2.0",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "b05084ca1d50879865178d9fff9fabeab61bdfb1f361bfbde95421ffc8f9be46"
+      },
+      {
+        "name": "uharfbuzz",
+        "version": "0.56.1",
+        "filename": "uharfbuzz-0.56.1-cp310-abi3-macosx_10_9_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/3b/f8/e9b50519563943d597cd8721a2583a5295ad59f26e4cbd74d9c85f1e777b/uharfbuzz-0.56.1-cp310-abi3-macosx_10_9_universal2.whl",
+        "sha256": "d2fcfafe2eac8497fa3c78462babbeddcfd50980b263859248a93fe8bb222507",
+        "size": 3314761,
+        "requires_python": ">=3.10",
+        "license_expression": null,
+        "license": "Apache License 2.0",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/3b/f8/e9b50519563943d597cd8721a2583a5295ad59f26e4cbd74d9c85f1e777b/uharfbuzz-0.56.1-cp310-abi3-macosx_10_9_universal2.whl.metadata",
+        "metadata_sha256": "c470c5248e5935a3cb841f1084c6eb81949e5c9ae788a393848510a8fddeb919"
+      },
+      {
+        "name": "xlsxwriter",
+        "version": "3.2.9",
+        "filename": "xlsxwriter-3.2.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl",
+        "sha256": "9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3",
+        "size": 175315,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "BSD-2-Clause",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "10d504f188e087f07a06b9038ed0535f37ac072c232e60c075ddb0aedb7b7d78"
       }
     ],
     "darwin-x64": [
@@ -528,6 +668,146 @@
         ],
         "metadata_source": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl.metadata",
         "metadata_sha256": "c73111f8f0ce43fc2194b3e03d0a1e3dd5aa136a7f87b63261776fad7d023097"
+      },
+      {
+        "name": "lxml",
+        "version": "6.1.3",
+        "filename": "lxml-6.1.3-cp312-cp312-macosx_10_13_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/a8/25/070c92013a1c029a602b03560d68772313d918268667fa993da7961759c9/lxml-6.1.3-cp312-cp312-macosx_10_13_x86_64.whl",
+        "sha256": "623c8799c17128753c65699f1c3aa32402657393a9ad6db09ed8b98ddf76611d",
+        "size": 4638308,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "BSD-3-Clause",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE.txt",
+          "LICENSES.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/a8/25/070c92013a1c029a602b03560d68772313d918268667fa993da7961759c9/lxml-6.1.3-cp312-cp312-macosx_10_13_x86_64.whl.metadata",
+        "metadata_sha256": "aad89f8107bc74045b86c9b7f7c0984196102520dd7faed5e4e45693b7c315ef"
+      },
+      {
+        "name": "python-pptx",
+        "version": "1.0.2",
+        "filename": "python_pptx-1.0.2-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl",
+        "sha256": "160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba",
+        "size": 472788,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "Pillow >=3.3.2",
+          "XlsxWriter >=0.5.7",
+          "lxml >=3.1.0",
+          "typing-extensions >=4.9.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl.metadata",
+        "metadata_sha256": "d38c6af5f1817cc528706264d8343cd1c95dbdec5672f29b944f54f79134a3a2"
+      },
+      {
+        "name": "PyYAML",
+        "version": "6.0.3",
+        "filename": "pyyaml-6.0.3-cp312-cp312-macosx_10_13_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/d1/33/422b98d2195232ca1826284a76852ad5a86fe23e31b009c9886b2d0fb8b2/pyyaml-6.0.3-cp312-cp312-macosx_10_13_x86_64.whl",
+        "sha256": "7f047e29dcae44602496db43be01ad42fc6f1cc0d8cd6c83d342306c32270196",
+        "size": 182063,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/d1/33/422b98d2195232ca1826284a76852ad5a86fe23e31b009c9886b2d0fb8b2/pyyaml-6.0.3-cp312-cp312-macosx_10_13_x86_64.whl.metadata",
+        "metadata_sha256": "03c3b415ed38d09faedc49360e930769b40c58f68585e6de00e2e4916a858d34"
+      },
+      {
+        "name": "skia-pathops",
+        "version": "0.9.2",
+        "filename": "skia_pathops-0.9.2-cp310-abi3-macosx_10_9_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/75/10/45af3ea2dee706a340601da315e450c449f76aaa18651cfe2677b0c65161/skia_pathops-0.9.2-cp310-abi3-macosx_10_9_universal2.whl",
+        "sha256": "c7a925b919c050df1e0545d26a69b64d9c8e1959e4dca73b06df088bf01d30f0",
+        "size": 2897494,
+        "requires_python": ">=3.10",
+        "license_expression": null,
+        "license": "BSD-3-Clause",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/75/10/45af3ea2dee706a340601da315e450c449f76aaa18651cfe2677b0c65161/skia_pathops-0.9.2-cp310-abi3-macosx_10_9_universal2.whl.metadata",
+        "metadata_sha256": "727b03b3bc8e1e6ddc68acfeff8ab7846146899b95358204859d7f1a4b26f151"
+      },
+      {
+        "name": "typing-extensions",
+        "version": "4.16.0",
+        "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+        "size": 45571,
+        "requires_python": ">=3.9",
+        "license_expression": "PSF-2.0",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "b05084ca1d50879865178d9fff9fabeab61bdfb1f361bfbde95421ffc8f9be46"
+      },
+      {
+        "name": "uharfbuzz",
+        "version": "0.56.1",
+        "filename": "uharfbuzz-0.56.1-cp310-abi3-macosx_10_9_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/3b/f8/e9b50519563943d597cd8721a2583a5295ad59f26e4cbd74d9c85f1e777b/uharfbuzz-0.56.1-cp310-abi3-macosx_10_9_universal2.whl",
+        "sha256": "d2fcfafe2eac8497fa3c78462babbeddcfd50980b263859248a93fe8bb222507",
+        "size": 3314761,
+        "requires_python": ">=3.10",
+        "license_expression": null,
+        "license": "Apache License 2.0",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/3b/f8/e9b50519563943d597cd8721a2583a5295ad59f26e4cbd74d9c85f1e777b/uharfbuzz-0.56.1-cp310-abi3-macosx_10_9_universal2.whl.metadata",
+        "metadata_sha256": "c470c5248e5935a3cb841f1084c6eb81949e5c9ae788a393848510a8fddeb919"
+      },
+      {
+        "name": "xlsxwriter",
+        "version": "3.2.9",
+        "filename": "xlsxwriter-3.2.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl",
+        "sha256": "9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3",
+        "size": 175315,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "BSD-2-Clause",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "10d504f188e087f07a06b9038ed0535f37ac072c232e60c075ddb0aedb7b7d78"
       }
     ],
     "win32-x64": [
@@ -792,7 +1072,167 @@
         ],
         "metadata_source": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl.metadata",
         "metadata_sha256": "c73111f8f0ce43fc2194b3e03d0a1e3dd5aa136a7f87b63261776fad7d023097"
+      },
+      {
+        "name": "lxml",
+        "version": "6.1.3",
+        "filename": "lxml-6.1.3-cp312-cp312-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/3a/5b/6ed903e4e6278a020c8a6f0dbbe78030d041840a6b4a64ea441a1e414077/lxml-6.1.3-cp312-cp312-win_amd64.whl",
+        "sha256": "3e9a00d1c2c30936f7add097c41afc5da6556c580909104aafd382cac92a855c",
+        "size": 4005999,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "BSD-3-Clause",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE.txt",
+          "LICENSES.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/3a/5b/6ed903e4e6278a020c8a6f0dbbe78030d041840a6b4a64ea441a1e414077/lxml-6.1.3-cp312-cp312-win_amd64.whl.metadata",
+        "metadata_sha256": "4038f4e4decac1c15eb5fd883abf1370f2df9b176b53bd172dd709d4542e2a48"
+      },
+      {
+        "name": "python-pptx",
+        "version": "1.0.2",
+        "filename": "python_pptx-1.0.2-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl",
+        "sha256": "160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba",
+        "size": 472788,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [
+          "Pillow >=3.3.2",
+          "XlsxWriter >=0.5.7",
+          "lxml >=3.1.0",
+          "typing-extensions >=4.9.0"
+        ],
+        "metadata_source": "https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl.metadata",
+        "metadata_sha256": "d38c6af5f1817cc528706264d8343cd1c95dbdec5672f29b944f54f79134a3a2"
+      },
+      {
+        "name": "PyYAML",
+        "version": "6.0.3",
+        "filename": "pyyaml-6.0.3-cp312-cp312-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl",
+        "sha256": "5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b",
+        "size": 154003,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "MIT",
+        "license_classifiers": [
+          "License :: OSI Approved :: MIT License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl.metadata",
+        "metadata_sha256": "847a701020334386852b6e07bad1053cb0ce3da9ee1846e7e9d02b24e8bb3f8d"
+      },
+      {
+        "name": "skia-pathops",
+        "version": "0.9.2",
+        "filename": "skia_pathops-0.9.2-cp310-abi3-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/ff/96/bd1bfaf5335242a86d8af940ff2124861e9bc6a5520cf96fda374fd10945/skia_pathops-0.9.2-cp310-abi3-win_amd64.whl",
+        "sha256": "9ae72d801b5f4c5dbb937fb25476a12fa2da70860f28dd637da2b529dbd8271c",
+        "size": 1782901,
+        "requires_python": ">=3.10",
+        "license_expression": null,
+        "license": "BSD-3-Clause",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/ff/96/bd1bfaf5335242a86d8af940ff2124861e9bc6a5520cf96fda374fd10945/skia_pathops-0.9.2-cp310-abi3-win_amd64.whl.metadata",
+        "metadata_sha256": "1266318b76573e729bde19d11556695007eec06dee6d227ffd9ad1b270358929"
+      },
+      {
+        "name": "typing-extensions",
+        "version": "4.16.0",
+        "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+        "size": 45571,
+        "requires_python": ">=3.9",
+        "license_expression": "PSF-2.0",
+        "license": null,
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl.metadata",
+        "metadata_sha256": "b05084ca1d50879865178d9fff9fabeab61bdfb1f361bfbde95421ffc8f9be46"
+      },
+      {
+        "name": "uharfbuzz",
+        "version": "0.56.1",
+        "filename": "uharfbuzz-0.56.1-cp310-abi3-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/e3/c9/37cf8d1cfb45696bb88ee65805910d5f2d4784d6bd196a755ed3a305c40f/uharfbuzz-0.56.1-cp310-abi3-win_amd64.whl",
+        "sha256": "ee99ae2389d4f8c5651962d65bf8fe9296c781598e3f697ba26d51c4b20527f9",
+        "size": 1454583,
+        "requires_python": ">=3.10",
+        "license_expression": null,
+        "license": "Apache License 2.0",
+        "license_classifiers": [],
+        "license_files": [
+          "LICENSE"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/e3/c9/37cf8d1cfb45696bb88ee65805910d5f2d4784d6bd196a755ed3a305c40f/uharfbuzz-0.56.1-cp310-abi3-win_amd64.whl.metadata",
+        "metadata_sha256": "08bde20ee852148eac65831576d924243efa7197c347f6a0f60077eaca71ce66"
+      },
+      {
+        "name": "xlsxwriter",
+        "version": "3.2.9",
+        "filename": "xlsxwriter-3.2.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl",
+        "sha256": "9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3",
+        "size": 175315,
+        "requires_python": ">=3.8",
+        "license_expression": null,
+        "license": "BSD-2-Clause",
+        "license_classifiers": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "license_files": [
+          "LICENSE.txt"
+        ],
+        "active_requires_dist": [],
+        "metadata_source": "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl.metadata",
+        "metadata_sha256": "10d504f188e087f07a06b9038ed0535f37ac072c232e60c075ddb0aedb7b7d78"
       }
     ]
-  }
+  },
+  "supplementalNotices": [
+    {
+      "filename": "HarfBuzz-COPYING.txt",
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+      "source": "uharfbuzz-0.56.1.tar.gz",
+      "sourceSha256": "a0a6928ed66b166a931ebe5df9ac551b9c42983513030233dcd95b41fa827f97"
+    },
+    {
+      "filename": "Microsoft-USE-COPYING.txt",
+      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+      "source": "uharfbuzz-0.56.1.tar.gz",
+      "sourceSha256": "a0a6928ed66b166a931ebe5df9ac551b9c42983513030233dcd95b41fa827f97"
+    },
+    {
+      "filename": "libiconv-LGPL-2.1.txt",
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+      "source": "libiconv-1.18.tar.gz/COPYING.LIB",
+      "sourceSha256": "3b08f5f4f9b4eb82f151a7040bfd6fe6c6fb922efe4b1659c66ea933276965e8"
+    }
+  ]
 }

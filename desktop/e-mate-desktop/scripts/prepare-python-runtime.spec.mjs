@@ -3,8 +3,24 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { createHash } from 'node:crypto'
 
-import { download, officeInstallArguments } from './prepare-python-runtime.mjs'
+import { download, officeInstallArguments, installOfficeNotices } from './prepare-python-runtime.mjs'
+
+test('supplemental runtime notices are copied byte-for-byte into the packaged runtime', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'e-mate-office-notices-'))
+  try {
+    installOfficeNotices(directory)
+    const manifest = JSON.parse(await readFile(new URL('./office-python/manifest.json', import.meta.url), 'utf8'))
+    for (const notice of manifest.supplementalNotices) {
+      const bytes = await readFile(join(directory, 'office-notices', notice.filename))
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), notice.sha256)
+    }
+    assert.throws(() => installOfficeNotices(directory), /EEXIST/u)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 
 test('all supported targets have a complete hashed wheel lock matching their manifest', async () => {
   const manifest = JSON.parse(await readFile(new URL('./office-python/manifest.json', import.meta.url), 'utf8'))
