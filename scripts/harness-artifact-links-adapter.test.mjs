@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { adaptHarnessConversationSource } from './harness-conversation-adapter.mjs'
-import { adaptHarnessArtifactLinksSource } from './harness-artifact-links-adapter.mjs'
+import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSource, artifactLinksVitePlugin, ARTIFACT_LINKS_RENDERER_PATH } from './harness-artifact-links-adapter.mjs'
 import { apply as applyOpenBoundary } from '../packages/dsh/src/profile/artifact-open-boundary.ts'
 
 const harness = join(process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname, 'upstream/deepseek-harness')
@@ -20,7 +20,8 @@ const requireHarness = createRequire(join(harness, 'package.json'))
 // side effect are adjusted for this Node DOM test; no renderer is substituted.
 const moduleText = adapted.replace(/^import [^\n]+ from "([^"]+)";/gmu, (line, name) => line.replace('"' + name + '"', JSON.stringify(pathToFileURL(requireNative.resolve(name)).href)))
   .replace(/^import "katex\/dist\/katex.min.css";$/mu, '')
-const { MarkdownText } = await import('data:text/javascript;base64,' + Buffer.from(moduleText).toString('base64'))
+const primitiveModule = await import('data:text/javascript;base64,' + Buffer.from(moduleText).toString('base64'))
+const { MarkdownText } = primitiveModule
 const { jsx } = requireNative('react/jsx-runtime')
 const { renderToStaticMarkup } = requireNative('react-dom/server')
 const vocabularyText = await readFile(join(harness, 'packages/client/ui-deliverables/src/client/turn-deliverables.ts'), 'utf8')
@@ -118,4 +119,111 @@ test('explicit links preserve Windows drives and relative paths without promotin
   const html = renderToStaticMarkup(jsx(MarkdownText, { text: '![查看图片](copied.png)', fileMentions }))
   assert.match(html, /<button/); assert.doesNotMatch(html, /<img|src=/)
   assert.equal(paths.length, 4, 'rendering never probes or opens any file/image')
+})
+
+// Load the emitted native module factories, exposing only their real owners for
+// this test. Slot dispatch below supplies the same native hook context as ChatView.
+function emittedFactory(source, require, extraExports = '') {
+  let output
+  new Function('window', source.replace('return module.exports;', extraExports + '\nreturn module.exports;'))({ __ModuleLoader__: { load(module) { output = module.factory(require) } } })
+  return output
+}
+const requireConversation = createRequire(join(harness, 'packages/client/ui-conversation/package.json'))
+const clientRuntime = emittedFactory(await readFile(join(harness, 'packages/client/runtime/lib/client.js'), 'utf8'), requireConversation)
+const conversationOwners = emittedFactory(conversation, name => {
+  if (name === '@deepseek-ai/dsh-client-runtime/client') return clientRuntime
+  if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitiveModule
+  if (name === '@deepseek-ai/dsh-client-ui-attachment') return {}
+  return requireConversation(name)
+}, 'exports.testOwners = { registerConversationNodes, AssistantNodeView, ChatNodeSeat, CHAT_NODE_INJECT };').testOwners
+function nativeChat(events, incremental = false) {
+  const definitions = [], views = []; let fallback
+  conversationOwners.registerConversationNodes({ conversationEvents: { register: value => definitions.push(value), registerFallback: value => { fallback = value } }, conversationViews: { register: value => views.push(value) } })
+  const assembler = new clientRuntime.ConversationNodeAssembler({ entries: () => definitions, fallbackEntry: () => fallback }, { entries: () => views })
+  if (incremental) for (const event of events) { assembler.append({ event, view: undefined }); assembler.flush() }
+  else assembler.replaceWindow(events.map(event => ({ event, view: undefined })), false)
+  assembler.flush()
+  return assembler.snapshot('chat')
+}
+const terminalText = '- [文本文件 EM218-link-check.txt](/workspace/EM218-link-check.txt)\n- [图片 EM218-link-check.png](/workspace/EM218-link-check.png)'
+function terminalEvents() {
+  return [
+    { seq: 1, type: 'turn/start', data: { turn: 1 } },
+    { seq: 2, type: 'step/start', data: { turn: 1, step: 1 } },
+    { seq: 3, type: 'assistant/message', surfaceOp: 'append', data: { turn: 1, step: 1, message: { id: 'final-message', role: 'assistant', content: [{ type: 'text', text: terminalText }] } } },
+    { seq: 4, type: 'step/end', data: { turn: 1, step: 1 } },
+    { seq: 5, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ].map(event => ({ ...event, time: 1700000000000 + event.seq }))
+}
+function nodeProps(chat, openFile) {
+  const node = chat.nodes.values().find(node => node.kind === 'assistant-step' && node.data.finalNode?.seq === 3)
+  assert(node)
+  const useSession = selector => selector({ chat })
+  return { nodeKey: node.key, selectedCallId: null, cwd: '/workspace', openFile, inspectCall() {}, forkAt() {}, useSession,
+    fileMentions: owner => fileLinkOwner({ get: () => undefined }, owner), t: key => key,
+    renderSlot(_name, owner, { hookContext }) {
+      return jsx(conversationOwners.AssistantNodeView, { ...owner, t: key => key, useTurnData: conversationOwners.CHAT_NODE_INJECT.hooks.turnData({ useSession }, hookContext) })
+    },
+  }
+}
+test('actual native final projection and Assistant renderer retain explicit file links after cold and incremental completion', () => {
+  for (const incremental of [false, true]) {
+    const chat = nativeChat(terminalEvents(), incremental)
+    const html = renderToStaticMarkup(jsx(conversationOwners.ChatNodeSeat, nodeProps(chat, () => {})))
+    assert.equal((html.match(/<button/g) ?? []).length, 2, incremental ? 'incremental completion' : 'cold completion')
+  }
+})
+
+
+test('Vite consumes the native source adapter and the emitted browser library opens final local links', async t => {
+  const requireWeb = createRequire(join(harness, 'apps/web/package.json'))
+  const { build } = await import(pathToFileURL(requireWeb.resolve('vite')).href)
+  const directory = await mkdtemp(join(tmpdir(), 'emate-artifact-vite-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const entry = join(directory, 'entry.js')
+  await writeFile(entry, "export { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives';")
+  const rendererPath = await realpath(join(harness, ARTIFACT_LINKS_RENDERER_PATH))
+  const renderer = await readFile(rendererPath, 'utf8')
+  assert.throws(() => adaptHarnessArtifactLinksRendererSource('changed native source'), /expected one rc.7 seam/)
+  assert.throws(() => adaptHarnessArtifactLinksRendererSource(renderer + renderer), /found 2/)
+  assert.throws(() => adaptHarnessArtifactLinksRendererSource(adaptHarnessArtifactLinksRendererSource(renderer)), /expected one rc.7 seam/)
+  const absent = artifactLinksVitePlugin(rendererPath)
+  absent.buildStart()
+  assert.equal(absent.transform('unrelated', join(directory, 'other.tsx')), null)
+  assert.throws(() => absent.generateBundle(), /not consumed/)
+  for (const apply of [false, true]) {
+    const result = await build({ configFile: false, root: directory, logLevel: 'silent',
+      esbuild: { jsx: 'automatic' }, plugins: apply ? [artifactLinksVitePlugin(rendererPath)] : [],
+      resolve: { alias: [{ find: /^@deepseek-ai\/dsh-client-ui-primitives$/, replacement: join(harness, 'packages/client/ui-primitives/src/index.ts') }] },
+      build: { outDir: join(directory, apply ? 'adapted-dist' : 'native-dist'), minify: false, lib: { entry, formats: ['es'], fileName: 'browser' },
+        rollupOptions: { external: id => id !== '@deepseek-ai/dsh-client-ui-primitives' && !id.endsWith('.css') && !id.startsWith('.') && !id.startsWith('/') },
+      },
+    })
+    const outputs = (Array.isArray(result) ? result : [result]).flatMap(value => value.output)
+    const built = outputs.find(item => item.type === 'chunk' && item.isEntry)
+    assert(built)
+    const shipped = await readFile(join(directory, apply ? 'adapted-dist' : 'native-dist', built.fileName), 'utf8')
+    assert.equal(shipped, built.code)
+    const code = shipped.replace(/(?:from |^import )["']([^"']+)["']/gm, (match, id) => match.replace(id, pathToFileURL(requireNative.resolve(id)).href))
+    const domEntry = join(directory, apply ? 'adapted-dom.mjs' : 'native-dom.mjs')
+    await writeFile(domEntry, code)
+    const compiled = await import(pathToFileURL(domEntry).href)
+    const html = renderToStaticMarkup(jsx(compiled.MarkdownText, { text: terminalText, fileMentions: fileLinkOwner({ get: () => undefined }, { openFile() {} }) }))
+    assert.equal((html.match(/<button/g) ?? []).length, apply ? 2 : 0)
+    if (apply) {
+      const { JSDOM } = requireHarness('jsdom')
+      const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
+      const names = ['window', 'document', 'navigator', 'HTMLElement', 'Node', 'IS_REACT_ACT_ENVIRONMENT']
+      const previous = new Map(names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]))
+      for (const name of names) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value: name === 'IS_REACT_ACT_ENVIRONMENT' ? true : dom.window[name] })
+      const { render, fireEvent, cleanup } = requireHarness('@testing-library/react')
+      try {
+        const opened = []
+        const view = render(jsx(compiled.MarkdownText, { text: terminalText, fileMentions: fileLinkOwner({ get: () => undefined }, { openFile: path => opened.push(path) }) }))
+        assert.deepEqual(opened, [], 'Vite output never probes or opens on render')
+        for (const button of view.getAllByRole('button')) fireEvent.click(button)
+        assert.deepEqual(opened, ['/workspace/EM218-link-check.txt', '/workspace/EM218-link-check.png'])
+      } finally { cleanup(); dom.window.close(); for (const [name, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name] } }
+    }
+  }
 })

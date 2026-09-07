@@ -43,3 +43,44 @@ export function adaptHarnessArtifactLinksSource(source) {
   change('return renderImage(definition.url, node.alt ?? "", key);', 'return renderImage(definition.url, node.alt ?? "", key, context);', 'renderer/image-reference')
   return source
 }
+
+// Vite aliases the platform library to this native SOURCE module. Adapting its
+// emitted Node library alone cannot affect the browser's static module table.
+export const ARTIFACT_LINKS_RENDERER_PATH = 'packages/client/ui-primitives/src/markdown/render.tsx'
+export function adaptHarnessArtifactLinksRendererSource(source) {
+  const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
+  const button = `function emateArtifactButton(mention, children, key) {
+  return createElement('button', { key, type: 'button', className: css.fileMention,
+    style: { margin: 0, padding: 0, border: 0, background: 'none', font: 'inherit', color: 'var(--dsw-alias-state-business-primary, LinkText)', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '3px' },
+    title: mention.title, 'aria-label': mention.label, onClick: mention.open }, children)
+}`
+  change('function renderAnchor(url: string, children: ReactNode[], key: Key): ReactNode {\n  return renderSafeLink(normalizeUri(url), children, key)\n}',
+    `${emateArtifactMention.toString()}\n${button}\nfunction renderAnchor(url: string, children: ReactNode[], key: Key, context: MarkdownRenderContext): ReactNode {\n  const mention = emateArtifactMention(url, context)\n  if (mention) return emateArtifactButton(mention, children, key)\n  return renderSafeLink(normalizeUri(url), children, key)\n}`, 'vite/anchor')
+  change('return renderAnchor(node.url, renderChildren(node.children, { ...context, inLink: true }), key)',
+    'return renderAnchor(node.url, renderChildren(node.children, { ...context, inLink: true }), key, context)', 'vite/link')
+  change('return renderAnchor(definition.url, renderChildren(node.children, { ...context, inLink: true }), key)',
+    'return renderAnchor(definition.url, renderChildren(node.children, { ...context, inLink: true }), key, context)', 'vite/reference')
+  change('function renderImage(url: string, alt: string, key: Key): ReactNode {\n  const imageSrc',
+    'function renderImage(url: string, alt: string, key: Key, context: MarkdownRenderContext): ReactNode {\n  const mention = emateArtifactMention(url, context)\n  if (mention) return emateArtifactButton(mention, alt || mention.label, key)\n  const imageSrc', 'vite/image')
+  change("return renderImage(node.url, node.alt ?? '', key)", "return renderImage(node.url, node.alt ?? '', key, context)", 'vite/image-node')
+  change("return renderImage(definition.url, node.alt ?? '', key)", "return renderImage(definition.url, node.alt ?? '', key, context)", 'vite/image-reference')
+  return source
+}
+
+export function artifactLinksVitePlugin(rendererPath) {
+  const target = rendererPath.replaceAll('\\', '/')
+  let seen = false
+  return {
+    name: 'e-mate-native-artifact-links', apply: 'build', enforce: 'pre',
+    buildStart() { seen = false },
+    transform(source, id) {
+      if (id.replaceAll('\\', '/') !== target) return null
+      const code = adaptHarnessArtifactLinksRendererSource(source)
+      seen = true
+      return { code, map: null }
+    },
+    generateBundle() {
+      if (!seen) throw Error('Native Markdown renderer was not consumed by Vite; artifact-link adaptation is missing')
+    },
+  }
+}

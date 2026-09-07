@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import test from 'node:test'
@@ -14,11 +16,15 @@ import {
   HARNESS_COMMIT,
   hashDirectory,
   runHarnessBuildScripts,
+  frontendBuildRecord,
+  verifyFrontendBuildRecord,
+  materializeFrontendDist,
+  harnessFrontendViteConfig,
 } from './harness-provenance.mjs'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
 import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
-import { ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE } from './harness-artifact-links-adapter.mjs'
+import { ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE, ARTIFACT_LINKS_RENDERER_PATH } from './harness-artifact-links-adapter.mjs'
 import { FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 
 const root = resolve(import.meta.dirname, '..')
@@ -76,6 +82,7 @@ test('runs manager-free Harness build scripts in order through inherited pnpm an
       'else {',
       "  const args = process.argv.slice(2)",
       "  require('node:fs').appendFileSync(process.env.T25_PM_LOG, `${JSON.stringify(args)}\\n`)",
+      "  if (args.includes('--config')) require('node:fs').writeFileSync(process.env.T25_PM_LOG + '.config', require('node:fs').readFileSync(args[args.indexOf('--config') + 1]))",
       "  if (args.at(-1) === process.env.T25_FAIL_SCRIPT) process.exit(7)",
       '}',
     ].join('\n'))
@@ -87,7 +94,13 @@ test('runs manager-free Harness build scripts in order through inherited pnpm an
       ['--dir', 'upstream/deepseek-harness', '--filter', '@deepseek-ai/dsh-web-frontend', 'run', 'build'],
     ]
     runHarnessBuildScripts(directory, '11.7.0', env)
-    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse), expected)
+    const calls = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse)
+    assert.deepEqual(calls.slice(0, 3), expected.slice(0, 3))
+    assert.deepEqual(calls[3].slice(0, -2), expected[3])
+    assert.equal(calls[3].at(-2), '--config')
+    assert.equal(existsSync(calls[3].at(-1)), false, 'ephemeral Vite config is removed')
+    assert.match(readFileSync(log + '.config', 'utf8'), /artifactLinksVitePlugin.*realpathSync/)
+    assert.match(readFileSync(log + '.config', 'utf8'), /apps\/web\/vite\.config\.ts/)
     assert.equal(expected.flat().includes('npm'), false)
 
     writeFileSync(log, '')
@@ -228,4 +241,51 @@ test('Desktop declares no Session, model-directory, bash, or pwsh patch path', (
   assert.doesNotMatch(manifest, /"@deepseek-ai\/dsh-session(?:-persistence)?@npm:[^"]+":\s*"patch:/u)
   assert.doesNotMatch(manifest, /dsh-client-ui-model-selection@.*patch:/u)
   assert.doesNotMatch(manifest, /"@deepseek-ai\/dsh-tool-(?:bash|pwsh)@npm:[^"]+":\s*"patch:/u)
+})
+
+
+test('frontend build inputs invalidate old receipts and materialization copies the actual shipped dist', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'emate-frontend-receipt-'))
+  try {
+    const native = join(directory, 'upstream/deepseek-harness')
+    const renderer = join(native, ARTIFACT_LINKS_RENDERER_PATH)
+    mkdirSync(join(directory, 'scripts'), { recursive: true })
+    mkdirSync(join(native, 'apps/web/dist/assets'), { recursive: true })
+    mkdirSync(join(renderer, '..'), { recursive: true })
+    writeFileSync(renderer, readFileSync(join(harnessRoot, ARTIFACT_LINKS_RENDERER_PATH)))
+    writeFileSync(join(directory, ARTIFACT_LINKS_ADAPTER_PATH), readFileSync(join(root, ARTIFACT_LINKS_ADAPTER_PATH)))
+    writeFileSync(join(directory, 'scripts/harness-provenance.mjs'), readFileSync(join(root, 'scripts/harness-provenance.mjs')))
+    writeFileSync(join(native, 'apps/web/dist/index.html'), '<script src="assets/test.js"></script>')
+    writeFileSync(join(native, 'apps/web/dist/assets/test.js'), 'synthetic browser output')
+    writeFileSync(join(native, 'apps/web/dist/assets/test.js.map'), 'not in native release:pack files')
+    const current = frontendBuildRecord(directory)
+    assert.doesNotThrow(() => verifyFrontendBuildRecord(directory, current))
+    assert.throws(() => verifyFrontendBuildRecord(directory, undefined), /frontend.*changed/)
+    assert.throws(() => verifyFrontendBuildRecord(directory, { ...current, artifact_adapter: { ...current.artifact_adapter, sha256: '0'.repeat(64) } }), /frontend.*changed/)
+    const target = join(directory, 'desktop/node_modules/@deepseek-ai/dsh-web-frontend')
+    mkdirSync(join(target, 'dist'), { recursive: true }); writeFileSync(join(target, 'dist/old.js'), 'stale published package bytes')
+    materializeFrontendDist(native, target)
+    assert.equal(readFileSync(join(target, 'dist/assets/test.js'), 'utf8'), 'synthetic browser output')
+    assert.equal(existsSync(join(target, 'dist/old.js')), false)
+    assert.equal(existsSync(join(target, 'dist/assets/test.js.map')), false)
+    writeFileSync(join(native, 'apps/web/dist/assets/test.js'), 'changed frontend output')
+    assert.throws(() => verifyFrontendBuildRecord(directory, current), /frontend.*changed/)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+
+test('generated Vite configuration resolves the pinned native aliases and the pre-transform before React', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'emate-native-vite-config-'))
+  try {
+    const configFile = join(directory, 'vite.config.mjs')
+    writeFileSync(configFile, harnessFrontendViteConfig(root))
+    const nativeRequire = createRequire(join(harnessRoot, 'apps/web/package.json'))
+    const { resolveConfig } = await import(pathToFileURL(nativeRequire.resolve('vite')).href)
+    const config = await resolveConfig({ configFile, root: join(harnessRoot, 'apps/web'), logLevel: 'silent' }, 'build')
+    const artifact = config.plugins.findIndex(plugin => plugin.name === 'e-mate-native-artifact-links')
+    assert(artifact >= 0)
+    assert(artifact < config.plugins.findIndex(plugin => plugin.name === 'vite:react-babel'))
+    const alias = config.resolve.alias.find(alias => alias.find instanceof RegExp && alias.find.test('@deepseek-ai/dsh-client-ui-primitives'))
+    assert(alias.replacement.endsWith('packages/client/ui-primitives/src/index.ts'))
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

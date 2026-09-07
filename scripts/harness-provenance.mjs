@@ -7,21 +7,23 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
-import { adaptHarnessArtifactLinksSource, ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE } from './harness-artifact-links-adapter.mjs'
+import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSource, ARTIFACT_LINKS_RENDERER_PATH, ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessFsBytesSource, FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 
 export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
 export const HARNESS_VERSION = '0.1.0-rc.7'
+export const HARNESS_FRONTEND_PACKAGE = '@deepseek-ai/dsh-web-frontend'
 
 const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/updated", refresh);'
 const BUILD_RECEIPT = '.release-cache/harness-build.json'
@@ -72,15 +74,49 @@ function regularFiles(root, directory = root) {
   return files
 }
 
-export function hashDirectory(directory) {
+export function hashDirectory(directory, include = () => true) {
   const digest = createHash('sha256').update('e-mate-harness-directory-v1\0')
-  for (const path of regularFiles(directory)) {
+  for (const path of regularFiles(directory).filter(include)) {
     const local = relative(directory, path).split(sep).join('/')
     const bytes = readFileSync(path)
     digest.update(`${local}\0${String(bytes.byteLength)}\0`)
     digest.update(bytes)
   }
   return digest.digest('hex')
+}
+
+const shippedFrontendFile = path => !path.endsWith('.map')
+
+export function frontendBuildRecord(root) {
+  const harnessRoot = join(root, 'upstream', 'deepseek-harness')
+  const source = readFileSync(join(harnessRoot, ARTIFACT_LINKS_RENDERER_PATH), 'utf8')
+  const dist = join(harnessRoot, 'apps', 'web', 'dist')
+  if (!existsSync(join(dist, 'index.html'))) throw Error('Pinned frontend dist is missing; run pnpm build:harness')
+  return {
+    package: HARNESS_FRONTEND_PACKAGE,
+    source: 'apps/web/dist',
+    dist_sha256: hashDirectory(dist, shippedFrontendFile),
+    build_owner_sha256: sha256(readFileSync(join(root, 'scripts/harness-provenance.mjs'))),
+    artifact_adapter: { path: ARTIFACT_LINKS_ADAPTER_PATH, sha256: sha256(readFileSync(join(root, ARTIFACT_LINKS_ADAPTER_PATH))) },
+    renderer: { path: ARTIFACT_LINKS_RENDERER_PATH, source_sha256: sha256(source), adapted_sha256: sha256(adaptHarnessArtifactLinksRendererSource(source)) },
+  }
+}
+
+export function verifyFrontendBuildRecord(root, actual) {
+  const expected = frontendBuildRecord(root)
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw Error('Pinned frontend dist or artifact-link build inputs changed; run pnpm build:harness')
+  return expected
+}
+
+/** Preserve the frontend package's native dist contract (release:pack excludes source maps). */
+export function materializeFrontendDist(harnessRoot, targetPackage) {
+  const source = join(harnessRoot, 'apps', 'web', 'dist')
+  if (!existsSync(join(source, 'index.html'))) throw Error('Pinned frontend dist is missing')
+  const target = join(targetPackage, 'dist')
+  if (resolve(source) === resolve(target) || resolve(source).startsWith(resolve(target) + sep) || resolve(target).startsWith(resolve(source) + sep)) throw Error('Frontend source and destination must not overlap')
+  rmSync(target, { recursive: true, force: true })
+  cpSync(source, target, { recursive: true, errorOnExist: true, filter: shippedFrontendFile })
+  if (hashDirectory(source, shippedFrontendFile) !== hashDirectory(target, shippedFrontendFile)) throw Error('Materialized frontend dist differs from the verified build')
 }
 
 function packageMap(harnessRoot) {
@@ -106,11 +142,12 @@ function packageMap(harnessRoot) {
 
 function packageRecords(harnessRoot) {
   return [...packageMap(harnessRoot)].map(([name, value]) => {
-    const lib = join(value.path, 'lib')
-    if (!existsSync(lib)) throw new Error(`pinned Harness build is missing emitted lib for ${name}`)
     if (value.manifest.version !== HARNESS_VERSION) {
       throw new Error(`${name} version drifted: ${String(value.manifest.version)}`)
     }
+    if (name === HARNESS_FRONTEND_PACKAGE) return { name, source: relative(harnessRoot, value.path).split(sep).join('/'), dist_sha256: hashDirectory(join(value.path, 'dist'), shippedFrontendFile) }
+    const lib = join(value.path, 'lib')
+    if (!existsSync(lib)) throw new Error(`pinned Harness build is missing emitted lib for ${name}`)
     return {
       name,
       source: relative(harnessRoot, value.path).split(sep).join('/'),
@@ -200,6 +237,7 @@ export function writeHarnessBuildReceipt(root) {
     harness_version: HARNESS_VERSION,
     pnpm_lock_sha256: sha256(readFileSync(join(harnessRoot, 'pnpm-lock.yaml'))),
     packages: packageRecords(harnessRoot),
+    frontend: frontendBuildRecord(root),
   }
   const path = join(root, BUILD_RECEIPT)
   mkdirSync(dirname(path), { recursive: true })
@@ -212,12 +250,14 @@ export function verifyHarnessBuildReceipt(root) {
   const path = join(root, BUILD_RECEIPT)
   if (!existsSync(path)) throw new Error('pinned Harness build receipt is missing; run pnpm build:harness')
   const actual = readJson(path)
+  verifyFrontendBuildRecord(root, actual.frontend)
   const expected = {
     schema_version: 1,
     harness_commit: HARNESS_COMMIT,
     harness_version: HARNESS_VERSION,
     pnpm_lock_sha256: sha256(readFileSync(join(harnessRoot, 'pnpm-lock.yaml'))),
     packages: packageRecords(harnessRoot),
+    frontend: frontendBuildRecord(root),
   }
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error('pinned Harness emitted libs do not match their clean-source build receipt')
@@ -265,6 +305,7 @@ export function materializeHarnessDesktopRuntime(root) {
     if (source === undefined || manifest.version !== HARNESS_VERSION) {
       throw new Error(`Desktop resolved package is outside the pinned Harness closure: ${String(manifest.name)}@${String(manifest.version)}`)
     }
+    if (manifest.name === HARNESS_FRONTEND_PACKAGE) { materializeFrontendDist(harnessRoot, target); continue }
     const sourceLib = join(source.path, 'lib')
     const targetLib = join(target, 'lib')
     if (!existsSync(sourceLib)) throw new Error(`pinned Harness build is missing emitted lib for ${manifest.name}`)
@@ -309,6 +350,13 @@ function desktopProvenance(root, receipt) {
     const source = sources.get(manifest.name)
     if (source === undefined || manifest.version !== HARNESS_VERSION) {
       throw new Error(`Desktop resolved package is outside the pinned Harness closure: ${String(manifest.name)}@${String(manifest.version)}`)
+    }
+    if (manifest.name === HARNESS_FRONTEND_PACKAGE) {
+      const sourceHash = hashDirectory(join(source.path, 'dist'), shippedFrontendFile)
+      const targetHash = hashDirectory(join(target, 'dist'), shippedFrontendFile)
+      if (sourceHash !== targetHash || sourceHash !== receipt.frontend.dist_sha256) throw Error('Desktop frontend does not match the artifact-adapted native Vite dist')
+      packages.push({ name: manifest.name, resolved: relative(root, target).split(sep).join('/'), source: relative(harnessRoot, source.path).split(sep).join('/'), source_dist_sha256: sourceHash, resolved_dist_sha256: targetHash, adapter: receipt.frontend.artifact_adapter, overlay: null })
+      continue
     }
     const sourceLib = join(source.path, 'lib')
     const targetLib = join(target, 'lib')
@@ -378,6 +426,7 @@ function desktopProvenance(root, receipt) {
     harness_version: receipt.harness_version,
     harness_pnpm_lock_sha256: receipt.pnpm_lock_sha256,
     desktop_yarn_lock_sha256: sha256(readFileSync(join(root, 'desktop', 'yarn.lock'))),
+    frontend: receipt.frontend,
     packages,
   }
 }
@@ -393,6 +442,16 @@ export function verifyHarnessDesktopRuntime(root) {
   return actual
 }
 
+export function harnessFrontendViteConfig(root) {
+  const harnessRoot = join(root, 'upstream', 'deepseek-harness')
+  return [
+    `import nativeConfig from ${JSON.stringify(pathToFileURL(join(harnessRoot, 'apps/web/vite.config.ts')).href)}`,
+    `import { realpathSync } from 'node:fs'`,
+    `import { artifactLinksVitePlugin } from ${JSON.stringify(pathToFileURL(join(root, ARTIFACT_LINKS_ADAPTER_PATH)).href)}`,
+    `export default { ...nativeConfig, plugins: [artifactLinksVitePlugin(realpathSync(${JSON.stringify(join(harnessRoot, ARTIFACT_LINKS_RENDERER_PATH))})), ...(nativeConfig.plugins ?? [])] }`,
+  ].join('\n')
+}
+
 export function runHarnessBuildScripts(root, pnpmVersion, env = process.env) {
   const commands = [
     // Host tsdown owns the generated remote declarations consumed by the Client graph.
@@ -402,14 +461,22 @@ export function runHarnessBuildScripts(root, pnpmVersion, env = process.env) {
     ['--dir', 'upstream/deepseek-harness', '--filter', '@deepseek-ai/dsh-web-frontend', 'run', 'build'],
   ]
   for (const args of commands) {
-    const invocation = pinnedPnpmInvocation(pnpmVersion, args, { env })
-    const result = spawnSync(invocation.command, invocation.args, {
-      cwd: root,
-      env: invocation.env,
-      stdio: 'inherit',
-    })
-    if (result.error !== undefined) throw result.error
-    if (result.status !== 0) throw new Error(`pinned Harness ${args.join(' ')} exited with ${String(result.status)}`)
+    let scratch
+    try {
+      let buildArgs = args
+      if (args.includes(HARNESS_FRONTEND_PACKAGE)) {
+        const cache = join(root, '.release-cache')
+        mkdirSync(cache, { recursive: true })
+        scratch = mkdtempSync(join(cache, 'harness-vite-'))
+        const config = join(scratch, 'vite.config.mjs')
+        writeFileSync(config, harnessFrontendViteConfig(root))
+        buildArgs = [...args, '--config', config]
+      }
+      const invocation = pinnedPnpmInvocation(pnpmVersion, buildArgs, { env })
+      const result = spawnSync(invocation.command, invocation.args, { cwd: root, env: invocation.env, stdio: 'inherit' })
+      if (result.error !== undefined) throw result.error
+      if (result.status !== 0) throw new Error(`pinned Harness ${args.join(' ')} exited with ${String(result.status)}`)
+    } finally { if (scratch) rmSync(scratch, { recursive: true, force: true }) }
   }
 }
 
