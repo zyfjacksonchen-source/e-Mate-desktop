@@ -486,7 +486,7 @@ async function nativeXinHarness(t) {
     async token() { return 'synthetic-native-token' }, async authorize() {}, async confirm() { return true }, configured: () => true, async install() {},
   })
   t.after(async () => { await owner.dispose(); await runtime.fiber.dispose() })
-  return { ...h, owner, runtime, writes, knowledgeCalls, async agent(id) {
+  return { ...h, owner, runtime, writes, knowledgeCalls, xinAuthority(value) { Object.assign(capability, value) }, async agent(id) {
     const agent = { id, session: { events: [] } }
     let scope
     await runtime.plugin(Object.assign(inner => { scope = createScope(inner, agent) }, { inject: ['tools','systemPrompt'] }))
@@ -578,6 +578,40 @@ test('a delayed native knowledge dispatch cannot execute under a replacement acc
   release()
   await assert.rejects(pending)
   assert.deepEqual(h.knowledgeCalls, [])
+})
+
+test('knowledge operation permits same Xin subject refresh but cannot follow a different authorized Xin account', async t => {
+  const h = await nativeXinHarness(t)
+  const operation = h.owner.captureKnowledge()
+  await operation.call('get_knowledge_compilation', {})
+  h.xinAuthority({ principal_id: 9 })
+  assert.equal((await h.owner.ensure({}, { reauthorize: true })).state, 'ready')
+  await operation.call('get_knowledge_compilation', {})
+  h.xinAuthority({ tenant_id: 'another-xin-tenant', user_id: 200, principal_id: 201 })
+  assert.equal((await h.owner.ensure({}, { reauthorize: true })).state, 'ready')
+  await assert.rejects(operation.call('get_knowledge_compilation', {}), /本人授权账号已变化/)
+  assert.equal(h.knowledgeCalls.length, 2)
+  await h.owner.captureKnowledge().call('get_knowledge_compilation', {})
+  assert.equal(h.knowledgeCalls.length, 3)
+})
+
+test('a guarded Agent write cannot dispatch after same e-Mate account authorizes another Xin subject', async t => {
+  const h = await nativeXinHarness(t)
+  const old = await h.agent('same-emate'); await h.owner.ensure(old.exec)
+  let entered, release
+  const started = new Promise(resolve => { entered = resolve })
+  const waiting = new Promise(resolve => { release = resolve })
+  h.runtime.on('tools/execute', async (exec, next) => {
+    if (exec.callId === 'old-write') { entered(); await waiting }
+    return next()
+  })
+  const pending = h.runtime.tools.execute({ callId: 'old-write', name: `mcp__${XIN_SERVICE}__mutate_project`, arguments: {}, agent: old.agent, signal: new AbortController().signal })
+  await started
+  h.xinAuthority({ tenant_id: 'another-xin-tenant', user_id: 200, principal_id: 201 })
+  assert.equal((await h.owner.ensure({}, { reauthorize: true })).state, 'ready')
+  release()
+  assert.equal((await pending).isError, true)
+  assert.deepEqual(h.writes, [])
 })
 
 test('cancelled reauthorization never restores tokens cleared by invalid_grant during refresh', async t => {

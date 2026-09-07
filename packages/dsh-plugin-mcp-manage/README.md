@@ -53,3 +53,9 @@ native Tool execution has no Agent/parent, so the workflow can retain the privat
 receipt without writing it into a user Session. Other model-facing MCP calls keep
 their existing Agent authorization and Tool Search restrictions. The server still
 checks current project read/write permissions on every call.
+
+The shared dispatch guard also captures the verified Xin tenant/user. Changing
+that business identity while retaining the same e-Mate login cancels old calls
+and invalidates captured knowledge operations; a refresh that only changes the
+token or principal ID keeps the same subject. Both dispatch and returned results
+are checked against the captured business identity.

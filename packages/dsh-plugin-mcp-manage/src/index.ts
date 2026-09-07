@@ -711,14 +711,17 @@ export function createXinConnection(ctx: Context, operations: {
   const capabilityTool = `${prefix}get_capabilities`
   const principals = new WeakMap<object, { turn: number; owner: string | undefined }>()
   const probes = new Set<string>()
-  const knowledgeCalls = new Map<string, { name: string; key: string; epoch: number; signal: AbortSignal }>()
-  const executions = new WeakMap<object, { key: string; epoch: number; signal: AbortSignal }>()
+  const knowledgeCalls = new Map<string, { name: string; key: string; epoch: number; signal: AbortSignal; subject: string }>()
+  const executions = new WeakMap<object, { key: string; epoch: number; signal: AbortSignal; subject?: string }>()
   let epoch = 0
   let disposed = false
   let controller = new AbortController()
   let entry: { id: string; key: string; fingerprint: string } | undefined
   let verified: string | undefined
   let proof: (XinCapabilityProof & { owner: string; verified_at: string }) | undefined
+  let subjectKey: string | undefined
+  let subjectController = new AbortController()
+  const proofSubject = () => subjectKey
   let tail: Promise<unknown> = Promise.resolve()
   const pending = new Map<string, { promise: Promise<XinConnectionResult>; interactive: boolean; reauthorize: boolean }>()
   const ledgerStates = new Map<string, GrantLedgerState>()
@@ -779,18 +782,18 @@ export function createXinConnection(ctx: Context, operations: {
     if (probes.has(String(exec.callId)) && exec.name === capabilityTool) { executions.set(exec, { key: scope.key, epoch, signal: controller.signal }); return undefined }
     if (verified !== scope.key || !isMcpServerActive(ctx.loader, ctx.tools, entry.id, XIN_SERVICE)) return '芯助手尚未验证当前授权，请先确保连接。'
     const knowledge = knowledgeCalls.get(String(exec.callId))
-    if (!exec.agent && knowledge?.name === exec.name && knowledge.key === scope.key && knowledge.epoch === epoch && !knowledge.signal.aborted) {
-      executions.set(exec, knowledge); return undefined
+    if (!exec.agent && knowledge?.name === exec.name && knowledge.key === scope.key && knowledge.epoch === epoch && knowledge.subject === proofSubject() && !knowledge.signal.aborted) {
+      executions.set(exec, { ...knowledge, signal: AbortSignal.any([knowledge.signal, subjectController.signal]) }); return undefined
     }
     if (HOST_KNOWLEDGE_METHODS.has(exec.name.slice(prefix.length))) return '知识导入与整理请使用企业知识工具；运行租约和上传凭据仅由宿主处理。'
     if (!exec.agent || executionOwner(exec) !== scope.key) return '请在当前任务中先调用 mcp_manage ensure 验证芯助手账号。'
-    executions.set(exec, { key: scope.key, epoch, signal: controller.signal })
+    executions.set(exec, { key: scope.key, epoch, signal: AbortSignal.any([controller.signal, subjectController.signal]), subject: proofSubject() })
     return undefined
   })
   const stopDispatch = ctx.on('tools/execute', async (exec, next) => {
     if (!exec.name.startsWith(prefix)) return next()
     const captured = executions.get(exec)
-    if (!captured || disposed || captured.epoch !== epoch || owner()?.key !== captured.key) throw new Error('芯助手账号已变化，请重新确保连接。')
+    if (!captured || disposed || captured.epoch !== epoch || owner()?.key !== captured.key || captured.subject !== undefined && captured.subject !== proofSubject()) throw new Error('芯助手账号已变化，请重新确保连接。')
     const previous = exec.signal
     exec.signal = AbortSignal.any([previous, captured.signal])
     try { exec.signal.throwIfAborted(); return await next() } finally { exec.signal = previous }
@@ -799,7 +802,7 @@ export function createXinConnection(ctx: Context, operations: {
     const decision = await next()
     if (!exec.name.startsWith(prefix)) return decision
     const captured = executions.get(exec)
-    if (!captured || disposed || captured.epoch !== epoch || owner()?.key !== captured.key) {
+    if (!captured || disposed || captured.epoch !== epoch || owner()?.key !== captured.key || captured.subject !== undefined && captured.subject !== proofSubject()) {
       return { kind: 'block' as const, feedback: [{ type: 'text' as const, text: '芯助手账号已变化，本次结果不可用于当前账号。' }] }
     }
     return decision
@@ -950,6 +953,10 @@ export function createXinConnection(ctx: Context, operations: {
           lease.assertCurrent()
           const checked = response.isError ? undefined : parseXinCapabilities(response.value)
           if (!checked) throw new Error('Xin current authority unavailable')
+          const nextSubject = JSON.stringify([checked.binding.tenant_id, checked.binding.user_id])
+          if (nextSubject !== subjectKey) {
+            subjectController.abort(); subjectController = new AbortController(); subjectKey = nextSubject
+          }
           proof = { ...checked, owner: scope.key, verified_at: new Date().toISOString() }
         } finally { probes.delete(callId) }
         if (!operations.configured()) { await operations.install(); lease.assertCurrent() }
@@ -1029,10 +1036,12 @@ export function createXinConnection(ctx: Context, operations: {
   const captureKnowledge = (exec: XinExecution = {}): XinKnowledgeOperation => {
     changed()
     const scope = owner(), generation = epoch, capturedSignal = controller.signal
+    let subject = proof?.owner === scope?.key ? proofSubject() : undefined
     if (!scope || disposed || exec.agent && executionOwner(exec) !== scope.key) throw Error('当前任务未绑定有效的芯助手账号。')
     const check = () => {
       capturedSignal.throwIfAborted(); exec.signal?.throwIfAborted()
       if (disposed || epoch !== generation || owner()?.key !== scope.key) throw Error('芯助手账号或连接已变化。')
+      if (subject !== undefined && subject !== proofSubject()) throw Error('芯助手本人授权账号已变化，请重新开始知识操作。')
     }
     check()
     // This closure stays inside the trusted knowledge Host. It carries neither
@@ -1045,9 +1054,11 @@ export function createXinConnection(ctx: Context, operations: {
       const ready = await ensure({ signal: combined })
       check(); combined.throwIfAborted()
       if (ready.state !== 'ready') throw Error('芯助手尚未完成本人授权。')
+      subject ??= proofSubject()
+      if (subject === undefined) throw Error('芯助手本人授权尚未核验。')
       const callId = `xin-knowledge-${randomBytes(24).toString('hex')}`
       const tool = prefix + name
-      knowledgeCalls.set(callId, { name: tool, key: scope.key, epoch: generation, signal: combined })
+      knowledgeCalls.set(callId, { name: tool, key: scope.key, epoch: generation, signal: combined, subject })
       try {
         // Native ToolRuntime validates arguments and executes the existing MCP
         // client. No Agent/parent means lease-bearing results cannot enter JSONL.
@@ -1060,6 +1071,7 @@ export function createXinConnection(ctx: Context, operations: {
   }
   return { status, ensure, disconnect, changed, captureKnowledge, async dispose() {
     disposed = true; epoch++; controller.abort(); verified = undefined
+    subjectController.abort()
     knowledgeCalls.clear()
     await serial(removeEntry)
     guard(); stopDispatch(); stopPost(); stopTurn(); stopAgent()
