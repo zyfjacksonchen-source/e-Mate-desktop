@@ -759,6 +759,7 @@ export function installEmateDesktopProfile(
   const tools = packageEntry('@deepseek-ai/dsh-tools')
   const storage = packageEntry('@deepseek-ai/dsh-storage-domain')
   const llm = packageEntry('@deepseek-ai/dsh-llm')
+  const compaction = packageEntry('@deepseek-ai/dsh-compaction')
   const schedule = packageEntry('@deepseek-ai/dsh-schedule')
   const credentials = packageEntry('@deepseek-ai/dsh-credentials')
   const environment = packageEntry('@deepseek-ai/dsh-launch-environment')
@@ -776,6 +777,8 @@ export function installEmateDesktopProfile(
     storage_domain_module_sha256: sha256(storage),
     llm_module: llm,
     llm_module_sha256: sha256(llm),
+    compaction_module: compaction,
+    compaction_module_sha256: sha256(compaction),
     schedule_module: schedule,
     schedule_module_sha256: sha256(schedule),
     credentials_module: credentials,

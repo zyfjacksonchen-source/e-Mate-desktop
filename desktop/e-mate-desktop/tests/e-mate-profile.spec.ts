@@ -184,10 +184,14 @@ describe('e-Mate desktop profile', () => {
       version?: string
       schedule_module?: string
       schedule_module_sha256?: string
+      compaction_module?: string
+      compaction_module_sha256?: string
     }
     expect(runtimeBinding.version).toBe(EMATE_DESKTOP_PROFILE_VERSION)
     expect(runtimeBinding.schedule_module).toContain('@deepseek-ai/dsh-schedule')
     expect(runtimeBinding.schedule_module_sha256).toMatch(/^[0-9a-f]{64}$/u)
+    expect(runtimeBinding.compaction_module).toContain('@deepseek-ai/dsh-compaction')
+    expect(runtimeBinding.compaction_module_sha256).toMatch(/^[0-9a-f]{64}$/u)
     expect(readFileSync(join(home, 'settings.yaml'), 'utf8')).toBe(
       'ui-theme:\n  preference: dark\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n',
     )
