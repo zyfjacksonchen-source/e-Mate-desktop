@@ -47,7 +47,7 @@ import { loadProfileBaseContract } from './base-contract.ts'
 import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { resolveDesktopShellEnvironment } from './shell-environment.ts'
 import type { DesktopPnpmBootstrap } from './pnpm.ts'
-import { bundledPythonPath } from './vision-toolkit.ts'
+import { bundledCalcPaths, bundledPythonPath } from './vision-toolkit.ts'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import {
   createDesktopExitCoordinator,
@@ -362,6 +362,17 @@ async function start(): Promise<void> {
             name: 'emate-bundled-python',
             variables: { DSH_EMATE_PYTHON: { description: 'Absolute path of the e-Mate bundled Python interpreter. Quote this path when executing local Skill scripts.' } },
             resolve: () => ({ DSH_EMATE_PYTHON: visionPythonPath }),
+          })
+          ctx.shellEnv.register({
+            name: 'emate-bundled-calc',
+            variables: {
+              DSH_EMATE_CALC: { description: 'Absolute path of the e-Mate bundled Calc executable, when available.' },
+              DSH_EMATE_CALC_FONTS: { description: 'Absolute directory of the bundled Calc fonts, when available.' },
+            },
+            resolve: () => {
+              const paths = bundledCalcPaths()
+              return paths ? { DSH_EMATE_CALC: paths.executable, DSH_EMATE_CALC_FONTS: paths.fontDirectory } : {}
+            },
           })
         })
         hostCtx.effect(
