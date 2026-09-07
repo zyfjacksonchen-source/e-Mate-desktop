@@ -135,7 +135,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         const source = result.source
         if (source) {
           if (!UUID.test(source.id) || source.file_hash !== file.sha256) fail('source-changed')
-          row.source_id = source.id; row.status = ['ready', 'parsing', 'failed', 'deleted', 'superseded'].includes(source.status) ? source.status : 'unknown'
+          row.source_id = source.id; row.status = source.status === 'error' ? 'failed' : ['ready', 'parsing', 'failed', 'deleted', 'superseded'].includes(source.status) ? source.status : 'unknown'
           if (HASH.test(source.parse_revision ?? '')) row.parse_revision = source.parse_revision
           if (row.status === 'ready' && !row.parse_revision) row.status = 'unknown'
         } else row.status = result.status === 'awaiting_content' ? 'awaiting_content' : 'unknown'
@@ -155,15 +155,20 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
   })
   async function plan(entry: Entry, rows: ImportSource[]): Promise<Plan[]> {
     const { marker, agent } = entry
-    const old = events(agent).find(event => event.kind === 'ui-import-plan' && event.operationId === marker.operationId)
-    if (old) return old.plans
+    const previous: Plan[] = events(agent).filter(event => event.kind === 'ui-import-plan' && event.operationId === marker.operationId && event.owner === marker.owner).flatMap(event => event.plans)
     const ready = [...new Map(rows.filter(row => row.status === 'ready').map(row => [row.source_id!, { source_id: row.source_id!, source_version: row.sha256, parse_revision: row.parse_revision! }])).values()]
-    if (!ready.length) return []
+    const current = new Map(ready.map(source => [source.source_id, source]))
+    const covered = new Set<string>()
+    for (const task of previous) for (const source of task.sources) {
+      if (current.has(source.source_id) && digest(current.get(source.source_id)) !== digest(source)) fail('source-changed')
+      covered.add(source.source_id)
+    }
+    const additions = ready.filter(source => !covered.has(source.source_id))
+    if (!additions.length) return previous
     const library = await ownedRead(entry, 'revisions', { scope: marker.scope, limit: 100 })
     if (!Array.isArray(library.items) || library.truncated === true) fail('library-too-large')
     const topics = new Map<string, { key: string; title?: string; expected_revision_id: string | null; sources: any[] }>()
-    const current = new Map(ready.map(source => [source.source_id, source]))
-    for (const source of ready) {
+    for (const source of additions) {
       const priorId = marker.supersedes?.source_id ?? source.source_id
       const heads = library.items.filter((head: any) => Array.isArray(head.source_versions) && head.source_versions.some((item: any) => item.source_id === priorId))
       if (!heads.length) topics.set('source/' + source.source_id, { key: 'source/' + source.source_id, title: (marker.title === '导入并整理知识' ? rows.find(row => row.source_id === source.source_id)?.name ?? '知识来源' : marker.title).slice(0, 300), expected_revision_id: null, sources: [source] })
@@ -192,7 +197,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         ...(marker.scope.kind === 'project' && marker.supersedes ? { replacements: [{ ...marker.supersedes, replacement_source_id: ready[0].source_id }] } : {}) })
     }
     await persist(ctx, agent, { kind: 'ui-import-plan', owner: marker.owner, operationId: marker.operationId, plans })
-    return plans
+    return [...previous, ...plans]
   }
   async function drive(entry: Entry, resume: boolean) {
     const { marker, agent, controller } = entry, exec = { agent, signal: controller.signal }
@@ -218,7 +223,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
       const plans = await plan(entry, rows)
       if (!plans.length) { await save(entry, { phase: 'partial', sources: rows, reason: '部分原件解析失败，尚无可整理来源。' }); return { status: 'failed', detail: '原件已保留，解析未完成。' } }
       await save(entry, { phase: 'compiling', sources: rows })
-      let compiled = 0
+      const committedSources = new Set<string>(), committedTopics = new Set<string>()
       for (const task of plans) {
         check(marker.owner, controller.signal)
         if (entry.userStop) throw new DOMException('stopped', 'AbortError')
@@ -242,11 +247,17 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
             if (status.state !== 'committed' && !status.job_id) fail(status.checkpoint?.unknown_submission ? 'submission-unknown' : 'unavailable')
           }
         }
-        compiled += task.topics.length
-        await save(entry, { compiled_count: compiled })
+        if (digest(status.source_versions) !== digest(task.sources) || digest(status.topics) !== digest(task.topics)) fail('idempotency-conflict')
+        for (const source of status.source_versions) committedSources.add(digest(source))
+        for (const topic of status.topics) committedTopics.add(topic.key)
+        await save(entry, { compiled_count: committedTopics.size })
+      }
+      rows = await sourceRows(entry)
+      for (const row of rows.filter(row => row.status === 'ready')) {
+        if (!committedSources.has(digest({ source_id: row.source_id, source_version: row.sha256, parse_revision: row.parse_revision }))) fail('source-changed')
       }
       const partial = rows.some(row => row.status !== 'ready')
-      await save(entry, { phase: partial ? 'partial' : 'complete', reason: partial ? '可用来源已整理发布；仍有原件解析失败，未标记为全部完成。' : '', sources: rows })
+      await save(entry, { phase: partial ? 'partial' : 'complete', reason: partial ? '可用来源已整理发布；仍有原件未完成，未标记为全部完成。' : '', sources: rows })
       return { status: partial ? 'failed' : 'completed', detail: partial ? '部分原件未完成。' : '原件已导入并整理发布。' }
     } catch (error: any) {
       const phase = entry.userStop ? 'stopped' : entry.shutdown || controller.signal.aborted ? 'paused' : error?.code === 'submission-unknown' ? 'unknown' : (progress(agent, marker).sources?.some((source: ImportSource) => source.source_id) || progress(agent, marker).compiled_count > 0) ? 'partial' : 'failed'

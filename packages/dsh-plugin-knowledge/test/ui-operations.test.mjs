@@ -52,7 +52,7 @@ function service() {
         if (!entry) return missing()
         if (init.method === 'PUT') {
           if (failNextUpload) { failNextUpload = false; throw Error('upload unknown') }
-          if (!entry.source) { const source = { id: randomUUID(), file_hash: hash(body), parse_revision: hash('parse:' + hash(body)), title: entry.request.title, filename: entry.request.filename, status: failedNames.has(entry.request.filename) ? 'failed' : parseState, text: Buffer.from(body).toString('utf8') }; sources.set(source.id, source); entry.source = source }
+          if (!entry.source) { const source = { id: randomUUID(), file_hash: hash(body), parse_revision: hash('parse:' + hash(body)), title: entry.request.title, filename: entry.request.filename, status: failedNames.has(entry.request.filename) ? 'error' : parseState, text: Buffer.from(body).toString('utf8') }; sources.set(source.id, source); entry.source = source }
         }
         if (entry.source) entry.status = entry.source.status
         return reply(entry)
@@ -170,7 +170,7 @@ test('UI request boundary rejects caller identity/provider and cannot read an ol
   for (const extra of [{ token: 'fake' }, { provider: 'fake' }, { tenant: 'fake' }, { user: 'fake' }]) await assert.rejects(run.ui.call('ui.import.prepare', { paths: [path], ...extra }), { code: 'invalid-request' })
   const prepared = (await run.ui.call('ui.import.prepare', { paths: [path] })).result
   run.changeOwner()
-  await assert.rejects(run.ui.call('ui.import.status', ref(prepared)), { code: 'invalid-recovery-session' })
+  await assert.rejects(run.ui.call('ui.import.status', ref(prepared)), { code: 'scope-changed' })
   assert.deepEqual((await run.ui.call('ui.import.recent', {})).result.items, [])
 })
 
@@ -212,4 +212,44 @@ test('over-limit folders fail before remote writes and report the batch limit ra
   const result = await waitPhase(run, prepared, ['failed', 'partial'])
   assert.equal(result.phase, 'failed'); assert.match(result.reason, /100份原件/)
   assert.equal(run.backend.calls.length, 0); assert.equal(run.adapter.requests.length, 0)
+})
+
+test('retrying a resolved parse failure must compile the newly ready source before complete', async t => {
+  const backend = service(); backend.failParsing('bad.txt')
+  const run = await harness(t, backend); const good = join(run.root, 'good.txt'), bad = join(run.root, 'bad.txt')
+  await writeFile(good, '已成功解析的来源。'); await writeFile(bad, '随后恢复的来源。')
+  const prepared = (await run.ui.call('ui.import.prepare', { paths: [good, bad] })).result
+  await run.ui.call('ui.import.start', ref(prepared))
+  const partial = await waitPhase(run, prepared, ['partial'])
+  assert.equal(partial.compiled_count, 1)
+  backend.setParsing('ready')
+  const second = (await run.ui.call('ui.import.resume', ref(prepared))).result
+  if (second.job_id) await run.ctx.jobs.wait(second.job_id, 5000, run.ctx.agents.get(prepared.session_id))
+  const resumed = (await run.ui.call('ui.import.status', ref(prepared))).result
+  assert.equal(resumed.sources.filter(source => source.status === 'ready').length, 2)
+  assert.equal(resumed.compiled_count, 2, 'must not report complete while the frozen old plan omits the recovered source')
+  const plans = events(run.ctx.agents.get(prepared.session_id)).filter(event => event.kind === 'ui-import-plan').flatMap(event => event.plans)
+  assert.equal(plans.length, 2); assert.equal(backend.compilations.size, 2)
+  const operationIds = plans.map(plan => plan.operationId), requests = run.adapter.requests.length
+  const third = (await run.ui.call('ui.import.resume', ref(prepared))).result
+  if (third.job_id) await run.ctx.jobs.wait(third.job_id, 5000, run.ctx.agents.get(prepared.session_id))
+  assert.equal((await run.ui.call('ui.import.status', ref(prepared))).result.phase, 'complete')
+  assert.equal(run.adapter.requests.length, requests)
+  assert.deepEqual(events(run.ctx.agents.get(prepared.session_id)).filter(event => event.kind === 'ui-import-plan').flatMap(event => event.plans.map(plan => plan.operationId)), operationIds)
+  assert.equal(backend.calls.filter(call => call.path === '/compilations' && call.method === 'POST').length, 2)
+})
+
+
+test('resume keeps a frozen parse version conflict and never replaces its plan or model request', async t => {
+  const run = await harness(t); const path = join(run.root, 'source.txt'); await writeFile(path, '原始冻结输入。')
+  const prepared = (await run.ui.call('ui.import.prepare', { paths: [path] })).result
+  await run.ui.call('ui.import.start', ref(prepared)); await waitPhase(run, prepared, ['complete'])
+  const before = events(run.ctx.agents.get(prepared.session_id)).filter(event => event.kind === 'ui-import-plan'), requests = run.adapter.requests.length
+  ;[...run.backend.sources.values()][0].parse_revision = hash('different parser revision')
+  await run.ui.call('ui.import.resume', ref(prepared))
+  const result = await waitPhase(run, prepared, ['partial', 'unknown'])
+  assert.equal(result.phase, 'partial'); assert.match(result.reason, /解析版本已变化/)
+  assert.equal(run.adapter.requests.length, requests)
+  assert.deepEqual(events(run.ctx.agents.get(prepared.session_id)).filter(event => event.kind === 'ui-import-plan'), before)
+  assert.equal(run.backend.compilations.size, 1)
 })
