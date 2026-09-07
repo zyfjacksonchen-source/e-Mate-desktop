@@ -48,6 +48,7 @@ import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { resolveDesktopShellEnvironment } from './shell-environment.ts'
 import type { DesktopPnpmBootstrap } from './pnpm.ts'
 import { bundledPythonPath } from './vision-toolkit.ts'
+import type {} from '@deepseek-ai/dsh-shell-env'
 import {
   createDesktopExitCoordinator,
   createDesktopShutdown,
@@ -356,6 +357,13 @@ async function start(): Promise<void> {
       prepared.rootConfig,
       prepared.patches,
       async (hostCtx) => {
+        hostCtx.inject(['shellEnv'], (ctx) => {
+          ctx.shellEnv.register({
+            name: 'emate-bundled-python',
+            variables: { DSH_EMATE_PYTHON: { description: 'Absolute path of the e-Mate bundled Python interpreter. Quote this path when executing local Skill scripts.' } },
+            resolve: () => ({ DSH_EMATE_PYTHON: visionPythonPath }),
+          })
+        })
         hostCtx.effect(
           () => releasePnpmRuntime,
           '@e-mate/desktop: packaged pnpm runtime PATH',

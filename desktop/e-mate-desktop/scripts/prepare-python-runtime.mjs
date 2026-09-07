@@ -46,7 +46,19 @@ function pythonExecutable(targetRoot, platform) {
 }
 
 function receipt(target, asset) {
-  return JSON.stringify({ release: RELEASE, python: PYTHON_VERSION, target, sha256: asset.sha256 })
+  const platform = target.startsWith('win32-') ? 'win32' : 'darwin'
+  return JSON.stringify({ release: RELEASE, python: PYTHON_VERSION, target, sha256: asset.sha256,
+    officeRequirementsSha256: sha256(join(packageRoot, 'scripts', 'office-python', `${platform}.txt`)) })
+}
+
+export function officeInstallArguments(target, staging) {
+  const platform = target.startsWith('win32-') ? 'win32' : 'darwin'
+  return ['-I', '-m', 'pip', '--isolated', 'install', '--disable-pip-version-check',
+    '--no-deps', '--no-compile', '--only-binary=:all:', '--require-hashes',
+    '--platform', platform === 'win32' ? 'win_amd64' : 'macosx_10_13_universal2',
+    '--implementation', 'cp', '--python-version', '3.12', '--abi', 'cp312',
+    '--target', join(staging, 'python', ...(platform === 'win32' ? ['Lib', 'site-packages'] : ['lib', 'python3.12', 'site-packages'])),
+    '-r', join(packageRoot, 'scripts', 'office-python', `${platform}.txt`)]
 }
 
 export async function download(url, destination, request = fetch) {
@@ -100,6 +112,21 @@ async function prepare(target) {
     if (!existsSync(pythonExecutable(staging, platform))) {
       throw new Error(`Python runtime archive for ${target} is missing its interpreter`)
     }
+    // Run only a host-native interpreter; pip selects the target wheel without
+    // executing target binaries (including the other macOS architecture).
+    const hostPython = target === `${process.platform}-${process.arch}`
+      ? pythonExecutable(staging, platform)
+      : pythonExecutable(join(outputRoot, `${process.platform}-${process.arch}`), process.platform)
+    const install = spawnSync(hostPython, officeInstallArguments(target, staging), { stdio: 'inherit' })
+    if (install.error !== undefined) throw install.error
+    if (install.status !== 0) throw new Error(`Word Python dependency installation failed for ${target}`)
+    if (target === `${process.platform}-${process.arch}`) {
+      const probe = spawnSync(hostPython, ['-I', '-c',
+        'import docx, lxml.etree, typing_extensions; from importlib.metadata import version; assert version("python-docx") == "1.2.0"; assert version("lxml") == "6.1.1"; assert version("typing_extensions") == "4.15.0"'],
+      { stdio: 'inherit' })
+      if (probe.error !== undefined) throw probe.error
+      if (probe.status !== 0) throw new Error(`Word Python dependency import verification failed for ${target}`)
+    }
     writeFileSync(join(staging, 'receipt.json'), expectedReceipt, { mode: 0o644 })
     rmSync(finalRoot, { recursive: true, force: true })
     renameSync(staging, finalRoot)
@@ -120,5 +147,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     || targets.some(target => !hostTargets.includes(target))) {
     throw new Error(`e-Mate Python runtime target is unsupported on ${process.platform}-${process.arch}`)
   }
+  // Materialize the host interpreter before preparing cross-architecture wheels.
+  targets.sort((a, b) => Number(b === `${process.platform}-${process.arch}`) - Number(a === `${process.platform}-${process.arch}`))
   for (const target of targets) await prepare(target)
 }

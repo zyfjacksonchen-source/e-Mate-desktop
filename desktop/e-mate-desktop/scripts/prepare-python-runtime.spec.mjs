@@ -4,7 +4,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { download } from './prepare-python-runtime.mjs'
+import { download, officeInstallArguments } from './prepare-python-runtime.mjs'
+
+test('Word dependencies use hashed binary wheels and the target Python site-packages', async () => {
+  for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+    const args = officeInstallArguments(target, '/staging')
+    for (const flag of ['--isolated', '--no-deps', '--no-compile', '--only-binary=:all:', '--require-hashes']) {
+      assert.ok(args.includes(flag))
+    }
+    assert.equal(args[args.indexOf('--platform') + 1], target.startsWith('win32') ? 'win_amd64' : 'macosx_10_13_universal2')
+    assert.equal(args[args.indexOf('--target') + 1], join('/staging', 'python', ...(target.startsWith('win32') ? ['Lib', 'site-packages'] : ['lib', 'python3.12', 'site-packages'])))
+    const requirements = await readFile(args.at(-1), 'utf8')
+    const packages = requirements.split('\n').filter(line => line && !line.startsWith('#'))
+    assert.equal(packages.length, 3)
+    for (const line of packages) assert.match(line, / @ https:\/\/files\.pythonhosted\.org\/\S+\.whl --hash=sha256:[0-9a-f]{64}$/u)
+  }
+})
 
 test('retries a transient Python runtime connection failure', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'e-mate-python-runtime-'))
