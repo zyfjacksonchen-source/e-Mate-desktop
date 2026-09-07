@@ -47,6 +47,7 @@ import { apply as applyImageGeneration, resolveBatchSources } from '../profile/p
 import {
   apply as applyModelPolicy,
   createQuotaService,
+  filterGroups,
   MODEL_POLICY_CHANNEL,
   validateModelPolicy,
 } from '../profile/plugins/model-policy.js'
@@ -4175,12 +4176,12 @@ test('enterprise model switch keeps native history and survives a cached-policy 
 
     const models = await apiProxy.sessions.models({ rpcId: 'models-1', payload: { sessionId: 'session-1' } })
     assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), [
-      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek',
+      'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
     ])
     assert.equal(models.result.value.routable, true)
     const settingsModels = await apiProxy.llm.models({ rpcId: 'models-2', payload: {} })
     assert.deepEqual(settingsModels.result.value.groups[0].models.map(model => model.id), [
-      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek',
+      'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
     ])
     const allowed = await apiProxy.sessions.selectModel({
       rpcId: 'select-1', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
@@ -4226,7 +4227,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     assert.deepEqual(
       (await apiProxy.sessions.models({ rpcId: 'models-gpt-only', payload: { sessionId: 'session-1' } }))
         .result.value.groups[0].models.map(model => model.id),
-      ['gpt-5.6-luna', 'gpt-5.6-sol'],
+      ['gpt-5.6-sol', 'gpt-5.6-luna'],
     )
     await assert.rejects(
       requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek' })),
@@ -5735,4 +5736,23 @@ test('general conversations reuse a managed Harness workspace outside user proje
   } finally {
     rmSync(dshHome, { recursive: true, force: true })
   }
+})
+
+
+test('model catalog ranks Astra first across providers without mutating policy or catalog', () => {
+  const groups = [
+    { id: 'deepseek', models: [{ id: 'deepseek-v4-flash' }] },
+    { id: 'gpt', models: ['gpt-5.6-luna', 'gpt-6-astra', 'gpt-5.6-sol'].map(id => ({ id })) },
+    { id: 'empty', models: [{ id: 'not-authorized' }] },
+  ]
+  const policy = {
+    allowed_model_ids: ['deepseek', 'gpt-5.6-luna', 'gpt-6-astra', 'gpt-5.6-sol'],
+    default_chat_model_id: 'gpt-5.6-luna',
+  }
+  const before = structuredClone({ groups, policy })
+  assert.deepEqual(filterGroups(groups, policy).flatMap(group => group.models.map(model => model.id)),
+    ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek-v4-flash'])
+  assert.deepEqual({ groups, policy }, before)
+  assert.deepEqual(filterGroups(groups, { ...policy, allowed_model_ids: ['gpt-5.6-luna', 'deepseek'] })
+    .flatMap(group => group.models.map(model => model.id)), ['gpt-5.6-luna', 'deepseek-v4-flash'])
 })

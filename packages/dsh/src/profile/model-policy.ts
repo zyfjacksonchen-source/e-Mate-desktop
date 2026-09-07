@@ -419,10 +419,22 @@ function allowed(policy, model) {
   return policy.allowed_model_ids.includes(policyModelId(model))
 }
 
-function filterGroups(groups, policy) {
+// Product display order is independent of policy defaults and session selection.
+const MODEL_DISPLAY_ORDER = [
+  'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
+  'doubao-seed-2-0-pro-260215', 'gpt-image-2-pro',
+]
+function modelDisplayRank(id) {
+  const index = MODEL_DISPLAY_ORDER.indexOf(policyModelId(id))
+  return index < 0 ? MODEL_DISPLAY_ORDER.length : index
+}
+
+export function filterGroups(groups, policy) {
   return groups
-    .map(group => ({ ...group, models: group.models.filter(model => allowed(policy, model.id)) }))
+    .map(group => ({ ...group, models: group.models.filter(model => allowed(policy, model.id))
+      .sort((a, b) => modelDisplayRank(a.id) - modelDisplayRank(b.id)) }))
     .filter(group => group.models.length > 0)
+    .sort((a, b) => modelDisplayRank(a.models[0].id) - modelDisplayRank(b.models[0].id))
 }
 
 function unavailableCatalog(value, message) {
