@@ -90,7 +90,7 @@ export function SessionRouteProjection({
       }
     }
     const path = current === undefined ? '/' : `/chat/${encodeURIComponent(current)}`
-    if (['/capabilities', '/settings', '/schedules'].includes(location.pathname)) return
+    if (['/capabilities', '/settings', '/schedules', '/knowledge'].includes(location.pathname)) return
     if (!['/', '/chat'].some(prefix => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`))) return
     if (location.pathname !== path) {
       history.pushState(null, '', path)

@@ -220,7 +220,7 @@ function SkipTargetOnboarding({ complete }: { complete: () => void }) {
 function HiddenSessionStats() { return null }
 function HiddenProductSurface() { return null }
 
-const STANDALONE_PRODUCT_ROUTES = new Set(['/settings', '/schedules', '/capabilities'])
+const STANDALONE_PRODUCT_ROUTES = new Set(['/settings', '/schedules', '/capabilities', '/knowledge'])
 
 function StandaloneProductSurface() {
   return createElement('div', {

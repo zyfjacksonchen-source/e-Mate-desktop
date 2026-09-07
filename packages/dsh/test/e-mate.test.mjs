@@ -230,6 +230,7 @@ test('managed profile installation is idempotent', () => {
     const pluginPackages = [
       '@e-mate/dsh-plugin-canvas',
       '@e-mate/dsh-plugin-pet',
+      '@e-mate/dsh-plugin-knowledge',
       '@e-mate/dsh-plugin-skill-hub',
       '@e-mate/dsh-plugin-better-sidebar',
       '@e-mate/dsh-plugin-cdp',

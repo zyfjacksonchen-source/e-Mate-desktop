@@ -20,6 +20,12 @@
       "cli": true
     },
     {
+      "id": "@e-mate/dsh-plugin-knowledge",
+      "root": "packages/dsh-plugin-knowledge",
+      "desktop": "bundled-profile",
+      "cli": true
+    },
+    {
       "id": "@e-mate/dsh-plugin-skill-hub",
       "root": "packages/dsh-plugin-skill-hub",
       "desktop": "bundled-profile",

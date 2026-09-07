@@ -302,6 +302,12 @@ describe('desktop header controls', () => {
     await runtime.flush()
     expect(view.queryByText('旧会话标题')).toBeNull()
     act(() => {
+      history.pushState(null, '', '/knowledge')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await runtime.flush()
+    expect(view.queryByText('旧会话标题')).toBeNull()
+    act(() => {
       history.pushState(null, '', '/chat/session-1')
       dispatchEvent(new PopStateEvent('popstate'))
     })
@@ -310,7 +316,7 @@ describe('desktop header controls', () => {
     await runtime.dispose()
   })
 
-  it('replaces the resident conversation with one route-owned standalone surface', async () => {
+  it.each(['/settings', '/knowledge'])('replaces the resident conversation with one route-owned standalone surface at %s', async route => {
     type RootProps = PropsRenderSlots<'conversation' | 'details' | 'shell.overlay'>
     const Root = ({ renderSlot }: RootProps) => <>
       {renderSlot('conversation', {})}
@@ -333,7 +339,7 @@ describe('desktop header controls', () => {
         <nav aria-label="设置导航"><button type="button" onClick={openSettingsSection}>常规</button></nav>
       </div>
     ))
-    history.replaceState(null, '', '/settings')
+    history.replaceState(null, '', route)
     await runtime.mount({ inject: ['slots', 'layout'], apply: registerRouteScopedConversationHeader })
     const view = runtime.renderRoot()
 
