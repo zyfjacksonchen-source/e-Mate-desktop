@@ -37,8 +37,28 @@ export function createBridge(ctx: any, id: string, close: () => void, beforeLeav
       return result.value.attachments.map((ref: unknown) => ({ ownerSessionId: id, ref: imageRef(ref) }))
     },
     subscribe(listener) {
+      // Native projection values retain their identity until that key changes.
+      // Other sessions' list updates cannot produce outputs for this canvas.
+      const outputsSnapshot = () => {
+        const list = ctx.sessions.list.getSnapshot()
+        const catalog = list.subagentsByParent?.[id]
+        const values: unknown[] = [catalog?.parentAvailable]
+        const append = (sessionId: string) => {
+          const row = list.byId?.[sessionId]
+          values.push(sessionId, row !== undefined, row?.projectionValues?.eMateImageReceipts, row?.projectionValues?.eMateImageBatches)
+        }
+        append(id)
+        for (const entry of catalog?.entries ?? []) if (entry.kind === 'child') append(entry.id)
+        return values
+      }
+      let previous = outputsSnapshot()
       const offSession = binding().subscribe(listener)
-      const offList = ctx.sessions.list.subscribe(listener)
+      const offList = ctx.sessions.list.subscribe(() => {
+        const next = outputsSnapshot()
+        if (next.length === previous.length && next.every((value, index) => Object.is(value, previous[index]))) return
+        previous = next
+        listener()
+      })
       return () => { offSession(); offList() }
     },
     async submit(project, intent, instruction) {
