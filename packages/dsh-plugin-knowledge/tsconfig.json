@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": [
+      "node",
+      "react"
+    ],
+    "typeRoots": [
+      "../../upstream/deepseek-harness/node_modules/@types",
+      "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types",
+      "../../packages/dsh-plugin-knowledge/node_modules/@types"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}

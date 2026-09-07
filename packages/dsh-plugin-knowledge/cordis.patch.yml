@@ -1,0 +1,4 @@
+- insert:
+    - id: emate-knowledge
+      name: '@e-mate/dsh-plugin-knowledge'
+      inject: [emateIdentity, connection, webServer, timer]
