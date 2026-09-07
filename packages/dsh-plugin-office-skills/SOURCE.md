@@ -26,15 +26,20 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - e-Mate script change (2026-09-07): `clean_transcript.py` now drops an all-digit line only when immediately followed by a subtitle timestamp. Standalone numeric meeting facts survive. All other upstream cleanup behavior remains; timestamps are still removed from the optional derivative, so citations and facts must be checked against the untouched original.
 - The helper requires only Python standard-library modules; no Python dependency or runtime is bundled by this addition. The Agent performs synthesis through its existing model channel. The original four Office presets and two Tool/Job paths remain available while their replacements are prepared.
 
-## Word replacement
+## Word TypeScript workflow
 
-- NousResearch/hermes-agent, `skills/productivity/docx` v1.1.0, fixed commit `9fc80ac70f6b97e36556c33bc4895b75558d4136`.
-- MIT, Copyright (c) 2026 Nous Research; full license in `skills/documents/LICENSE`. Only the current MIT rewrite is included, not its proprietary predecessor or the Hermes runtime.
-- Local differences and retained upstream references are recorded in `skills/documents/UPSTREAM.md`. Fixes cover replacement rescanning, shared parts, Chinese styles and relationship validation.
-- Python, python-docx/lxml and real document rendering are separate runtime requirements. This source replacement is marked `needs-runtime` until the packaged environment is integrated and verified. It is not an installed-readiness claim.
+- Uses the existing pinned `dolanmiu/docx` 9.7.1 MIT dependency and native e-Mate Tool/Job/attachment paths. The documents Skill is an e-Mate workflow, not a claimed upstream Skill release.
+- The Python Hermes subtree and Word-only Python wheel installation were removed in favor of TypeScript creation, template filling and text replacement. Historical provenance and test receipts remain in Git and private evidence.
+- Visual pagination acceptance and complex edit coverage remain separate from package correctness; see `skills/documents/UPSTREAM.md`.
 
 ## Codex PDF replacement
 
 - OpenAI PDF plugin `26.905.11957`; its original four Skill files are retained byte-for-byte. Exact file hashes, the original MIT plugin manifest and the licensing inspection scope are recorded in `skills/pdf/SOURCE.md` and `skills/pdf/UPSTREAM.json`.
 - `HOST.md` maps resource paths, the native Python environment and real attachment delivery to e-Mate. The marker helper only checks its arguments; it is not evidence of successful generation or rendering.
 - Python dependencies and a real renderer remain a separate acceptance gate. The provider reports `needs-runtime` until that gate is verified.
+
+## Codex Spreadsheets replacement
+
+- OpenAI Spreadsheets plugin `26.905.11957`; original 19 Skill files are retained byte-for-byte. Original MIT plugin declaration and hashes: `skills/spreadsheets/UPSTREAM.json`.
+- The original Skill explicitly permits openpyxl when artifact-tool is unavailable. HOST selects that supported path; the proprietary artifact-tool runtime is not distributed.
+- Formula recalculation and rendering need actual supporting runtime and receipts; openpyxl alone does not establish either. Provider readiness remains pending.

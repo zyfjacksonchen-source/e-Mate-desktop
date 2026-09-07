@@ -50,7 +50,7 @@ const MAX_XML_ENTRY_BYTES = 8 * 1024 * 1024
 const MAX_ZIP_COMPRESSION_RATIO = 200
 const fontRoot = fileURLToPath(new URL('../assets/noto-sans-sc/', import.meta.url))
 
-interface OfficeZip {
+export interface OfficeZip {
   zip: JSZip
   remainingXmlBytes: number
 }
@@ -60,7 +60,7 @@ interface ZipMetadata {
   uncompressedSize?: unknown
 }
 
-async function loadOfficeZip(buffer: Buffer): Promise<OfficeZip> {
+export async function loadOfficeZip(buffer: Buffer): Promise<OfficeZip> {
   const zip = await JSZip.loadAsync(buffer)
   const entries = Object.values(zip.files)
   if (entries.length > MAX_ZIP_ENTRIES) throw new Error('Office archive contains too many entries')
@@ -85,7 +85,7 @@ async function loadOfficeZip(buffer: Buffer): Promise<OfficeZip> {
   return { zip, remainingXmlBytes: MAX_ZIP_TOTAL_BYTES }
 }
 
-async function readZipXml(archive: OfficeZip, entry: JSZip.JSZipObject): Promise<string> {
+export async function readZipXml(archive: OfficeZip, entry: JSZip.JSZipObject): Promise<string> {
   const chunks: Buffer[] = []
   let bytes = 0
   const stream = entry.nodeStream('nodebuffer') as Readable

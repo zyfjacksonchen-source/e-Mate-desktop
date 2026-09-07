@@ -43,6 +43,12 @@ test('text edits use original matches across runs and do not replay inserted con
  assert.match(await part(twice),/<w:drawing>/)
  assert.equal(strings(await part(await replaceDocxBuffer(output,[{find:'报告',replace:'报告'}]))),'前报告报告后')
 })
+test('Chinese template keys fill and missing Chinese values fail', async () => {
+ const source=await createDocxBuffer({title:'{{客户名称}}',blocks:[{type:'paragraph',text:'日期：{{日期}}'}]})
+ const output=await templateDocxBuffer(source,{'客户名称':'示例公司','日期':'2026-09-07'})
+ assert.equal(strings(await part(output)),'示例公司日期：2026-09-07')
+ await assert.rejects(templateDocxBuffer(source,{'客户名称':'示例公司'}),/missing/)
+})
 test('same-run media remains and crossing media is rejected without changing source bytes', async () => {
  let source = await fixture()
  const zip = await JSZip.loadAsync(source)

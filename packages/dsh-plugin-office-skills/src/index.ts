@@ -10,6 +10,7 @@ import {
   readOfficeBuffer,
   writeOfficeBuffer,
 } from './office-runtime.ts'
+import { createDocxBuffer, replaceDocxBuffer, templateDocxBuffer, type NativeDocxSpec } from './docx-native.ts'
 
 interface SkillLookupOptions { signal?: AbortSignal }
 interface SkillCandidate {
@@ -79,13 +80,14 @@ interface SkillSpec {
   format?: OfficeFormat
   hostGuide?: string
   runtimePending?: boolean
+  adapter?: string
 }
 
 const skillRoot = fileURLToPath(new URL('../skills/', import.meta.url))
 const SPECS: readonly SkillSpec[] = [
-  { name: 'documents', description: 'Word 文档：创建、编辑和套用模板，支持中文排版、批注与修订。', whenToUse: '用于 Word 文档创建、模板填充、格式保留编辑、批注和修订；使用前验证 Python 依赖。', directory: `${skillRoot}documents`, format: 'docx', hostGuide: 'HOST.md', runtimePending: true },
+  { name: 'documents', description: 'Word 文档：中文商务排版、模板填充和保留图片样式的文字修改。', whenToUse: '用于创建 Word 报告、填充 DOCX 模板和定向替换文字，使用内置 TypeScript 工具。', directory: `${skillRoot}documents`, format: 'docx', hostGuide: 'HOST.md', adapter: 'docx-typescript' },
   { name: 'pdf', description: 'PDF 文档：创建、提取、填写和检查版式，交付前渲染验证。', whenToUse: '用于 PDF 阅读、生成、表单填写及视觉检查；使用前验证 Python 和渲染依赖。', directory: `${skillRoot}pdf`, format: 'pdf', hostGuide: 'HOST.md', runtimePending: true },
-  { name: 'spreadsheets', description: 'Create, read, and safely regenerate XLSX workbooks locally.', whenToUse: 'Use for tabular XLSX authoring, reading, analysis, and supported edits.', directory: `${skillRoot}spreadsheets`, format: 'xlsx' },
+  { name: 'spreadsheets', description: '电子表格：创建、编辑、分析和检查工作簿，保留公式与格式。', whenToUse: '用于 XLSX/CSV 数据、公式、图表和排版；按预置指南检查真实运行依赖。', directory: `${skillRoot}spreadsheets`, format: 'xlsx', hostGuide: 'HOST.md', runtimePending: true },
   { name: 'presentations', description: 'Create, read, and safely regenerate PPTX presentations locally.', whenToUse: 'Use for text-first PPTX authoring, extraction, review, and supported edits.', directory: `${skillRoot}presentations`, format: 'pptx' },
   { name: 'meeting-summary', description: '会议总结：从本地转录文本整理会议纪要、决策与行动项，保留事实来源。', whenToUse: '用于会议转录文本、VTT、SRT 的总结和行动项整理；不负责录音或音频转录。', directory: `${skillRoot}meeting-summary`, hostGuide: 'HOST.md' },
 ]
@@ -102,7 +104,7 @@ function candidate(spec: SkillSpec): SkillCandidate {
     rank: BUNDLED_SKILL_RANK,
     locator: spec.name,
     path: `${spec.directory}/SKILL.md`,
-    metadata: { eMateCapability: 'office', ...(spec.format === undefined ? {} : { format: spec.format }), adapter: spec.hostGuide === undefined ? 'clean-room' : 'upstream', state: spec.runtimePending ? 'needs-runtime' : 'ready' },
+    metadata: { eMateCapability: 'office', ...(spec.format === undefined ? {} : { format: spec.format }), adapter: spec.adapter ?? (spec.hostGuide === undefined ? 'clean-room' : 'upstream'), state: spec.runtimePending ? 'needs-runtime' : 'ready' },
   }
 }
 
@@ -207,7 +209,7 @@ async function publish(root: string, requestedName: string, data: Buffer, reques
   }
 }
 
-async function sourceFile(root: string, relativePath: unknown): Promise<{ buffer: Buffer; format: OfficeFormat; name: string; path: string }> {
+async function workspaceFile(root: string, relativePath: unknown): Promise<{ buffer: Buffer; name: string; path: string }> {
   if (typeof relativePath !== 'string' || relativePath.trim() !== relativePath || relativePath === ''
     || isAbsolute(relativePath) || relativePath.includes('\0')) throw new Error('Office path must be workspace-relative')
   const requested = join(root, relativePath)
@@ -215,9 +217,51 @@ async function sourceFile(root: string, relativePath: unknown): Promise<{ buffer
   if (!inside(root, path)) throw new Error('Office path escapes the workspace')
   const info = await lstat(requested)
   if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_FILE_BYTES) throw new Error('Office source is unavailable or too large')
-  const extension = extname(path).toLowerCase().slice(1)
-  const sourceFormat = format(extension)
-  return { buffer: await readFile(path), format: sourceFormat, name: path.split(sep).at(-1) as string, path: relative(root, path).split(sep).join('/') }
+  return { buffer: await readFile(path), name: path.split(sep).at(-1) as string, path: relative(root, path).split(sep).join('/') }
+}
+
+async function sourceFile(root: string, relativePath: unknown): Promise<{ buffer: Buffer; format: OfficeFormat; name: string; path: string }> {
+  const source = await workspaceFile(root, relativePath)
+  return { ...source, format: format(extname(source.path).toLowerCase().slice(1)) }
+}
+
+async function writeWord(root: string, document: unknown, signal: AbortSignal): Promise<Buffer> {
+  if (document === null || typeof document !== 'object' || Array.isArray(document)) throw new Error('Word document must be an object')
+  const input = document as Record<string, unknown>
+  if (input.operation === undefined) return await writeOfficeBuffer('docx', input)
+  const keys = input.operation === 'create' ? ['operation', 'spec']
+    : input.operation === 'template' ? ['operation', 'source_path', 'values']
+      : ['operation', 'source_path', 'replacements']
+  if (Object.keys(input).some(key => !keys.includes(key))) throw new Error('Word operation contains an unsupported field')
+  if (input.operation === 'create') {
+    const spec = input.spec as Record<string, unknown> | undefined
+    if (spec === undefined || spec === null || typeof spec !== 'object' || !Array.isArray(spec.blocks) || spec.blocks.length > 10_000) throw new Error('Word creation spec is invalid')
+    let imageBytes = 0
+    const blocks = []
+    for (const value of spec.blocks) {
+      signal.throwIfAborted()
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Word block is invalid')
+      const block = value as Record<string, unknown>
+      if (block.type !== 'image') { blocks.push(block); continue }
+      if ('data' in block) throw new Error('Word images require a workspace path')
+      if (Object.keys(block).some(key => !['type', 'path', 'width', 'height', 'caption'].includes(key))) throw new Error('Word image contains an unsupported field')
+      const source = await workspaceFile(root, block.path)
+      const extension = extname(source.path).toLowerCase()
+      if (!['.png', '.jpg', '.jpeg'].includes(extension)) throw new Error('Word images must be PNG or JPEG')
+      imageBytes += source.buffer.byteLength
+      if (imageBytes > MAX_FILE_BYTES) throw new Error('Word images exceed the size limit')
+      const { path: _path, ...properties } = block
+      blocks.push({ ...properties, type: 'image', data: source.buffer, imageType: extension === '.png' ? 'png' : 'jpg' })
+    }
+    return await createDocxBuffer({ ...spec, blocks } as unknown as NativeDocxSpec)
+  }
+  if (input.operation !== 'template' && input.operation !== 'replace') throw new Error('Word operation is invalid')
+  const source = await sourceFile(root, input.source_path)
+  if (source.format !== 'docx') throw new Error('Word source must be a DOCX file')
+  signal.throwIfAborted()
+  return input.operation === 'template'
+    ? await templateDocxBuffer(source.buffer, input.values as Record<string, string>)
+    : await replaceDocxBuffer(source.buffer, input.replacements as readonly { find: string; replace: string }[])
 }
 
 function startJob<T>(ctx: OfficeContext, owner: AgentOwner | undefined, signal: AbortSignal, label: string, run: (signal: AbortSignal) => Promise<T>): { id: string; result: Promise<T> } {
@@ -289,7 +333,7 @@ export function apply(ctx: OfficeContext): void {
   ctx.effect(() => ctx.jobs.attachController('emate-office'), 'emate.office: target Job controller')
   ctx.effect(() => ctx.tools.register({
     name: 'office_write',
-    description: 'Create a new local DOCX, XLSX, PPTX, or PDF from normalized JSON in the current workspace. Never overwrites a source file; supported edits are read → modify JSON → write a new file.',
+    description: 'Create a local Office file. DOCX also supports styled creation, template filling and text replacement as described in the documents Skill. Other formats use normalized JSON. Always writes a new file and preserves the source.',
     parameters: {
       type: 'object', additionalProperties: false, required: ['document', 'filename', 'format'],
       properties: {
@@ -309,7 +353,9 @@ export function apply(ctx: OfficeContext): void {
       const root = await workspace(exec.agent)
       const started = startJob(ctx, exec.agent, exec.signal, `Write ${targetName}`, async jobSignal => {
         jobSignal.throwIfAborted()
-        const data = await writeOfficeBuffer(targetFormat, input.document)
+        const data = targetFormat === 'docx'
+          ? await writeWord(root, input.document, jobSignal)
+          : await writeOfficeBuffer(targetFormat, input.document)
         jobSignal.throwIfAborted()
         return await publish(root, targetName, data, targetFormat, jobSignal)
       })

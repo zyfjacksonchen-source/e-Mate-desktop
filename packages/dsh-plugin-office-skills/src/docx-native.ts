@@ -267,7 +267,7 @@ export async function replaceDocxBuffer(source: Buffer, replacements: readonly D
 export async function templateDocxBuffer(source: Buffer, values: Record<string, string>): Promise<Buffer> {
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Invalid Word template values')
   const replacements = Object.entries(values).map(([key, value]) => {
-    if (!/^[A-Za-z0-9_.-]+$/u.test(key)) throw new Error('Invalid Word template key')
+    if (!/^[\p{L}\p{N}\p{M}_.-]+$/u.test(key)) throw new Error('Invalid Word template key')
     return { find: `{{${key}}}`, replace: value }
   })
   checkedReplacements(replacements)
@@ -278,7 +278,7 @@ export async function templateDocxBuffer(source: Buffer, values: Record<string, 
     const fields = { depth: 0 }
     for (const paragraph of Array.from(document.getElementsByTagNameNS(W, 'p'))) {
       const mapped = paragraphText(paragraph, fields)
-      for (const match of mapped.text.matchAll(/\{\{([A-Za-z0-9_.-]+)\}\}/gu)) if (!Object.hasOwn(values, match[1]!)) throw new Error('Word template value is missing')
+      for (const match of mapped.text.matchAll(/\{\{([\p{L}\p{N}\p{M}_.-]+)\}\}/gu)) if (!Object.hasOwn(values, match[1]!)) throw new Error('Word template value is missing')
       for (const replacement of replacements) if (matchesIn(mapped, replacement.find).length) {
         touched.add(path); found.add(replacement.find)
       }

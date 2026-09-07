@@ -35,16 +35,23 @@ test('registers five Skills with accurate runtime states and two target Tool/Job
   for (const skill of skills) {
     assert.equal(skill.rank, 600)
     assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
-    assert.equal(skill.metadata.state, ['documents', 'pdf'].includes(skill.name) ? 'needs-runtime' : 'ready')
+    assert.equal(skill.metadata.state, ['pdf', 'spreadsheets'].includes(skill.name) ? 'needs-runtime' : 'ready')
     const loaded = await provider.get(skill, {})
     assert.ok(loaded.content.length > 300)
     assert.doesNotMatch(loaded.content, /^---/u)
     assert.doesNotMatch(loaded.content, /EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE/u)
     if (skill.name === 'documents') {
+      assert.equal(skill.metadata.adapter, 'docx-typescript')
+      assert.ok(loaded.content.includes(loaded.resourceBase.path))
+      assert.match(loaded.content, /office_write/u)
+      assert.match(await readFile(join(loaded.resourceBase.path, 'LICENSE'), 'utf8'), /e-Mate contributors/u)
+    }
+    if (skill.name === 'spreadsheets') {
       assert.equal(skill.metadata.adapter, 'upstream')
       assert.ok(loaded.content.includes(loaded.resourceBase.path))
-      assert.match(loaded.content, /python-docx/u)
-      assert.match(await readFile(join(loaded.resourceBase.path, 'LICENSE'), 'utf8'), /Nous Research/u)
+      assert.doesNotMatch(loaded.content, /\{\{SKILL_DIR\}\}/u)
+      const original = await readFile(join(loaded.resourceBase.path, 'SKILL.md'))
+      assert.equal(createHash('sha256').update(original).digest('hex'), 'd5d9e4b1863527e2577106e324815cc5c498bd9d8af304ad2f210c2ede985b39')
     }
     if (skill.name === 'pdf') {
       assert.equal(skill.metadata.adapter, 'upstream')
@@ -268,6 +275,32 @@ test('Tools stay inside the current workspace and never overwrite output', async
   assert.notEqual(writeMeta.relative_path, write.presentCall({format:'docx',filename:'交付.docx'}).locations[0].path)
   assert.ok((await readFile(join(root, first.relative_path))).byteLength > 500)
   assert.match(JSON.stringify((await read.execute({ path: first.relative_path }, execution)).document), /轻量 Office/u)
+
+  const styled = await write.execute({ format: 'docx', filename: '排版.docx', document: {
+    operation: 'create', spec: { title: '商务报告', blocks: [
+      { type: 'heading', text: '结论', level: 1 },
+      { type: 'paragraph', text: '原始项目' },
+      { type: 'table', headers: ['事项', '状态'], rows: [['交付', '完成']] },
+    ] },
+  } }, execution)
+  const originalBytes = await readFile(join(root, styled.relative_path))
+  const revised = await write.execute({ format: 'docx', filename: '排版.docx', document: {
+    operation: 'replace', source_path: styled.relative_path,
+    replacements: [{ find: '原始项目', replace: '修订项目' }],
+  } }, execution)
+  assert.notEqual(revised.relative_path, styled.relative_path)
+  assert.deepEqual(await readFile(join(root, styled.relative_path)), originalBytes)
+  assert.match(JSON.stringify((await read.execute({ path: revised.relative_path }, execution)).document), /修订项目/u)
+  const filesBeforeFailure = await readdir(join(root, '.e-mate', 'office'))
+  await writeFile(join(sandbox, 'outside.docx'), originalBytes)
+  await writeFile(join(sandbox, 'outside.png'), 'outside image')
+  await assert.rejects(write.execute({ format: 'docx', filename: '无效.docx', document: {
+    operation: 'replace', source_path: '../outside.docx', replacements: [{ find: 'a', replace: 'b' }],
+  } }, execution), /escapes the workspace/u)
+  await assert.rejects(write.execute({ format: 'docx', filename: '无效.docx', document: {
+    operation: 'create', spec: { blocks: [{ type: 'image', path: '../outside.png', width: 100, height: 100 }] },
+  } }, execution), /escapes the workspace/u)
+  assert.deepEqual(await readdir(join(root, '.e-mate', 'office')), filesBeforeFailure)
 
   for (const [format, filename, content, expected] of [
     ['xlsx', '数据.xlsx', { sheets: [{ name: '数据', rows: [['项目', '数量'], ['e-Mate', 16]] }] }, 'e-Mate'],
