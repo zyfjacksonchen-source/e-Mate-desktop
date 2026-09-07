@@ -126,6 +126,47 @@ export function decodeXinReply(raw: any): any {
 }
 export type ProjectCall = (name: string, args: Record<string, unknown>, exec: Execution, signal?: AbortSignal) => Promise<any>
 export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, assertExecution: (exec: Execution, owner: string) => void, xinCall?: ProjectCall) {
+  type ImportOptions = { paths: string[]; operationId: string; title?: string; publisher?: string; scope?: Scope; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }
+  const activeBatches = new Map<string, { requestHash: string; promise: Promise<any> }>()
+  const batchRequest = (options: ImportOptions) => {
+    if (!OPERATION.test(options.operationId) || !Array.isArray(options.paths) || !options.paths.length || options.paths.length > 100 || options.paths.some(path => typeof path !== 'string' || !path || path.length > 4096)) fail('invalid-files')
+    for (const text of [options.title, options.publisher]) if (text !== undefined && (typeof text !== 'string' || !text || text.length > 300)) fail('invalid-request')
+    const scope = options.scope ?? { kind: 'uploader-private' }
+    if (!['uploader-private', 'public', 'project'].includes(scope.kind) || (scope.kind === 'project' && (!Number.isSafeInteger(scope.project_id) || scope.project_id < 1))) fail('invalid-request')
+    return structuredClone({ paths: options.paths, scope, title: options.title ?? null, publisher: options.publisher ?? '本人上传', supersedes: options.supersedes ?? null })
+  }
+  const readOriginal = async (fs: any, file: any, signal?: AbortSignal) => {
+    const before = await fs.stat(file.target, signal)
+    if (before?.type !== 'file') fail('source-changed')
+    const bytes = await fs.readBytes(file.target, signal, MAX_ORIGINAL_BYTES)
+    if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > MAX_ORIGINAL_BYTES || (await fs.stat(file.target, signal))?.version !== before.version) fail('source-changed')
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    if (file.sha256 !== undefined && (file.sha256 !== sha256 || file.byte_length !== bytes.length)) fail('source-changed', '原件已变化，未创建新的子操作；请查看原批次回执。')
+    return { bytes, sha256 }
+  }
+  const prepareBatch = async (exec: Execution, options: ImportOptions, owner: string, request: any) => {
+    const previous = events(exec.agent).find(event => event.kind === 'import-batch' && event.batchId === options.operationId && event.owner === owner)
+    if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict', '同一导入批次不能更换文件、范围或资料信息。')
+    if (!previous) {
+      if (events(exec.agent).some(event => ['import-request', 'project-import-request', 'project-import-receipt'].includes(event.kind) && event.batchId === options.operationId && event.owner === owner)) fail('source-changed', '原批次缺少完整原件快照，请先保留并查看原回执。')
+      await persist(ctx, exec.agent, { kind: 'import-batch', owner, batchId: options.operationId, request })
+    }
+    const fs = exec.agent.ctx.get('fs'); if (!fs) fail('filesystem-unavailable')
+    const snapshot = events(exec.agent).find(event => event.kind === 'import-batch-files' && event.batchId === options.operationId && event.owner === owner)
+    let files
+    try { files = await collectOriginals(fs, request.paths, exec.agent.session.header.cwd, exec.signal) }
+    catch (error) { exec.signal?.throwIfAborted(); if (snapshot) fail('source-changed', '原批次的文件清单已变化，请查看原回执。'); throw error }
+    const manifest = []; const prepared = []
+    for (const file of files) {
+      assertExecution(exec, owner)
+      const { bytes, sha256 } = await readOriginal(fs, file, exec.signal)
+      const entry = { target_key: file.target.targetKey, filename: file.filename, sha256, byte_length: bytes.length }
+      manifest.push(entry); prepared.push({ ...file, sha256, byte_length: bytes.length })
+    }
+    if (snapshot && digest(snapshot.files) !== digest(manifest)) fail('source-changed', '原批次的文件清单或内容已变化，未创建新的子操作；请查看原回执。')
+    if (!snapshot) await persist(ctx, exec.agent, { kind: 'import-batch-files', owner, batchId: options.operationId, files: manifest })
+    return { fs, files: prepared }
+  }
   const recordUserPublicIntent = async (exec: Execution, paths: string[]) => {
     const owner = await transport.capture(); assertExecution(exec, owner)
     const log = exec.agent.session.events
@@ -146,16 +187,13 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
     await persist(ctx, exec.agent, { kind: 'public-intent', id, owner, paths, origin: 'user_message' })
     return id
   }
-  const importProject = async (exec: Execution, options: any, owner: string) => {
+  const importProject = async (exec: Execution, options: any, owner: string, prepared: { fs: any; files: any[] }) => {
     if (!xinCall || !Number.isSafeInteger(options.scope.project_id) || options.scope.project_id < 1 || options.supersedes || !OPERATION.test(options.operationId)) fail('invalid-project-import')
     const call = async (name: string, args: Record<string, unknown>) => { assertExecution(exec, owner); const result = decodeXinReply(await xinCall(name, args, exec, exec.signal)); assertExecution(exec, owner); return result }
-    const fs = exec.agent.ctx.get('fs'); if (!fs) fail('filesystem-unavailable')
-    const files = await collectOriginals(fs, options.paths, exec.agent.session.header.cwd, exec.signal)
+    const { fs, files } = prepared
     const sources = []
     for (const file of files) {
-      const bytes = await fs.readBytes(file.target, exec.signal, MAX_ORIGINAL_BYTES)
-      if (!bytes.length || (await fs.stat(file.target, exec.signal))?.version !== file.version) fail('source-changed')
-      const sha256 = createHash('sha256').update(bytes).digest('hex')
+      const { bytes, sha256 } = await readOriginal(fs, file, exec.signal)
       const find = async () => call('find_imported_source', { project_id: options.scope.project_id, sha256, kind: 'knowledge' })
       let result: any
       try { result = await find() } catch (error: any) { if (error.code !== 'not-found') throw error }
@@ -175,7 +213,43 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
       await persist(ctx, exec.agent, { kind: 'project-import-receipt', owner, batchId: options.operationId, projectId: options.scope.project_id, sourceId: source.id, sha256 })
       sources.push(source)
     }
-    return { scope_key: owner, scope: options.scope, sources }
+    return { scope_key: owner, operation_id: options.operationId, scope: options.scope, sources }
+  }
+  const importFilesOnce = async (exec: Execution, options: ImportOptions, owner: string, request: any) => {
+      const scope = options.scope ?? { kind: 'uploader-private' }
+      const prior = events(exec.agent).find(event => event.kind === 'import-batch' && event.batchId === options.operationId && event.owner === owner)
+      if (prior && digest(prior.request) !== digest(request)) fail('idempotency-conflict', '同一导入批次不能更换文件、范围或资料信息。')
+      let provenance: any
+      if (scope.kind === 'public') {
+        const intentId = options.publicIntentId ?? await recordUserPublicIntent(exec, options.paths)
+        const intent = events(exec.agent).find(event => event.kind === 'public-intent' && event.id === intentId && event.owner === owner && digest(event.paths) === digest(options.paths))
+        if (!intent) fail('public-intent-required', '公共导入需要本次明确的公共知识库操作来源。')
+        provenance = { kind: 'uploader_declared', classification: 'general_method', intent_receipt: { kind: intent.origin, id: intent.id } }
+      }
+      const prepared = await prepareBatch(exec, options, owner, request)
+      if (scope.kind === 'project') return importProject(exec, options, owner, prepared)
+      const { fs, files } = prepared
+      if (options.supersedes && (files.length !== 1 || !UUID.test(options.supersedes.source_id) || !HASH.test(options.supersedes.source_version))) fail('invalid-replacement')
+      const receipts = []
+      for (const file of files) {
+        assertExecution(exec, owner); transport.check(owner); exec.signal?.throwIfAborted()
+        const { bytes, sha256 } = await readOriginal(fs, file, exec.signal)
+        const operation_id = digest([options.operationId, file.target.targetKey, sha256])
+        const request = { operation_id, filename: file.filename, title: options.title ?? file.filename, publisher: options.publisher ?? '本人上传', kind: 'knowledge', sha256, byte_length: bytes.length, scope, ...(provenance ? { provenance } : {}), ...(options.supersedes ? { supersedes: options.supersedes } : {}) }
+        const previous = events(exec.agent).find(event => event.kind === 'import-request' && event.operationId === operation_id && event.owner === owner)
+        if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict')
+        if (!previous) await persist(ctx, exec.agent, { kind: 'import-request', owner, batchId: options.operationId, operationId: operation_id, request })
+        const frozen = previous?.request ?? events(exec.agent).findLast(event => event.kind === 'import-request' && event.operationId === operation_id && event.owner === owner).request
+        let receipt = await findOrCreate(transport, owner, 'imports', frozen, previous !== undefined, exec.signal)
+        if (!UUID.test(receipt.import_id) || receipt.operation_id !== operation_id || receipt.scope?.kind !== scope.kind || receipt.request_hash !== digest({ ...request, provenance: provenance ?? null, supersedes: options.supersedes ?? null })) fail('invalid-response')
+        await persist(ctx, exec.agent, { kind: 'import-receipt', owner, operationId: operation_id, importId: receipt.import_id })
+        if (receipt.status === 'awaiting_content') {
+          try { receipt = await transport.request(owner, 'PUT', `/imports/${receipt.import_id}/content`, bytes, exec.signal) }
+          catch (error) { exec.signal?.throwIfAborted(); receipt = await transport.request(owner, 'GET', `/imports/${receipt.import_id}`, undefined, exec.signal) }
+        }
+        receipts.push({ import_id: receipt.import_id, operation_id, status: receipt.status, source: receipt.source })
+      }
+      return { scope_key: owner, operation_id: options.operationId, scope, imports: receipts }
   }
   return {
     recordUserPublicIntent,
@@ -192,7 +266,7 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
           if (value.source?.file_hash !== sha256 || value.source?.project_id !== scope.project_id) fail('invalid-response')
           sources.push(value.source)
         }
-        return { scope_key: owner, scope, sources }
+        return { scope_key: owner, operation_id: operationId, scope, sources }
       }
       const requests = events(exec.agent).filter(event => event.kind === 'import-request' && event.batchId === operationId && event.owner === owner)
       const imports = []
@@ -201,7 +275,7 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
         if (value.operation_id !== request.operationId) fail('invalid-response')
         imports.push({ import_id: value.import_id, operation_id: value.operation_id, status: value.status, source: value.source })
       }
-      return { scope_key: owner, imports }
+      return { scope_key: owner, operation_id: operationId, imports }
     },
     async recordPublicIntent(agent: any, paths: string[]) {
       const owner = await transport.capture(); assertExecution({ agent }, owner)
@@ -210,44 +284,14 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
       await persist(ctx, agent, { kind: 'public-intent', id, owner, paths, origin: 'public_library_action' })
       return id
     },
-    async importFiles(exec: Execution, options: { paths: string[]; operationId: string; title?: string; publisher?: string; scope?: Scope; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }) {
+    async importFiles(exec: Execution, options: ImportOptions) {
       const owner = await transport.capture(); assertExecution(exec, owner)
-      const scope = options.scope ?? { kind: 'uploader-private' }
-      if (scope.kind === 'project') return importProject(exec, options, owner)
-      if (!OPERATION.test(options.operationId) || !['public', 'uploader-private'].includes(scope.kind)) fail('invalid-request')
-      let provenance: any
-      if (scope.kind === 'public') {
-        const intentId = options.publicIntentId ?? await recordUserPublicIntent(exec, options.paths)
-        const intent = events(exec.agent).find(event => event.kind === 'public-intent' && event.id === intentId && event.owner === owner && digest(event.paths) === digest(options.paths))
-        if (!intent) fail('public-intent-required', '公共导入需要本次明确的公共知识库操作来源。')
-        provenance = { kind: 'uploader_declared', classification: 'general_method', intent_receipt: { kind: intent.origin, id: intent.id } }
-      }
-      const fs = exec.agent.ctx.get('fs')
-      if (!fs) fail('filesystem-unavailable')
-      const files = await collectOriginals(fs, options.paths, exec.agent.session.header.cwd, exec.signal)
-      if (options.supersedes && (files.length !== 1 || !UUID.test(options.supersedes.source_id) || !HASH.test(options.supersedes.source_version))) fail('invalid-replacement')
-      const receipts = []
-      for (const file of files) {
-        assertExecution(exec, owner); transport.check(owner); exec.signal?.throwIfAborted()
-        const bytes = await fs.readBytes(file.target, exec.signal, MAX_ORIGINAL_BYTES)
-        if (!(bytes instanceof Uint8Array) || bytes.length < 1 || bytes.length > MAX_ORIGINAL_BYTES || (await fs.stat(file.target, exec.signal))?.version !== file.version) fail('source-changed')
-        const sha256 = createHash('sha256').update(bytes).digest('hex')
-        const operation_id = digest([options.operationId, file.target.targetKey, sha256])
-        const request = { operation_id, filename: file.filename, title: options.title ?? file.filename, publisher: options.publisher ?? '本人上传', kind: 'knowledge', sha256, byte_length: bytes.length, scope, ...(provenance ? { provenance } : {}), ...(options.supersedes ? { supersedes: options.supersedes } : {}) }
-        const previous = events(exec.agent).find(event => event.kind === 'import-request' && event.operationId === operation_id && event.owner === owner)
-        if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict')
-        if (!previous) await persist(ctx, exec.agent, { kind: 'import-request', owner, batchId: options.operationId, operationId: operation_id, request })
-        const frozen = previous?.request ?? events(exec.agent).findLast(event => event.kind === 'import-request' && event.operationId === operation_id && event.owner === owner).request
-        let receipt = await findOrCreate(transport, owner, 'imports', frozen, previous !== undefined, exec.signal)
-        if (!UUID.test(receipt.import_id) || receipt.operation_id !== operation_id || receipt.scope?.kind !== scope.kind || receipt.request_hash !== digest({ ...request, provenance: provenance ?? null, supersedes: options.supersedes ?? null })) fail('invalid-response')
-        await persist(ctx, exec.agent, { kind: 'import-receipt', owner, operationId: operation_id, importId: receipt.import_id })
-        if (receipt.status === 'awaiting_content') {
-          try { receipt = await transport.request(owner, 'PUT', `/imports/${receipt.import_id}/content`, bytes, exec.signal) }
-          catch (error) { exec.signal?.throwIfAborted(); receipt = await transport.request(owner, 'GET', `/imports/${receipt.import_id}`, undefined, exec.signal) }
-        }
-        receipts.push({ import_id: receipt.import_id, operation_id, status: receipt.status, source: receipt.source })
-      }
-      return { scope_key: owner, scope, imports: receipts }
+      const request = batchRequest(options); const requestHash = digest(request); const key = owner + ':' + options.operationId
+      const current = activeBatches.get(key)
+      if (current) { if (current.requestHash !== requestHash) fail('idempotency-conflict'); const result = await current.promise; assertExecution(exec, owner); return result }
+      const promise = importFilesOnce(exec, options, owner, request).finally(() => { activeBatches.delete(key) })
+      activeBatches.set(key, { requestHash, promise })
+      return promise
     },
   }
 }

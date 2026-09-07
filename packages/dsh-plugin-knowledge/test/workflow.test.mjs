@@ -552,3 +552,125 @@ test('the native picked provider is frozen before the first turn and survives re
   assert.equal(resumedProvider.requests[0].reasoningEffort, 'medium')
   assert.equal(resolves, 1)
 })
+
+for (const kind of ['uploader-private', 'public', 'project']) test(`the ${kind} import freezes the whole batch and rejects path, metadata, directory and content changes`, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'emate-batch-')); const folder = join(root, 'selected')
+  await mkdir(folder); await writeFile(join(folder, 'a.txt'), 'alpha'); await writeFile(join(folder, 'b.txt'), 'beta')
+  const scope = kind === 'project' ? { kind, project_id: 42 } : { kind }
+  const imports = new Map(), sources = new Map(), tickets = new Map(); let mutations = 0, run
+  const checkManifest = () => {
+    const entry = events(run.caller).find(event => event.kind === 'import-batch-files')
+    assert.equal(entry.files.length, 2)
+    assert.deepEqual(entry.files.map(file => file.sha256), ['alpha', 'beta'].map(text => createHash('sha256').update(text).digest('hex')))
+    assert.deepEqual(entry.files.map(file => file.byte_length), [5, 4])
+  }
+  const response = value => Response.json({ schema_version: 1, ...value })
+  const backend = { async request(url, init) {
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body
+    if (init.method === 'POST') {
+      mutations++; checkManifest()
+      const value = { import_id: randomUUID(), operation_id: body.operation_id, scope: body.scope, status: 'awaiting_content', request_hash: digest({ ...body, provenance: body.provenance ?? null, supersedes: body.supersedes ?? null }), source: null }
+      imports.set(value.import_id, { value, body }); return response(value)
+    }
+    if (init.method === 'GET') return response([...imports.values()].find(entry => entry.value.operation_id === url.searchParams.get('operation_id')).value)
+    mutations++; checkManifest()
+    if (url.pathname.includes('/api/uploads/')) {
+      const intent = tickets.get(url.href)
+      assert.equal(createHash('sha256').update(body).digest('hex'), intent.sha256)
+      const source = { id: randomUUID(), project_id: 42, file_hash: intent.sha256, status: 'ready' }; sources.set(intent.sha256, source)
+      return response(source)
+    }
+    const entry = imports.get(url.pathname.split('/').at(-2)); entry.value.status = 'ready'; entry.value.source = { id: randomUUID(), file_hash: entry.body.sha256 }
+    return response(entry.value)
+  } }
+  run = await runtime(t, backend, root, { async xinKnowledgeCall(name, args) {
+    if (name === 'find_imported_source') return sources.has(args.sha256) ? { schema_version: 1, source: sources.get(args.sha256) } : { schema_version: 1, status: 'failed', error: 'NOT_FOUND' }
+    assert.equal(name, 'prepare_source_upload'); mutations++; checkManifest()
+    const url = 'https://mvdcm.ecoremedia.net/business-assistant/api/uploads/' + String(tickets.size).padStart(43, 't')
+    tickets.set(url, args.intent); return { upload_url: url, method: 'PUT', sha256: args.intent.sha256, size: args.intent.size }
+  } })
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const options = { paths: [folder], operationId: randomUUID(), scope, ...(kind === 'public' ? { publicIntentId: await run.workflow.recordPublicIntent(run.caller, [folder]) } : {}) }
+  const first = await run.workflow.importFiles({ agent: run.caller }, options)
+  assert.equal(first.operation_id, options.operationId)
+  const before = mutations
+  for (const change of [{ paths: [join(folder, 'a.txt')] }, { title: 'changed' }, { publisher: 'changed' }, { scope: kind === 'project' ? { kind, project_id: 43 } : { kind: 'project', project_id: 42 } }, { supersedes: { source_id: source.source_id, source_version: source.source_version } }]) {
+    await assert.rejects(run.workflow.importFiles({ agent: run.caller }, { ...options, ...change }), { code: 'idempotency-conflict' })
+  }
+  await writeFile(join(folder, 'new.txt'), 'new file')
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, options), { code: 'source-changed' })
+  await rm(join(folder, 'new.txt')); await writeFile(join(folder, 'a.txt'), 'changed original')
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, options), { code: 'source-changed' })
+  assert.equal(mutations, before)
+  const status = await run.workflow.importsStatus({ agent: run.caller }, options.operationId, scope)
+  assert.equal(status.operation_id, options.operationId)
+  assert.equal((status.imports ?? status.sources).length, 2)
+  assert.equal(events(run.caller).filter(event => event.kind === 'import-batch-files').length, 1)
+})
+
+test('operationStatus uses the same scoped receipt projection as UUID status', async t => {
+  const run = await runtime(t); run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const input = request(); const started = await run.workflow.start({ agent: run.caller }, input)
+  await done(run, started)
+  assert.deepEqual(await run.workflow.operationStatus({ agent: run.caller }, input.operationId), await run.workflow.status({ agent: run.caller }, started.compilation_id))
+  assert(run.backend.calls.some(call => call.query === '?operation_id=' + input.operationId))
+})
+
+test('canonical user-stop is durable and blocks automatic recovery; explicit resume records new intent in the same session', async t => {
+  const backend = server(); backend.pauseAfterPrepared()
+  const run = await runtime(t, backend); run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const started = await run.workflow.start({ agent: run.caller }, request()); await done(run, started)
+  const canonical = run.ctx.agents.get(started.session_id)
+  await run.workflow.stop({ agent: run.caller }, started.compilation_id)
+  const stored = await run.ctx.sessionPersistence.readFrom(canonical.id, 0)
+  const stop = stored.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop')
+  assert.equal(stop.data.compilationId, started.compilation_id)
+  assert.deepEqual(stop.data.scope, { kind: 'public' })
+  assert.equal(events(run.caller).some(event => event.kind === 'user-stop'), false)
+  await assert.rejects(run.workflow.resume({ agent: run.caller }, started.compilation_id, undefined, { automatic: true }), { code: 'cancelled' })
+  const resumed = await run.workflow.resume({ agent: run.caller }, started.compilation_id)
+  assert.equal(resumed.session_id, canonical.id)
+  assert.equal((await done(run, resumed)).status, 'completed')
+  assert.equal(events(canonical).filter(event => event.kind === 'user-resume').length, 1)
+  assert.equal(run.adapter.requests.length, 1)
+})
+
+test('automatic recovery respects canonical controlVersion and never fabricates user-resume', async t => {
+  const backend = server(); backend.pauseAfterPrepared()
+  const run = await runtime(t, backend); run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const started = await run.workflow.start({ agent: run.caller }, request()); await done(run, started)
+  const canonical = run.ctx.agents.get(started.session_id)
+  assert.equal(events(canonical).find(event => event.kind === 'compilation-session').controlVersion, 1)
+  const resumed = await run.workflow.resume({ agent: run.caller }, started.compilation_id, undefined, { automatic: true })
+  assert.equal((await done(run, resumed)).status, 'completed')
+  assert.equal(events(canonical).filter(event => event.kind === 'user-resume').length, 0)
+})
+
+test('a forged checkpoint cannot publish an unrelated cold session while recording stop or resume', async t => {
+  const backend = server(); backend.pauseAfterPrepared()
+  const run = await runtime(t, backend); run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const started = await run.workflow.start({ agent: run.caller }, request()); await done(run, started)
+  const foreign = await run.ctx.agents.create({ sessionId: randomUUID(), agentOptions: { provider: 'mock', model: 'model' } })
+  foreign.agent.session.append('knowledge/workflow', { kind: 'unrelated-private-record' }, { ignorable: true })
+  await run.ctx.sessions.flush(foreign.agent.session); const foreignId = foreign.agent.id; await foreign.dispose()
+  backend.compilation.checkpoint.session_id = foreignId
+  const published = []; run.ctx.on('agent/created', ({ agent }) => published.push(agent.id))
+  await assert.rejects(run.workflow.stop({ agent: run.caller }, started.compilation_id), { code: 'invalid-recovery-session' })
+  await assert.rejects(run.workflow.resume({ agent: run.caller }, started.compilation_id), { code: 'invalid-recovery-session' })
+  assert.equal(run.ctx.agents.get(foreignId), undefined)
+  assert.equal(published.includes(foreignId), false)
+})
+
+test('a legacy paused canonical session without control intent is never resumed automatically', async t => {
+  const backend = server(); backend.pauseAfterPrepared()
+  const run = await runtime(t, backend); run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const started = await run.workflow.start({ agent: run.caller }, request()); await done(run, started)
+  const legacy = await run.ctx.agents.create({ sessionId: randomUUID(), agentOptions: { provider: 'mock', model: 'model' } })
+  const owner = await run.workflow.authorize({ agent: run.caller })
+  legacy.agent.session.append('knowledge/workflow', { kind: 'compilation-session', owner, compilationId: started.compilation_id, scope: { kind: 'public' }, selection: { provider: 'mock', model: 'model' } }, { ignorable: true })
+  await run.ctx.sessions.flush(legacy.agent.session)
+  backend.compilation.checkpoint.session_id = legacy.agent.id
+  await assert.rejects(run.workflow.resume({ agent: run.caller }, started.compilation_id, undefined, { automatic: true }), { code: 'invalid-recovery-session' })
+  assert.equal(events(legacy.agent).some(event => event.kind === 'user-resume'), false)
+  await legacy.dispose()
+})

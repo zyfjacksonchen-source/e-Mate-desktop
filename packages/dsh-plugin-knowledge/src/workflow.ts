@@ -124,21 +124,29 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
     try { transport.check(owner); await persist(ctx, handle.agent, { kind: 'operation-session', owner }); handles.set(handle.agent.id, handle); return handle.agent }
     catch (error) { await handle.dispose(); throw error }
   }
+  const statusResult = (value: Compilation, owner: string) => ({ scope_key: owner, ...publicReceipt(value), ...(running.get(value.id)?.owner === owner ? { job_id: running.get(value.id)!.jobId } : {}) })
   const status = async (exec: Execution, compilationId: string, scope?: Scope) => {
     const owner = await transport.capture(); assertExecution(exec, owner)
     if (!UUID.test(compilationId)) fail('invalid-request')
     const value = receipt(await selectedTransport(exec, scope).request(owner, 'GET', `/compilations/${compilationId}`, undefined, exec.signal))
-    return { scope_key: owner, ...publicReceipt(value), ...(running.get(compilationId)?.owner === owner ? { job_id: running.get(compilationId)!.jobId } : {}) }
+    return statusResult(value, owner)
   }
-  const launch = (exec: Execution, initial: Compilation, owner: string, selection: FrozenSelection): Promise<any> => {
+  const operationStatus = async (exec: Execution, operationId: string, scope?: Scope) => {
+    const owner = await transport.capture(); assertExecution(exec, owner)
+    if (!OPERATION.test(operationId)) fail('invalid-request')
+    const value = receipt(await selectedTransport(exec, scope).request(owner, 'GET', '/compilations?operation_id=' + operationId, undefined, exec.signal))
+    if (value.operation_id !== operationId) fail('invalid-response')
+    return statusResult(value, owner)
+  }
+  const launch = (exec: Execution, initial: Compilation, owner: string, selection: FrozenSelection, canonical?: any): Promise<any> => {
     const key = owner + ':' + initial.id
     const pending = launches.get(key)
     if (pending) return pending
-    const task = launchOnce(exec, initial, owner, selection).finally(() => { launches.delete(key) })
+    const task = launchOnce(exec, initial, owner, selection, canonical).finally(() => { launches.delete(key) })
     launches.set(key, task)
     return task
   }
-  const launchOnce = async (exec: Execution, initial: Compilation, owner: string, selection: FrozenSelection) => {
+  const launchOnce = async (exec: Execution, initial: Compilation, owner: string, selection: FrozenSelection, canonical?: any) => {
     assertExecution(exec, owner)
     const existing = running.get(initial.id)
     if (existing) { if (existing.owner !== owner) fail('scope-changed'); return { ...publicReceipt(initial), job_id: existing.jobId, session_id: existing.agent.id } }
@@ -151,17 +159,23 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
     exec.signal?.addEventListener('abort', abort, { once: true })
     let handle: any
     try {
-      const prior = initial.checkpoint.session_id
+      const prior = canonical?.id ?? initial.checkpoint.session_id
       if (prior) {
         const live = ctx.agents.get(prior)
         if (live) handle = { agent: live, dispose: async () => {} }
-        else handle = await ctx.agents.resume({ resumeSessionId: prior, agentOptions: options, signal: controller.signal, setup: isolate })
+        else {
+          const stored = await ctx.sessionPersistence.readFrom(prior, 0)
+          assertExecution(exec, owner)
+          const marker = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.owner === owner && event.data.compilationId === initial.id)?.data
+          if (!marker || (marker.selection && digest(freezeSelection(marker.selection, initial.request.model)) !== digest(selection))) fail('invalid-recovery-session')
+          handle = await ctx.agents.resume({ resumeSessionId: prior, agentOptions: options, signal: controller.signal, setup: isolate })
+        }
         const marker = events(handle.agent).find(event => event.kind === 'compilation-session' && event.compilationId === initial.id && event.owner === owner)
         if (!marker || (marker.selection && digest(freezeSelection(marker.selection, initial.request.model)) !== digest(selection))) fail('invalid-recovery-session')
         if (handle.agent.options.provider !== options.provider || handle.agent.options.model !== options.model) fail('model-changed')
       } else {
         handle = await ctx.agents.create({ sessionId: randomUUID(), agentOptions: options, signal: controller.signal, setup: isolate })
-        await persist(ctx, handle.agent, { kind: 'compilation-session', owner, compilationId: initial.id, selection })
+        await persist(ctx, handle.agent, { kind: 'compilation-session', owner, compilationId: initial.id, selection, scope: initial.request.scope, controlVersion: 1 })
       }
       assertExecution(exec, owner)
       const agent = handle.agent
@@ -169,6 +183,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       const goal = ctx.goals.get(agent)
       if (!goal) { ctx.goals.create(agent, { objective: '整理并发布知识编译 ' + initial.id }); ctx.goals.disarm(agent) }
       else if (goal.phase !== 'complete') { if (goal.phase !== 'active' || goal.activation !== 'armed') ctx.goals.resume(agent, { id: goal.id, revision: goal.revision }); ctx.goals.disarm(agent) }
+      if (events(agent).findLast(event => ['user-stop', 'user-resume'].includes(event.kind) && event.owner === owner && event.compilationId === initial.id)?.kind === 'user-stop') fail('cancelled', '该知识任务已被用户停止。')
       const entry: Running = { owner, controller, agent, jobId: '' }
       // Reserve before Job.start so two concurrent UI/Tool starts share one native producer.
       running.set(initial.id, entry)
@@ -347,6 +362,26 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
     if (live && live.options.model === value.request.model.id && typeof live.options.provider === 'string') return freezeSelection({ provider: live.options.provider, model: live.options.model, ...(value.request.model.reasoning_effort === 'none' ? {} : { reasoningEffort: value.request.model.reasoning_effort }) }, value.request.model)
     fail('invalid-recovery-session', '缺少冻结模型的原生回执，请从原知识任务恢复。')
   }
+  const canonicalAgent = async (exec: Execution, value: Compilation, owner: string, selection: FrozenSelection) => {
+    const id = running.get(value.id)?.agent.id ?? value.checkpoint.session_id
+    let agent = id ? ctx.agents.get(id) : events(exec.agent).some(event => event.kind === 'compilation-session' && event.owner === owner && event.compilationId === value.id) ? exec.agent : undefined
+    if (!agent) {
+      if (id) {
+        const stored = await ctx.sessionPersistence.readFrom(id, 0)
+        assertExecution(exec, owner)
+        const marker = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.owner === owner && event.data.compilationId === value.id)?.data
+        if (!marker || (marker.selection && digest(freezeSelection(marker.selection, value.request.model)) !== digest(selection))) fail('invalid-recovery-session')
+      }
+      const handle = id ? await ctx.agents.resume({ resumeSessionId: id, agentOptions: selection, signal: exec.signal, setup: isolate })
+        : await ctx.agents.create({ sessionId: randomUUID(), agentOptions: selection, signal: exec.signal, setup: isolate })
+      agent = handle.agent; handles.set(agent.id, handle)
+      if (!id) await persist(ctx, agent, { kind: 'compilation-session', owner, compilationId: value.id, selection, scope: value.request.scope, controlVersion: 1 })
+    }
+    assertExecution(exec, owner)
+    const marker = events(agent).find(event => event.kind === 'compilation-session' && event.owner === owner && event.compilationId === value.id)
+    if (!marker || (marker.selection && digest(freezeSelection(marker.selection, value.request.model)) !== digest(selection))) fail('invalid-recovery-session')
+    return { agent, marker }
+  }
   const startCompilation = async (exec: Execution, options: { operationId: string; sourceVersions: any[]; topics: any[]; model: { id: string; reasoning_effort: string }; scope?: Scope; benchmarkQueryIds?: string[]; sourceReplacements?: { source_id: string; source_version: string; replacement_source_id: string }[] }) => {
       const owner = await transport.capture(); assertExecution(exec, owner)
       if (!OPERATION.test(options.operationId) || !Array.isArray(options.topics) || options.topics.length < 1 || options.topics.length > 30 || (options.sourceReplacements && options.scope?.kind !== 'project')) fail('invalid-request')
@@ -370,7 +405,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
   }
 
   return {
-    ...imports, openOperation, status,
+    ...imports, openOperation, status, operationStatus,
     async authorize(exec: Execution) { const owner = await transport.capture(); assertExecution(exec, owner); return owner },
     async start(exec: Execution, options: { operationId: string; sourceVersions: any[]; topics: any[]; model: { id: string; reasoning_effort: string }; scope?: Scope; benchmarkQueryIds?: string[]; sourceReplacements?: { source_id: string; source_version: string; replacement_source_id: string }[] }) {
       const owner = await transport.capture(); assertExecution(exec, owner)
@@ -381,14 +416,30 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       starts.set(key, { hash, promise })
       return promise
     },
-    async resume(exec: Execution, compilationId: string, scope?: Scope) {
+    async resume(exec: Execution, compilationId: string, scope?: Scope, options: { automatic?: boolean } = {}) {
       const owner = await transport.capture(); assertExecution(exec, owner); if (!UUID.test(compilationId)) fail('invalid-request')
+      await launches.get(owner + ':' + compilationId)
+      assertExecution(exec, owner)
       const value = receipt(await selectedTransport(exec, scope).request(owner, 'GET', `/compilations/${compilationId}`, undefined, exec.signal))
       if (value.state === 'committed') return publicReceipt(value)
-      return launch(exec, value, owner, await recoverySelection(exec, value, owner))
+      const selection = await recoverySelection(exec, value, owner)
+      const { agent, marker } = await canonicalAgent(exec, value, owner, selection)
+      const latest = events(agent).findLast(event => ['user-stop', 'user-resume'].includes(event.kind) && event.owner === owner && event.compilationId === value.id)
+      if (options.automatic) {
+        if (latest?.kind === 'user-stop') fail('cancelled', '该知识任务已被用户停止。')
+        if (marker.controlVersion !== 1 && latest?.kind !== 'user-resume' && (value.state === 'paused' || events(agent).some(event => event.kind === 'paused' && event.compilationId === value.id))) fail('invalid-recovery-session', '旧任务暂停原因不明，请手动继续。')
+        if (value.checkpoint.unknown_submission) fail('submission-unknown')
+      } else await persist(ctx, agent, { kind: 'user-resume', owner, compilationId: value.id, scope: value.request.scope, controlVersion: 1 })
+      return launch(exec, value, owner, selection, agent)
     },
     async stop(exec: Execution, compilationId: string, scope?: Scope) {
-      const owner = await transport.capture(); assertExecution(exec, owner)
+      const owner = await transport.capture(); assertExecution(exec, owner); if (!UUID.test(compilationId)) fail('invalid-request')
+      await launches.get(owner + ':' + compilationId)
+      assertExecution(exec, owner)
+      const value = receipt(await selectedTransport(exec, scope).request(owner, 'GET', `/compilations/${compilationId}`, undefined, exec.signal))
+      if (value.state === 'committed') return statusResult(value, owner)
+      const { agent } = await canonicalAgent(exec, value, owner, await recoverySelection(exec, value, owner))
+      await persist(ctx, agent, { kind: 'user-stop', owner, compilationId: value.id, scope: value.request.scope, controlVersion: 1 })
       const entry = running.get(compilationId)
       if (entry) { if (entry.owner !== owner) fail('scope-changed'); ctx.jobs.kill(entry.jobId, entry.agent, '用户停止知识整理'); await entry.done }
       return status(exec, compilationId, scope)
