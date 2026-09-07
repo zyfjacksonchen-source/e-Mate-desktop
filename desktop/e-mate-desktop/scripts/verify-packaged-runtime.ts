@@ -1,7 +1,7 @@
 /** Fail-loud verification of the runtime entries sealed into Electron's app.asar. */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { listPackage } from '@electron/asar'
@@ -382,8 +382,35 @@ export function verifyPackagedRuntime(
  */
 export async function afterPack(context: PackagedRuntimeContext): Promise<void> {
   verifyPackagedRuntime(context)
+  preservePackagedCalcDirectories(context)
   verifyPackagedCalc(context)
   verifyPackagedNodePty(context)
+}
+
+/** Preserve original empty directories omitted by Electron Builder's resource copier. */
+export function preservePackagedCalcDirectories(context: PackagedRuntimeContext): void {
+  if (context.electronPlatformName !== 'darwin') return
+  // These paths and 0755 modes were verified in both pinned upstream DMGs.
+  const directories = ['Contents/Resources/autotext/common', 'Contents/Resources/en.lproj', 'Contents/Resources/uno_packages/cache/uno_packages']
+  for (const target of requiredPythonEntries(context).map(entry => entry.split('/')[1]!)) {
+    const root = join(resolvePackagedResourcesRoot(context), 'calc-runtime', target, 'LibreOffice.app')
+    if (!lstatSync(root).isDirectory()) throw new Error('Calc package root must be a directory')
+    for (const directory of directories) {
+      let current = root
+      for (const part of directory.split('/')) {
+        current = join(current, part)
+        try {
+          if (!lstatSync(current).isDirectory()) throw new Error('Calc directory path is not a real directory')
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          // Only the fixed empty leaves and their empty uno_packages parents may be created.
+          const suffix = relative(root, current).split(sep).join('/')
+          if (!directories.includes(suffix) && suffix !== 'Contents/Resources/uno_packages' && suffix !== 'Contents/Resources/uno_packages/cache') throw error
+          mkdirSync(current, { mode: 0o755 })
+        }
+      }
+    }
+  }
 }
 
 /** Read-only whole-payload verification; never downloads into a finished package. */

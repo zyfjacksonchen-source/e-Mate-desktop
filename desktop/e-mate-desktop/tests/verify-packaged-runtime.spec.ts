@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -13,6 +14,7 @@ import {
   resolvePackagedUnpackedRoot,
   verifyPackagedNodePty,
   verifyPackagedCalc,
+  preservePackagedCalcDirectories,
   verifyPackagedRuntime,
   type ArchiveLister,
   type FileProbe,
@@ -297,4 +299,27 @@ describe('packaged desktop runtime verification', () => {
       `required package export @deepseek-ai/dsh-base/package.json resolved outside ${unpackedRoot}: ${escapedPath}`,
     )
   })
+})
+
+
+it('preserves only pinned empty Calc directories and rejects symlink parents', () => {
+  const base = mkdtempSync(join(tmpdir(), 'emate-calc-empty-'))
+  const runtime = context(base, 'darwin', 1)
+  const root = join(resolvePackagedResourcesRoot(runtime), 'calc-runtime/darwin-x64/LibreOffice.app')
+  const resources = join(root, 'Contents/Resources')
+  try {
+    mkdirSync(join(resources, 'autotext'), { recursive: true })
+    preservePackagedCalcDirectories(runtime)
+    for (const name of ['autotext/common', 'en.lproj', 'uno_packages', 'uno_packages/cache', 'uno_packages/cache/uno_packages']) expect(statSync(join(resources, name)).isDirectory()).toBe(true)
+    preservePackagedCalcDirectories(runtime)
+    rmSync(join(resources, 'uno_packages'), { recursive: true })
+    const outside = join(base, 'outside'); mkdirSync(outside)
+    symlinkSync(outside, join(resources, 'uno_packages'))
+    expect(() => preservePackagedCalcDirectories(runtime)).toThrow('not a real directory')
+    expect(existsSync(join(outside, 'cache'))).toBe(false)
+    rmSync(join(resources, 'uno_packages'))
+    rmSync(join(resources, 'autotext'), { recursive: true })
+    expect(() => preservePackagedCalcDirectories(runtime)).toThrow()
+    expect(existsSync(join(resources, 'autotext'))).toBe(false)
+  } finally { rmSync(base, { recursive: true, force: true }) }
 })
