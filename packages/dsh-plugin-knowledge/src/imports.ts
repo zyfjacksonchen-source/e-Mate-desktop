@@ -7,7 +7,7 @@ export const HASH = /^[a-f0-9]{64}$/
 export const UUID = /^[a-f0-9-]{36}$/
 export const OPERATION = /^[A-Za-z0-9_-]{16,80}$/
 export type Scope = { kind: 'public' | 'uploader-private' } | { kind: 'project'; project_id: number }
-export type Execution = { agent: any; signal?: AbortSignal; rootCallId?: string }
+export type Execution = { agent: any; signal?: AbortSignal; rootCallId?: string; xinSubject?: string }
 export function fail(code: string, message = '知识任务未完成，请回查原任务。'): never { throw Object.assign(new Error(message), { code }) }
 export function digest(value: unknown): string {
   const ordered = (input: any): any => Array.isArray(input) ? input.map(ordered) : input && typeof input === 'object' ? Object.fromEntries(Object.keys(input).sort().map(key => [key, ordered(input[key])])) : input
@@ -125,8 +125,9 @@ export function decodeXinReply(raw: any): any {
   if (value?.error || value?.status === 'failed') fail(value.error === 'INVALID_CITATION' ? 'invalid-citation' : value.error === 'IDEMPOTENCY_CONFLICT' ? 'idempotency-conflict' : value.error === 'INVALID_QUERY' ? 'invalid-request' : value.error === 'FORBIDDEN' ? 'unauthorized' : value.error === 'NOT_FOUND' ? 'not-found' : ['REVISION_CONFLICT', 'LEASE_CONFLICT', 'SCOPE_CHANGED'].includes(value.error) ? 'conflict' : 'project-unavailable')
   return value
 }
+export type BindXin = (exec: Execution, expectedSubject?: string) => Promise<string>
 export type ProjectCall = (name: string, args: Record<string, unknown>, exec: Execution, signal?: AbortSignal) => Promise<any>
-export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, assertExecution: (exec: Execution, owner: string) => void, xinCall?: ProjectCall) {
+export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, assertExecution: (exec: Execution, owner: string) => void, xinCall?: ProjectCall, bindXin?: BindXin) {
   type ImportOptions = { paths: string[]; operationId: string; title?: string; publisher?: string; scope?: Scope; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }
   const activeBatches = new Map<string, { requestHash: string; promise: Promise<any> }>()
   const batchRequest = (options: ImportOptions) => {
@@ -150,7 +151,7 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
     if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict', '同一导入批次不能更换文件、范围或资料信息。')
     if (!previous) {
       if (events(exec.agent).some(event => ['import-request', 'project-import-request', 'project-import-receipt'].includes(event.kind) && event.batchId === options.operationId && event.owner === owner)) fail('source-changed', '原批次缺少完整原件快照，请先保留并查看原回执。')
-      await persist(ctx, exec.agent, { kind: 'import-batch', owner, batchId: options.operationId, request })
+      await persist(ctx, exec.agent, { kind: 'import-batch', owner, batchId: options.operationId, request, ...(exec.xinSubject ? { xin_subject: exec.xinSubject } : {}) })
     }
     const fs = exec.agent.ctx.get('fs'); if (!fs) fail('filesystem-unavailable')
     const snapshot = events(exec.agent).find(event => event.kind === 'import-batch-files' && event.batchId === options.operationId && event.owner === owner)
@@ -227,6 +228,12 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
         if (!intent) fail('public-intent-required', '公共导入需要本次明确的公共知识库操作来源。')
         provenance = { kind: 'uploader_declared', classification: 'general_method', intent_receipt: { kind: intent.origin, id: intent.id } }
       }
+      if (scope.kind === 'project') {
+        if (prior && !HASH.test(prior.xin_subject ?? '') || !prior && events(exec.agent).some(event => ['project-import-request', 'project-import-receipt'].includes(event.kind) && event.batchId === options.operationId && event.owner === owner)) fail('xin-binding-missing')
+        if (!bindXin) fail('project-unavailable')
+        exec = { ...exec, xinSubject: await bindXin(exec, prior?.xin_subject ?? exec.xinSubject) }
+        assertExecution(exec, owner)
+      }
       const prepared = await prepareBatch(exec, options, owner, request)
       if (scope.kind === 'project') return importProject(exec, options, owner, prepared)
       const { fs, files } = prepared
@@ -259,6 +266,10 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
       if (!OPERATION.test(operationId)) fail('invalid-request')
       if (scope?.kind === 'project') {
         if (!xinCall || !Number.isSafeInteger(scope.project_id) || scope.project_id < 1) fail('invalid-project-import')
+        const batch = events(exec.agent).find(event => event.kind === 'import-batch' && event.batchId === operationId && event.owner === owner)
+        if (!HASH.test(batch?.xin_subject ?? '')) fail('xin-binding-missing')
+        if (!bindXin) fail('project-unavailable')
+        exec = { ...exec, xinSubject: await bindXin(exec, batch.xin_subject) }
         const hashes = new Set(events(exec.agent).filter(event => ['project-import-request', 'project-import-receipt'].includes(event.kind) && event.batchId === operationId && event.owner === owner && event.projectId === scope.project_id).map(event => event.sha256))
         const sources = []
         for (const sha256 of hashes) {

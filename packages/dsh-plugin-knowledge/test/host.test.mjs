@@ -132,3 +132,140 @@ test('disposing during cold identity bootstrap cannot revive a request or mint a
   await assert.rejects(host.call('catalog', {}), error => error.code === 'cancelled')
   assert.equal(requests, 0)
 })
+
+async function nativeApplyReview(t, root, xin) {
+  const [{ Context }, { default: Timer }, { mountAgentLoopTestDependencies }, { default: AgentLoop }, { default: Persistence }, { default: Jobs }, { default: Fs }, { apply }] = await Promise.all([
+    import('../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'),
+    import('../../../upstream/deepseek-harness/vendor/timer/lib/index.js'),
+    import('../../../upstream/deepseek-harness/packages/test-support/agent-loop-testkit/lib/index.js'),
+    import('../../../upstream/deepseek-harness/packages/core/agent-loop/lib/index.js'),
+    import('../../../upstream/deepseek-harness/packages/session/session-persistence-jsonl/lib/index.js'),
+    import('../../../upstream/deepseek-harness/packages/jobs/jobs-local/lib/index.js'),
+    import('../../../upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'),
+    import('../src/index.ts'),
+  ])
+  const ctx = new Context(); await ctx.plugin(Timer); await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(Persistence, { root, compression: 'none' }); await ctx.plugin(AgentLoop, { agents: [] }); await ctx.plugin(Jobs)
+  ctx.jobs.attachController('knowledge-apply-review'); await ctx.plugin(Fs, { cwd: root })
+  const { LlmAdapter } = await import('../../../upstream/deepseek-harness/packages/llm/llm/lib/index.js')
+  class NoModelCalls extends LlmAdapter { async resolveModel(provider, model) { return { provider, id: model, name: model } } async *stream() { throw Error('unexpected model call') } }
+  ctx.llm.registerAdapter(['mock'], new NoModelCalls())
+  ctx.reflect.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock-model' }) })
+  ctx.reflect.provide('emateModelPolicy', { assertModel: async () => {} })
+  ctx.reflect.provide('emateIdentity', { localAccountPrincipal: () => principal, state: async () => ({ authenticated: true }), request: async () => { throw Error('unexpected HTTP') } })
+  ctx.reflect.provide('emateXinKnowledge', { capture(exec = {}) {
+    const bound = xin.subject, epoch = xin.epoch; xin.captures.push({ bound, exec })
+    return { async bind(expected, signal) {
+      signal?.throwIfAborted(); exec.signal?.throwIfAborted()
+      if (xin.revoked) throw Object.assign(Error('grant revoked'), { code: 'project-unavailable' })
+      const fingerprint = createHash('sha256').update(bound).digest('hex')
+      if (bound !== xin.subject || epoch !== xin.epoch || expected !== undefined && expected !== fingerprint) throw Object.assign(Error('Xin subject changed'), { code: 'scope-changed' })
+      return fingerprint
+    }, async call(name, args, signal) {
+      signal?.throwIfAborted(); exec.signal?.throwIfAborted()
+      if (bound !== xin.subject || epoch !== xin.epoch) throw Object.assign(Error('Xin subject changed'), { code: 'scope-changed' })
+      xin.calls.push({ bound, name, args })
+      if (name === 'find_imported_source') return { structuredContent: { schema_version: 1, status: 'failed', error: 'NOT_FOUND' } }
+      if (name === 'prepare_source_upload') throw Error('fixture submission not acknowledged')
+      return { structuredContent: { schema_version: 1, id: args.compilation_id, operation_id: 'known_operation_id', version: 1, state: 'paused', request: { scope: { kind: 'project', project_id: 17 }, source_versions: [], topics: [] }, checkpoint: {}, revision_ids: {} } }
+    } }
+  } })
+  ctx.reflect.provide('connection', { rpc: { handle: () => () => {} } })
+  ctx.reflect.provide('webServer', { register: () => () => {} })
+  apply(ctx)
+  let disposed = false
+  const dispose = async () => { if (disposed) return; disposed = true; await ctx.emateKnowledgeUi.dispose(); await ctx.emateKnowledgeRecovery.dispose(); await ctx.emateKnowledgeWorkflow.dispose(); await ctx.fiber.dispose() }
+  t.after(dispose)
+  return { ctx, workflow: ctx.emateKnowledgeWorkflow, dispose }
+}
+
+test('real apply keeps one native Xin capture per Host Agent across fresh executions and pause signals', async t => {
+  const { mkdtemp, rm } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-apply-'))
+  const xin = { subject: 'xin-a', epoch: 1, captures: [], calls: [] }, run = await nativeApplyReview(t, root, xin)
+  const agent = await run.workflow.openOperation({ provider: 'mock', model: 'mock-model' })
+  const id = '11111111-1111-4111-8111-111111111111', scope = { kind: 'project', project_id: 17 }
+  const cancelled = new AbortController()
+  await run.workflow.status({ agent, signal: cancelled.signal }, id, scope)
+  cancelled.abort()
+  await run.workflow.status({ agent, signal: new AbortController().signal }, id, scope)
+  assert.equal(xin.captures.length, 1)
+  assert.equal(xin.captures[0].exec.signal, undefined)
+  xin.subject = 'xin-b'; xin.epoch++
+  await assert.rejects(run.workflow.status({ agent, signal: new AbortController().signal }, id, scope), { code: 'scope-changed' })
+  assert.equal(xin.captures.length, 1)
+  assert.equal(xin.calls.length, 2)
+  t.after(() => rm(root, { recursive: true, force: true }))
+})
+
+test('real apply cold Session restoration must not prepare an old import under a different Xin subject', async t => {
+  const { mkdtemp, rm, writeFile } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-apply-cold-'))
+  const file = join(root, 'original.txt'); await writeFile(file, 'frozen original')
+  const xin = { subject: 'xin-a', epoch: 1, captures: [], calls: [] }
+  const first = await nativeApplyReview(t, root, xin)
+  const agent = await first.workflow.openOperation({ provider: 'mock', model: 'mock-model' })
+  const options = { operationId: 'frozen_import_operation', paths: [file], scope: { kind: 'project', project_id: 17 } }
+  await assert.rejects(first.workflow.importFiles({ agent }, options), { code: 'not-found' })
+  const sessionId = agent.id
+  await first.dispose()
+  xin.subject = 'xin-b'; xin.epoch++
+  const second = await nativeApplyReview(t, root, xin)
+  const restored = await second.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock-model' } })
+  t.after(() => restored.dispose())
+  const error = await second.workflow.importFiles({ agent: restored.agent }, options).then(() => undefined, error => error)
+  assert.equal(xin.calls.filter(call => call.bound === 'xin-b' && call.name === 'prepare_source_upload').length, 0, 'old import must issue zero prepare calls under a new Xin subject')
+  assert.equal(error?.code, 'scope-changed')
+  t.after(() => rm(root, { recursive: true, force: true }))
+})
+
+
+test('UI prepare freezes the original Xin subject before start without exposing its fingerprint', async t => {
+  const { mkdtemp, rm, writeFile } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-prepare-binding-'))
+  const file = join(root, 'original.txt'); await writeFile(file, 'frozen original')
+  const xin = { subject: 'xin-a', epoch: 1, captures: [], calls: [] }, run = await nativeApplyReview(t, root, xin)
+  const ui = run.ctx.emateKnowledgeUi
+  const prepared = (await ui.call('ui.import.prepare', { paths: [file], scope: { kind: 'project', project_id: 17 } })).result
+  const agent = run.ctx.agents.get(prepared.session_id)
+  const marker = agent.session.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'ui-import').data
+  assert.equal(marker.xin_subject, createHash('sha256').update('xin-a').digest('hex'))
+  assert.equal(xin.calls.length, 0)
+  assert.doesNotMatch(JSON.stringify(prepared), /xin_subject|xinSubject|xin-a/)
+  xin.subject = 'xin-b'; xin.epoch++
+  const ref = { operation_id: prepared.operation_id, session_id: prepared.session_id }
+  await ui.call('ui.import.start', ref)
+  for (let i = 0; i < 50; i++) { const status = (await ui.call('ui.import.status', ref)).result; if (status.phase === 'failed') break; await new Promise(resolve => setTimeout(resolve, 10)) }
+  assert.equal((await ui.call('ui.import.status', ref)).result.phase, 'failed')
+  assert.equal(xin.calls.length, 0)
+  xin.subject = 'xin-a'; xin.epoch++
+  await ui.call('ui.import.resume', ref)
+  for (let i = 0; i < 50 && !xin.calls.some(call => call.name === 'prepare_source_upload'); i++) await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(xin.calls.filter(call => call.name === 'prepare_source_upload' && call.bound === 'xin-a').length, 1)
+  t.after(() => rm(root, { recursive: true, force: true }))
+})
+
+test('same-subject cold imports retain the original binding, while legacy missing bindings and revoked captures fail closed', async t => {
+  const { mkdtemp, rm, writeFile } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-binding-recovery-'))
+  const file = join(root, 'original.txt'); await writeFile(file, 'frozen original')
+  const xin = { subject: 'xin-a', epoch: 1, captures: [], calls: [] }, first = await nativeApplyReview(t, root, xin)
+  const agent = await first.workflow.openOperation({ provider: 'mock', model: 'mock-model' })
+  const options = { operationId: 'stable_import_operation', paths: [file], scope: { kind: 'project', project_id: 17 } }
+  await assert.rejects(first.workflow.importFiles({ agent }, options), { code: 'not-found' })
+  const originalBatch = structuredClone(agent.session.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'import-batch').data)
+  const sessionId = agent.id; await first.dispose(); xin.epoch++
+  const second = await nativeApplyReview(t, root, xin)
+  const restored = await second.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock-model' } }); t.after(() => restored.dispose())
+  await assert.rejects(second.workflow.importFiles({ agent: restored.agent }, options), { code: 'not-found' })
+  assert.equal(xin.calls.filter(call => call.name === 'prepare_source_upload').length, 2)
+  xin.epoch++; xin.revoked = true
+  await assert.rejects(second.workflow.importFiles({ agent: restored.agent }, options), { code: 'project-unavailable' })
+  assert.equal(xin.calls.filter(call => call.name === 'prepare_source_upload').length, 2)
+  const legacy = await second.workflow.openOperation({ provider: 'mock', model: 'mock-model' })
+  delete originalBatch.xin_subject
+  legacy.session.append('knowledge/workflow', originalBatch, { ignorable: true }); await second.ctx.sessions.flush(legacy.session)
+  await assert.rejects(second.workflow.importFiles({ agent: legacy }, options), { code: 'xin-binding-missing' })
+  assert.equal(xin.calls.filter(call => call.name === 'prepare_source_upload').length, 2)
+  t.after(() => rm(root, { recursive: true, force: true }))
+})

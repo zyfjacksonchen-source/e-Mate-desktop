@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createKnowledgeImports, createKnowledgeTransport, decodeXinReply, findOrCreate, digest, events, fail, HASH, OPERATION, ownerOf, persist, UUID, type Execution, type Scope, type KnowledgeTransport } from './imports.ts'
+import { createKnowledgeImports, createKnowledgeTransport, decodeXinReply, findOrCreate, digest, events, fail, HASH, OPERATION, ownerOf, persist, UUID, type Execution, type Scope, type KnowledgeTransport, type BindXin } from './imports.ts'
 
 const EVENT = 'knowledge/workflow'
 const READ_TOOL = 'knowledge_frozen_source'
@@ -62,7 +62,7 @@ export async function recoverNativeClaims(ctx: any, agent: any, compilationId: s
 
 /** Native owner adapter only: no model adapter, worker queue, credential store, or renderer identity. */
 export type XinKnowledgeCall = (name: string, args: Record<string, unknown>, exec: Execution, signal?: AbortSignal) => Promise<any>
-export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCall?: XinKnowledgeCall; resolveSelection?: (exec: Execution) => Promise<FrozenSelection>; installModelSelection?: (agentCtx: any, selection: any) => () => void } = {}) {
+export function createKnowledgeWorkflow(ctx: any, dependencies: { bindXin?: BindXin; xinKnowledgeCall?: XinKnowledgeCall; resolveSelection?: (exec: Execution) => Promise<FrozenSelection>; installModelSelection?: (agentCtx: any, selection: any) => () => void } = {}) {
   const identity = ctx.get?.('emateIdentity') ?? ctx.emateIdentity
   const transport = createKnowledgeTransport(identity)
   const turns = new WeakMap<object, Map<number, string | undefined>>()
@@ -116,7 +116,15 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       return result
     } }
   }
-  const imports = createKnowledgeImports(ctx, transport, assertExecution, dependencies.xinKnowledgeCall)
+  const bindXin: BindXin = async (exec, expected) => {
+    const owner = await transport.capture(); assertExecution(exec, owner)
+    if (!dependencies.bindXin) fail('project-unavailable')
+    const subject = await dependencies.bindXin(exec, expected ?? exec.xinSubject)
+    assertExecution(exec, owner)
+    if (!HASH.test(subject) || expected !== undefined && subject !== expected) fail('scope-changed')
+    return subject
+  }
+  const imports = createKnowledgeImports(ctx, transport, assertExecution, dependencies.xinKnowledgeCall, bindXin)
   const isolate = (agentCtx: any) => {
     agentCtx.systemPrompt.section({ name: 'emate:knowledge-isolated', order: 0, text: PERSONA, complete: true })
     agentCtx.systemPrompt.suppressRuntimeContext()
@@ -176,10 +184,11 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
         }
         const marker = events(handle.agent).find(event => event.kind === 'compilation-session' && event.compilationId === initial.id && event.owner === owner)
         if (!marker || (marker.selection && digest(freezeSelection(marker.selection, initial.request.model)) !== digest(selection))) fail('invalid-recovery-session')
+        if (initial.request.scope.kind === 'project' && (!HASH.test(marker.xin_subject ?? '') || marker.xin_subject !== exec.xinSubject)) fail('xin-binding-missing')
         if (handle.agent.options.provider !== options.provider || handle.agent.options.model !== options.model) fail('model-changed')
       } else {
         handle = await ctx.agents.create({ sessionId: randomUUID(), agentOptions: options, signal: controller.signal, setup: isolate })
-        await persist(ctx, handle.agent, { kind: 'compilation-session', owner, compilationId: initial.id, selection, scope: initial.request.scope, controlVersion: 1 })
+        await persist(ctx, handle.agent, { kind: 'compilation-session', owner, compilationId: initial.id, selection, scope: initial.request.scope, controlVersion: 1, ...(exec.xinSubject ? { xin_subject: exec.xinSubject } : {}) })
       }
       assertExecution(exec, owner)
       const agent = handle.agent
@@ -379,7 +388,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       const handle = id ? await ctx.agents.resume({ resumeSessionId: id, agentOptions: selection, signal: exec.signal, setup: isolate })
         : await ctx.agents.create({ sessionId: randomUUID(), agentOptions: selection, signal: exec.signal, setup: isolate })
       agent = handle.agent; handles.set(agent.id, handle)
-      if (!id) await persist(ctx, agent, { kind: 'compilation-session', owner, compilationId: value.id, selection, scope: value.request.scope, controlVersion: 1 })
+      if (!id) await persist(ctx, agent, { kind: 'compilation-session', owner, compilationId: value.id, selection, scope: value.request.scope, controlVersion: 1, ...(exec.xinSubject ? { xin_subject: exec.xinSubject } : {}) })
     }
     assertExecution(exec, owner)
     const marker = events(agent).find(event => event.kind === 'compilation-session' && event.owner === owner && event.compilationId === value.id)
@@ -389,17 +398,21 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
   const startCompilation = async (exec: Execution, options: { operationId: string; sourceVersions: any[]; topics: any[]; model: { id: string; reasoning_effort: string }; scope?: Scope; benchmarkQueryIds?: string[]; sourceReplacements?: { source_id: string; source_version: string; replacement_source_id: string }[] }) => {
       const owner = await transport.capture(); assertExecution(exec, owner)
       if (!OPERATION.test(options.operationId) || !Array.isArray(options.topics) || options.topics.length < 1 || options.topics.length > 30 || (options.sourceReplacements && options.scope?.kind !== 'project')) fail('invalid-request')
-      const io = selectedTransport(exec, options.scope)
       const request = { operation_id: options.operationId, source_versions: options.sourceVersions, topics: options.topics.map(topic => ({ ...topic, expected_revision_id: topic.expected_revision_id ?? null })), model: options.model, scope: options.scope ?? { kind: 'uploader-private' }, benchmark_query_ids: options.benchmarkQueryIds ?? [], ...(options.sourceReplacements ? { source_replacements: options.sourceReplacements } : {}) }
       const previous = events(exec.agent).find(event => event.kind === 'compilation-request' && event.operationId === options.operationId && event.owner === owner)
       if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict')
+      if (request.scope.kind === 'project') {
+        if (previous && !HASH.test(previous.xin_subject ?? '')) fail('xin-binding-missing')
+        exec = { ...exec, xinSubject: await bindXin(exec, previous?.xin_subject ?? exec.xinSubject) }
+      }
+      const io = selectedTransport(exec, options.scope)
       let selection: FrozenSelection
       if (previous?.selection) selection = freezeSelection(previous.selection, request.model)
       else {
         if (previous || !dependencies.resolveSelection) fail('model-selection-unavailable')
         selection = freezeSelection(await dependencies.resolveSelection(exec), request.model)
         assertExecution(exec, owner)
-        await persist(ctx, exec.agent, { kind: 'compilation-request', owner, operationId: options.operationId, request, selection })
+        await persist(ctx, exec.agent, { kind: 'compilation-request', owner, operationId: options.operationId, request, selection, ...(exec.xinSubject ? { xin_subject: exec.xinSubject } : {}) })
       }
       const frozen = previous?.request ?? events(exec.agent).findLast(event => event.kind === 'compilation-request' && event.operationId === options.operationId && event.owner === owner).request
       const value = receipt(await findOrCreate(io, owner, 'compilations', frozen, previous !== undefined, exec.signal))
@@ -409,7 +422,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
   }
 
   return {
-    ...imports, openOperation, status, operationStatus,
+    ...imports, openOperation, status, operationStatus, bindXin,
     async authorize(exec: Execution) { const owner = await transport.capture(); assertExecution(exec, owner); return owner },
     async start(exec: Execution, options: { operationId: string; sourceVersions: any[]; topics: any[]; model: { id: string; reasoning_effort: string }; scope?: Scope; benchmarkQueryIds?: string[]; sourceReplacements?: { source_id: string; source_version: string; replacement_source_id: string }[] }) {
       const owner = await transport.capture(); assertExecution(exec, owner)
@@ -426,6 +439,18 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       assertExecution(exec, owner)
       const value = receipt(await selectedTransport(exec, scope).request(owner, 'GET', `/compilations/${compilationId}`, undefined, exec.signal))
       if (value.state === 'committed') return publicReceipt(value)
+      if (value.request.scope.kind === 'project') {
+        let binding = events(exec.agent).find(event => event.kind === 'compilation-request' && event.operationId === value.operation_id && event.owner === owner)
+        if (!binding) {
+          const id = value.checkpoint.session_id ?? exec.agent.id
+          const live = ctx.agents.get(id)
+          const stored = live ? { events: live.session.events } : await ctx.sessionPersistence.readFrom(id, 0, exec.signal)
+          assertExecution(exec, owner)
+          binding = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.compilationId === value.id && event.data.owner === owner)?.data
+        }
+        if (!HASH.test(binding?.xin_subject ?? '')) fail('xin-binding-missing')
+        exec = { ...exec, xinSubject: await bindXin(exec, binding.xin_subject) }
+      }
       const selection = await recoverySelection(exec, value, owner)
       const { agent, marker } = await canonicalAgent(exec, value, owner, selection)
       const latest = events(agent).findLast(event => ['user-stop', 'user-resume'].includes(event.kind) && event.owner === owner && event.compilationId === value.id)

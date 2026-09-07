@@ -6,11 +6,13 @@ export type ImportPhase = 'prepared' | 'importing' | 'parsing' | 'compiling' | '
 export interface ImportSource { key: string; name: string; sha256: string; status: string; source_id?: string; parse_revision?: string }
 export interface UiImportStatus { operation_id: string; session_id: string; title: string; scope: Scope; model: { id: string; reasoning_effort: string }; phase: ImportPhase; sources: ImportSource[]; file_count?: number; compiled_count: number; compilation_session_id?: string; job_id?: string; reason?: string; updated_at: number }
 type Reference = { operation_id: string; session_id: string }
-type Marker = { kind: 'ui-import'; owner: string; operationId: string; batchId: string; paths: string[]; scope: Scope; title: string; selection: Selection; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }
+type Marker = { xin_subject?: string; kind: 'ui-import'; owner: string; operationId: string; batchId: string; paths: string[]; scope: Scope; title: string; selection: Selection; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }
 type Plan = { operationId: string; sources: any[]; topics: any[]; replacements?: any[] }
 type Entry = { agent: any; marker: Marker; controller: AbortController; jobId: string; done?: Promise<any>; stopping?: Promise<void>; userStop: boolean; shutdown: boolean; automatic: boolean; currentCompilation?: string }
 export type KnowledgeUiRead = (request: { endpoint: string; payload: Record<string, unknown>; exec?: Execution; signal?: AbortSignal }) => Promise<{ scope_key: string; result: any }>
 export const UI_IMPORT_MESSAGES: Record<string, string> = {
+  'xin-binding-missing': '旧项目任务缺少原芯助手账号绑定，未继续上传。请保留回执并在确认账号后发起新任务。',
+  'scope-changed': '任务绑定的账号已变化，未继续上传。请切回原账号继续。',
   'too-many-files': '当前一次最多处理100份原件。大库自动分批尚未完成，请拆分选择；本任务不会标记为已完成。',
   'file-too-large': '单份原件不能超过20 MiB，请调整文件后重新发起。',
   'source-changed': '原件或解析版本已变化，已保留原批次回执；请核对原件后继续或发起新的明确操作。',
@@ -20,7 +22,6 @@ export const UI_IMPORT_MESSAGES: Record<string, string> = {
   'submission-unknown': '模型提交结果未知，暂不重新生成；请查看原任务回执。',
   'project-unavailable': '项目连接暂不可用，请先通过外部连接授权芯助手。',
   'public-intent-required': '无法确认公共导入范围，未执行导入，原件仍保留在本机。',
-  'scope-changed': '登录账号已变化，本次操作已暂停。',
   'unavailable': '知识任务暂未完成，已保留已有回执，可稍后继续。',
 }
 function exact(value: any, keys: string[]) {
@@ -115,7 +116,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
     return { agent, marker: markerOf(agent, expected, reference.operation_id) }
   }
   async function ownedRead(entry: Entry, endpoint: string, payload: Record<string, unknown>) {
-    const exec = { agent: entry.agent, signal: entry.controller.signal }
+    const exec = { agent: entry.agent, signal: entry.controller.signal, xinSubject: entry.marker.xin_subject }
     check(entry.marker.owner, exec.signal); await workflow.authorize(exec)
     const reply = await read({ endpoint, payload, exec, signal: exec.signal })
     check(entry.marker.owner, exec.signal)
@@ -200,10 +201,14 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
     return [...previous, ...plans]
   }
   async function drive(entry: Entry, resume: boolean) {
-    const { marker, agent, controller } = entry, exec = { agent, signal: controller.signal }
+    const { marker, agent, controller } = entry, exec = { agent, signal: controller.signal, xinSubject: marker.xin_subject }
     try {
       check(marker.owner, controller.signal)
       if (entry.userStop) throw new DOMException('stopped', 'AbortError')
+      if (marker.scope.kind === 'project') {
+        if (!HASH.test(marker.xin_subject ?? '')) fail('xin-binding-missing')
+        await workflow.bindXin(exec, marker.xin_subject); check(marker.owner, controller.signal)
+      }
       let rows = await sourceRows(entry)
       if (!rows.length || rows.some(row => !row.source_id)) {
         await save(entry, { phase: 'importing', reason: '', sources: rows })
@@ -331,11 +336,13 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
           const fs = agent.ctx.get('fs'); const target = await fs.resolve(payload.paths[0], { signal })
           if ((await fs.stat(target, signal))?.type !== 'file') fail('invalid-replacement')
         }
+        const xinSubject = scope.kind === 'project' ? await workflow.bindXin({ agent, signal }) : undefined
+        check(expected, signal)
         const operationId = randomUUID(), batchId = randomUUID()
         const publicIntentId = scope.kind === 'public' ? await workflow.recordPublicIntent(agent, payload.paths) : undefined
         check(expected, signal)
         const marker: Marker = { kind: 'ui-import', owner: expected, operationId, batchId, paths: [...payload.paths], scope, title: payload.title?.trim() || '导入并整理知识', selection,
-          ...(publicIntentId ? { publicIntentId } : {}), ...(payload.supersedes ? { supersedes: payload.supersedes } : {}) }
+          ...(xinSubject ? { xin_subject: xinSubject } : {}), ...(publicIntentId ? { publicIntentId } : {}), ...(payload.supersedes ? { supersedes: payload.supersedes } : {}) }
         await persist(ctx, agent, marker); check(expected, signal)
         return { scope_key: expected, result: project(agent, marker) }
       }

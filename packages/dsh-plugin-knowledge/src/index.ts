@@ -149,7 +149,7 @@ export function createKnowledgeHost(identity: any, schedule = (callback: () => v
 export function apply(ctx: any): void {
   const host = createKnowledgeHost(ctx.get('emateIdentity'), (callback, delay) => ctx.timeout(callback, delay))
   let uiOperations: ReturnType<typeof createKnowledgeUiOperations> | undefined
-  const xinOperations = new WeakMap<object, { call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> }>()
+  const xinOperations = new WeakMap<object, { bind(expectedSubject?: string, signal?: AbortSignal): Promise<string>; call(name: string, args: Record<string, unknown>, signal?: AbortSignal, expectedSubject?: string): Promise<unknown> }>()
   const captureXin = (exec?: any) => {
     // A Host operation spans many reads with fresh execution wrappers. Keep
     // its native Xin subject closure bound to the same canonical Agent.
@@ -161,10 +161,25 @@ export function apply(ctx: any): void {
     }
     return operation!
   }
+  const verifiedXin = async (exec: any, expected: string | undefined, signal?: AbortSignal) => {
+    const operation = captureXin(exec)
+    try { const subject = await operation.bind(expected, signal); return { operation, subject } }
+    catch (error) {
+      // Only a persisted expected identity permits replacing an expired closure.
+      // Revalidate with the native read proof before any business call; never replay that call.
+      if (!expected || !HASH.test(expected) || signal?.aborted || exec?.signal?.aborted) throw error
+      const fresh = ctx.emateXinKnowledge.capture(exec?.rootCallId ? exec : {})
+      const subject = await fresh.bind(expected, signal)
+      const key = exec?.rootCallId ? exec : exec?.agent
+      if (key) xinOperations.set(key, fresh)
+      return { operation: fresh, subject }
+    }
+  }
   const workflow = createKnowledgeWorkflow(ctx, { installModelSelection,
+    bindXin: async (exec, expected) => (await verifiedXin(exec, expected, exec.signal)).subject,
     resolveSelection: exec => resolveKnowledgeSelection(ctx, exec, exec?.signal, exec?.agent ? uiOperations?.selectionFor(exec.agent) : undefined),
-    xinKnowledgeCall(name, args, exec, signal) {
-      return captureXin(exec).call(name, args, signal)
+    async xinKnowledgeCall(name, args, exec, signal) {
+      return captureXin(exec).call(name, args, signal, exec.xinSubject)
     },
   })
   ctx.provide('emateKnowledgeWorkflow', workflow)
@@ -172,7 +187,9 @@ export function apply(ctx: any): void {
     const scope_key = ownerOf(ctx.get('emateIdentity'))
     if (!scope_key) reject('请先完成企业登录。', 'unauthorized')
     const operation = captureXin(exec)
-    return { scope_key: scope_key!, call: operation.call.bind(operation) }
+    return { scope_key: scope_key!, async call(name, args, signal) {
+      return operation.call(name, args, signal, exec?.xinSubject)
+    } }
   } })
   uiOperations = createKnowledgeUiOperations(ctx, { workflow, read: uiRead, resolveSelection: exec => resolveKnowledgeSelection(ctx, exec) })
   const ui = uiOperations

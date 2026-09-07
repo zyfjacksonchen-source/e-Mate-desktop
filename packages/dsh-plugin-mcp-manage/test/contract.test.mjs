@@ -871,3 +871,28 @@ test('ensure and status during slow forget cannot queue a native reconnection', 
   finish(); await pending
   assert.equal(h.counts().authorizeCount, 1); assert.equal(h.entries.size, 0)
 })
+
+test('knowledge binding fingerprints survive fresh captures for the same real principal and reject a different principal before business dispatch', async t => {
+  const h = await nativeXinHarness(t)
+  const first = h.owner.captureKnowledge()
+  const subject = await first.bind()
+  assert.match(subject, /^[a-f0-9]{64}$/)
+  assert.equal(h.knowledgeCalls.length, 0)
+  assert.equal(await h.owner.captureKnowledge().bind(subject), subject)
+  h.xinAuthority({ user_id: 99 })
+  const replaced = h.owner.captureKnowledge()
+  await assert.rejects(replaced.bind(subject))
+  await assert.rejects(replaced.call('get_knowledge_compilation', {}))
+  assert.equal(h.knowledgeCalls.length, 0)
+  const next = h.owner.captureKnowledge()
+  assert.notEqual(await next.bind(), subject)
+  await h.owner.disconnect()
+  await assert.rejects(next.bind(subject))
+})
+
+test('knowledge binding without an existing grant does not start OAuth consent or install business tools', async t => {
+  const h = xinHarness(); t.after(() => h.owner.dispose())
+  await assert.rejects(h.owner.captureKnowledge().bind(), { code: 'project-unavailable' })
+  assert.deepEqual(h.counts(), { authorizeCount: 0, confirmCount: 0 })
+  assert.equal(h.entries.size, 0)
+})

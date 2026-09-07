@@ -93,7 +93,7 @@ async function runtime(t, backend = server(), root, dependencies = {}) {
   const identity = { localAccountPrincipal: () => principal, request: backend.request }
   ctx.reflect.provide('emateIdentity', identity)
   let selection = { provider: 'mock', model: 'model' }
-  const workflow = createKnowledgeWorkflow(ctx, { installModelSelection, resolveSelection: async () => structuredClone(selection), ...dependencies })
+  const workflow = createKnowledgeWorkflow(ctx, { installModelSelection, bindXin: async (_exec, expected) => { if (expected !== undefined && expected !== 'e'.repeat(64)) throw Object.assign(Error('subject changed'), { code: 'scope-changed' }); return 'e'.repeat(64) }, resolveSelection: async () => structuredClone(selection), ...dependencies })
   const caller = await workflow.openOperation({ provider: 'mock', model: 'model' })
   let disposed = false
   const dispose = async () => { if (disposed) return; disposed = true; await workflow.dispose(); await ctx.fiber.dispose() }
@@ -816,4 +816,47 @@ test('ordinary chat needs its real native turn, and a later turn may bind the ne
   run.adapter.script.push(toolChunks('owner-b', 'check_knowledge_owner', {}))
   chat.followup(createUserMessage({ content: [{ type: 'text', text: '读取当前账号企业知识' }], source: { kind: 'user' } })); await chat.whenIdle()
   assert.equal(accepted.length, 2); assert.notEqual(accepted[0], accepted[1])
+})
+
+test('cold project compilation verifies the canonical Xin fingerprint before lease writes and resumes the same subject without another model call', async t => {
+  const backend = server(); backend.pauseAfterPrepared()
+  let subject = 'e'.repeat(64); const calls = []
+  const dependencies = {
+    async bindXin(_exec, expected) { if (expected !== undefined && expected !== subject) throw Object.assign(Error('changed'), { code: 'scope-changed' }); return subject },
+    async xinKnowledgeCall(name, args) {
+      calls.push(name)
+      const routes = {
+        create_knowledge_compilation: ['POST', '/compilations', args.request],
+        get_knowledge_compilation: ['GET', '/compilations/' + args.compilation_id],
+        claim_knowledge_compilation: ['POST', '/compilations/' + args.compilation_id + '/claim', args.request],
+        checkpoint_knowledge_compilation: ['PATCH', '/compilations/' + args.compilation_id, args.request],
+        prepare_knowledge_revision: ['PUT', '/revisions/' + args.revision_id, args.request],
+        get_knowledge_revision: ['GET', '/revisions/' + args.revision_id],
+        commit_knowledge_compilation: ['POST', '/compilations/' + args.compilation_id + '/commit', args.request],
+      }
+      const [method, path, body] = routes[name]
+      const response = await backend.request(new URL('https://local/knowledge/v1' + path), { method, body: body && JSON.stringify(body) })
+      const value = await response.json()
+      return { structuredContent: response.ok ? value : { schema_version: 1, status: 'failed', error: value.error } }
+    },
+  }
+  const isolated = { request() { throw Error('project used enterprise HTTP') } }
+  const first = await runtime(t, isolated, undefined, dependencies)
+  first.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const scope = { kind: 'project', project_id: 42 }
+  const result = await first.workflow.start({ agent: first.caller }, { ...request(), scope })
+  assert.equal((await done(first, result)).status, 'failed')
+  const stored = await first.ctx.sessionPersistence.readFrom(result.session_id, 0)
+  assert.equal(stored.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'compilation-session').data.xin_subject, subject)
+  await first.dispose()
+  const second = await runtime(t, isolated, first.root, dependencies)
+  subject = 'f'.repeat(64)
+  const before = calls.length
+  await assert.rejects(second.workflow.resume({ agent: second.caller }, result.compilation_id, scope), { code: 'scope-changed' })
+  assert.deepEqual(calls.slice(before), ['get_knowledge_compilation'])
+  subject = 'e'.repeat(64)
+  const resumed = await second.workflow.resume({ agent: second.caller }, result.compilation_id, scope)
+  assert.equal((await done(second, resumed)).status, 'completed')
+  assert.equal(second.adapter.requests.length, 0)
+  assert.equal(backend.compilation.state, 'committed')
 })

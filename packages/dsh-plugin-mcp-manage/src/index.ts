@@ -693,7 +693,8 @@ const HOST_KNOWLEDGE_METHODS = new Set([
   'prepare_knowledge_revision', 'commit_knowledge_compilation',
 ])
 export interface XinKnowledgeOperation {
-  call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>
+  bind(expectedSubject?: string, signal?: AbortSignal): Promise<string>
+  call(name: string, args: Record<string, unknown>, signal?: AbortSignal, expectedSubject?: string): Promise<unknown>
 }
 declare module '@deepseek-ai/cordis' {
   interface Context { emateXinKnowledge: { capture(exec?: XinExecution): XinKnowledgeOperation } }
@@ -1057,23 +1058,39 @@ export function createXinConnection(ctx: Context, operations: {
       if (subject !== undefined && subject !== proofSubject()) throw Error('芯助手本人授权账号已变化，请重新开始知识操作。')
     }
     check()
-    // This closure stays inside the trusted knowledge Host. It carries neither
-    // OAuth credentials nor a generic MCP invocation surface into an Agent/RPC.
-    return { async call(name, args, signal) {
+    let expectedFingerprint: string | undefined
+    const bind = async (expected?: string, signal?: AbortSignal) => {
       check()
-      if (!KNOWLEDGE_METHODS.has(name)) throw Error('该方法不属于企业知识流程。')
+      if (expected !== undefined) {
+        if (!/^[a-f0-9]{64}$/.test(expected) || expectedFingerprint !== undefined && expectedFingerprint !== expected) throw Object.assign(Error('芯助手任务账号不匹配，请从原账号继续。'), { code: 'scope-changed' })
+        expectedFingerprint = expected
+      }
       const combined = AbortSignal.any([capturedSignal, ...(exec.signal ? [exec.signal] : []), ...(signal ? [signal] : [])])
       combined.throwIfAborted()
-      const ready = await ensure({ signal: combined })
+      // Verify the existing grant through get_capabilities; binding never starts OAuth consent.
+      const ready = await ensure({ signal: combined }, { interactive: false })
       check(); combined.throwIfAborted()
-      if (ready.state !== 'ready') throw Error('芯助手尚未完成本人授权。')
+      if (ready.state !== 'ready') throw Object.assign(Error('芯助手尚未完成本人授权。'), { code: 'project-unavailable' })
       subject ??= proofSubject()
-      if (subject === undefined) throw Error('芯助手本人授权尚未核验。')
+      if (subject === undefined) throw Object.assign(Error('芯助手本人授权尚未核验。'), { code: 'project-unavailable' })
+      const fingerprint = createHash('sha256').update(JSON.stringify([XIN_SERVICE, spec.url, subject])).digest('hex')
+      if (expectedFingerprint !== undefined && expectedFingerprint !== fingerprint) throw Object.assign(Error('芯助手任务账号已变化，请从原账号继续。'), { code: 'scope-changed' })
+      expectedFingerprint = fingerprint
       capturedSubjectSignal ??= subjectController.signal
       if (turnBinding) turnBinding.subjectSignal ??= capturedSubjectSignal
+      return fingerprint
+    }
+    // Only a non-secret identity fingerprint may leave this trusted closure.
+    // Credentials and lease-bearing Tool results remain in their native owners.
+    return { bind, async call(name, args, signal, expectedSubject) {
+      if (!KNOWLEDGE_METHODS.has(name)) throw Error('该方法不属于企业知识流程。')
+      await bind(expectedSubject, signal)
+      check()
+      const combined = AbortSignal.any([capturedSignal, capturedSubjectSignal!, ...(exec.signal ? [exec.signal] : []), ...(signal ? [signal] : [])])
+      combined.throwIfAborted()
       const callId = `xin-knowledge-${randomBytes(24).toString('hex')}`
       const tool = prefix + name
-      knowledgeCalls.set(callId, { name: tool, key: scope.key, epoch: generation, signal: combined, subject })
+      knowledgeCalls.set(callId, { name: tool, key: scope.key, epoch: generation, signal: combined, subject: subject! })
       try {
         // Native ToolRuntime validates arguments and executes the existing MCP
         // client. No Agent/parent means lease-bearing results cannot enter JSONL.
