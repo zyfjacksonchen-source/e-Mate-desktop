@@ -162,13 +162,13 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
       <strong>图片 {task.ordinal}</strong>
       <span>{stateLabels[task.state]}</span>
     </div>
-    {addImageToCanvas && task.receipt && <div className={css.canvasAction}>
+    {addImageToCanvas && task.receipt && <div className={css.canvasAction} data-pending={addingToCanvas || undefined}>
       <button type="button" aria-label={`加入画布：图片 ${task.ordinal}`}
         disabled={!preview || task.receipt.status !== 'completed' || addingToCanvas}
         title={!preview ? '正在核对图片附件' : task.receipt.status !== 'completed' ? '图片仍待确认' : '加入画布'}
         onClick={addToCanvas}>{addingToCanvas ? '正在加入…' : '加入画布'}</button>
-      {canvasError && <p role="status" className={css.reason}>{canvasError}</p>}
     </div>}
+    {canvasError && <p role="status" className={css.reason}>{canvasError}</p>}
     {task.state === 'unknown' && <p className={css.reason}>结果不确定，未自动重复生成</p>}
     {task.state === 'cancelled' && <p className={css.reason}>已取消；已完成图片仍会保留</p>}
     {task.state === 'interrupted' && <p className={css.reason}>任务未开始；未自动重新生成</p>}
