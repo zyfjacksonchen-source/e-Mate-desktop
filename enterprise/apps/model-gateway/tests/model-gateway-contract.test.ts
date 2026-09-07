@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createCipheriv, createHash, generateKeyPairSync, verify } from 'node:crypto';
 import { once } from 'node:events';
+import { request as httpRequest } from 'node:http';
 import test from 'node:test';
 import { InMemoryConsentStore } from '@e-mate/consent-store';
 import { TASK_SCENARIOS } from '@e-mate/monitoring-contract';
@@ -20,7 +21,7 @@ import {
 } from '../src/index.ts';
 import { createProductionAuthenticator } from '../src/production.ts';
 import type { ImageObservation } from '../src/image-observability.ts';
-import { InvocationRequestConflictError } from '../src/server.ts';
+import { InvocationRequestConflictError, MAX_RESPONSES_REQUEST_BYTES } from '../src/server.ts';
 
 const sessionToken = 's'.repeat(64);
 const otherToken = 'o'.repeat(64);
@@ -3911,4 +3912,67 @@ test('proves one image usage fact across conflicting concurrency, receipt reacqu
     usageStore,
     (event) => observations.push(event)
   );
+});
+
+
+test('Responses admits bounded multi-image JSON above the old 4 MiB cap without changing input bytes', async () => {
+  const images = Array.from({ length: 3 }, () => 'data:image/png;base64,' + 'A'.repeat(2 * 1024 * 1024));
+  const input = [{ role: 'user', content: [{ type: 'input_text', text: 'synthetic transport fixture' }, ...images.map(image_url => ({ type: 'input_image', image_url }))] }];
+  const body = { model: route.id, stream: true, store: false, reasoning: { effort: 'medium' }, input };
+  await withGateway(async (baseUrl, upstream) => {
+    const response = await fetch(baseUrl + '/v1/responses', { method: 'POST', headers: responseHeaders(), body: JSON.stringify(body) });
+    assert.equal(response.status, 200); await response.text();
+    const forwarded = await upstream[0]!.json();
+    assert.deepEqual(forwarded.input, input); assert.deepEqual(forwarded.reasoning, body.reasoning);
+    assert.equal(forwarded.model, route.upstreamModelId); assert.equal(upstream.length, 1);
+  });
+});
+
+test('Responses authenticates before size rejection and rejects oversized declarations before usage or provider work', async () => {
+  const store = new InMemoryUsageStore(limits);
+  let prepared = 0;
+  const original = store.prepare.bind(store);
+  store.prepare = (...args) => { prepared++; return original(...args); };
+  await withGateway(async (baseUrl, upstream) => {
+    const declared = (authorized: boolean) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const request = httpRequest(baseUrl + '/v1/responses', { method: 'POST', headers: { ...responseHeaders(), Authorization: authorized ? 'Bearer ' + sessionToken : 'Bearer invalid', 'content-length': String(MAX_RESPONSES_REQUEST_BYTES + 1), connection: 'close' } }, response => {
+        let body = ''; response.setEncoding('utf8'); response.on('data', chunk => { body += chunk; }); response.on('end', () => resolve({ status: response.statusCode!, body }));
+      }); request.on('error', reject); request.end();
+    });
+    assert.equal((await declared(false)).status, 401);
+    const refused = await declared(true); assert.equal(refused.status, 413);
+    assert.equal(JSON.parse(refused.body).error.code, 'REQUEST_TOO_LARGE');
+    assert.equal(prepared, 0); assert.equal(upstream.length, 0);
+  }, undefined, undefined, undefined, limits, route, undefined, store);
+});
+
+test('two large Responses slots bound work while small requests progress and completed slots are released', async () => {
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  const large = 'x'.repeat(5 * 1024 * 1024);
+  await withGateway(async (baseUrl, upstream) => {
+    const headers = (id: string) => ({ ...responseHeaders(), 'x-e-mate-task-id': id });
+    const first = modelRequest(baseUrl, headers('large-1'), large);
+    const second = modelRequest(baseUrl, headers('large-2'), large);
+    try {
+      for (let i = 0; upstream.length < 2 && i < 200; i++) await new Promise(resolve => setTimeout(resolve, 5));
+      assert.equal(upstream.length, 2);
+      const busy = await modelRequest(baseUrl, headers('large-3'), large);
+      assert.equal(busy.status, 429); assert.equal(busy.headers.get('retry-after'), '1');
+      assert.equal((await busy.json()).error.code, 'REQUEST_BODY_BUSY');
+      const small = await modelRequest(baseUrl, headers('small-1')); assert.equal(small.status, 200); await small.text();
+    } finally { release(); }
+    for (const response of await Promise.all([first, second])) { assert.equal(response.status, 200); await response.text(); }
+    const next = await modelRequest(baseUrl, headers('large-4'), large); assert.equal(next.status, 200); await next.text();
+    assert.equal(upstream.length, 4);
+  }, async (_request, index) => { if (index <= 2) await gate; return completedSse(10, 5, 'large-response-' + index); }, undefined, undefined, { ...limits, tenantMaxConcurrent: 10 });
+});
+
+test('upstream 413 remains an explicit rejected size response without HTML or provider replay', async () => {
+  const store = new InMemoryUsageStore(limits); let rejected = 0;
+  const reject = store.reject.bind(store); store.reject = async (...args) => { rejected++; return reject(...args); };
+  await withGateway(async (baseUrl, upstream) => {
+    const result = await modelRequest(baseUrl); assert.equal(result.status, 413);
+    const body = await result.text(); assert.equal(JSON.parse(body).error.code, 'UPSTREAM_REQUEST_TOO_LARGE');
+    assert.doesNotMatch(body, /html|nginx|synthetic-private-details/); assert.equal(upstream.length, 1); assert.equal(rejected, 1);
+  }, () => new Response('<html>nginx synthetic-private-details</html>', { status: 413, headers: { 'content-type': 'text/html' } }), undefined, undefined, limits, route, undefined, store);
 });

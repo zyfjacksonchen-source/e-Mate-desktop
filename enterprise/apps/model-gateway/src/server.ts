@@ -28,6 +28,9 @@ import {
 } from './activity-contract.ts';
 
 const maxRequestBytes = 4 * 1024 * 1024;
+// Keep below the deployed 50 MiB reverse-proxy fence; model JSON carries base64 images.
+export const MAX_RESPONSES_REQUEST_BYTES = 48 * 1024 * 1024;
+const maxLargeResponsesInFlight = 2;
 const maxAuditRequestBytes = 512 * 1024;
 const maxAuditBatchSize = 64;
 const maxAuditTokenCount = 1_000_000_000_000;
@@ -2049,6 +2052,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
   options.routes.forEach(validateRoute);
   const routes = new Map(options.routes.map((route) => [route.id, route]));
   const gatewayFetch = options.fetchImplementation ?? fetch;
+  let largeResponsesInFlight = 0;
   const timeoutMs = options.upstreamTimeoutMs ?? 120_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 600_000) {
     throw new Error('Invalid Model Gateway timeout');
@@ -2056,6 +2060,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
 
   return async (request: IncomingMessage, response: ServerResponse) => {
     let imageObserver: ImageRequestObserver | undefined;
+    let largeResponse = false;
     try {
       const url = new URL(request.url ?? '/', 'http://model-gateway.internal');
       if (url.hash || (
@@ -2319,7 +2324,20 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       if (url.pathname === '/v1/responses') {
         if (request.method !== 'POST') return method(response, 'POST');
         const initialScope = responseRequestScope(request);
-        const body = await readJson(request);
+        const declared = request.headers['content-length'];
+        if (typeof declared === 'string' && (!/^\d+$/.test(declared) || Number(declared) > MAX_RESPONSES_REQUEST_BYTES)) {
+          throw new HttpError(413, 'REQUEST_TOO_LARGE', 'Model request exceeds the 48 MiB request limit');
+        }
+        // Authentication precedes body admission. No queue and no usage/provider work on refusal.
+        if (declared === undefined || Number(declared) > maxRequestBytes) {
+          if (largeResponsesInFlight >= maxLargeResponsesInFlight) {
+            response.setHeader('retry-after', '1');
+            throw new HttpError(429, 'REQUEST_BODY_BUSY', 'Large model request capacity is temporarily busy');
+          }
+          largeResponsesInFlight++;
+          largeResponse = true;
+        }
+        const body = await readJson(request, MAX_RESPONSES_REQUEST_BYTES);
         const taskId =
           initialScope.taskId ??
           `h-${createHash('sha256')
@@ -2540,6 +2558,9 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         if (!upstream.ok) {
           if (definitelyRejectedStatuses.has(upstream.status)) {
             await options.usageStore.reject(identity, taskId, prepared.invocationId);
+          }
+          if (upstream.status === 413) {
+            throw new HttpError(413, 'UPSTREAM_REQUEST_TOO_LARGE', 'Model provider rejected the request size');
           }
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Model provider rejected the request');
         }
@@ -2885,6 +2906,8 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           message: known ? error.message : 'Model Gateway temporarily unavailable',
         },
       });
+    } finally {
+      if (largeResponse) largeResponsesInFlight--;
     }
   };
 }
