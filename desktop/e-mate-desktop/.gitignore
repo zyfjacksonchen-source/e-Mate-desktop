@@ -4,3 +4,5 @@ node_modules/
 build/e-mate-profile/
 build/harness-runtime-provenance.json
 build/python-runtime/
+build/calc-runtime/
+build/calc-downloads/

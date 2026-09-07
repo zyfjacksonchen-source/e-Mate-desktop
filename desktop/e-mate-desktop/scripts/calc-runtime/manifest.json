@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "version": "26.8.0",
+  "sourceVersion": "26.8.0.3",
+  "targets": {
+    "darwin-arm64": {
+      "archive": {
+        "url": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/mac/aarch64/LibreOffice_26.8.0_MacOS_aarch64.dmg",
+        "bytes": 298773447,
+        "sha256": "8858d8058da4f862f47559486814e65efc27294da67c5e4bb56b006b1ee59f89"
+      },
+      "executable": "LibreOffice.app/Contents/MacOS/soffice",
+      "fileCount": 17449,
+      "symlinkCount": 23,
+      "logicalBytes": 801661965
+    },
+    "darwin-x64": {
+      "archive": {
+        "url": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/mac/x86_64/LibreOffice_26.8.0_MacOS_x86-64.dmg",
+        "bytes": 309257813,
+        "sha256": "2dcbce4894e01bc1ecd594658e2cbda70ff7bfcd0b310f35d38887797172d09e"
+      },
+      "executable": "LibreOffice.app/Contents/MacOS/soffice",
+      "fileCount": 17449,
+      "symlinkCount": 23,
+      "logicalBytes": 814364510
+    }
+  }
+}
