@@ -53,6 +53,9 @@ function GraphView({ nodes, edges, selected, select, loadGraph, failed }: {
 export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTask, prepareDraft }: Props) {
   const [open, setOpen] = useState(location.pathname === '/knowledge')
   const [graph, setGraph] = useState<KnowledgeGraph>()
+  const [updated, setUpdated] = useState(false), [syncError, setSyncError] = useState(''), [syncing, setSyncing] = useState(false)
+  const syncRequest = useRef<AbortController | undefined>(undefined), syncStopped = useRef(false)
+  const resumePolling = useRef<(() => void) | undefined>(undefined)
   const [scope, setScope] = useState('')
   const [total, setTotal] = useState<number>()
   const [query, setQuery] = useState(''), [layer, setLayer] = useState('all')
@@ -67,40 +70,98 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
   useEffect(() => { listElement.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({ block: 'nearest' }) }, [selected?.id])
   const generation = useRef(0), reads = useRef(0), downloadGeneration = useRef(0)
   const request = useRef<AbortController | undefined>(undefined), readingRequest = useRef<AbortController | undefined>(undefined), downloadRequest = useRef<AbortController | undefined>(undefined)
+  const latest = useRef({ graph, scope, selected, drafting, busy, search }); latest.current = { graph, scope, selected, drafting, busy, search }
   const clear = () => {
+    syncRequest.current?.abort(); setUpdated(false); setSyncError(''); setSyncing(false)
     generation.current++; reads.current++; downloadGeneration.current++
     request.current?.abort(); readingRequest.current?.abort(); downloadRequest.current?.abort(); draftRequest.current?.abort()
     setDrafting(false); setGraph(undefined); setScope(''); setTotal(undefined); setSearch(undefined); setQuery(''); setLayer('all'); setSelected(undefined); setDetail(undefined); setBusy(false); setReading(false); setDownloading(false)
   }
   const report = (reason: any) => {
-    if (['scope-changed', 'unauthorized'].includes(reason?.code)) clear()
+    if (['scope-changed', 'unauthorized'].includes(reason?.code)) { syncStopped.current = true; clear() }
     if (reason?.code === 'scope-changed') dispatchEvent(new Event('emate:identity-changed'))
     setError(reason instanceof Error ? reason.message : '企业知识请求未完成，请重试。')
   }
-  const refresh = async () => {
-    draftRequest.current?.abort(); setDrafting(false)
-    const ticket = ++generation.current
-    request.current?.abort(); const controller = new AbortController(); request.current = controller
-    setBusy(true); setError(''); setUnavailable(false); setSelected(undefined); setDetail(undefined); setSearch(undefined)
-    reads.current++; readingRequest.current?.abort()
+  const refresh = async (force = true) => {
+    if (location.pathname !== '/knowledge' || document.visibilityState === 'hidden' || navigator.onLine === false
+      || syncRequest.current || !force && (syncStopped.current || latest.current.busy)) return
+    if (force) syncStopped.current = false
+    const controller = new AbortController(); syncRequest.current = controller
+    setSyncing(true); setSyncError('')
+    const loading = !latest.current.graph
+    if (loading) setBusy(true)
     try {
-      const [catalog, result] = await Promise.all([callKnowledge('catalog', {}, controller.signal), callKnowledge('graph', { limit: 500 }, controller.signal)])
-      if (ticket !== generation.current || controller.signal.aborted) return
+      const catalog = await callKnowledge('catalog', {}, controller.signal)
+      if (controller.signal.aborted) return
+      if (!HASH.test(catalog.scope_key) || !HASH.test(catalog.result?.corpus_revision)
+        || !Number.isSafeInteger(catalog.result.source_count) || catalog.result.source_count < 0) throw Error('企业知识范围或版本无效。')
+      const current = latest.current
+      if (current.scope && current.scope !== catalog.scope_key) throw Object.assign(Error('登录账号已变化，请重新加载。'), { code: 'scope-changed' })
+      if (!force && current.graph?.corpus_revision === catalog.result.corpus_revision) { setUpdated(false); return }
+      if (!force && (current.selected || current.drafting || current.search || current.busy && current.graph)) { setUpdated(true); return }
+      const result = await callKnowledge('graph', { limit: 500, corpus_revision: catalog.result.corpus_revision }, controller.signal)
+      if (controller.signal.aborted) return
       const next = parseGraph(result.result)
-      if (!HASH.test(result.scope_key) || result.scope_key !== catalog.scope_key || next.corpus_revision !== catalog.result?.corpus_revision
-        || !Number.isSafeInteger(catalog.result.source_count) || catalog.result.source_count < 0) throw Error('企业知识范围或版本不一致，请重试。')
-      if (scope && scope !== result.scope_key) clear()
+      if (result.scope_key !== catalog.scope_key) throw Object.assign(Error('登录账号已变化，请重新加载。'), { code: 'scope-changed' })
+      if (next.corpus_revision !== catalog.result.corpus_revision) throw Error('企业知识版本已变化，请重试同步。')
+      // Reading or search started during synchronization still owns its original snapshot.
+      if (!force && (latest.current.selected || latest.current.drafting || latest.current.search || latest.current.busy && latest.current.graph)) { setUpdated(true); return }
+      generation.current++; request.current?.abort(); reads.current++; readingRequest.current?.abort(); draftRequest.current?.abort()
       setGraph(next); setScope(result.scope_key); setTotal(catalog.result.source_count)
-    } catch (reason) { if (ticket === generation.current && !controller.signal.aborted) report(reason) }
-    finally { if (ticket === generation.current) setBusy(false) }
+      setSelected(undefined); setDetail(undefined); setSearch(undefined); setReading(false); setDrafting(false)
+      setUpdated(false); setError(''); setUnavailable(false)
+    } catch (reason: any) {
+      if (!controller.signal.aborted) {
+        if (['scope-changed', 'unauthorized'].includes(reason?.code)) report(reason)
+        else setSyncError('资料同步异常：' + (reason instanceof Error ? reason.message : '暂时无法读取企业知识，请重试。'))
+      }
+    } finally {
+      if (syncRequest.current === controller) { syncRequest.current = undefined; setSyncing(false); if (loading) setBusy(false); if (force) resumePolling.current?.() }
+    }
   }
+  const refreshLatest = useRef(refresh); refreshLatest.current = refresh
   useEffect(() => {
     const sync = () => { const next = location.pathname === '/knowledge'; if (!next) clear(); setOpen(next) }
-    const identity = () => { clear(); setError('登录状态已变化，请重新加载企业知识。') }
+    const identity = () => { syncStopped.current = true; clear(); setError('登录状态已变化，请重新加载企业知识。') }
     addEventListener('popstate', sync); addEventListener('emate:identity-changed', identity)
-    return () => { request.current?.abort(); readingRequest.current?.abort(); downloadRequest.current?.abort(); draftRequest.current?.abort(); generation.current++; reads.current++; downloadGeneration.current++; removeEventListener('popstate', sync); removeEventListener('emate:identity-changed', identity) }
+    return () => { syncRequest.current?.abort(); request.current?.abort(); readingRequest.current?.abort(); downloadRequest.current?.abort(); draftRequest.current?.abort(); generation.current++; reads.current++; downloadGeneration.current++; removeEventListener('popstate', sync); removeEventListener('emate:identity-changed', identity) }
   }, [])
-  useEffect(() => { if (open) void refresh() }, [open])
+  useEffect(() => {
+    if (!open) return
+    syncStopped.current = false
+    let timer: ReturnType<typeof setTimeout> | undefined, disposed = false, running = false, rerun = false
+    const enabled = () => !disposed && !syncStopped.current && document.visibilityState !== 'hidden' && navigator.onLine !== false
+    const poll = async () => {
+      if (timer) clearTimeout(timer)
+      if (!enabled()) return
+      if (running) { rerun = true; return }
+      running = true
+      try { await refreshLatest.current(false) }
+      finally {
+        running = false
+        if (enabled()) {
+          if (rerun) { rerun = false; void poll() }
+          else timer = setTimeout(() => void poll(), 15000)
+        }
+      }
+    }
+    const lifecycle = () => {
+      if (timer) clearTimeout(timer)
+      if (!enabled()) { rerun = false; syncRequest.current?.abort() }
+      else void poll()
+    }
+    resumePolling.current = () => {
+      if (!running && enabled()) { if (timer) clearTimeout(timer); timer = setTimeout(() => void poll(), 15000) }
+    }
+    document.addEventListener('visibilitychange', lifecycle)
+    addEventListener('online', lifecycle); addEventListener('offline', lifecycle); addEventListener('emate:identity-changed', lifecycle)
+    void poll()
+    return () => {
+      disposed = true; resumePolling.current = undefined; if (timer) clearTimeout(timer); syncRequest.current?.abort()
+      document.removeEventListener('visibilitychange', lifecycle)
+      removeEventListener('online', lifecycle); removeEventListener('offline', lifecycle); removeEventListener('emate:identity-changed', lifecycle)
+    }
+  }, [open, callKnowledge])
   useEffect(() => {
     if (typeof matchMedia !== 'function') return
     const media = matchMedia('(prefers-reduced-motion: reduce)'), sync = () => setReduced(media.matches)
@@ -196,7 +257,7 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
   const originals: OriginalVersion[] = selected ? selected.revision_id ? detail?.source_versions ?? [] : [{ source_id: selected.source_id, source_version: selected.source_version }] : []
   const graphical = view === 'graph' && !reduced && !unavailable && nodes.length > 0
   return <main className={css.page} aria-label="知识图谱" data-emate-knowledge-page="">
-    <header className={css.header}><div><small>公司公共知识</small><h1>知识图谱</h1><p>沿知识、方法与原始资料，找到可追溯的依据。</p></div><button type="button" onClick={() => void refresh()} disabled={busy}>{busy ? '正在读取' : '刷新资料'}</button></header>
+    <header className={css.header}><div><small>公司公共知识</small><h1>知识图谱</h1><p>沿知识、方法与原始资料，找到可追溯的依据。</p></div><button type="button" onClick={() => void refresh()} disabled={busy || syncing}>{busy || syncing ? '正在读取' : '刷新资料'}</button></header>
     <KnowledgeImports openRequest={importRequest} callKnowledge={callKnowledge} pickDirectory={pickDirectory} openTask={openTask} replacement={selected && !selected.revision_id ? { source_id: selected.source_id, source_version: selected.source_version, title: selected.title } : undefined} />
     <form className={css.filters} onSubmit={event => { event.preventDefault(); void searchText() }}>
       <input maxLength={4000} aria-label="搜索知识" placeholder="筛选标题，或检索原文内容" value={query} onChange={event => { draftRequest.current?.abort(); setDrafting(false); generation.current++; request.current?.abort(); setBusy(false); setQuery(event.target.value); setSearch(undefined) }} />
@@ -205,6 +266,8 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
       <div className={css.viewChoice} aria-label="浏览方式"><button type="button" aria-pressed={view === 'graph' && !reduced && !unavailable} onClick={() => setView('graph')} disabled={reduced || unavailable}>图谱</button><button type="button" aria-pressed={view === 'list' || reduced || unavailable} onClick={() => setView('list')}>列表</button></div>
     </form>
     <div className={css.status} role="status">{graph ? <><span>当前显示 {nodes.length} 个条目</span><span>公共资料 {total} 份</span><span title={graph.corpus_revision}>版本 {graph.corpus_revision.slice(0, 12)}</span>{graph.truncated && <span>当前图谱为部分结果，单视图最多500个节点。</span>}</> : <span>{busy ? '正在读取企业知识…' : '尚未加载企业知识。'}</span>}</div>
+    {updated && <div className={css.status} role="status"><span>资料已更新，当前阅读或检索保留原版本。</span><button type="button" disabled={syncing || drafting} onClick={() => void refresh()}>载入最新资料</button></div>}
+    {syncError && <p className={css.error} role="alert">{syncError}<button type="button" disabled={syncing} onClick={() => void refresh(false)}>重试同步</button></p>}
     {error && <p className={css.error} role="alert">{error}</p>}
     {(reduced || unavailable) && <p className={css.fallback}>{reduced ? '已遵循减少动态效果设置，使用完整列表阅读。' : '当前环境无法显示三维图谱，所有条目仍可在列表中阅读。'}</p>}
     <div className={`${css.workspace} ${selected ? css.hasDetail : ''}`}>

@@ -18,9 +18,11 @@ function fixture(nodes = [one, two]) {
 }
 beforeEach(() => {
   history.replaceState(null, '', '/knowledge')
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
   Object.defineProperty(window, 'matchMedia', { configurable: true, value: vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })) })
 })
-afterEach(() => { cleanup(); document.body.replaceChildren(); history.replaceState(null, '', '/') })
+afterEach(() => { cleanup(); vi.useRealTimers(); document.body.replaceChildren(); history.replaceState(null, '', '/') })
 it('uses the native route and never makes fake nodes for an empty corpus', async () => {
   history.replaceState(null, '', '/')
   render(<KnowledgeEntry wide KnowledgeIcon={() => <svg />} />)
@@ -72,6 +74,7 @@ it('does not restore a canceled page after navigation away', async () => {
   let release!: (value: any) => void
   const call = vi.fn((endpoint: string) => endpoint === 'catalog' ? Promise.resolve(answer({ source_count: 1 })) : new Promise<any>(resolve => { release = resolve }))
   render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  await act(async () => {})
   act(() => { history.pushState(null, '', '/chat/task'); dispatchEvent(new PopStateEvent('popstate')) })
   await act(async () => release(answer({ nodes: [one], edges: [], truncated: false })))
   expect(screen.queryByRole('main')).toBeNull()
@@ -275,4 +278,173 @@ it('refuses a submitting composer without changing its pending draft', async () 
   f.machine.dispatch({ type: 'enter', mode: 'queue' })
   await expect(f.prepare(f.ctx, '引用', new AbortController().signal, () => f.actions)).rejects.toThrow('输入框正在提交')
   expect(f.input.setDraft).not.toHaveBeenCalled()
+})
+
+
+it('polls only catalog every 15 seconds and refreshes a changed graph with that exact revision', async () => {
+  vi.useFakeTimers()
+  let version = revision
+  const call = vi.fn(async (endpoint: string, body: any) => {
+    if (endpoint === 'catalog') return answer({ corpus_revision: version, source_count: 2 })
+    if (endpoint === 'graph') return answer({ corpus_revision: body.corpus_revision, nodes: [one, two], edges: [], truncated: false })
+    throw Error('unexpected')
+  })
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  await act(async () => {})
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'graph')).toHaveLength(1)
+  await act(async () => vi.advanceTimersByTimeAsync(14999))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(1)
+  await act(async () => vi.advanceTimersByTimeAsync(1))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(2)
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'graph')).toHaveLength(1)
+  version = 'f'.repeat(64)
+  await act(async () => vi.advanceTimersByTimeAsync(15000))
+  expect(call).toHaveBeenLastCalledWith('graph', { limit: 500, corpus_revision: version }, expect.any(AbortSignal))
+  expect(screen.getByText('版本 ' + version.slice(0, 12))).toBeTruthy()
+})
+
+it('keeps reading its original snapshot when updated and loads only after the explicit update action', async () => {
+  vi.useFakeTimers()
+  let version = revision
+  const original = fixture()
+  const call = vi.fn(async (endpoint: string, body: any) => endpoint === 'catalog' ? answer({ corpus_revision: version, source_count: 2 })
+    : endpoint === 'graph' ? answer({ corpus_revision: body.corpus_revision, nodes: [one, two], edges: [], truncated: false }) : original(endpoint, body))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} prepareDraft={vi.fn()} />)
+  await act(async () => {})
+  await act(async () => fireEvent.click(within(screen.getByRole('list')).getAllByRole('button')[0]!))
+  version = 'f'.repeat(64)
+  await act(async () => vi.advanceTimersByTimeAsync(15000))
+  expect(screen.getByText(/资料已更新，当前阅读或检索保留原版本/)).toBeTruthy()
+  expect(screen.getByText('版本 ' + revision.slice(0, 12))).toBeTruthy()
+  expect(screen.getByText(/原文内容：接口夹具：搜索方法/)).toBeTruthy()
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'graph')).toHaveLength(1)
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '载入最新资料' })))
+  expect(screen.queryByRole('complementary')).toBeNull()
+  expect(screen.getByText('版本 ' + version.slice(0, 12))).toBeTruthy()
+})
+
+it('serializes stalled polls, pauses when hidden/offline, and checks immediately on resume', async () => {
+  vi.useFakeTimers()
+  let stall = false, release!: (value: any) => void, pendingSignal!: AbortSignal
+  const original = fixture()
+  const call = vi.fn((endpoint: string, body: any, signal: AbortSignal) => {
+    if (endpoint === 'catalog' && stall) { pendingSignal = signal; return new Promise<any>(resolve => { release = resolve }) }
+    return original(endpoint, body)
+  })
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  await act(async () => {})
+  stall = true
+  await act(async () => vi.advanceTimersByTimeAsync(15000))
+  await act(async () => vi.advanceTimersByTimeAsync(60000))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(2)
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+  act(() => document.dispatchEvent(new Event('visibilitychange')))
+  expect(pendingSignal.aborted).toBe(true)
+  stall = false; await act(async () => release(answer({ source_count: 2 })))
+  await act(async () => vi.advanceTimersByTimeAsync(30000))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(2)
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(3)
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: false })
+  act(() => dispatchEvent(new Event('offline')))
+  await act(async () => vi.advanceTimersByTimeAsync(30000))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(3)
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
+  await act(async () => dispatchEvent(new Event('online')))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(4)
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('retains data on sync failure, retries, and cancels permanently for the old account', async () => {
+  vi.useFakeTimers()
+  let fail = false, nextScope = scope
+  const original = fixture()
+  const call = vi.fn(async (endpoint: string, body: any) => {
+    if (endpoint === 'catalog' && fail) throw Error('temporary network error')
+    const reply = await original(endpoint, body)
+    return { ...reply, scope_key: nextScope }
+  })
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  await act(async () => {})
+  fail = true; await act(async () => vi.advanceTimersByTimeAsync(15000))
+  expect(screen.getByRole('list')).toBeTruthy(); expect(screen.getByText(/资料同步异常/)).toBeTruthy()
+  fail = false; await act(async () => fireEvent.click(screen.getByRole('button', { name: '重试同步' })))
+  expect(screen.queryByRole('alert')).toBeNull()
+  nextScope = 'd'.repeat(64); await act(async () => vi.advanceTimersByTimeAsync(15000))
+  expect(screen.queryByRole('list')).toBeNull()
+  const calls = call.mock.calls.length
+  await act(async () => vi.advanceTimersByTimeAsync(45000))
+  await act(async () => dispatchEvent(new Event('online')))
+  expect(call.mock.calls.length).toBe(calls)
+})
+
+it.each(['identity', 'unauthorized'])('resumes periodic synchronization after manual recovery from %s', async (reason) => {
+  vi.useFakeTimers()
+  const original = fixture()
+  const call = vi.fn((endpoint: string, body: any) => original(endpoint, body))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  await act(async () => {})
+  if (reason === 'identity') act(() => dispatchEvent(new Event('emate:identity-changed')))
+  else {
+    call.mockRejectedValueOnce(Object.assign(Error('请重新登录'), { code: 'unauthorized' }))
+    await act(async () => vi.advanceTimersByTimeAsync(15000))
+  }
+  expect(screen.queryByRole('list')).toBeNull()
+  const catalogs = call.mock.calls.filter(([endpoint]) => endpoint === 'catalog').length
+  await act(async () => vi.advanceTimersByTimeAsync(30000))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(catalogs)
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '刷新资料' })))
+  expect(screen.getByRole('list')).toBeTruthy()
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(catalogs + 1)
+  await act(async () => vi.advanceTimersByTimeAsync(15000))
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'catalog')).toHaveLength(catalogs + 2)
+  expect(call.mock.calls.filter(([endpoint]) => endpoint === 'graph')).toHaveLength(2)
+})
+
+it.each(['catalog', 'graph'])('preserves a search started while automatic %s synchronization is in flight', async (stalledEndpoint) => {
+  vi.useFakeTimers()
+  let version = revision, releaseSync!: (reply: any) => void, releaseSearch!: (reply: any) => void, searchSignal!: AbortSignal
+  const original = fixture()
+  const call = vi.fn((endpoint: string, body: any, signal: AbortSignal) => {
+    if (endpoint === 'search') { searchSignal = signal; return new Promise<any>(resolve => { releaseSearch = resolve }) }
+    if (version !== revision && endpoint === stalledEndpoint) return new Promise<any>(resolve => { releaseSync = resolve })
+    if (endpoint === 'catalog') return Promise.resolve(answer({ corpus_revision: version, source_count: 2 }))
+    return original(endpoint, body)
+  })
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  await act(async () => {})
+  version = 'f'.repeat(64)
+  await act(async () => vi.advanceTimersByTimeAsync(15000))
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索知识' }), { target: { value: '正在检索' } })
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '检索原文' })))
+  await act(async () => releaseSync(answer({ corpus_revision: version, source_count: 2, nodes: [one, two], edges: [], truncated: false })))
+  expect(searchSignal.aborted).toBe(false)
+  expect(screen.getByText('版本 ' + revision.slice(0, 12))).toBeTruthy()
+  expect(screen.getByText(/资料已更新，当前阅读或检索保留原版本/)).toBeTruthy()
+  await act(async () => releaseSearch(answer({ data: [{ source_id: one.source_id, text: '搜索结果' }], sources: [{ id: one.source_id, file_hash: one.source_version, title: one.title }] })))
+  expect(within(screen.getByRole('list')).getAllByRole('button')).toHaveLength(1)
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('preserves an in-flight draft and its exact snapshot when a poll discovers newer knowledge', async () => {
+  vi.useFakeTimers()
+  let version = revision, finishDraft!: () => void
+  const original = fixture()
+  const call = vi.fn(async (endpoint: string, body: any) => endpoint === 'catalog'
+    ? answer({ corpus_revision: version, source_count: 2 }) : original(endpoint, body))
+  const prepareDraft = vi.fn((_text: string, _signal: AbortSignal) => new Promise<void>(resolve => { finishDraft = resolve }))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} prepareDraft={prepareDraft} />)
+  await act(async () => {})
+  await act(async () => fireEvent.click(within(screen.getByRole('list')).getAllByRole('button')[0]!))
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '加入方案/报表' })))
+  expect(prepareDraft).toHaveBeenCalledOnce()
+  version = 'f'.repeat(64)
+  await act(async () => vi.advanceTimersByTimeAsync(15000))
+  expect(prepareDraft.mock.calls[0]![1].aborted).toBe(false)
+  expect(prepareDraft.mock.calls[0]![0]).toContain(`"corpus_revision": "${revision}"`)
+  expect(prepareDraft.mock.calls[0]![0]).not.toContain(version)
+  expect(screen.getByText(/资料已更新，当前阅读或检索保留原版本/)).toBeTruthy()
+  await act(async () => finishDraft())
+  expect(screen.getByText('版本 ' + revision.slice(0, 12))).toBeTruthy()
 })
