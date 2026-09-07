@@ -24,7 +24,7 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - Original `SKILL.md` bytes are unchanged (SHA-256 `852f8724aafd16de632326fb7aa12437bf8129b919f80180de71e216902694ca`); its three references, HTML template and examples are preserved. The source README and explanatory screenshots are not required by the Skill entry and are omitted.
 - e-Mate additions: `HOST.md` is prepended by the existing provider with the actual absolute resource directory. It retains the original transcript as authority, makes cleaning optional, uses only existing native Python if available, and does not claim audio transcription or require a connection.
 - e-Mate script change (2026-09-07): `clean_transcript.py` now drops an all-digit line only when immediately followed by a subtitle timestamp. Standalone numeric meeting facts survive. All other upstream cleanup behavior remains; timestamps are still removed from the optional derivative, so citations and facts must be checked against the untouched original.
-- The helper requires only Python standard-library modules; no Python dependency or runtime is bundled by this addition. The Agent performs synthesis through its existing model channel. The original four Office presets and two Tool/Job paths remain available while their replacements are prepared.
+- The helper requires only Python standard-library modules; no Python dependency or runtime is bundled by this addition. The Agent performs synthesis through its existing model channel. The two existing Tool/Job paths remain available alongside the replacement Skill workflows.
 
 ## Word TypeScript workflow
 
@@ -44,3 +44,10 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - OpenAI Spreadsheets plugin `26.905.11957`; original 19 Skill files are retained byte-for-byte. Original MIT plugin declaration and hashes: `skills/spreadsheets/UPSTREAM.json`.
 - The original Skill explicitly permits openpyxl when artifact-tool is unavailable. HOST selects that supported path; the proprietary artifact-tool runtime is not distributed.
 - Formula recalculation and rendering need actual supporting runtime and receipts; openpyxl alone does not establish either. Provider readiness remains pending.
+
+## PPT Master replacement
+
+- Fixed source: `hugohe3/ppt-master@c45b7427e707d8695f1bf7df4d20360d05f82e7c`; the native provider replaces `presentations` with `ppt-master` and prepends its Host guide.
+- The complete Skill resources, necessary external document references, original attribution guard, MIT license and separately licensed assets are preserved. Exact original and adapted file identities are recorded in `skills/ppt-master/UPSTREAM.json` and `SOURCE.md`.
+- The export owner is adapted to preserve file permissions and Windows DACLs. Successful publication remains successful if backup cleanup fails, with a warning identifying the retained backup. Regression evidence does not replace Windows installed acceptance.
+- Python dependency distribution, native preview integration, final PPTX rendering and installed Skill discovery remain acceptance gates. No PyMuPDF or proprietary artifact-tool runtime is included.

@@ -1,10 +1,14 @@
 # @e-mate/dsh-plugin-office-skills
 
-Lightweight local Office support for e-Mate 2.0.17 on the pinned Harness rc.7 Profile.
+Office support for e-Mate 2.0.18 on the pinned Harness rc.7 Profile.
+
+The native Skill provider exposes `documents`, `pdf`, `spreadsheets`, `ppt-master`, and `meeting-summary`. Each upstream preset retains its source and license records under its Skill directory; e-Mate's `HOST.md` supplies the actual resource path and native task integration. The old `presentations` preset has been removed.
 
 - `office_read` reads a workspace-relative DOCX, XLSX, PPTX, or PDF into bounded normalized JSON.
 - `office_write` creates a new real DOCX, XLSX, PPTX, or PDF under `.e-mate/office/`.
 - Every operation uses the target Tool and Job registries. Outputs never overwrite a source file.
-- The package is pure JavaScript and bundles its exact execution closure and an OFL Chinese font. It does not require Python, LibreOffice, Microsoft Office, native compilation, or a second download.
+- These two Tools use the bundled JavaScript execution closure and an OFL Chinese font. Word creation, template filling and targeted text replacement use the existing TypeScript `docx` implementation.
 
-This intentionally is not a lossless arbitrary Office editor. Tables, macros, charts, tracked changes, forms, signatures, masters, and exact third-party layout are read only where the normalized contract supports them. Requests that require unsupported preservation must fail closed. Preview remains the responsibility of the installed `dsh-file-viewer`; scanned content remains the responsibility of `dsh-vision-toolkit`.
+The PDF, spreadsheet and PPT Master Skill workflows have additional runtime requirements beyond these two Tools. PDF and spreadsheet Python dependencies are prepared by the existing Desktop owner and exposed through `DSH_EMATE_PYTHON`; PPT Master runtime integration is still pending. The provider's individual `needs-runtime` states distinguish those workflows from the existing Tools. Do not interpret basic Tool availability as complete Skill acceptance. Spreadsheet formula recalculation, final document rendering and platform installation remain separate gates.
+
+The normalized `office_read`/`office_write` contract is not a lossless arbitrary Office editor. Requests that require unsupported preservation must fail closed. Richer workflows follow the selected Skill's actual dependencies and checks; their source presence does not prove installed support. Native file previews remain with `dsh-file-viewer`, and scanned-content tools remain with `dsh-vision-toolkit`.

@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-office-skills",
   "version": "2.0.18",
-  "description": "Clean-room DOCX, PDF, XLSX, and PPTX skills for the e-Mate profile",
+  "description": "Bundled document, PDF, spreadsheet, PPT Master and meeting Skills for e-Mate",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
