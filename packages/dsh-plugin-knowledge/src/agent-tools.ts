@@ -9,8 +9,8 @@ type Workflow = ReturnType<typeof createKnowledgeWorkflow> & {
 const READ_ENDPOINTS = ['catalog', 'graph', 'sources', 'source', 'node', 'search', 'benchmarks', 'benchmark', 'evidence', 'original', 'revisions', 'revision'] as const
 const fields: Record<string, readonly string[]> = {
   read: ['action', 'endpoint', 'request'],
-  import: ['action', 'paths', 'scope', 'title', 'publisher', 'supersedes', 'graph_files', 'graph_root'],
-  compile: ['action', 'source_versions', 'topics', 'scope', 'benchmark_query_ids', 'source_replacements'],
+  import: ['action', 'paths', 'scope', 'title', 'publisher', 'supersedes', 'graph_files', 'graph_root', 'batch_key'],
+  compile: ['action', 'source_versions', 'topics', 'scope', 'benchmark_query_ids', 'source_replacements', 'batch_key'],
   'import-status': ['action', 'operation_id', 'scope'],
   status: ['action', 'operation_id', 'compilation_id', 'scope'],
   resume: ['action', 'compilation_id', 'scope'],
@@ -41,6 +41,7 @@ const parameters: JsonSchemaNode = {
       period: { type: 'object', properties: { start: string(10), end: string(10) }, required: ['start', 'end'], additionalProperties: false },
     } },
     paths: { type: 'array', items: string(4096), description: '本次完整的 1 至 100 个文件或目录路径。' }, scope: scopeSchema,
+    batch_key: { type: 'string', description: '同一用户消息需要多个导入或编译批次时，为每批指定固定标识，如 public-001。限 1 至 64 位英文字母、数字、下划线、短横线，首位字母或数字。同批重试保持此值及完整输入；结果未知先回查原 operation_id，不换标识重放。单批可省略。' },
     title: string(300), publisher: string(300),
     graph_files: { type: 'array', description: '逐文件冻结的原目录关系，与graph_root互斥。source_ref只使用已核实ready原件，不能猜测版本。', items: { type: 'object', additionalProperties: false, properties: { path: string(4096), graph_path: graphPath, source_ref: sourceVersion }, required: ['path', 'graph_path'] } },
     graph_root: { type: 'object', additionalProperties: false, description: '文件夹根及跨批次复用的命名空间；保留根内Markdown相对路径。初次绑定expected_binding为null，冲突须回查。', properties: { path: string(4096), namespace_id: id, layer: { type: 'string', enum: ['expert', 'case', 'source'] } }, required: ['path', 'namespace_id', 'layer'] },
@@ -60,12 +61,14 @@ function nativeCall(ctx: any, exec: any) {
   if (!call) fail('unauthorized')
   return call
 }
-function operationId(exec: any, call: any, action: 'import' | 'compile', owner: string) {
+function operationId(exec: any, call: any, action: 'import' | 'compile', owner: string, batchKey?: string) {
   const session = exec.agent.session
   const start = session.events.find((event: any) => event.type === 'turn/start' && event.data.turn === call.data.turn)
   const message = start && session.events.findLast((event: any) => event.seq > start.seq && event.seq < call.seq && event.type === 'user/message' && event.data.source?.kind === 'user')
   if (typeof session.header.id !== 'string' || !session.header.id || typeof message?.data.id !== 'string' || !message.data.id) fail('invalid-request')
-  return digest(['enterprise_knowledge', owner, session.header.id, message.data.id, action])
+  const identity = ['enterprise_knowledge', owner, session.header.id, message.data.id, action]
+  if (batchKey !== undefined) identity.push(batchKey)
+  return digest(identity)
 }
 const PRIVATE_FIELDS = new Set(['leasetoken', 'accesstoken', 'refreshtoken', 'idtoken', 'clientsecret', 'authorization', 'oauth', 'uploadurl'])
 function publicValue(value: unknown, depth = 0): void {
@@ -103,6 +106,7 @@ export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { work
         await verify()
         if (validateJsonSchemaValue(parameters, args).length) fail('invalid-request')
         if (!fields[args.action] || Object.keys(args).some(key => !fields[args.action]!.includes(key))) fail('invalid-request')
+        if (args.batch_key !== undefined && (typeof args.batch_key !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(args.batch_key))) fail('invalid-request')
         const scope = args.scope ?? { kind: 'uploader-private' }
         let result: any
         if (args.action === 'read') {
@@ -112,7 +116,7 @@ export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { work
           result = reply.result
         } else if (args.action === 'import') {
           if (!Array.isArray(args.paths) || !args.paths.length) fail('invalid-request')
-          const batch = operationId(exec, call, 'import', owner!)
+          const batch = operationId(exec, call, 'import', owner!, args.batch_key)
           const publicIntentId = scope.kind === 'public' ? await checked(() => workflow.recordUserPublicIntent(exec, args.paths)) : undefined
           result = await checked(() => workflow.importFiles(exec, { paths: args.paths, operationId: batch, scope,
             ...(args.graph_files !== undefined ? { graph_files: args.graph_files } : {}), ...(args.graph_root !== undefined ? { graph_root: args.graph_root } : {}),
@@ -125,7 +129,7 @@ export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { work
           const selected = await checked(() => Promise.resolve(ctx.emateKnowledgeSelection(exec)))
           const effort = selected?.reasoningEffort ?? 'none'
           if (typeof selected?.provider !== 'string' || !selected.provider || selected.provider.length > 128 || typeof selected.model !== 'string' || !selected.model || selected.model.length > 128 || typeof effort !== 'string' || !effort || effort.length > 64) fail('invalid-response')
-          result = await checked(() => workflow.start(exec, { operationId: operationId(exec, call, 'compile', owner!), sourceVersions: args.source_versions, topics: args.topics, scope,
+          result = await checked(() => workflow.start(exec, { operationId: operationId(exec, call, 'compile', owner!, args.batch_key), sourceVersions: args.source_versions, topics: args.topics, scope,
             model: { id: selected.model, reasoning_effort: effort }, benchmarkQueryIds: args.benchmark_query_ids ?? [],
             ...(args.source_replacements !== undefined ? { sourceReplacements: args.source_replacements } : {}) }))
         } else if (args.action === 'import-status') {

@@ -70,6 +70,19 @@ test('one native user message keeps one import ID; different bodies conflict in 
   assert.deepEqual(run.results.map(r=>r.status),['success','success','failure']);assert.equal(run.results[2].error.code,'idempotency-conflict')
   await f.run([first]);assert.notEqual(f.calls.filter(c=>c[0]==='import').at(-1)[1].operationId,expected)
 })
+test('named batches share one native message without losing retry conflicts',async t=>{
+  const f=await fixture(t),first={action:'import',paths:['/files/a.pdf'],batch_key:'private-001'},second={...first,paths:['/files/b.pdf'],batch_key:'private-002'}
+  const run=await f.run([first,second,first,{...first,paths:['/files/changed.pdf']},{...first,batch_key:''},{...first,batch_key:'x'.repeat(65)}])
+  const imports=f.calls.filter(c=>c[0]==='import')
+  assert.equal(imports.length,4)
+  assert.notEqual(imports[0][1].operationId,imports[1][1].operationId)
+  assert.equal(imports[0][1].operationId,imports[2][1].operationId)
+  assert.equal(imports[0][1].operationId,imports[3][1].operationId)
+  assert.deepEqual(run.results.map(r=>r.status),['success','success','success','failure','failure','failure'])
+  assert.equal(run.results[3].error.code,'idempotency-conflict')
+  assert.equal(run.results[4].error.code,'invalid-request')
+  assert.equal(run.results[5].error.code,'invalid-request')
+})
 test('public imports obtain native intent first; project imports preserve explicit scope',async t=>{
   const f=await fixture(t)
   await f.run([{action:'import',paths:['/files/public.pdf'],scope:{kind:'public'}}],'请把 /files/public.pdf 导入公共知识库')
@@ -84,6 +97,13 @@ test('compile takes the native effective model and stable operation; model param
   assert.deepEqual(calls[0][1].model,{id:'native-effective',reasoning_effort:'medium'});assert.equal(run.results[2].error.code,'idempotency-conflict')
   const before=f.calls.length,bad=await f.run([{...input,model:{id:'model-supplied'}}])
   assert.equal(bad.results[0].error.code,'invalid-request');assert.equal(f.calls.length,before)
+  const batchA={...input,batch_key:'topic-001'},batchB={...input,batch_key:'topic-002',topics:[{key:'second'}]}
+  const named=await f.run([batchA,batchB,batchA,{...batchA,topics:[{key:'changed'}]}])
+  const namedCalls=f.calls.filter(c=>c[0]==='compile').slice(-4)
+  assert.notEqual(namedCalls[0][1].operationId,namedCalls[1][1].operationId)
+  assert.equal(namedCalls[0][1].operationId,namedCalls[2][1].operationId)
+  assert.deepEqual(named.results.map(r=>r.status),['success','success','success','failure'])
+  assert.equal(named.results[3].error.code,'idempotency-conflict')
 })
 test('status actions keep caller IDs and scope on the existing workflow',async t=>{
   const f=await fixture(t),op='stable-operation-id',scope={kind:'project',project_id:42}
