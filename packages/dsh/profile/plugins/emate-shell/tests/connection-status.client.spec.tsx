@@ -62,6 +62,9 @@ describe('Xin shared Host contract', () => {
     const disconnection = { local_stopped: true, local_forgotten: true, remote_revocation: 'unknown' }
     const stopped = { ...xinProof, state: 'authorization-required', active: false, authorized: false, disconnection }
     expect(parseXinConnection(stopped).disconnection?.remote_revocation).toBe('unknown')
+    expect(parseXinConnection({ ...stopped, authorization_unknown: true }).authorization_unknown).toBe(true)
+    expect(() => parseXinConnection({ ...stopped, authorization_unknown: false })).toThrow()
+    expect(() => parseXinConnection({ ...stopped, authorization_unknown: { token: 'secret' } })).toThrow()
     expect(() => parseXinConnection({ ...xinProof, disconnection })).toThrow()
     expect(() => parseXinConnection({ ...stopped, disconnection: { ...disconnection, local_stopped: false } })).toThrow()
     expect(() => parseXinConnection({ ...stopped, disconnection: { ...disconnection, token: 'secret' } })).toThrow()

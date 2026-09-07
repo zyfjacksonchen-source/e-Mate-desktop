@@ -136,7 +136,7 @@ test('OAuth callback accepts one matching state and rejects callback smuggling',
   ), /Invalid OAuth callback/u)
 })
 
-function xinHarness(revoke) {
+function xinHarness(revoke, hooks = {}) {
   let principal = { tenantId: 'tenant-a', userId: 'user-a' }
   const credentials = new Map()
   const seenRefs = []
@@ -156,7 +156,7 @@ function xinHarness(revoke) {
   const ctx = {
     get: () => ({ localAccountPrincipal: () => principal }),
     credentials: {
-      async resolve(ref) { seenRefs.push(ref); return credentials.has(ref) ? { value: credentials.get(ref) } : undefined },
+      async resolve(ref) { if (!ref.endsWith('_STATE')) seenRefs.push(ref); return credentials.has(ref) ? { value: credentials.get(ref) } : undefined },
       async describe(ref) { return { configured: credentials.has(ref), writable: true } },
       async set(ref, value) { credentials.set(ref, value) },
       async unset(ref) { credentials.delete(ref) },
@@ -184,15 +184,16 @@ function xinHarness(revoke) {
       },
     },
   }
-  const owner = createXinConnection(ctx, {
+  const operations = {
     revoke,
-    async token(lease) { await tokenGate?.(); lease.assertCurrent(); return credentials.has(lease.ref) ? JSON.parse(credentials.get(lease.ref)).tokens?.access_token ?? '' : '' },
-    async authorize(lease) { authorizeCount++; await authorizeGate?.(); lease.assertCurrent(); await ctx.credentials.set(lease.ref, JSON.stringify({ schema_version: 1, tokens: { access_token: 'synthetic-access-token' } })); lease.assertCurrent() },
+    async token(lease) { if (hooks.token) return hooks.token(lease, ctx); await tokenGate?.(); lease.assertCurrent(); return credentials.has(lease.ref) ? JSON.parse(credentials.get(lease.ref)).tokens?.access_token ?? '' : '' },
+    async authorize(lease) { authorizeCount++; if (hooks.authorize) return hooks.authorize(lease, ctx); await authorizeGate?.(); lease.assertCurrent(); await ctx.credentials.set(lease.ref, JSON.stringify({ schema_version: 1, tokens: { access_token: 'synthetic-access-token' } })); lease.assertCurrent() },
     async confirm() { confirmCount++; return true },
     configured: () => configured,
     async install() { configured = true },
-  })
-  return { owner, ctx, entries, credentials, seenRefs, calls, guards, posts,
+  }
+  const owner = createXinConnection(ctx, operations)
+  return { owner, restart: () => createXinConnection(ctx, operations), ctx, entries, credentials, seenRefs, calls, guards, posts,
     principal: value => { principal = value },
     execution(agent, turn = 1, callId = `call-${++nextCall}`) {
       agent.session ??= { events: [] }
@@ -234,7 +235,7 @@ test('Xin owner tuple separates tenant, user and delimiter collisions; old globa
   const scoped = [...h.credentials.keys()].filter(key => key.startsWith('EMATE_MCP_XIN_') && !key.includes('BUSINESS_ASSISTANT'))
   assert.equal(scoped.length, 3); assert.equal(new Set(scoped).size, 3)
   assert(!h.seenRefs.includes('EMATE_MCP_XIN_BUSINESS_ASSISTANT_OAUTH'))
-  await h.owner.disconnect(); assert.equal(h.credentials.size, 3)
+  await h.owner.disconnect(); assert.equal([...h.credentials.keys()].filter(key => !key.endsWith('_STATE')).length, 3)
   h.principal(scopes[0]); h.owner.changed(); assert.equal((await h.owner.ensure()).state, 'ready')
   assert.deepEqual(h.counts(), { authorizeCount: 3, confirmCount: 0 })
 })
@@ -259,7 +260,7 @@ test('Xin forget stops native calls before revocation and keeps network failure 
   await h.owner.ensure()
   const stopped = await h.owner.disconnect()
   assert.deepEqual(stopped.disconnection, { local_stopped: true, local_forgotten: true, remote_revocation: 'unknown' })
-  assert.equal(h.credentials.size, 0)
+  assert.equal([...h.credentials.keys()].filter(key => !key.endsWith('_STATE')).length, 0)
   assert.equal((await h.owner.ensure({}, { interactive: false })).state, 'authorization-required')
   assert.equal((await h.owner.status()).disconnection.remote_revocation, 'unknown')
   assert.equal(h.counts().authorizeCount, 1)
@@ -280,7 +281,7 @@ test('failed native deletion leaves a secret-free marker; failed marker and dele
     if (failMarker) assert.equal((await h.owner.ensure()).state, 'unavailable')
     h.ctx.credentials.set = set; h.ctx.credentials.unset = unset
     await h.owner.disconnect()
-    assert.equal(h.credentials.size, 0)
+    assert.equal([...h.credentials.keys()].filter(key => !key.endsWith('_STATE')).length, 0)
   }
 })
 
@@ -294,8 +295,10 @@ test('Xin revocation uses verified native discovery, posts only to its issuer an
     count++
     assert.equal(String(url), saved.discovery.authorizationServerMetadata.revocation_endpoint)
     assert.equal(init.method, 'POST')
-    assert.deepEqual(Object.fromEntries(init.body), { client_id: 'fixture-client', token: 'xin_rt_fixture', token_type_hint: 'refresh_token' })
-    return new Response(null, { status: 200 })
+    const form = Object.fromEntries(init.body)
+    assert.deepEqual({ ...form, request_id: '<random>' }, { client_id: 'fixture-client', token: 'xin_rt_fixture', token_type_hint: 'refresh_token', resource: saved.discovery.resourceMetadata.resource, receipt_version: '1', request_id: '<random>' })
+    assert.match(form.request_id, /^[A-Za-z0-9_-]{16,80}$/)
+    return Response.json({ schema_version: 1, type: 'xin-oauth-revocation', request_id: form.request_id, issuer: saved.discovery.authorizationServerMetadata.issuer, resource: form.resource, receipt_id: 'a'.repeat(64), complete: true, status: 'revoked', grant_id: 'g'.repeat(32) })
   }
   assert.equal(await revokeXinCredential(JSON.stringify(saved), undefined, post), 'revoked')
   const malicious = structuredClone(saved)
@@ -303,6 +306,8 @@ test('Xin revocation uses verified native discovery, posts only to its issuer an
   assert.equal(await revokeXinCredential(JSON.stringify(malicious), undefined, post), 'unknown')
   assert.equal(count, 1)
   assert.equal(await revokeXinCredential(JSON.stringify(saved), undefined, async () => { throw Error('network down') }), 'unknown')
+  assert.equal(await revokeXinCredential(JSON.stringify(saved), undefined, async () => new Response(null, { status: 200 })), 'unknown')
+  assert.equal(await revokeXinCredential(JSON.stringify(saved), undefined, async () => new Response(null, { status: 204 })), 'unknown')
   assert.equal(await revokeXinCredential(undefined, undefined, post), 'not-required')
   assert.equal(await revokeXinCredential('invalid', undefined, post), 'unknown')
 })
@@ -329,7 +334,7 @@ test('late refresh/authorization after account change is cancelled before native
   await started
   h.principal({ tenantId: 'tenant-b', userId: 'user-a' }); h.owner.changed(); finish()
   assert.equal((await pending).state, 'cancelled')
-  assert.equal(h.entries.size, 0); assert.equal(h.credentials.size, 0)
+  assert.equal(h.entries.size, 0); assert.equal([...h.credentials.keys()].filter(key => !key.endsWith('_STATE')).length, 0)
 })
 
 test('failed native readiness recreates the same scoped entry and malformed authority never reports ready', async t => {
@@ -383,7 +388,7 @@ test('noninteractive restore never opens OAuth and invalid ready proofs roll bac
   assert.deepEqual(h.counts(), { authorizeCount: 0, confirmCount: 0 })
   h.authority({ tenant_id: 'xin', user_id: -1, principal_id: 2, scope_revision: 'r', tools: [], project_ids: [], knowledge_project_ids: [], writable_project_ids: [], project_scope_revisions: {} })
   const failed = await h.owner.ensure()
-  assert.equal(failed.state, 'unavailable'); assert.equal(h.credentials.size, 0); assert.equal(h.entries.size, 0)
+  assert.equal(failed.state, 'unavailable'); assert.equal([...h.credentials.keys()].filter(key => !key.endsWith('_STATE')).length, 0); assert.equal(h.entries.size, 0)
   assert(!JSON.stringify(failed).includes('synthetic-access-token'))
 })
 
@@ -628,4 +633,128 @@ test('stored OAuth client metadata without tokens remains authorization-required
   assert.equal((await h.owner.status()).state, 'authorization-required')
   h.credentials.set(ref, JSON.stringify({ schema_version: 1, tokens: { access_token: 'synthetic-expired' }, expires_at: 1 }))
   assert.equal((await h.owner.status()).state, 'authorization-required')
+})
+
+
+const ledgerState = h => JSON.parse([...h.credentials].find(([key]) => key.endsWith('_STATE'))?.[1] ?? '{"pending":[]}')
+const testGrant = { schema_version: 1, id: 'grant-family-a-123456789', complete: true, resource: 'https://mvdcm.ecoremedia.net/business-assistant/mcp' }
+
+test('token submission loss remains secret-free unknown across restart and forget; unsent cancellation does not', async t => {
+  for (const sent of [false, true]) {
+    const h = xinHarness(undefined, { async authorize(lease) {
+      const abort = new AbortController()
+      const fetcher = oauthRequestFetch(abort.signal, lease, async () => {
+        assert.equal(ledgerState(h).pending.length, 1)
+        assert.equal(ledgerState(h).pending[0].kind, 'authorization_code')
+        throw Error('synthetic response loss after server commit')
+      })
+      if (!sent) abort.abort()
+      await fetcher('https://mvdcm.ecoremedia.net/agent/oauth/token', { method: 'POST', body: new URLSearchParams({ grant_type: 'authorization_code', code: 'synthetic-secret-code' }) })
+    } })
+    t.after(() => h.owner.dispose())
+    const failed = await h.owner.ensure()
+    assert.equal(failed.state, 'unavailable')
+    assert.equal(failed.authorization_unknown, sent ? true : undefined)
+    assert.equal(ledgerState(h).pending.length, sent ? 1 : 0)
+    assert.doesNotMatch(JSON.stringify(ledgerState(h)), /synthetic|token|code"\s*:/)
+    await h.owner.dispose()
+    const restarted = h.restart(); t.after(() => restarted.dispose())
+    assert.equal((await restarted.status()).authorization_unknown, sent ? true : undefined)
+    const stopped = await restarted.disconnect()
+    assert.equal(stopped.disconnection.remote_revocation, sent ? 'unknown' : 'not-required')
+    assert.equal(stopped.disconnection.local_forgotten, true)
+    assert.equal((await restarted.ensure({}, { interactive: false })).state, 'authorization-required')
+  }
+})
+
+test('received grant obligation clears only after atomic save and actual capability proof', async t => {
+  const h = xinHarness(undefined, { async authorize(lease, ctx) {
+    await oauthRequestFetch(undefined, lease, async () => Response.json({ xin_grant: testGrant }))(
+      'https://mvdcm.ecoremedia.net/agent/oauth/token', { method: 'POST', body: new URLSearchParams({ grant_type: 'authorization_code' }) })
+    assert.equal(ledgerState(h).pending[0].grant_id, testGrant.id)
+    await ctx.credentials.set(lease.ref, JSON.stringify({ schema_version: 1, grant: lease.grant, tokens: { access_token: 'synthetic-access' } }))
+    await lease.mutationCommitted()
+    assert.equal(ledgerState(h).pending.length, 1)
+  } })
+  t.after(() => h.owner.dispose())
+  assert.equal((await h.owner.ensure()).state, 'ready')
+  assert.equal(ledgerState(h).pending.length, 0)
+  assert.equal((await h.owner.status()).authorization_unknown, undefined)
+})
+
+test('new authorization probe failure preserves unknown cleanup across previous credential rollback and restart', async t => {
+  const h = xinHarness(async () => 'revoked', { async authorize(lease, ctx) {
+    await lease.beginMutation('authorization_code')
+    await lease.receivedGrant(testGrant)
+    await ctx.credentials.set(lease.ref, JSON.stringify({ schema_version: 1, grant: testGrant, tokens: { access_token: 'synthetic-new-grant' } }))
+    await lease.mutationCommitted()
+  } })
+  t.after(() => h.owner.dispose())
+  await h.owner.ensure({}, { interactive: false })
+  const ref = h.seenRefs[0]
+  const old = JSON.stringify({ schema_version: 1, tokens: { access_token: 'synthetic-previous' } })
+  h.credentials.set(ref, old)
+  h.authority({ invalid: true })
+  const failed = await h.owner.ensure({}, { reauthorize: true })
+  assert.equal(failed.state, 'unavailable'); assert.equal(failed.authorization_unknown, true)
+  assert.equal(h.credentials.get(ref), old)
+  assert(ledgerState(h).pending.some(item => item.kind === 'revocation' && item.grant_id === testGrant.id))
+  await h.owner.dispose()
+  const restarted = h.restart(); t.after(() => restarted.dispose())
+  const receipt = await restarted.disconnect()
+  assert.equal(receipt.disconnection.remote_revocation, 'unknown', 'old grant success cannot settle independent new grant')
+  assert.equal(receipt.authorization_unknown, true)
+  assert.doesNotMatch(JSON.stringify(ledgerState(h)), /synthetic-new|synthetic-previous/)
+})
+
+test('durable forgotten marker prevents retained credentials from resurrection after restart', async t => {
+  const h = xinHarness(async () => 'unknown'); t.after(() => h.owner.dispose())
+  await h.owner.ensure()
+  const ref = h.seenRefs[0]
+  const retained = h.credentials.get(ref)
+  const stopped = await h.owner.disconnect()
+  assert.equal(stopped.disconnection.local_forgotten, true)
+  // Simulate an older credential backend snapshot surviving a process restart.
+  h.credentials.set(ref, retained)
+  await h.owner.dispose()
+  const restarted = h.restart(); t.after(() => restarted.dispose())
+  assert.equal((await restarted.status()).state, 'authorization-required')
+  assert.equal((await restarted.ensure({}, { interactive: false })).state, 'authorization-required')
+  assert.equal(h.entries.size, 0)
+  assert.equal(h.counts().authorizeCount, 1)
+})
+
+test('OAuth receipt binding rejects mismatched grant/request/resource/issuer and incomplete proofs', async () => {
+  const state = { schema_version: 1, grant: testGrant, client: { client_id: 'client' }, tokens: { refresh_token: 'xin_rt_fixture' }, discovery: {
+    authorizationServerUrl: 'https://mvdcm.ecoremedia.net', authorizationServerMetadata: { issuer: 'https://mvdcm.ecoremedia.net', revocation_endpoint: 'https://mvdcm.ecoremedia.net/agent/oauth/revoke' }, resourceMetadata: { resource: testGrant.resource } } }
+  for (const change of [{ grant_id: 'other-grant-family-123456' }, { request_id: 'other-request-id-12345' }, { resource: 'https://different.invalid/mcp' }, { issuer: 'https://different.invalid' }, { complete: false }, { status: 'unknown' }, { schema_version: 2 }, { receipt_id: 'invalid' }]) {
+    assert.equal(await revokeXinCredential(JSON.stringify(state), undefined, async (_url, init) => Response.json({ schema_version: 1, type: 'xin-oauth-revocation', request_id: init.body.get('request_id'), resource: testGrant.resource, issuer: 'https://mvdcm.ecoremedia.net', grant_id: testGrant.id, receipt_id: 'a'.repeat(64), complete: true, status: 'revoked', ...change })), 'unknown')
+  }
+})
+
+
+test('old Agent cannot clear another account durable disconnection during ensure preflight', async t => {
+  const h = xinHarness(async () => 'unknown'); t.after(() => h.owner.dispose())
+  const oldAgent = {}; await h.owner.ensure(h.execution(oldAgent))
+  h.principal({ tenantId: 'tenant-a', userId: 'user-b' }); h.owner.changed()
+  await h.owner.ensure(); await h.owner.disconnect()
+  const before = [...h.credentials]
+  assert.equal((await h.owner.ensure(h.execution(oldAgent))).state, 'unavailable')
+  assert.deepEqual([...h.credentials], before)
+  await h.owner.dispose()
+  const restarted = h.restart(); t.after(() => restarted.dispose())
+  assert.equal((await restarted.ensure({}, { interactive: false })).state, 'authorization-required')
+})
+
+test('ensure and status during slow forget cannot queue a native reconnection', async t => {
+  let started, finish
+  const entered = new Promise(resolve => { started = resolve })
+  const h = xinHarness(async () => { started(); await new Promise(resolve => { finish = resolve }); return 'unknown' })
+  t.after(() => h.owner.dispose())
+  await h.owner.ensure()
+  const pending = h.owner.disconnect(); await entered
+  assert.equal((await h.owner.ensure()).state, 'unavailable')
+  assert.equal((await h.owner.status()).state, 'unavailable')
+  finish(); await pending
+  assert.equal(h.counts().authorizeCount, 1); assert.equal(h.entries.size, 0)
 })

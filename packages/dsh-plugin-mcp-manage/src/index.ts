@@ -1,3 +1,4 @@
+import { createGrantLedger, validXinGrant, type XinGrant, type GrantLedgerState } from './xin-grant-ledger.ts'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
@@ -249,7 +250,7 @@ async function confirmed(
   return answer.answers[0]?.selected.includes('确认') === true
 }
 
-export interface OAuthLease { ref: ReturnType<typeof credentialRef>; signal: AbortSignal; assertCurrent(): void; invalidated?: boolean; transientFailure?: boolean }
+export interface OAuthLease { beginMutation?(kind: 'authorization_code' | 'refresh_token'): Promise<void>; receivedGrant?(grant: XinGrant): Promise<void>; mutationCommitted?(): Promise<void>; mutationRejected?(): Promise<void>; cleanupGrant?(raw: string): Promise<void>; grant?: XinGrant; ref: ReturnType<typeof credentialRef>; signal: AbortSignal; assertCurrent(): void; invalidated?: boolean; transientFailure?: boolean }
 
 interface OAuthCredentialState {
   schema_version: 1
@@ -257,6 +258,7 @@ interface OAuthCredentialState {
   tokens?: OAuthTokens
   discovery?: OAuthDiscoveryState
   expires_at?: number
+  grant?: XinGrant
 }
 
 function oauthCallbackUrl(name: string): string {
@@ -340,8 +342,20 @@ export function oauthRequestFetch(signal?: AbortSignal, lease?: OAuthLease, fetc
   return async (input, init) => {
     const combined = AbortSignal.any([...(signal ? [signal] : []), ...(lease ? [lease.signal] : []), ...(init?.signal ? [init.signal] : []), ...(input instanceof Request ? [input.signal] : [])])
     combined.throwIfAborted(); lease?.assertCurrent()
+    const form = init?.body instanceof URLSearchParams ? init.body : typeof init?.body === 'string' ? new URLSearchParams(init.body) : undefined
+    const kind = init?.method?.toUpperCase() === 'POST' ? form?.get('grant_type') : undefined
+    const mutation = kind === 'authorization_code' || kind === 'refresh_token'
+    if (mutation) {
+      await lease?.beginMutation?.(kind)
+      try { combined.throwIfAborted(); lease?.assertCurrent() } catch (error) { await lease?.mutationRejected?.(); throw error }
+    }
     try {
       const response = await fetchImplementation(input, { ...init, signal: combined })
+      if (mutation && lease) {
+        const body = await response.clone().json().catch(() => undefined)
+        if (response.ok && validXinGrant(body?.xin_grant, MCP_CATALOG.get(XIN_SERVICE)!.url)) { lease.grant = body.xin_grant; await lease.receivedGrant?.(body.xin_grant) }
+        else if (response.status >= 400 && response.status < 500 && typeof body?.error === 'string') await lease.mutationRejected?.()
+      }
       if (lease && (response.status >= 500 || response.status === 429)) lease.transientFailure = true
       return response
     } catch (error) {
@@ -519,7 +533,9 @@ async function oauthProvider(
       saved.expires_at = tokens.expires_in === undefined
         ? undefined
         : Date.now() + Math.max(1, tokens.expires_in) * 1_000
-      await persist()
+      if (lease) { if (lease.grant) saved.grant = lease.grant; else delete saved.grant }
+      try { await persist(); await lease?.mutationCommitted?.() }
+      catch (error) { await lease?.cleanupGrant?.(JSON.stringify(saved)); throw error }
     },
     redirectToAuthorization: redirect,
     saveCodeVerifier: verifier => { codeVerifier = verifier },
@@ -534,7 +550,7 @@ async function oauthProvider(
     discoveryState: () => saved.discovery,
     invalidateCredentials: async scope => {
       if (scope === 'all' || scope === 'tokens') {
-        if (lease) lease.invalidated = true
+        if (lease) { lease.invalidated = true; if (saved.tokens) await lease.cleanupGrant?.(JSON.stringify(saved)) }
         delete saved.tokens
         delete saved.expires_at
       }
@@ -615,38 +631,50 @@ async function currentOAuthToken(ctx: Context, spec: McpServerSpec, lease?: OAut
 type RemoteRevocation = 'revoked' | 'unknown' | 'not-required'
 
 /** Native discovery and the existing bounded HTTPS path; tokens are never returned to callers. */
-export async function revokeXinCredential(raw: string | undefined, signal?: AbortSignal, fetchImplementation = secureOAuthFetch): Promise<RemoteRevocation> {
-  if (!raw) return 'not-required'
+export async function revokeXinGrant(raw: string | undefined, signal?: AbortSignal, fetchImplementation = secureOAuthFetch): Promise<{ status: RemoteRevocation; grant_id?: string }> {
+  if (!raw) return { status: 'not-required' }
   try {
     const state = JSON.parse(raw) as OAuthCredentialState
-    if (state?.schema_version !== 1) return 'unknown'
-    if (!state.tokens) return 'not-required'
+    if (state?.schema_version !== 1) return { status: 'unknown' }
+    if (!state.tokens) return { status: 'not-required' }
     const token = state.tokens.refresh_token ?? state.tokens.access_token
-    if (!token) return 'not-required'
+    if (!token) return { status: 'not-required' }
     if (typeof token !== 'string' || token.length > TOKEN_MAX || /\s/u.test(token)
-      || typeof state.client?.client_id !== 'string' || !state.client.client_id || state.client.client_id.length > 2048) return 'unknown'
+      || typeof state.client?.client_id !== 'string' || !state.client.client_id || state.client.client_id.length > 2048) return { status: 'unknown' }
     const spec = MCP_CATALOG.get(XIN_SERVICE)!
     const fetcher = oauthRequestFetch(signal, undefined, fetchImplementation)
-    const discovery = state.discovery ?? await discoverOAuthServerInfo(spec.url, { fetchFn: fetcher })
+    const discovery = state.discovery?.authorizationServerMetadata?.revocation_endpoint ? state.discovery : await discoverOAuthServerInfo(spec.url, { fetchFn: fetcher })
     const metadata = discovery.authorizationServerMetadata
-    if (!metadata?.issuer || !metadata.revocation_endpoint) return 'unknown'
+    if (!metadata?.issuer || !metadata.revocation_endpoint) return { status: 'unknown' }
     const issuer = new URL(metadata.issuer)
     const endpoint = new URL(metadata.revocation_endpoint)
     if (issuer.protocol !== 'https:' || issuer.username || issuer.password || issuer.hash || issuer.search
       || issuer.href !== new URL(discovery.authorizationServerUrl).href || issuer.origin !== new URL(spec.url).origin
       || endpoint.origin !== issuer.origin || endpoint.username || endpoint.password || endpoint.hash || endpoint.search
-      || discovery.resourceMetadata?.resource && discovery.resourceMetadata.resource !== spec.url) return 'unknown'
+      || discovery.resourceMetadata?.resource && discovery.resourceMetadata.resource !== spec.url) return { status: 'unknown' }
+    const requestId = randomBytes(24).toString('base64url')
     const response = await fetcher(endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: state.client.client_id, token,
+      body: new URLSearchParams({ client_id: state.client.client_id, token, resource: spec.url, receipt_version: '1', request_id: requestId,
         token_type_hint: state.tokens.refresh_token ? 'refresh_token' : 'access_token' }) })
-    return response.status === 200 || response.status === 204 ? 'revoked' : 'unknown'
-  } catch { return 'unknown' }
+    const receipt = await response.json().catch(() => undefined)
+    if (response.status !== 200 || receipt?.schema_version !== 1 || receipt.type !== 'xin-oauth-revocation'
+      || receipt.request_id !== requestId || receipt.issuer !== metadata.issuer || receipt.resource !== spec.url
+      || typeof receipt.receipt_id !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.receipt_id)
+      || receipt.complete !== true || receipt.status !== 'revoked' || typeof receipt.grant_id !== 'string'
+      || !/^[A-Za-z0-9_-]{16,80}$/.test(receipt.grant_id) || state.grant && state.grant.id !== receipt.grant_id) return { status: 'unknown' }
+    return { status: 'revoked', grant_id: receipt.grant_id }
+  } catch { return { status: 'unknown' } }
+}
+
+export async function revokeXinCredential(raw: string | undefined, signal?: AbortSignal, fetchImplementation = secureOAuthFetch): Promise<RemoteRevocation> {
+  return (await revokeXinGrant(raw, signal, fetchImplementation)).status
 }
 
 export interface XinConnectionResult {
   schema_version: 1; service: typeof XIN_SERVICE; name: typeof XIN_SERVICE; transport: 'streamable-http'
   state: 'ready' | 'authorization-required' | 'connecting' | 'unavailable' | 'cancelled'
   active: boolean; authorized: boolean
+  authorization_unknown?: true
   binding?: XinCapabilityProof['binding']; permissions?: XinCapabilityProof['permissions']; verified_at?: string
   disconnection?: { local_stopped: true; local_forgotten: boolean; remote_revocation: RemoteRevocation }
 }
@@ -674,6 +702,13 @@ export function createXinConnection(ctx: Context, operations: {
   let proof: (XinCapabilityProof & { owner: string; verified_at: string }) | undefined
   let tail: Promise<unknown> = Promise.resolve()
   const pending = new Map<string, { promise: Promise<XinConnectionResult>; interactive: boolean; reauthorize: boolean }>()
+  const ledgerStates = new Map<string, GrantLedgerState>()
+  const ledgers = new Map<string, ReturnType<typeof createGrantLedger>>()
+  const ledger = (scope: { key: string; ref: string }) => {
+    let value = ledgers.get(scope.key)
+    if (!value) { value = createGrantLedger(ctx.credentials, scope.ref, state => ledgerStates.set(scope.key, state)); ledgers.set(scope.key, value) }
+    return value
+  }
   const disconnected = new Map<string, NonNullable<XinConnectionResult['disconnection']> | null>()
   const principal = () => {
     const identity = ctx.get('emateIdentity') as { localAccountPrincipal?(): unknown } | undefined
@@ -704,7 +739,7 @@ export function createXinConnection(ctx: Context, operations: {
     return call?.type === 'tool/call' && call.data.turn === binding.turn ? binding.owner : undefined
   }
   let observedOwner = owner()?.key
-  const result = (state: XinConnectionResult['state'], expectedOwner = owner()?.key): XinConnectionResult => ({ schema_version: 1, service: XIN_SERVICE, name: XIN_SERVICE, transport: 'streamable-http', state, active: state === 'ready', authorized: state === 'ready', ...(expectedOwner && expectedOwner === owner()?.key && disconnected.get(expectedOwner) ? { disconnection: { ...disconnected.get(expectedOwner)! } } : {}), ...(proof && proof.owner === expectedOwner && expectedOwner === owner()?.key ? { binding: { ...proof.binding }, permissions: { ...proof.permissions, tools: [...proof.permissions.tools] }, verified_at: proof.verified_at } : {}) })
+  const result = (state: XinConnectionResult['state'], expectedOwner = owner()?.key): XinConnectionResult => ({ schema_version: 1, service: XIN_SERVICE, name: XIN_SERVICE, transport: 'streamable-http', state, active: state === 'ready', authorized: state === 'ready', ...(state !== 'connecting' && expectedOwner === owner()?.key && (ledgerStates.get(expectedOwner ?? '')?.pending.length ?? 0) > 0 ? { authorization_unknown: true as const } : {}), ...(expectedOwner && expectedOwner === owner()?.key && disconnected.get(expectedOwner) ? { disconnection: { ...disconnected.get(expectedOwner)! } } : {}), ...(proof && proof.owner === expectedOwner && expectedOwner === owner()?.key ? { binding: { ...proof.binding }, permissions: { ...proof.permissions, tools: [...proof.permissions.tools] }, verified_at: proof.verified_at } : {}) })
   const serial = <T>(task: () => Promise<T>): Promise<T> => {
     const run = tail.catch(() => {}).then(task); tail = run.then(() => {}, () => {}); return run
   }
@@ -750,6 +785,13 @@ export function createXinConnection(ctx: Context, operations: {
     if (!scope) return result('authorization-required')
     const priorOwner = executionOwner(exec)
     if (exec.agent && priorOwner !== scope.key) return result('unavailable', priorOwner ?? '')
+    const statusEpoch = epoch
+    if (disconnected.has(scope.key) && disconnected.get(scope.key) === null) return result('unavailable', scope.key)
+    try {
+      const saved = await ledger(scope).read()
+      if (statusEpoch !== epoch || owner()?.key !== scope.key || disposed) return result('cancelled', scope.key)
+      if (saved.disconnected) disconnected.set(scope.key, saved.disconnected)
+    } catch { return result('unavailable', scope.key) }
     if (disconnected.has(scope.key)) return result(disconnected.get(scope.key)?.local_forgotten ? 'authorization-required' : 'unavailable')
     if (pending.has(scope.key)) return result('connecting')
     if (verified === scope.key && entry?.key === scope.key && isMcpServerActive(ctx.loader, ctx.tools, entry.id, XIN_SERVICE)) return result('ready')
@@ -764,7 +806,23 @@ export function createXinConnection(ctx: Context, operations: {
       return result(usable ? 'unavailable' : 'authorization-required', scope.key)
     } catch { return result(signal.aborted || owner()?.key !== scope.key ? 'cancelled' : 'unavailable', scope.key) }
   }
-  const ensure = (exec: XinExecution = {}, options: { interactive?: boolean; reauthorize?: boolean } = {}): Promise<XinConnectionResult> => {
+  const ensure = async (exec: XinExecution = {}, options: { interactive?: boolean; reauthorize?: boolean } = {}): Promise<XinConnectionResult> => {
+    changed()
+    const scope = owner(), generation = epoch
+    if (!scope || disposed) return result('authorization-required')
+    const priorOwner = executionOwner(exec)
+    if (exec.agent && priorOwner !== scope.key) return result('unavailable', priorOwner ?? '')
+    if (disconnected.has(scope.key) && disconnected.get(scope.key) === null) return result('unavailable', scope.key)
+    try {
+      const saved = await ledger(scope).read()
+      if (generation !== epoch || owner()?.key !== scope.key || exec.signal?.aborted) return result('cancelled', scope.key)
+      if (saved.disconnected) disconnected.set(scope.key, saved.disconnected)
+      if (saved.disconnected?.local_forgotten && options.interactive !== false) await ledger(scope).reconnect()
+      if (generation !== epoch || owner()?.key !== scope.key || exec.signal?.aborted) return result('cancelled', scope.key)
+      return ensureCurrent(exec, options)
+    } catch { return result('unavailable', scope.key) }
+  }
+  const ensureCurrent = (exec: XinExecution = {}, options: { interactive?: boolean; reauthorize?: boolean } = {}): Promise<XinConnectionResult> => {
     changed()
     const scope = owner()
     if (!scope || disposed) return Promise.resolve(result('authorization-required'))
@@ -788,7 +846,29 @@ export function createXinConnection(ctx: Context, operations: {
     }
     const generation = epoch
     const signal = AbortSignal.any([controller.signal, ...(exec.signal ? [exec.signal] : [])])
-    const lease: OAuthLease = { ref: scope.ref, signal, assertCurrent() {
+    const journal = ledger(scope)
+    let mutationId: string | undefined
+    let mutationSaved = false
+    const cleanupGrant = async (raw: string) => {
+      const state = JSON.parse(raw) as OAuthCredentialState
+      let pendingId: string | undefined
+      try { pendingId = await journal.begin('revocation', state.grant?.id) } catch { /* Still attempt bounded server cleanup. */ }
+      const receipt = await revokeXinGrant(raw)
+      if (receipt.status === 'revoked' && receipt.grant_id) { await journal.revoked(receipt.grant_id); if (pendingId) await journal.committed(pendingId) }
+      else if (!pendingId && !(ledgerStates.get(scope.key)?.pending.length)) throw Error('授权撤销义务无法保存。')
+    }
+    const lease: OAuthLease = { ref: scope.ref, signal,
+      async beginMutation(kind) {
+        const previous = await readOAuthState(ctx, XIN_SERVICE, lease)
+        lease.grant = undefined; mutationSaved = false
+        mutationId = await journal.begin(kind, kind === 'refresh_token' ? previous.grant?.id : undefined)
+      },
+      async receivedGrant(grant) { if (mutationId) await journal.received(mutationId, grant.id) },
+      // Keep the obligation through capability verification, not merely token receipt.
+      async mutationCommitted() { mutationSaved = true },
+      async mutationRejected() { if (mutationId) { await journal.committed(mutationId); mutationId = undefined } },
+      cleanupGrant,
+      assertCurrent() {
       signal.throwIfAborted()
       if (disposed || generation !== epoch || owner()?.key !== scope.key) throw new Error('Xin identity changed')
     } }
@@ -849,6 +929,10 @@ export function createXinConnection(ctx: Context, operations: {
           proof = { ...checked, owner: scope.key, verified_at: new Date().toISOString() }
         } finally { probes.delete(callId) }
         if (!operations.configured()) { await operations.install(); lease.assertCurrent() }
+        const stored = await readOAuthState(ctx, XIN_SERVICE, lease)
+        if (mutationSaved && mutationId) await journal.committed(mutationId)
+        if (stored.grant) await journal.confirmed(stored.grant.id)
+        lease.assertCurrent()
         verified = scope.key
         return scopedResult('ready')
       } catch {
@@ -857,6 +941,15 @@ export function createXinConnection(ctx: Context, operations: {
         // Only the captured owner's key can be restored, never the next account.
         // Serial execution prevents another ensure from racing this rollback.
         if (authorizing) {
+          try {
+            const current = await ctx.credentials.resolve(scope.ref)
+            const beforeTokens = previous ? JSON.parse(previous.value).tokens : undefined
+            const nowTokens = current ? JSON.parse(current.value).tokens : undefined
+            if (nowTokens?.access_token && (nowTokens.access_token !== beforeTokens?.access_token || nowTokens.refresh_token !== beforeTokens?.refresh_token)) await cleanupGrant(current!.value)
+          } catch {
+            disconnected.set(scope.key, { local_stopped: true, local_forgotten: false, remote_revocation: 'unknown' })
+            return scopedResult('unavailable')
+          }
           try { if (previous) await ctx.credentials.set(scope.ref, previous.value); else await ctx.credentials.unset(scope.ref) } catch { return scopedResult('unavailable') }
         }
         return scopedResult(signal.aborted || generation !== epoch || owner()?.key !== scope.key ? 'cancelled' : 'unavailable')
@@ -876,17 +969,27 @@ export function createXinConnection(ctx: Context, operations: {
     const earlier = disconnected.get(scope.key)
     disconnected.set(scope.key, null)
     return serial(async () => {
+      const journal = ledger(scope)
+      let recorded = false
+      try { await journal.disconnect({ local_stopped: true, local_forgotten: false, remote_revocation: 'unknown' }); recorded = true } catch { /* Continue best-effort removal, but never claim a durable clean state. */ }
       let removed = false
       try { await removeEntry(); removed = true } catch { /* The new epoch already blocks local calls. */ }
       let remote: RemoteRevocation = 'unknown'
-      try { remote = await (operations.revoke ?? revokeXinCredential)((await ctx.credentials.resolve(scope.ref))?.value, signal) } catch { /* Forget locally even when revocation is unknown. */ }
+      try {
+        const raw = (await ctx.credentials.resolve(scope.ref))?.value
+        if (operations.revoke) remote = await operations.revoke(raw, signal)
+        else { const receipt = await revokeXinGrant(raw, signal); remote = receipt.status; if (receipt.status === 'revoked' && receipt.grant_id) await journal.revoked(receipt.grant_id) }
+        if ((await journal.read()).pending.length) remote = 'unknown'
+      } catch { /* Forget locally even when revocation is unknown. */ }
       const previous = disconnected.get(scope.key) ?? earlier
       if (remote === 'not-required' && previous) remote = previous.remote_revocation
       let forgotten = false
       // A secret-free native marker also survives a failed file deletion.
       try { await ctx.credentials.set(scope.ref, JSON.stringify({ schema_version: 1 })); forgotten = true } catch { /* Try deletion too. */ }
       try { await ctx.credentials.unset(scope.ref); forgotten = true } catch { /* Never restore the former token. */ }
-      disconnected.set(scope.key, { local_stopped: true, local_forgotten: forgotten, remote_revocation: remote })
+      const receipt = { local_stopped: true as const, local_forgotten: forgotten, remote_revocation: remote }
+      try { await journal.disconnect(receipt) } catch { if (!recorded) receipt.local_forgotten = false; receipt.remote_revocation = 'unknown' }
+      disconnected.set(scope.key, receipt)
       proof = undefined
       return result(owner()?.key !== scope.key ? 'cancelled' : removed && forgotten ? 'authorization-required' : 'unavailable', scope.key)
     })

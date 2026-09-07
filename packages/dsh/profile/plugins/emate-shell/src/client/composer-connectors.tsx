@@ -222,10 +222,11 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
           {xinBusy ? <button type="button" onClick={cancelXin}>取消等待</button> : <button type="button" disabled={!disconnectXin || xin === undefined || xin.state === 'authorization-required' && !xin.binding} onClick={() => runXin('disconnect')}>断开并忘记芯助手</button>}
         </div>
         {xin?.disconnection && <p role={xin.disconnection.local_forgotten && xin.disconnection.remote_revocation !== 'unknown' ? 'status' : 'alert'}>
-          {!xin.disconnection.local_forgotten ? '本机调用已停用，但凭据清理未完成，请重试断开。'
+          {!xin.disconnection.local_forgotten ? '本机调用已停用，但凭据清理未完成。请重试断开，完成前请勿关闭或重启应用。'
             : xin.disconnection.remote_revocation === 'unknown' ? '本机已停用并清除凭据；服务端授权撤销未确认。'
               : xin.disconnection.remote_revocation === 'revoked' ? '本机凭据已清除，服务端授权已撤销。' : '本机已清除连接信息，没有可撤销的凭据。'}
         </p>}
+        {xin?.authorization_unknown && <p role="alert">此前授权的服务端结果尚未确认；重新连接不代表旧授权已撤销。</p>}
         {xinNotice && <p role="status">{xinNotice}</p>}
         {xinError && <p role="alert">{xinError}</p>}
       </section>
