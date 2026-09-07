@@ -61,21 +61,21 @@ async function directory(t) {
   const path = await mkdtemp(join(tmpdir(), 'emate-knowledge-recovery-'))
   t.after(() => rm(path, { recursive: true, force: true })); return path
 }
-async function seed(run, remote, { identity = owner, controls = [], scope = { kind: 'public' }, withScope = true, caller = false, controlVersion = 1 } = {}) {
+async function seed(run, remote, { identity = owner, controls = [], scope = { kind: 'public' }, withScope = true, caller = false, controlVersion = 1, selected = selection } = {}) {
   const compilationId = randomUUID(), operationId = randomUUID(), revisionId = randomUUID()
-  const handle = await run.ctx.agents.create({ sessionId: randomUUID(), agentOptions: selection })
+  const handle = await run.ctx.agents.create({ sessionId: randomUUID(), agentOptions: selected })
   const session = handle.agent.session
   const append = data => session.append('knowledge/workflow', { schema_version: 1, owner: identity, compilationId, ...data }, { ignorable: true })
   if (caller) {
-    append({ kind: 'compilation-request', operationId, selection, request: { scope } })
+    append({ kind: 'compilation-request', operationId, selection: selected, request: { scope } })
     append({ kind: 'compilation-receipt', operationId })
-  } else append({ kind: 'compilation-session', selection, ...(controlVersion ? { controlVersion } : {}), ...(withScope ? { scope } : {}) })
+  } else append({ kind: 'compilation-session', selection: selected, ...(controlVersion ? { controlVersion } : {}), ...(withScope ? { scope } : {}) })
   for (const data of controls) append(data)
   await run.ctx.sessions.flush(session)
   const sessionId = handle.agent.id
   await handle.dispose()
   remote.rows.set(compilationId, { id: compilationId, operation_id: operationId, version: 1, state: 'paused',
-    request: { scope, model: { id: selection.model, reasoning_effort: 'none' }, source_versions: [source], topics: [{ key: 'topic' }] },
+    request: { scope, model: { id: selected.model, reasoning_effort: selected.reasoningEffort ?? 'none' }, source_versions: [source], topics: [{ key: 'topic' }] },
     checkpoint: { session_id: sessionId, child_session_id: null, message_id: null, completed_units: ['topic'], unknown_submission: false }, revision_ids: { topic: revisionId } })
   return { sessionId, compilationId, operationId }
 }
@@ -113,6 +113,16 @@ test('foreign owner, user stop, unknown physical submission and ordinary chat in
   assert.equal(recent.find(item => item.compilation_id === unknown.compilationId).state, 'unknown')
   assert(!recent.some(item => [foreign.compilationId, caller.compilationId].includes(item.compilation_id)))
   assert.equal(remote.calls.length, 0); assert.equal(run.ctx.agents.list().length, 0)
+})
+
+test('recovery retains the native max reasoning choice without a second effort catalog', async t => {
+  const path = await directory(t), remote = backend(), run = await runtime(t, path, remote)
+  const saved = await seed(run, remote, { selected: { ...selection, reasoningEffort: 'max' } })
+  assert.equal((await run.recovery.scan()).recovered, 1)
+  await waitJobs(run)
+  assert.equal(remote.rows.get(saved.compilationId).state, 'committed')
+  assert.equal(remote.rows.get(saved.compilationId).request.model.reasoning_effort, 'max')
+  assert.equal(run.adapter.requests, 0)
 })
 
 test('a canonical explicit resume overrides user stop; server unknown still blocks model/job launch', async t => {

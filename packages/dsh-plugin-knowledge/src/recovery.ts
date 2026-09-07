@@ -19,7 +19,7 @@ function scopeOf(value: any): Scope | undefined {
 }
 function selectionOf(value: any): Selection | undefined {
   if (typeof value?.provider !== 'string' || !value.provider || value.provider.length > 128 || typeof value?.model !== 'string' || !value.model || value.model.length > 128
-    || value.reasoningEffort !== undefined && !['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value.reasoningEffort)) return undefined
+    || value.reasoningEffort !== undefined && (typeof value.reasoningEffort !== 'string' || !value.reasoningEffort || value.reasoningEffort.length > 32)) return undefined
   return { provider: value.provider, model: value.model, ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort }) }
 }
 /** Only physical records can establish a local coordinator, stop intent or model outcome. */
