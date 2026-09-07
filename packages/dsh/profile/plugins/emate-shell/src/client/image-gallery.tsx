@@ -997,8 +997,9 @@ function FileTerminal({ paths, openFile, openMenu }: {
   readonly openFile: (path: string) => void
   readonly openMenu: (target: MenuTarget, source: HTMLElement | { clientX: number; clientY: number }) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
   if (paths.length === 0) return null
-  const shown = paths.slice(0, 6)
+  const shown = expanded ? paths : paths.slice(0, 6)
   const hidden = paths.length - shown.length
   return <section className={css.files} aria-label="产物文件">
     {shown.map((path, index) => {
@@ -1020,8 +1021,8 @@ function FileTerminal({ paths, openFile, openMenu }: {
         ><IconEllipsisOutline16 /></button>
       </div>
     })}
-    {hidden > 0 && <button type="button" className={css.moreFiles} onClick={() => { openFile('.') }}>
-      其余 {hidden} 项，在文件夹中查看
+    {hidden > 0 && <button type="button" className={css.moreFiles} onClick={() => { setExpanded(true) }}>
+      展开其余 {hidden} 项文件
     </button>}
   </section>
 }

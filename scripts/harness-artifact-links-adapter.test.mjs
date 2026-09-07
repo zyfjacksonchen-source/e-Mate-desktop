@@ -227,3 +227,54 @@ test('Vite consumes the native source adapter and the emitted browser library op
     }
   }
 })
+
+test('native deliverables adopts only successful Office receipts explicitly named by latest closing prose', async () => {
+  const { adaptHarnessArtifactDeliverablesSource } = await import('./harness-artifact-links-adapter.mjs')
+  const nativeSource = await readFile(join(harness, 'packages/client/ui-deliverables/src/client/turn-deliverables.ts'), 'utf8')
+  const adapted = adaptHarnessArtifactDeliverablesSource(nativeSource, true)
+  const source = adapted.replace(/^import[\s\S]*?from '[^']+'\n/gmu, '').replace(/declare module [\s\S]*?\n\}\n/u, '')
+  const code = stripTypeScriptTypes(source).replace(/export /gu, '')
+  const definition = new Function('isAppendSurfaceEvent', code + '\nreturn deliverablesDefinition')((event) => event.surfaceOp !== 'replace')
+  assert.throws(() => adaptHarnessArtifactDeliverablesSource(adapted, true), /expected one/)
+  const library = await readFile(join(harness, 'packages/client/ui-deliverables/lib/client.js'), 'utf8')
+  assert.ok(adaptHarnessArtifactDeliverablesSource(library).includes('emateOfficeDeliverables'))
+  let seq = 1
+  const start = { type: 'turn/start', seq: seq++, data: { turn: 3 } }
+  let state = definition.start({}, { event: start })
+  function step(event, view) { event.seq = seq++; event.data.turn = 3; const match = definition.match(event); if (match) state = definition.update({ state }, { event, view }) }
+  function receipt(id, name, path, operation = 'read', extra = {}) {
+    step({ type: 'tool/call', data: { callId: id, name } }, { for: 'call', view: { card: 'generic', kind: 'edit', locations: [{ path: 'wrong-requested-name.pptx' }] } })
+    step({ type: 'tool/result', data: { message: { source: { callId: id }, content: [{ type: 'tool-result', isError: false }] }, meta: { operation, format: 'pptx', job_id: 'emate-office-7', bytes: 1703973, relative_path: path, ...extra } } })
+  }
+  function closing(text) { step({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }) }
+  const paths = () => definition.buildLocationData({ state }, 'turn').value.produced.map(row => row.path)
+  receipt('intermediate', 'editor', 'ignored')
+  const real = 'emate_red_intro_20260908/exports/e-Mate介绍_红色活力风_5页.pptx'
+  receipt('read', 'office_read', real)
+  assert.ok(!paths().includes(real))
+  closing('交付：`' + real + '`')
+  assert.equal(paths()[0], real)
+  const fileMentions = vocabulary.producedFileMentions(paths(), () => {}, path => path)
+  const html = renderToStaticMarkup(jsx(MarkdownText, { text: '`' + real + '`', fileMentions }))
+  assert.match(html, /<button/u)
+  assert.ok(html.includes('e-Mate介绍_红色活力风_5页.pptx'))
+  assert.ok(!paths().includes('ignored'))
+  closing('最终正文不再引用文件')
+  assert.ok(!paths().includes(real))
+  closing('```bash\n`' + real + '`\n```')
+  assert.ok(!paths().includes(real))
+  receipt('write', 'office_write', '.e-mate/office/结果-2.pptx', 'write')
+  assert.ok(paths().includes('.e-mate/office/结果-2.pptx'))
+  for (const [id, path, extra] of [['escape', '../secret.pptx', {}], ['wrongformat', 'out.pptx', { format: 'pdf' }], ['badsize', 'bad.pptx', { bytes: 0 }]]) {
+    receipt(id, 'office_read', path, 'read', extra); closing('`' + path + '`'); assert.ok(!paths().includes(path))
+  }
+  receipt('fake-tool', 'bash', 'unverified.pptx'); closing('`unverified.pptx`')
+  assert.ok(!paths().includes('unverified.pptx'))
+  step({ type: 'tool/call', data: { callId: 'failed', name: 'office_read' } })
+  step({ type: 'tool/result', data: { message: { source: { callId: 'failed' }, content: [{ type: 'tool-result', isError: true }] }, meta: { operation: 'read', format: 'pptx', job_id: 'emate-office-8', bytes: 20, relative_path: 'failed.pptx' } } })
+  closing('`failed.pptx`'); assert.ok(!paths().includes('failed.pptx'))
+  receipt('png', 'office_write', '.e-mate/office/page.png', 'write', { format: 'png' })
+  assert.ok(paths().includes('.e-mate/office/page.png'))
+  const before = paths(); const event = { type: 'assistant/message', surfaceOp: 'replace', data: { turn: 3 } }
+  assert.equal(definition.match(event), null); assert.deepEqual(paths(), before)
+})

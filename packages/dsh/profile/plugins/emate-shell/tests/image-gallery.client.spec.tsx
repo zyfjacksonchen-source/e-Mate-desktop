@@ -1017,7 +1017,11 @@ describe('completed artifact terminal', () => {
     const view = render(<ArtifactTerminal {...terminalProps([], { callIds: [], paths }) as never} />)
     expect(screen.getAllByRole('button', { name: /^打开 /u })).toHaveLength(Math.min(count, 6))
     expect(view.container.textContent).not.toContain('/work')
-    expect(screen.queryByRole('button', { name: /其余/u }) === null).toBe(count <= 6)
+    expect(screen.queryByRole('button', { name: /展开其余/u }) === null).toBe(count <= 6)
+    if (count > 6) {
+      fireEvent.click(screen.getByRole('button', { name: /展开其余/u }))
+      expect(screen.getAllByRole('button', { name: /^打开 /u })).toHaveLength(count)
+    }
   })
 
   it.each([
@@ -1076,7 +1080,7 @@ describe('completed artifact terminal', () => {
     const props = terminalProps([], { callIds: [], paths })
     const view = render(<ArtifactTerminal {...props as never} />)
     expect(screen.getAllByText('PPTX')).toHaveLength(6)
-    expect(screen.getByRole('button', { name: '其余 1 项，在文件夹中查看' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '展开其余 1 项文件' })).toBeTruthy()
     expect(view.container.textContent).not.toContain('/work')
     fireEvent.click(screen.getByRole('button', { name: /打开方式：很长的中文文件名-0/u }))
     expect(screen.getAllByRole('menu')).toHaveLength(1)

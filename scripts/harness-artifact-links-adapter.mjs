@@ -84,3 +84,95 @@ export function artifactLinksVitePlugin(rendererPath) {
     },
   }
 }
+
+export const ARTIFACT_DELIVERABLES_PACKAGE = '@deepseek-ai/dsh-client-ui-deliverables'
+export const ARTIFACT_DELIVERABLES_SOURCE_PATH = 'packages/client/ui-deliverables/src/client/turn-deliverables.ts'
+
+// Extend the native Turn accumulator with persisted, successful Office receipts.
+// A read proves existence, not creation: it joins the file vocabulary only when
+// the latest assistant prose explicitly names that exact verified path.
+function emateOfficeDeliverables(native, isAppend) {
+  const valid = (value, operation) => {
+    if (!value || value.operation !== operation || !['docx', 'xlsx', 'pptx', 'pdf', ...(operation === 'write' ? ['png'] : [])].includes(value.format)
+      || typeof value.job_id !== 'string' || !value.job_id.startsWith('emate-office-')
+      || !Number.isSafeInteger(value.bytes) || value.bytes < 1 || value.bytes > 32 * 1024 * 1024) return undefined
+    const path = value.relative_path
+    if (typeof path !== 'string' || path.length > 8192 || path !== path.trim() || path !== path.normalize('NFC')
+      || /[\\:%?#\u0000-\u001f\u007f]/u.test(path) || path.split('/').some(part => !part || part === '.' || part === '..')
+      || !path.toLowerCase().endsWith('.' + value.format)) return undefined
+    return path
+  }
+  const references = (message, candidates) => {
+    const text = (message?.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n')
+    if (text.length > 512 * 1024) return []
+    const prose = text.replace(/(^|\n)[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]*\2[^\n]*(?=\n|$)|$)/gu, '$1')
+    const tokens = new Set([...prose.matchAll(/`([^`\n]+)`/gu)].map(match => match[1]))
+    for (const match of prose.matchAll(/\]\(([^\s)]+)\)/gu)) { try { tokens.add(decodeURIComponent(match[1])) } catch {} }
+    return candidates.filter(item => tokens.has(item.path))
+  }
+  return {
+    ...native,
+    match(event) {
+      if (event.type === 'assistant/message' && isAppend(event)) return { id: String(event.data.turn), role: 'update' }
+      return native.match(event)
+    },
+    start(context, match) { return { ...native.start(context, match), officeCalls: new Map(), officeReads: [], officeFinal: [] } },
+    update(context, match) {
+      const { event } = match
+      const state = context.state
+      if (event.type === 'assistant/message') return { ...state, officeFinal: references(event.data.message, [...state.officeReads, ...state.produced]) }
+      if (event.type === 'tool/call') {
+        const next = native.update(context, match)
+        const officeCalls = new Map(state.officeCalls)
+        if (event.data.name === 'office_read' || event.data.name === 'office_write') officeCalls.set(String(event.data.callId), event.data.name)
+        return { ...next, officeCalls }
+      }
+      if (event.type === 'tool/result') {
+        const tool = state.officeCalls.get(String(event.data.message.source.callId))
+        if (tool) {
+          const result = event.data.message.content[0]
+          if (result?.type !== 'tool-result' || result.isError !== false) return state
+          const operation = tool === 'office_write' ? 'write' : 'read'
+          const path = valid(event.data.meta, operation)
+          if (!path) return state
+          const item = { seq: event.seq, path }
+          return operation === 'write' ? { ...state, produced: [...state.produced, item] }
+            : { ...state, officeReads: [...state.officeReads, item] }
+        }
+      }
+      return native.update(context, match)
+    },
+    buildLocationData(context, scope) {
+      const result = native.buildLocationData(context, scope)
+      if (!result || !context.state) return result
+      const selected = context.state.officeFinal ?? []
+      const preferred = new Set(selected.map(item => item.path))
+      return { ...result, value: { ...result.value, produced: [...selected, ...result.value.produced.filter(item => !preferred.has(item.path))] } }
+    },
+  }
+}
+
+export function adaptHarnessArtifactDeliverablesSource(source, sourceModule = false) {
+  if (sourceModule) {
+    source = replaceOnce(source, 'export const deliverablesDefinition: ConversationNodeDefinition<DeliverablesState> = {',
+      `${emateOfficeDeliverables.toString()}\nexport const deliverablesDefinition: ConversationNodeDefinition<DeliverablesState> = emateOfficeDeliverables({`, 'deliverables/source-definition')
+    return replaceOnce(source, "      value: { produced: context.state.produced },\n    },\n}", "      value: { produced: context.state.produced },\n    },\n}, isAppendSurfaceEvent)", 'deliverables/source-close')
+  }
+  source = replaceOnce(source, 'const deliverablesDefinition = {', `${emateOfficeDeliverables.toString()}\nconst deliverablesDefinition = emateOfficeDeliverables({`, 'deliverables/library-definition')
+  return replaceOnce(source, '\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t};', '\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t}, _deepseek_ai_dsh_client_runtime_client.isAppendSurfaceEvent);', 'deliverables/library-close')
+}
+
+export function artifactDeliverablesVitePlugin(sourcePath) {
+  const target = sourcePath.replaceAll('\\', '/')
+  let seen = false
+  return {
+    name: 'e-mate-native-office-deliverables', apply: 'build', enforce: 'pre',
+    buildStart() { seen = false },
+    transform(source, id) {
+      if (id.replaceAll('\\', '/') !== target) return null
+      seen = true
+      return { code: adaptHarnessArtifactDeliverablesSource(source, true), map: null }
+    },
+    generateBundle() { if (!seen) throw Error('Native deliverables source was not consumed by Vite; Office receipt adaptation is missing') },
+  }
+}
