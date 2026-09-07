@@ -3,6 +3,11 @@ import { readFile } from 'node:fs/promises'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import { createKnowledgeWorkflow } from './workflow.ts'
 import { resolveKnowledgeSelection } from './model-selection.ts'
+import { registerKnowledgeAgentTools } from './agent-tools.ts'
+import { createKnowledgeRecovery } from './recovery.ts'
+import { createKnowledgeUiOperations } from './ui-operations.ts'
+import { createKnowledgeUiRead } from './ui-read.ts'
+import { ownerOf } from './imports.ts'
 import { API_ROOT, CHANNEL, GRAPH_ASSET, HASH, SOURCE_ID, knowledgeFailure } from './contract.ts'
 export const name = 'emate-knowledge'
 export const inject = ['emateIdentity', 'connection', 'webServer', 'timer', 'agents', 'sessions', 'sessionPersistence', 'subagents', 'jobs', 'goals', 'tools', 'emateXinKnowledge', 'apiProxy', 'agentDefaultModel', 'emateModelPolicy', 'llm']
@@ -21,6 +26,7 @@ const allowed: Record<string, { method: string; path: string; keys: string[] }> 
   original: { method: 'GET', path: '/sources', keys: ['source_id', 'version', 'scope'] },
   revisions: { method: 'GET', path: '/revisions', keys: ['question', 'limit', 'corpus_revision', 'scope'] },
   revision: { method: 'GET', path: '/revisions', keys: ['revision_id'] },
+  import: { method: 'GET', path: '/imports', keys: ['operation_id'] },
 }
 function reject(message: string, code = 'invalid-request'): never { throw Object.assign(Error(message), { code }) }
 export function knowledgeTarget(endpoint: string, payload: any) {
@@ -29,6 +35,7 @@ export function knowledgeTarget(endpoint: string, payload: any) {
     || Object.keys(payload).some(key => !operation.keys.includes(key))) reject('知识请求字段无效。')
   const url = new URL(API_ROOT + operation.path)
   const input = { ...payload }
+  if (endpoint === 'import' && (typeof input.operation_id !== 'string' || !/^[A-Za-z0-9_-]{16,80}$/u.test(input.operation_id))) reject('知识导入操作编号无效。')
   if (input.scope !== undefined && !['public', 'uploader-private'].includes(input.scope)) reject('知识范围无效。')
   if (endpoint === 'revisions') input.scope ??= 'public'
   const field = endpoint === 'revision' ? 'revision_id' : endpoint === 'node' ? 'node_id' : endpoint === 'evidence' ? 'query_id' : ['source', 'original'].includes(endpoint) ? 'source_id' : null
@@ -123,23 +130,28 @@ export function createKnowledgeHost(identity: any, schedule = (callback: () => v
         const header = response.headers.get('content-disposition') ?? ''
         const disposition = /^attachment; filename\*=UTF-8''[A-Za-z0-9%._~!$&'()*+,;=:@-]{1,1600}$/u.test(header) ? header : 'attachment'
         downloads.set(id, { owner: key!, bytes: content, disposition, expires: Date.now() + 60000, cancel: schedule(() => downloads.delete(id), 60000) })
-        return { scope_key: key, result: { url: DOWNLOAD_ROOT + id, sha256: expected, bytes: content.length } }
+        return { scope_key: key!, result: { url: DOWNLOAD_ROOT + id, sha256: expected, bytes: content.length } }
       }
       if (response.headers.get('content-type')?.split(';', 1)[0] !== 'application/json') reject('知识服务响应格式无效。', 'invalid-response')
       let result: any
       try { result = JSON.parse(content.toString('utf8')) } catch { reject('知识服务响应无效。', 'invalid-response') }
       const expectedScope = endpoint === 'revision' ? 'enterprise-subject' : (payload as any).scope ?? 'public'
-      if (result?.schema_version !== 1 || result.scope?.kind !== expectedScope || endpoint !== 'revision' && !HASH.test(result.corpus_revision)) reject('知识服务返回了不匹配的资料范围。', 'invalid-response')
+      if (endpoint === 'import') {
+        if (result?.schema_version !== 1 || !['public', 'uploader-private'].includes(result.scope?.kind)
+          || result.operation_id !== (payload as any).operation_id || !SOURCE_ID.test(result.import_id ?? '') || !HASH.test(result.request_hash ?? '')
+          || typeof result.status !== 'string' || result.source !== null && (!SOURCE_ID.test(result.source?.id ?? '') || !HASH.test(result.source?.file_hash ?? ''))) reject('知识导入回执无效。', 'invalid-response')
+      } else if (result?.schema_version !== 1 || result.scope?.kind !== expectedScope || endpoint !== 'revision' && !HASH.test(result.corpus_revision)) reject('知识服务返回了不匹配的资料范围。', 'invalid-response')
       if (endpoint === 'revision' && (result.revision_id !== (payload as any).revision_id || typeof result.markdown !== 'string' || !Array.isArray(result.source_versions))) reject('知识修订身份无效。', 'invalid-response')
-      return { scope_key: key, result }
+      return { scope_key: key!, result }
     },
   }
 }
 export function apply(ctx: any): void {
   const host = createKnowledgeHost(ctx.get('emateIdentity'), (callback, delay) => ctx.timeout(callback, delay))
+  let uiOperations: ReturnType<typeof createKnowledgeUiOperations> | undefined
   const xinOperations = new WeakMap<object, { call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> }>()
   const workflow = createKnowledgeWorkflow(ctx, { installModelSelection,
-    resolveSelection: exec => resolveKnowledgeSelection(ctx, exec),
+    resolveSelection: exec => resolveKnowledgeSelection(ctx, exec, exec?.signal, exec?.agent ? uiOperations?.selectionFor(exec.agent) : undefined),
     xinKnowledgeCall(name, args, exec, signal) {
       let operation = xinOperations.get(exec)
       if (!operation) {
@@ -152,11 +164,47 @@ export function apply(ctx: any): void {
     },
   })
   ctx.provide('emateKnowledgeWorkflow', workflow)
+  const uiRead = createKnowledgeUiRead({ host, workflow, xinCapture(exec: any) {
+    const scope_key = ownerOf(ctx.get('emateIdentity'))
+    if (!scope_key) reject('请先完成企业登录。', 'unauthorized')
+    const operation = ctx.emateXinKnowledge.capture(exec?.rootCallId ? exec : { signal: exec?.signal })
+    return { scope_key: scope_key!, call: operation.call.bind(operation) }
+  } })
+  uiOperations = createKnowledgeUiOperations(ctx, { workflow, read: uiRead, resolveSelection: exec => resolveKnowledgeSelection(ctx, exec) })
+  const ui = uiOperations
+  ctx.provide('emateKnowledgeUi', ui)
   ctx.provide('emateKnowledgeSelection', (exec: any) => resolveKnowledgeSelection(ctx, exec))
-  ctx.on('credentials/updated', (ref: string) => { if (String(ref) === 'E_MATE_ENTERPRISE_SESSION') { host.changed(); workflow.changed(); ctx.timeout(() => { host.changed(); workflow.changed() }, 0) } })
-  ctx.effect(() => ctx.connection.rpc.handle(CHANNEL, (endpoint: string, payload: unknown, signal: AbortSignal) => knowledgeRpc(host, endpoint, payload, signal), { authority: 'loopback' }), 'emate.knowledge: account-bound native RPC')
+  ctx.effect(() => registerKnowledgeAgentTools(ctx, { workflow, read: (endpoint, payload, signal) => host.call(endpoint, payload, signal) }), 'emate.knowledge: native Agent entry')
+  const recovery = createKnowledgeRecovery(ctx, { workflow })
+  let recoveryTimer: (() => void) | undefined
+  let recovering = false, recoveryRequested = false
+  let stopped = false
+  const scheduleRecovery = () => {
+    if (stopped || recoveryTimer) return
+    if (recovering) { recoveryRequested = true; return }
+    recoveryTimer = ctx.timeout(() => {
+      recoveryTimer = undefined
+      recovering = true
+      void ui.recover().then(async imports => {
+        const result = await recovery.scan()
+        if (result.has_more || imports.has_more) recoveryRequested = true
+      }).catch(() => { /* Preserve physical checkpoints; later identity/Job events retry recovery. */ }).finally(() => {
+        recovering = false
+        if (recoveryRequested) { recoveryRequested = false; scheduleRecovery() }
+      })
+    }, 250)
+  }
+  ctx.provide('emateKnowledgeRecovery', recovery)
+  ctx.effect(() => ctx.jobs.onJobDone((snapshot: any) => { if (['knowledge', 'knowledge-import'].includes(snapshot.kind)) scheduleRecovery() }), 'emate.knowledge: continue native recovery after Job completion')
+  const changed = () => { host.changed(); workflow.changed(); recovery.changed(); ui.changed() }
+  ctx.on('credentials/updated', (ref: string) => { if (String(ref) === 'E_MATE_ENTERPRISE_SESSION') { changed(); ctx.timeout(() => { changed(); scheduleRecovery() }, 0) } })
+  ctx.effect(() => ctx.connection.rpc.handle(CHANNEL, (endpoint: string, payload: unknown, signal: AbortSignal) => knowledgeRpc(typeof endpoint === 'string' && endpoint.startsWith('ui.import.') ? ui : host, endpoint, payload, signal), { authority: 'loopback' }), 'emate.knowledge: account-bound native RPC')
   ctx.effect(() => () => host.dispose(), 'emate.knowledge: release pending reads')
-  ctx.effect(() => () => workflow.dispose(), 'emate.knowledge: pause native compilation and preserve checkpoints')
+  ctx.effect(() => {
+    // Native identity restores persisted access asynchronously on startup.
+    void Promise.resolve().then(() => ctx.emateIdentity.state()).then(scheduleRecovery, () => {})
+    return async () => { stopped = true; recoveryTimer?.(); await ui.dispose(); await recovery.dispose(); await workflow.dispose() }
+  }, 'emate.knowledge: bounded local startup recovery')
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: GRAPH_ASSET, async handler(req: any, res: any) {
     if (req.method !== 'GET') { res.writeHead(405); res.end(); return }
     try { const body = await readFile(new URL('./assets/graph.js', import.meta.url)); res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin' }); res.end(body) }
@@ -170,7 +218,7 @@ export function apply(ctx: any): void {
   } }), 'emate.knowledge: verified one-time original download')
 }
 
-export async function knowledgeRpc(host: ReturnType<typeof createKnowledgeHost>, endpoint: string, payload: unknown, signal?: AbortSignal) {
+export async function knowledgeRpc(host: Pick<ReturnType<typeof createKnowledgeHost>, 'call'>, endpoint: string, payload: unknown, signal?: AbortSignal) {
   try { return { ok: true, value: { schema_version: 1, status: 'success', value: await host.call(endpoint, payload, signal) } } }
   catch (error) { return { ok: true, value: knowledgeFailure(error) } }
 }

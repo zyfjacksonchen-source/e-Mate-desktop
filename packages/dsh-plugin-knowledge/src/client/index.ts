@@ -1,7 +1,7 @@
 import { IconDataOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CHANNEL, GRAPH_ASSET, GRAPH_MODULE, parseKnowledgeRpc } from '../contract.ts'
 import { KnowledgeEntry, KnowledgePage } from './page.tsx'
-export const inject = ['slots', 'connection', 'modules']
+export const inject = ['slots', 'connection', 'modules', 'workspaces', 'sessions']
 export function apply(ctx: any): void {
   let loading: Promise<any> | undefined
   const loadGraph = () => {
@@ -12,6 +12,13 @@ export function apply(ctx: any): void {
     name: 'shell.overlay', id: 'e-mate-knowledge', order: -9,
     inject: () => ({
       loadGraph,
+      pickDirectory: async (signal?: AbortSignal) => {
+        signal?.throwIfAborted()
+        const path = await ctx.workspaces.pickDirectory()
+        signal?.throwIfAborted()
+        return path
+      },
+      openTask: (sessionId: string) => ctx.sessions.open(sessionId),
       callKnowledge: async (endpoint: string, payload: Record<string, unknown>, signal?: AbortSignal) => {
         const response = await ctx.connection.rpc.call(CHANNEL, endpoint, payload, signal)
         return parseKnowledgeRpc(response)

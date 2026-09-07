@@ -681,6 +681,7 @@ export interface XinConnectionResult {
 type XinExecution = Partial<Parameters<Context['tools']['execute']>[0]> & { token?: Parameters<Context['tools']['execute']>[0]['parent'] }
 
 const KNOWLEDGE_METHODS = new Set([
+  'query_knowledge_projects', 'inspect_source',
   'prepare_source_upload', 'find_imported_source', 'create_knowledge_compilation',
   'find_knowledge_compilation', 'get_knowledge_compilation', 'claim_knowledge_compilation',
   'checkpoint_knowledge_compilation', 'prepare_knowledge_revision', 'commit_knowledge_compilation',

@@ -7,6 +7,20 @@ const result = { schema_version: 1, scope: { kind: 'public' }, corpus_revision: 
 const principal = { tenantId: 'enterprise', userId: 'user-1' }
 const reply = value => Response.json(value)
 
+test('import lookup validates the exact operation receipt without inventing a corpus revision', async () => {
+  const operation_id = 'a'.repeat(64)
+  const receipt = { schema_version: 1, scope: { kind: 'uploader-private' }, operation_id,
+    import_id: '11111111-1111-4111-8111-111111111111', request_hash: 'b'.repeat(64), status: 'awaiting_content', source: null }
+  const host = createKnowledgeHost({ localAccountPrincipal: () => principal, async request(url) {
+    assert.equal(url.href, API_ROOT + '/imports?operation_id=' + operation_id); return reply(receipt)
+  } })
+  assert.equal((await host.call('import', { operation_id })).result.status, 'awaiting_content')
+  receipt.operation_id = 'c'.repeat(64)
+  await assert.rejects(host.call('import', { operation_id }), { code: 'invalid-response' })
+  for (const payload of [{}, { operation_id, scope: 'public' }, { operation_id: '../another' }]) assert.throws(() => knowledgeTarget('import', payload))
+  host.dispose()
+})
+
 test('only fixed readonly operations and bounded targets are accepted, never renderer credentials', () => {
   const target = knowledgeTarget('graph', { limit: 500, depth: 2 })
   assert.equal(target.url.href, API_ROOT + '/graph?limit=500&depth=2')

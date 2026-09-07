@@ -27,3 +27,15 @@ test('unroutable selections and cancellation never reach model resolution', asyn
   const cancel = new AbortController(); cancel.abort()
   await assert.rejects(resolveKnowledgeSelection({}, undefined, cancel.signal), { name: 'AbortError' })
 })
+
+test('resumed UI imports retain their frozen native selection but recheck current model policy', async () => {
+  const selected = { provider: 'frozen-provider', model: 'gpt-6-astra', reasoningEffort: 'medium' }
+  let denied = false
+  const ctx = {
+    emateModelPolicy: { async assertModel(model) { assert.equal(model, selected.model); if (denied) throw Error('disabled') } },
+    llm: { async resolveCallConfig(value) { assert.deepEqual(value, selected); return value } },
+  }
+  assert.deepEqual(await resolveKnowledgeSelection(ctx, { agent: { id: 'ui-import' } }, undefined, selected), selected)
+  denied = true
+  await assert.rejects(resolveKnowledgeSelection(ctx, { agent: { id: 'ui-import' } }, undefined, selected), /disabled/)
+})
