@@ -61,6 +61,13 @@ function xmlEscape(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;')
 }
 
+function isWebLink(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname.length > 0
+  } catch { return false }
+}
+
 export const CALC_PROFILE = `<?xml version="1.0" encoding="UTF-8"?>
 <oor:items xmlns:oor="http://openoffice.org/2001/registry">
  <item oor:path="/org.openoffice.Office.Calc/Formula/Load"><prop oor:name="OOXMLRecalcMode" oor:op="fuse"><value>0</value></prop></item>
@@ -122,11 +129,17 @@ export async function validateCalcWorkbook(bytes: Uint8Array, signal: AbortSigna
       }
       if (local === 'Relationship') {
         const target = element.getAttribute('Target') ?? ''
-        if (element.getAttribute('TargetMode')?.toLowerCase() === 'external' || /^(?:[a-z][a-z\d+.-]*:|\/\/|\\)/iu.test(target) || /externalLink|oleObject|vbaProject|attachedTemplate/iu.test(element.getAttribute('Type') ?? '')) throw new Error('Calc does not support external relationships')
+        const type = element.getAttribute('Type') ?? ''
+        const webHyperlink = /^(?:http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships|http:\/\/purl\.oclc\.org\/ooxml\/officeDocument\/relationships)\/hyperlink$/u.test(type) && isWebLink(target)
+        if (!webHyperlink && (element.getAttribute('TargetMode')?.toLowerCase() === 'external' || /^(?:[a-z][a-z\d+.-]*:|\/\/|\\)/iu.test(target) || /externalLink|oleObject|vbaProject|attachedTemplate/iu.test(type))) throw new Error('Calc does not support active external relationships')
       }
       if (local === 'f' || local === 'definedName') {
         const formula = element.textContent ?? ''
-        if (/(?:\b(?:WEBSERVICE|RTD|DDE|CALL|EXEC|REGISTER(?:\.ID)?|SQLREQUEST|IMAGE|HYPERLINK|STOCKHISTORY|CUBE\w*)\s*\(|\[[^\]]*\][^!]*!|\|[^!]*!)/iu.test(formula)) throw new Error('Calc does not support active or external formulas')
+        if (/(?:\b(?:WEBSERVICE|RTD|DDE|CALL|EXEC|REGISTER(?:\.ID)?|SQLREQUEST|IMAGE|STOCKHISTORY|CUBE\w*)\s*\(|\[[^\]]*\][^!]*!|\|[^!]*!)/iu.test(formula)) throw new Error('Calc does not support active or external formulas')
+        for (const link of formula.matchAll(/\bHYPERLINK\s*\(/giu)) {
+          const argument = /^\s*"((?:[^"]|"")*)"\s*[,;)]/u.exec(formula.slice(link.index + link[0].length))
+          if (!argument || !isWebLink(argument[1]!.replaceAll('""', '"'))) throw new Error('Calc supports HYPERLINK formulas with literal HTTP or HTTPS destinations')
+        }
       }
     }
   }
@@ -148,6 +161,7 @@ export function createCalcRuntime<Target>(services: CalcServices<Target>, paths:
       if (bytes.byteLength > MAX_BYTES) throw new Error('Calc input exceeds 32 MiB')
       await validateCalcWorkbook(bytes, signal)
       const temporary = await mkdtemp(join(tmpdir(), 'emate-calc-'))
+      let mayRemoveTemporary = true
       try {
         const profile = join(temporary, 'profile')
         const input = join(temporary, 'input.xlsx')
@@ -164,15 +178,21 @@ export function createCalcRuntime<Target>(services: CalcServices<Target>, paths:
           // Native file-effect confinement is not a network or read-isolation guarantee.
           const confined = services.sandbox.confine(argv, { mode: 'workspace-write', workspaceRoot: temporary })
           const handle = services.subprocess.spawn({ argv: confined.argv, cwd: temporary, env: { FONTCONFIG_FILE: fonts, FONTCONFIG_PATH: temporary, XDG_CACHE_HOME: join(temporary, 'font-cache') }, signal, graceMs: 3000, stdio: { stdin: 'ignore', stdout: { maxBytes: 64 * 1024 }, stderr: { maxBytes: 64 * 1024 } } })
+          mayRemoveTemporary = false
           try {
             const result = await handle.done
             signal.throwIfAborted()
             if (result.exitCode !== 0) throw new Error(`Calc conversion failed (exit ${result.exitCode})`)
           } finally {
             // Also waits for descendants before the private profile is removed.
-            handle.terminate()
-            await handle.done.catch(() => {})
-            await handle.waitForExit()
+            try {
+              handle.terminate()
+              await handle.done.catch(() => {})
+              mayRemoveTemporary = await handle.waitForExit() === true
+            } catch (cause) {
+              throw new Error(`Calc process tree exit could not be verified; retained ${temporary}`, { cause })
+            }
+            if (!mayRemoveTemporary) throw new Error(`Calc process tree has not exited; retained ${temporary}`)
           }
         }
         const readOutput = async (file: string) => {
@@ -192,7 +212,7 @@ export function createCalcRuntime<Target>(services: CalcServices<Target>, paths:
         signal.throwIfAborted()
         return { bytes: pdf, format: 'pdf', engine: 'LibreOffice Calc' }
       } finally {
-        await rm(temporary, { recursive: true, force: true })
+        if (mayRemoveTemporary) await rm(temporary, { recursive: true, force: true })
       }
     },
   }

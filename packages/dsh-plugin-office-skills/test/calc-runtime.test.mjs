@@ -44,11 +44,11 @@ async function fixture(t, behavior='success') {
    if(behavior==='cancel'){spec.signal.addEventListener('abort',()=>resolve({exitCode:null}),{once:true}); controller.abort(new Error('user cancelled'));return}
    const destination=spec.argv[spec.argv.indexOf('--outdir')+1]
    Promise.resolve().then(async()=>{assert.equal(await readFile(join(spec.cwd,'profile/user/registrymodifications.xcu'),'utf8'),CALC_PROFILE)
-    if(behavior==='success')await writeFile(join(destination,'input.xlsx'),original)
+    if(['success','wait-false','wait-reject'].includes(behavior))await writeFile(join(destination,'input.xlsx'),original)
     resolve({exitCode:behavior==='error'?1:0})
    }).catch(reject)
   })
-  return {done,terminate(){events.push('terminate');finish({exitCode:null})},async waitForExit(){events.push('exit');return true},collected:{}}
+  return {done,terminate(){events.push('terminate');finish({exitCode:null})},async waitForExit(){events.push('exit');if(behavior==='wait-reject')throw new Error('tree observation failed');return behavior!=='wait-false'},collected:{}}
  }}}
  return {runtime:createCalcRuntime(services,{executable,fontDirectory}),request:{sourcePath:'source.xlsx',workspaceRoot:root,output:'xlsx',signal:controller.signal},requests,events,original,services}
 }
@@ -81,4 +81,26 @@ test('confinement denial never retries without the native sandbox',async t=>{
  f.services.sandbox.confine=()=>{throw new Error('sandbox unavailable')}
  await assert.rejects(f.runtime.convert(f.request),/sandbox unavailable/)
  assert.equal(f.requests.length,0)
+})
+
+
+for(const behavior of ['wait-false','wait-reject'])test(`${behavior} retains the profile and fails instead of delivering an artifact`,async t=>{
+ const f=await fixture(t,behavior)
+ await assert.rejects(f.runtime.convert(f.request),/tree.*retained/)
+ const directory=f.requests[0].cwd
+ t.after(()=>rm(directory,{recursive:true,force:true}))
+ assert.ok((await lstat(join(directory,'profile/user/registrymodifications.xcu'))).isFile())
+ assert.deepEqual(f.events,['confine','terminate','exit'])
+})
+
+test('preserves passive web hyperlinks but still rejects external images, workbooks and active formulas',async()=>{
+ const type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
+ const rel=(kind,url)=>`<Relationships><Relationship Type="${type}${kind}" TargetMode="External" Target="${url}"/></Relationships>`
+ await validateCalcWorkbook(await workbook({'xl/worksheets/_rels/sheet1.xml.rels':rel('hyperlink','https://example.com/source'), 'xl/worksheets/sheet1.xml':'<worksheet><f>HYPERLINK("http://example.com/source","来源")</f></worksheet>'}),signal())
+ for(const extra of [
+  {'xl/worksheets/_rels/sheet1.xml.rels':rel('image','https://example.com/image.png')},
+  {'xl/worksheets/_rels/sheet1.xml.rels':rel('externalLink','https://example.com/data.xlsx')},
+  {'xl/worksheets/_rels/sheet1.xml.rels':rel('hyperlink','file:///tmp/source.xlsx')},
+  {'xl/worksheets/sheet1.xml':'<worksheet><f>HYPERLINK(WEBSERVICE("https://example.com"),"来源")</f></worksheet>'},
+ ])await assert.rejects(validateCalcWorkbook(await workbook(extra),signal()),/Calc/)
 })
