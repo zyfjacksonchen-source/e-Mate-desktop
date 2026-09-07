@@ -90,7 +90,8 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-describe('e-Mate desktop profile', () => {
+// This suite installs and repairs complete on-disk profiles, including Skill assets.
+describe('e-Mate desktop profile', { timeout: 30_000 }, () => {
   type ProfileModule = typeof import('../src/e-mate-profile.ts')
   let EMATE_DESKTOP_PROFILE_VERSION: ProfileModule['EMATE_DESKTOP_PROFILE_VERSION']
   let EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS: ProfileModule['EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS']
@@ -505,8 +506,7 @@ describe('e-Mate desktop profile', () => {
       for (const entry of entries) rmSync(join(source, entry), { force: true })
       rmSync(join(source, '..', 'outside.js'), { force: true })
     }
-    // This exercises repeated full on-disk repairs, not the warm-start latency budget.
-  }, 30_000)
+  })
 
   it('defers removal of replaced managed packages until the desktop is interactive', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
