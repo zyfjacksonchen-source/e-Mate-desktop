@@ -8,6 +8,7 @@ import { createRequire } from 'node:module'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
 import LlmRuntime, { LlmAdapter, createUserMessage, createMessage, createToolResultMessage } from '../../../upstream/deepseek-harness/packages/llm/llm/lib/index.js'
 import SessionStore, { Session, SESSION_FORMAT_VERSION } from '../../../upstream/deepseek-harness/packages/core/session/lib/index.js'
+import { createScope, scopeTarget } from '../../../upstream/deepseek-harness/packages/core/scope/lib/index.js'
 import TokenMeter from '../../../upstream/deepseek-harness/packages/llm/token-meter/lib/index.js'
 import BasicCompaction from '../../../upstream/deepseek-harness/packages/compaction/compaction-basic/lib/index.js'
 import Pruner from '../../../upstream/deepseek-harness/packages/compaction/compaction-tool-result-pruner/lib/index.js'
@@ -15,7 +16,7 @@ import * as pairing from '../../../upstream/deepseek-harness/packages/compaction
 import { LocalAttachmentStore } from '../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'
 import Persistence from '../../../upstream/deepseek-harness/packages/session/session-persistence-jsonl/lib/index.js'
 import { toPiContext } from '../../../upstream/deepseek-harness/packages/llm/llm-pi-ai/src/context.ts'
-import { compactRequestHistory, estimateRequestBytes, requestSizeFailure, MAX_RESPONSES_BYTES } from '../src/profile/request-size.ts'
+import { installRequestHistoryCompaction, compactRequestHistory, estimateRequestBytes, requestSizeFailure, MAX_RESPONSES_BYTES } from '../src/profile/request-size.ts'
 
 const require = createRequire(new URL('../../../upstream/deepseek-harness/packages/attachment/attachment-local/package.json', import.meta.url))
 const sharp = require('sharp')
@@ -41,14 +42,22 @@ class SummaryAdapter extends LlmAdapter {
     yield { type: 'finish', reason: { kind: 'stop' } }
   }
 }
-async function harness(t) {
+async function harness(t, isolated = false) {
   const home = await mkdtemp(join(tmpdir(), 'emate-request-bytes-'))
   const ctx = new Context()
   const fibers = [await ctx.plugin(SessionStore), await ctx.plugin(Persistence, { root: join(home, 'sessions'), compression: 'none' })]
   new LlmRuntime(ctx)
   new TokenMeter(ctx)
-  new Pruner(ctx)
-  new BasicCompaction(ctx, { auto: false })
+  const scopeKey = {}
+  const scoped = isolated ? createScope(ctx, scopeKey) : undefined
+  if (scoped) {
+    const realm = scoped.ctx.isolate('compaction').isolate('toolResultPruner')
+    fibers.push(await realm.plugin(Pruner), await realm.plugin(BasicCompaction, { auto: false }))
+    t.after(() => scoped.dispose())
+  } else {
+    new Pruner(ctx)
+    new BasicCompaction(ctx, { auto: false })
+  }
   const attachments = new LocalAttachmentStore(ctx, { dshHome: home })
   const adapter = new SummaryAdapter()
   ctx.llm.registerAdapter(['e-mate-enterprise'], adapter)
@@ -56,7 +65,7 @@ async function harness(t) {
   ctx.provide('emateIdentity', { localAccountPrincipal: () => owner })
   const ref = await attachments.saveImage({ data: await image(), mediaType: 'image/png', name: 'synthetic-original.png' })
   t.after(async () => { for (const fiber of fibers.reverse()) await fiber.dispose(); await rm(home, { recursive: true, force: true }) })
-  return { ctx, attachments, adapter, ref, home, switchOwner() { owner = undefined; ctx.emit('credentials/updated') } }
+  return { ctx, scopeKey, attachments, adapter, ref, home, switchOwner() { owner = undefined; ctx.emit('credentials/updated') } }
 }
 function conversation(ref, count = 20) {
   const session = Session.create('request-byte-fixture')
@@ -199,4 +208,94 @@ test('a non-shrinking compaction result cannot spend a second attempt', async t 
   await compactRequestHistory(boundary, payload(session), pairing)
   assert.equal(calls, 1)
   assert.equal(requestSizeFailure(options(session)).status, 413)
+})
+
+
+test('byte pressure follows actual isolated preset scopes, existing providers, reload and teardown', async t => {
+  const h = await harness(t)
+  // Root services in the older unit fixture are deliberately removed from this
+  // proof: only providers behind native Context.isolate may process the events.
+  const root = new Context()
+  root.provide('emateIdentity', h.ctx.emateIdentity)
+  let installs = 0
+  const ownerKeys = [{}, {}]
+  const scopes = ownerKeys.map(key => createScope(root, key))
+  const counts = [0, 0]
+  const provide = async index => {
+    const realm = scopes[index].ctx.isolate('compaction').isolate('toolResultPruner')
+    const fiber = await realm.plugin({ name: `isolated-compaction-${index}-${++installs}`, apply(ctx) {
+      ctx.provide('toolResultPruner', { pruneSession() {} })
+      ctx.provide('compaction', { async compactRegion() { counts[index]++ } })
+    } })
+    return { realm, fiber }
+  }
+  const first = await provide(0) // Already mounted when policy starts.
+  assert.equal(root.get('compaction'), undefined)
+  assert.equal(root.get('toolResultPruner'), undefined)
+  const startPolicy = () => root.plugin({ name: 'test-root-policy', apply(ctx) {
+    ctx.effect(() => installRequestHistoryCompaction(ctx, pairing))
+  } })
+  let policy = await startPolicy()
+  const second = await provide(1) // Later preset mounts notify the policy.
+  const run = async index => {
+    const session = conversation(h.ref)
+    const input = payload(session)
+    return root.waterfall(scopeTarget(root, ownerKeys[index]), 'agent/pre-step', input,
+      async () => ({ kind: 'enter', messages: [] }))
+  }
+  await run(0)
+  assert.deepEqual(counts, [1, 0])
+  await run(1)
+  assert.deepEqual(counts, [1, 1])
+  // Repeated native notifications must not multiply hooks.
+  first.fiber.ctx.reflect.notify(['compaction'])
+  first.fiber.ctx.reflect.notify(['compaction'])
+  await run(0)
+  assert.deepEqual(counts, [2, 1])
+  await policy.dispose()
+  await run(0)
+  assert.deepEqual(counts, [2, 1])
+  policy = await startPolicy()
+  await run(0)
+  assert.deepEqual(counts, [3, 1])
+  await first.fiber.dispose()
+  await run(0)
+  assert.deepEqual(counts, [3, 1])
+  const replacement = await provide(0)
+  await run(0)
+  assert.deepEqual(counts, [4, 1])
+  await policy.dispose()
+  await run(1)
+  assert.deepEqual(counts, [4, 1])
+  await replacement.fiber.dispose()
+  await second.fiber.dispose()
+  for (const scope of scopes) await scope.dispose()
+})
+
+
+test('real native compaction processes image history through its isolated pre-step hook', async t => {
+  const h = await harness(t, true)
+  assert.equal(h.ctx.get('compaction'), undefined)
+  assert.equal(h.ctx.get('toolResultPruner'), undefined)
+  const stop = installRequestHistoryCompaction(h.ctx, pairing)
+  t.after(stop)
+  const session = conversation(h.ref)
+  const original = structuredClone(session.events)
+  const incoming = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'image', attachment: h.ref }] })
+  const run = (input, decision) => h.ctx.waterfall(scopeTarget(h.ctx, h.scopeKey), 'agent/pre-step', input, async () => decision)
+  await run(payload(session), { kind: 'enter', messages: [incoming] })
+  assert.ok(h.adapter.calls.length > 0)
+  assert.equal(requestSizeFailure(options(session, [incoming])), undefined)
+  assert.deepEqual(session.events.slice(0, original.length), original)
+  assert.equal(digest((await h.attachments.readImage(h.ref)).data), digest(await image()))
+  const calls = h.adapter.calls.length
+  const cancelled = new AbortController()
+  cancelled.abort(new Error('explicit cancel'))
+  await run({ ...payload(conversation(h.ref)), signal: cancelled.signal }, { kind: 'enter', messages: [] })
+  await run(payload(conversation(h.ref)), { kind: 'reject', reason: 'test rejection' })
+  assert.equal(h.adapter.calls.length, calls)
+  h.adapter.action = async request => { h.switchOwner(); request.signal.throwIfAborted() }
+  const changed = conversation(h.ref)
+  await assert.rejects(run(payload(changed), { kind: 'enter', messages: [] }), /account changed/u)
+  assert.equal(changed.surface.replaceGeneration, 0)
 })

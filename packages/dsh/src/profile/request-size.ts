@@ -120,3 +120,41 @@ export async function compactRequestHistory(ctx, payload, pairing) {
     }
   } finally { stop() }
 }
+
+/** Register in each native provider's context, retaining its preset scope and
+ * service isolation. The Host policy's context cannot resolve these services.
+ */
+export function installRequestHistoryCompaction(ctx, pairing) {
+  const registrations = new Map()
+  const install = (owner, value) => {
+    const key = owner.fiber
+    if (!value) { registrations.get(key)?.(); return }
+    if (registrations.has(key)) return
+    const dispose = owner.effect(() => {
+      const stop = owner.on('agent/pre-step', async (payload, next) => {
+        const decision = await next()
+        if (decision.kind === 'enter' && !payload.signal.aborted) {
+          await compactRequestHistory(owner, { ...payload, messages: decision.messages }, pairing)
+        }
+        return decision
+      })
+      return () => { stop(); registrations.delete(key) }
+    }, 'e-Mate byte pressure in the native compaction realm')
+    registrations.set(key, dispose)
+  }
+  const stopObserving = ctx.on('internal/service', function (name, value) {
+    if (name === 'compaction') install(this, value)
+  }, { global: true })
+  // Public Cordis implementation records also cover policy reload after presets
+  // are mounted; do not inspect or copy private isolation labels.
+  for (const key of Reflect.ownKeys(ctx.reflect.store)) {
+    const implementation = ctx.reflect.store[key]
+    if (implementation.name === 'compaction' && implementation.fiber.uid !== null) {
+      install(implementation.fiber.ctx, implementation.value)
+    }
+  }
+  return () => {
+    stopObserving()
+    for (const dispose of [...registrations.values()]) dispose()
+  }
+}

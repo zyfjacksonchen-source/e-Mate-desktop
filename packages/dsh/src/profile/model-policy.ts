@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { LOGGED_OUT_CREDENTIAL } from './credentials-os.js'
 import { loadTargetStorageDomain, loadTargetCompaction } from './target-runtime.js'
-import { compactRequestHistory, requestSizeFailure } from './request-size.js'
+import { installRequestHistoryCompaction, requestSizeFailure } from './request-size.js'
 
 export const name = 'emate-model-policy'
 export const inject = ['apiProxy', 'connection', 'credentials', 'settings', 'storageDomain', 'llm', 'emateIdentity']
@@ -1162,13 +1162,7 @@ export async function apply(ctx, config = {}) {
   ctx.provide('emateModelPolicy', service)
   ctx.effect(() => installApiPolicy(ctx, service), 'emate.modelPolicy: target ApiProxy policy projection')
   const pairing = await loadTargetCompaction(config.bindingPath)
-  ctx.on('agent/pre-step', async (payload, next) => {
-    const decision = await next()
-    if (decision.kind === 'enter' && !payload.signal.aborted) {
-      await compactRequestHistory(ctx, { ...payload, messages: decision.messages }, pairing)
-    }
-    return decision
-  })
+  ctx.effect(() => installRequestHistoryCompaction(ctx, pairing), 'emate.modelPolicy: native compaction realm byte pressure')
   ctx.on('agent/request', async (payload, next) => {
     const request = await next()
     await service.assertModel(request.model)
