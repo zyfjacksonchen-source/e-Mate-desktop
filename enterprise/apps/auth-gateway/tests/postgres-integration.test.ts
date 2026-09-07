@@ -274,6 +274,10 @@ integrationTest('initialization widens an existing legacy source constraint with
           'e_mate_auth_legacy_password_credential_source_version_check',
           'e_mate_auth_credential_migration_source_version_check'
         )
+          AND conrelid IN (
+            'e_mate_auth_legacy_password_credential'::regclass,
+            'e_mate_auth_credential_migration'::regclass
+          )
         ORDER BY conname`
     );
     assert.equal(constraints.rows.length, 2);
