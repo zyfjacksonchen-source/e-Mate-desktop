@@ -25,11 +25,12 @@ const ecosystemPlugins = [
   'dsh-visualize',
 ]
 
-// Materialize the current product source before copying its generated Profile.
-// A previous nonempty client.js can otherwise silently retain stale UI/CSS.
-execFileSync('corepack', ['pnpm', '--filter', '@e-mate/dsh', 'build'], {
+// Build the complete product inventory before copying its generated Profile.
+// The dsh-only build copies plugin lib files without rebuilding those components.
+execFileSync('corepack', ['pnpm', 'run', 'build'], {
   cwd: repositoryRoot,
   stdio: 'inherit',
+  shell: process.platform === 'win32',
 })
 
 for (const path of [
