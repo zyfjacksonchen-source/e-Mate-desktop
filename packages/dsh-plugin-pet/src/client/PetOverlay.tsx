@@ -41,7 +41,7 @@ export function PetOverlay({ pet, scene, paused, position: saved, save, open, ta
         }
         const next = motionBag.current.pop()!
         motionCurrent.current = next; setMotionScene(next); schedule()
-      }, 8000 + Math.floor(Math.random() * 8000))
+      }, 16000 + Math.floor(Math.random() * 8000))
     }
     schedule()
     return () => clearTimeout(timer)

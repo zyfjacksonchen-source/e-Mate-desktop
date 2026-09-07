@@ -27,7 +27,7 @@ describe('native sprite host',()=>{
     const props={pet:pet(),scene:'terminal' as const,paused:false,freeMotion:true,position:{x:.5,y:.5},save:async()=>{},open:vi.fn(),taskId:'task-a'}
     const view=render(<PetOverlay {...props}/>), seen=new Set<string>()
     for(let i=0;i<6;i++) {
-      act(()=>{vi.advanceTimersByTime(8000)})
+      act(()=>{vi.advanceTimersByTime(16000)})
       const motion=view.container.querySelector('[data-pet-scene]')!.getAttribute('data-pet-scene')!
       expect(seen.has(motion)).toBe(false);seen.add(motion)
       expect(screen.getByRole('button').title).toBe('运行终端')
@@ -48,10 +48,26 @@ describe('native sprite host',()=>{
   })
   it('pausing/unmount clears every animation timer and valid base remains a fallback',()=>{
     const source=pet();const view=render(<PetSprite pet={source} scene="terminal" drag={null} look={null} paused={false}/>)
-    expect(vi.getTimerCount()).toBe(1);act(()=>{vi.advanceTimersByTime(150)});expect(view.container.querySelector('span')?.getAttribute('data-frame-column')).toBe('1')
+    expect(vi.getTimerCount()).toBe(1);act(()=>{vi.advanceTimersByTime(350)});expect(view.container.querySelector('span')?.getAttribute('data-frame-column')).toBe('1')
     view.rerender(<PetSprite pet={source} scene="terminal" drag={null} look={null} paused={true}/>);expect(vi.getTimerCount()).toBe(0)
     view.rerender(<PetSprite pet={{...source,office:undefined,officeUrl:undefined}} scene="terminal" drag={null} look={null} paused={true}/>);expect(view.container.querySelector('span')?.getAttribute('data-frame-row')).toBe('7')
     view.unmount();expect(vi.getTimerCount()).toBe(0)
+  })
+  it('office and fallback actions play slowly once, hold their final frame and do not replay after pause',()=>{
+    for(const source of [pet(),{...pet(),office:undefined,officeUrl:undefined}]) {
+      const props={pet:source,scene:'terminal' as const,drag:null,look:null,paused:false}
+      const view=render(<PetSprite {...props}/>), cell=()=>view.container.querySelector('[data-frame-column]')!.getAttribute('data-frame-column')
+      act(()=>{vi.advanceTimersByTime(200)});expect(cell()).toBe('0')
+      act(()=>{vi.advanceTimersByTime(200)});expect(cell()).toBe('1')
+      view.rerender(<PetSprite {...props} paused/>);expect(vi.getTimerCount()).toBe(0)
+      act(()=>{vi.advanceTimersByTime(60000)});expect(cell()).toBe('1')
+      view.rerender(<PetSprite {...props}/>);expect(cell()).toBe('1')
+      act(()=>{vi.advanceTimersByTime(10000)});expect(cell()).toBe(source.office?'7':'5');expect(vi.getTimerCount()).toBe(0)
+      view.rerender(<PetSprite {...props} look={4}/>);expect(cell()).toBe(source.office?'7':'5')
+      view.rerender(<PetSprite {...props} paused/>);view.rerender(<PetSprite {...props}/>)
+      act(()=>{vi.advanceTimersByTime(60000)});expect(cell()).toBe(source.office?'7':'5');expect(vi.getTimerCount()).toBe(0)
+      view.unmount()
+    }
   })
   it('keyboard movement is persisted through the native scope callback; click opens current details',async()=>{
     const save=vi.fn(async(_position: {x:number;y:number})=>{});const open=vi.fn();render(<PetOverlay pet={pet()} scene="goal" paused position={{x:0.5,y:0.5}} save={save} open={open} taskId="task-a"/>)

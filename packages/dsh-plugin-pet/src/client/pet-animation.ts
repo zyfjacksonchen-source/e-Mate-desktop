@@ -33,11 +33,8 @@ export interface PetAnimationSequence {
   readonly loopStartIndex: number | null
 }
 
-/** Number of full task-action passes before the renderer settles into slow idle. */
-export const CODEX_PET_NON_IDLE_REPEAT_COUNT = 3
-
-/** Duration multiplier applied to the idle tail after a task animation. */
-export const CODEX_PET_SLOW_IDLE_MULTIPLIER = 6
+/** Product playback is deliberately calmer than the source atlas timing. */
+export const PET_FRAME_DURATION_MULTIPLIER = 2.5
 
 const IDLE_FRAMES: PetAnimationFrames = Object.freeze([
   Object.freeze({ rowIndex: 0, columnIndex: 0, frameDurationMs: 280 }),
@@ -76,12 +73,8 @@ export const CODEX_PET_ANIMATION_FRAMES: Readonly<
   waiting: uniformFrames(6, 6, 150, 260),
 })
 
-const SLOW_IDLE_FRAMES = Object.freeze(IDLE_FRAMES.map(frame =>
-  Object.freeze({ ...frame, frameDurationMs: frame.frameDurationMs * CODEX_PET_SLOW_IDLE_MULTIPLIER }),
-)) as PetAnimationFrames
-
 /**
- * Build Codex's finite action lead-in and slow-idle loop.
+ * Play each action once at a calmer speed, then hold its final pose.
  * @param state - task, hover, or drag animation to play.
  * @param reducedMotion - whether playback must remain on the state's first cell.
  * @returns frame order and loop target for the renderer's timer.
@@ -92,15 +85,9 @@ export function getPetAnimationSequence(
 ): PetAnimationSequence {
   const frames = CODEX_PET_ANIMATION_FRAMES[state]
   if (reducedMotion) return { frames: [frames[0]], loopStartIndex: null }
-  if (state === 'idle') return { frames, loopStartIndex: 0 }
-
-  const actionFrames = Array.from(
-    { length: CODEX_PET_NON_IDLE_REPEAT_COUNT },
-    () => frames,
-  ).flat()
   return {
-    frames: [...actionFrames, ...SLOW_IDLE_FRAMES] as unknown as PetAnimationFrames,
-    loopStartIndex: actionFrames.length,
+    frames: frames.map(frame => ({ ...frame, frameDurationMs: frame.frameDurationMs * PET_FRAME_DURATION_MULTIPLIER })) as unknown as PetAnimationFrames,
+    loopStartIndex: null,
   }
 }
 
