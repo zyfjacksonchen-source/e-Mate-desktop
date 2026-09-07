@@ -104,7 +104,8 @@ export async function collectOriginals(fs: any, paths: string[], cwd: string | u
         await visit(child.target, depth + 1)
       }
     } else if (info?.type === 'file') {
-      if (result.length >= 100 || (info.size !== undefined && (info.size < 1 || info.size > MAX_ORIGINAL_BYTES))) fail('file-too-large')
+      if (result.length >= 100) fail('too-many-files')
+      if (info.size !== undefined && (info.size < 1 || info.size > MAX_ORIGINAL_BYTES)) fail('file-too-large')
       result.push({ target, filename: basename(fs.processPath(target)), version: info.version })
     } else fail('invalid-file')
   }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { HASH, SOURCE_ID, parseGraph, type CallKnowledge, type KnowledgeGraph, type KnowledgeNode } from '../contract.ts'
 import type { GraphController } from './graph-renderer.ts'
 import css from './page.module.css'
+import { KnowledgeImports, type KnowledgeImportsProps } from './imports.tsx'
 type OriginalVersion = { source_id: string; source_version: string; parse_revision?: string }
 function revisionOriginals(value: any): OriginalVersion[] {
   const seen = new Set<string>()
@@ -14,7 +15,7 @@ function revisionOriginals(value: any): OriginalVersion[] {
 }
 type ViewNode = KnowledgeNode & { source_only?: boolean; excerpt?: string }
 type GraphModule = { createGraph(element: HTMLElement, select: (id: string) => void, unavailable: () => void): GraphController }
-interface Props { callKnowledge: CallKnowledge; loadGraph(): Promise<GraphModule> }
+interface Props { callKnowledge: CallKnowledge; loadGraph(): Promise<GraphModule>; pickDirectory?: KnowledgeImportsProps['pickDirectory']; openTask?: KnowledgeImportsProps['openTask'] }
 const layerNames: Record<string, string> = { expert: '专家知识', case: '案例方法', source: '原始资料' }
 export function KnowledgeEntry({ wide, KnowledgeIcon }: { wide: boolean; KnowledgeIcon: ComponentType<{ size?: number }> }) {
   const [active, setActive] = useState(location.pathname === '/knowledge')
@@ -42,7 +43,7 @@ function GraphView({ nodes, edges, selected, select, loadGraph, failed }: {
   useEffect(() => { if (selected) controller.current?.focus(selected) }, [selected])
   return <div ref={element} className={css.graph} aria-label="知识关系图，使用下方列表进行键盘浏览"><button className={css.resetView} type="button" disabled={!ready} onClick={() => controller.current?.reset()}>重置视角</button></div>
 }
-export function KnowledgePage({ callKnowledge, loadGraph }: Props) {
+export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTask }: Props) {
   const [open, setOpen] = useState(location.pathname === '/knowledge')
   const [graph, setGraph] = useState<KnowledgeGraph>()
   const [scope, setScope] = useState('')
@@ -161,6 +162,7 @@ export function KnowledgePage({ callKnowledge, loadGraph }: Props) {
   const graphical = view === 'graph' && !reduced && !unavailable && nodes.length > 0
   return <main className={css.page} aria-label="企业知识图谱" data-emate-knowledge-page="">
     <header className={css.header}><div><small>公司公共知识</small><h1>企业知识图谱</h1><p>沿知识、方法与原始资料，找到可追溯的依据。</p></div><button type="button" onClick={() => void refresh()} disabled={busy}>{busy ? '正在读取' : '刷新资料'}</button></header>
+    <KnowledgeImports callKnowledge={callKnowledge} pickDirectory={pickDirectory} openTask={openTask} replacement={selected && !selected.revision_id ? { source_id: selected.source_id, source_version: selected.source_version, title: selected.title } : undefined} />
     <form className={css.filters} onSubmit={event => { event.preventDefault(); void searchText() }}>
       <input maxLength={4000} aria-label="搜索知识" placeholder="筛选标题，或检索原文内容" value={query} onChange={event => { generation.current++; request.current?.abort(); setBusy(false); setQuery(event.target.value); setSearch(undefined) }} />
       <select aria-label="知识类型" value={layer} onChange={event => { generation.current++; request.current?.abort(); setBusy(false); setLayer(event.target.value); setSearch(undefined) }}><option value="all">全部类型</option>{Object.entries(layerNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>

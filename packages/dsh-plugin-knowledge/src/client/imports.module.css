@@ -1,0 +1,32 @@
+.root { margin: 0 0 16px; font: inherit; color: var(--knowledge-ink, var(--dsw-alias-text-primary)); }
+.panel { margin-top: 10px; padding: 16px; border: 1px solid var(--knowledge-rule, var(--dsw-alias-border-l1)); border-radius: 12px; background: var(--knowledge-panel, var(--dsw-alias-bg-layer-1)); }
+.top, .recentHeader, .taskTitle, .submit { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.top p, .tasks p { margin: 4px 0; font-size: 12px; color: var(--knowledge-muted, var(--dsw-alias-text-secondary)); }
+.drop { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border: 1px dashed var(--knowledge-rule, var(--dsw-alias-border-l1)); border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 12px; }
+.fields { display: flex; flex-wrap: wrap; gap: 12px; }
+.fields label { display: flex; flex: 1; min-width: 180px; flex-direction: column; gap: 4px; font-size: 12px; }
+.fields input, .fields select { height: 36px; padding: 6px 8px; border: 1px solid var(--knowledge-rule, var(--dsw-alias-border-l1)); border-radius: 7px; background: var(--knowledge-panel, var(--dsw-alias-bg-layer-1)); color: inherit; font: inherit; }
+.files, .tasks, .sourceRows { list-style: none; margin: 10px 0; padding: 0; }
+.files { display: flex; flex-wrap: wrap; gap: 6px; }
+.files li, .sourceRows li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.files li { max-width: 100%; border-radius: 7px; background: var(--knowledge-bg, var(--dsw-alias-bg-layer-2)); padding: 5px 6px 5px 9px; }
+.files li span, .sourceRows li span { overflow-wrap: anywhere; }
+.files svg, .sourceRows svg { flex: none; color: var(--knowledge-brand, var(--dsw-alias-interactive-primary)); }
+.files li button { border: 0; padding: 0 8px; }
+.sourceRows { max-height: 180px; overflow: auto; }
+.sourceRows li { padding: 5px 0; }
+.sourceRows small { margin-left: auto; flex: none; color: var(--knowledge-muted, var(--dsw-alias-text-secondary)); }
+.replace { display: flex; align-items: flex-start; gap: 6px; margin-top: 10px; font-size: 12px; }
+.submit { margin-top: 12px; flex-wrap: wrap; }
+.submit span, .notice { color: var(--knowledge-muted, var(--dsw-alias-text-secondary)); font-size: 12px; }
+.root .submit button { background: var(--knowledge-ink, var(--dsw-alias-text-primary)); color: var(--knowledge-panel, var(--dsw-alias-bg-layer-1)); }
+.recentHeader { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--knowledge-rule, var(--dsw-alias-border-l1)); }
+.tasks > li { padding: 12px 0; border-bottom: 1px solid var(--knowledge-rule, var(--dsw-alias-border-l1)); }
+.taskTitle strong { min-width: 0; overflow-wrap: anywhere; }
+.taskTitle span { flex: none; font-size: 12px; color: var(--knowledge-muted, var(--dsw-alias-text-secondary)); }
+.taskTitle span[data-phase='complete'] { color: var(--dsw-alias-state-success-primary, #338663); }
+.tasks details { margin: 8px 0; font-size: 12px; }
+.actions { display: flex; gap: 8px; margin-top: 8px; }
+.error { font-size: 12px; color: var(--dsw-alias-state-error-primary, #b44b38); }
+.panel button:focus-visible, .panel input:focus-visible, .panel select:focus-visible, .panel summary:focus-visible { outline: 2px solid var(--knowledge-brand, var(--dsw-alias-interactive-primary)); outline-offset: 2px; }
+@media (max-width: 600px) { .panel { padding: 12px; } .fields { flex-direction: column; } .submit { align-items: stretch; flex-direction: column; } }
