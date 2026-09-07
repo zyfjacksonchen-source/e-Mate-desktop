@@ -8,13 +8,16 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { composeEntries } from '@deepseek-ai/dsh-app-boot'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 const conversationAdapterUrl = new URL('../../../scripts/harness-conversation-adapter.mjs', import.meta.url).href
 const { adaptNavigationSource, NAVIGATION_PACKAGE } = await import(conversationAdapterUrl) as {
   adaptNavigationSource(source: string): string
@@ -94,11 +97,28 @@ describe('e-Mate desktop profile', () => {
   let EMATE_BUNDLED_PROFILE_COMPONENT_IDS: ProfileModule['EMATE_BUNDLED_PROFILE_COMPONENT_IDS']
   let cleanupEmateDesktopProfileArtifact: ProfileModule['cleanupEmateDesktopProfileArtifact']
   let installEmateDesktopProfile: ProfileModule['installEmateDesktopProfile']
+  let packagedSource: string
   // Navigation source checks do not need a built profile; installation checks do.
   beforeAll(async () => {
-    ({ EMATE_DESKTOP_PROFILE_VERSION, EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS,
+    packagedSource = mkdtempSync(join(tmpdir(), 'e-mate-packaged-profile-'))
+    // Match electron-builder's declaration exclusion without mutating shared build resources.
+    cpSync(fileURLToPath(new URL('../build/e-mate-profile/', import.meta.url)), packagedSource, {
+      recursive: true, dereference: true, filter: source => !source.endsWith('.d.ts'),
+    })
+    const runtimePaths = await import('../src/packaged-runtime-path.ts')
+    vi.doMock('../src/packaged-runtime-path.ts', () => ({
+      ...runtimePaths,
+      unpackedAsarPath: (path: string) => path === fileURLToPath(new URL('../build/e-mate-profile/', import.meta.url))
+        ? packagedSource : runtimePaths.unpackedAsarPath(path),
+    }))
+    ;({ EMATE_DESKTOP_PROFILE_VERSION, EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS,
       EMATE_BUNDLED_PROFILE_COMPONENT_IDS, cleanupEmateDesktopProfileArtifact,
       installEmateDesktopProfile } = await import('../src/e-mate-profile.ts'))
+  })
+
+  afterAll(() => {
+    vi.doUnmock('../src/packaged-runtime-path.ts')
+    if (packagedSource) rmSync(packagedSource, { recursive: true, force: true })
   })
 
   it('installs the fixed product profile and replaces legacy CLI update guidance', () => {
@@ -400,14 +420,90 @@ describe('e-Mate desktop profile', () => {
     const library = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules', 'lib')
     const sourceLibrary = realpathSync(library)
     const sentinel = join(profile, '.warm-start-sentinel')
-    const receipt = readFileSync(join(profile, '.e-mate-install.json'), 'utf8')
+    const receiptPath = join(profile, '.e-mate-install.json')
+    const receipt = readFileSync(receiptPath, 'utf8')
+    const previousTime = new Date('2000-01-01T00:00:00Z')
+    utimesSync(receiptPath, previousTime, previousTime)
     writeFileSync(sentinel, 'warm path reused')
 
     installEmateDesktopProfile(home)
 
     expect(realpathSync(library)).toBe(sourceLibrary)
-    expect(readFileSync(join(profile, '.e-mate-install.json'), 'utf8')).toBe(receipt)
+    expect(readFileSync(receiptPath, 'utf8')).toBe(receipt)
+    expect(statSync(receiptPath).mtimeMs).toBe(previousTime.getTime())
     expect(readFileSync(sentinel, 'utf8')).toBe('warm path reused')
+  })
+
+  it('skips only declaration conditions while repairing missing or corrupted runtime entries', () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const source = join(packagedSource, 'bundles', 'computer-use')
+    const manifestPath = join(source, 'package.json')
+    const originalManifest = readFileSync(manifestPath, 'utf8')
+    const manifest = JSON.parse(originalManifest)
+    const entries = ['host-default.js', 'host-import.js', 'host-require.js', 'client-default.js', 'client-import.js', 'client-require.js', 'types-runtime.js']
+    const runtime = 'export const value = 1\n'
+    try {
+      delete manifest.main
+      manifest.exports['.'] = {
+        types: './missing-host.d.ts',
+        'types@>=5.2': { default: './missing-versioned-host.d.ts' },
+        import: ['./host-import.js'], require: './host-require.js', default: './host-default.js',
+      }
+      manifest.exports['./client'] = {
+        types: './missing-client.d.ts',
+        import: { 'types@>=5.2': './missing-versioned-client.d.ts', default: './client-import.js' },
+        require: './client-require.js', default: './client-default.js',
+        'types-runtime': './types-runtime.js',
+      }
+      writeFileSync(manifestPath, JSON.stringify(manifest))
+      for (const entry of entries) writeFileSync(join(source, entry), runtime)
+      const profile = installEmateDesktopProfile(home)
+      const target = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
+      const receiptPath = join(profile, '.e-mate-install.json')
+      const previousTime = new Date('2000-01-01T00:00:00Z')
+      expect(existsSync(join(source, 'lib', 'types', 'client', 'index.d.ts'))).toBe(false)
+      utimesSync(receiptPath, previousTime, previousTime)
+      installEmateDesktopProfile(home)
+      expect(statSync(receiptPath).mtimeMs).toBe(previousTime.getTime())
+
+      for (const entry of [...entries, 'cordis.patch.yml']) {
+        const path = join(target, entry)
+        const expected = readFileSync(path)
+        // Same-size corruption must be caught by critical-entry hashing.
+        const corrupted = Buffer.from(expected)
+        corrupted[0] = corrupted[0]! ^ 1
+        writeFileSync(path, corrupted)
+        utimesSync(receiptPath, previousTime, previousTime)
+        installEmateDesktopProfile(home)
+        expect(readFileSync(path)).toEqual(expected)
+        expect(statSync(receiptPath).mtimeMs).not.toBe(previousTime.getTime())
+        rmSync(path)
+        installEmateDesktopProfile(home)
+        expect(readFileSync(path)).toEqual(expected)
+      }
+
+      manifest.main = './host-default.js'
+      writeFileSync(manifestPath, JSON.stringify(manifest))
+      installEmateDesktopProfile(home)
+      writeFileSync(join(target, manifest.main), runtime.replace('1', '2'))
+      installEmateDesktopProfile(home)
+      expect(readFileSync(join(target, manifest.main), 'utf8')).toBe(runtime)
+
+      // A runtime condition still cannot escape the package, even if its bytes match.
+      manifest.exports['./client'].default = '../outside.js'
+      writeFileSync(manifestPath, JSON.stringify(manifest))
+      writeFileSync(join(source, '..', 'outside.js'), runtime)
+      writeFileSync(join(target, '..', 'outside.js'), runtime)
+      installEmateDesktopProfile(home)
+      utimesSync(receiptPath, previousTime, previousTime)
+      installEmateDesktopProfile(home)
+      expect(statSync(receiptPath).mtimeMs).not.toBe(previousTime.getTime())
+    } finally {
+      writeFileSync(manifestPath, originalManifest)
+      for (const entry of entries) rmSync(join(source, entry), { force: true })
+      rmSync(join(source, '..', 'outside.js'), { force: true })
+    }
   })
 
   it('defers removal of replaced managed packages until the desktop is interactive', () => {

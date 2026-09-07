@@ -194,7 +194,10 @@ function declaredExportPaths(value: unknown): string[] {
   if (typeof value === 'string') return [value]
   if (Array.isArray(value)) return value.flatMap(declaredExportPaths)
   if (value !== null && typeof value === 'object') {
-    return Object.values(value as Record<string, unknown>).flatMap(declaredExportPaths)
+    // Type declarations are development-only and excluded by electron-builder.
+    return Object.entries(value as Record<string, unknown>)
+      .filter(([condition]) => condition !== 'types' && !condition.startsWith('types@'))
+      .flatMap(([, entry]) => declaredExportPaths(entry))
   }
   return []
 }
