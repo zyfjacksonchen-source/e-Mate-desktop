@@ -47,10 +47,8 @@ export function registerComputerUseTrigger(ctx: any): void {
     order: -10,
     async candidates(_session, { query, signal }) {
       if (!'电脑操控'.includes(query)) return []
-      if (document.body.dataset.dshDesktopPlatform !== 'darwin') {
-        return computerCandidate(document.body.dataset.dshDesktopPlatform === 'win32'
-          ? 'Windows 暂不支持 Computer Use。'
-          : '当前桌面平台未提供 Computer Use。', '不可用')
+      if (!['darwin', 'win32'].includes(document.body.dataset.dshDesktopPlatform ?? '')) {
+        return computerCandidate('当前桌面平台未提供 Computer Use。', '不可用')
       }
       try {
         const capability = await computerUseOf(ctx, signal)
@@ -58,6 +56,11 @@ export function registerComputerUseTrigger(ctx: any): void {
         if (capability.state === 'ready') return computerCandidate(capability.detail ?? 'Computer Use 已就绪。', '可插入')
         if (capability.state === 'setup-required' && capability.actions.length > 0) {
           return computerCandidate(capability.detail ?? '需要在 macOS 系统设置中开启权限。', '打开系统设置')
+        }
+        if (capability.state === 'setup-required') {
+          // A selected reference expresses intent, not an application lease.
+          // Native ComputerLeaseManager still approves or rejects the action.
+          return computerCandidate(`${capability.detail ?? '尚未授权应用操作。'} 实际操作仍需原生应用授权。`, '可插入')
         }
         return computerCandidate(capability.detail ?? 'Computer Use 当前不可用。', '不可用')
       } catch (reason) {
@@ -67,7 +70,7 @@ export function registerComputerUseTrigger(ctx: any): void {
     },
     lexicon() { return ['电脑操控'] },
     onPick({ candidate }) {
-      if (document.body.dataset.dshDesktopPlatform !== 'darwin') return 'handled'
+      if (!['darwin', 'win32'].includes(document.body.dataset.dshDesktopPlatform ?? '')) return 'handled'
       if (candidate.hint === '可插入') {
         return { insert: { source: '电脑操控', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
       }

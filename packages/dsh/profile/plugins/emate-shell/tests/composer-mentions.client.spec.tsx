@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { createScope } from '@deepseek-ai/dsh-client-runtime/client'
+import { InputTriggerController } from '../../../../../../upstream/deepseek-harness/packages/client/ui-input-trigger/src/client/controller.ts'
+import { SessionInputShell } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
+import { deriveDecorations } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/decorations.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from '../src/client/composer-mentions.ts'
+
+afterEach(() => { delete document.body.dataset.dshDesktopPlatform; vi.restoreAllMocks() })
 
 describe('native e-Mate @ references', () => {
   it('waits for the native command Remote used by the Plan action', () => {
@@ -213,9 +220,16 @@ describe('native e-Mate @ references', () => {
 
     call.mockClear()
     document.body.dataset.dshDesktopPlatform = 'win32'
+    item = { id: 'computer-use', state: 'ready', detail: 'Windows 已就绪。', actions: [] }
     const windows = (await source.candidates(session, request))[0]!
-    expect(windows).toMatchObject({ description: 'Windows 暂不支持 Computer Use。', hint: '不可用' })
-    expect(pick(windows)).toBe('handled')
+    expect(windows).toMatchObject({ description: 'Windows 已就绪。', hint: '可插入' })
+    expect(pick(windows)).toMatchObject({ insert: { source: '电脑操控', ref: 'computer-use' } })
+    expect(call).toHaveBeenCalledOnce()
+    call.mockClear()
+    document.body.dataset.dshDesktopPlatform = 'linux'
+    const unsupported = (await source.candidates(session, request))[0]!
+    expect(unsupported).toMatchObject({ hint: '不可用' })
+    expect(pick(unsupported)).toBe('handled')
     expect(call).not.toHaveBeenCalled()
     delete document.body.dataset.dshDesktopPlatform
     timeout.mockRestore()
@@ -267,4 +281,67 @@ describe('native e-Mate @ references', () => {
     expect(setDraft).toHaveBeenCalledWith('请处理 @')
     expect(track).toHaveBeenCalledWith('请处理 @', 5, { tier: 'plain' }, 8)
   })
+})
+
+it.each(['darwin', 'win32'])('native %s pick inserts and submits a selected CU reference, including application grants still pending', async platform => {
+  for (const state of ['ready', 'setup-required', 'blocked', 'failed', ...(platform === 'darwin' ? ['os-setup'] : [])]) {
+    document.body.dataset.dshDesktopPlatform = platform
+    const sources: InputTriggerSource[] = []
+    const ctx = new Context(), scope = createScope(ctx, `cu-${platform}-${state}` as never)
+    const controller = new InputTriggerController({ actx: scope.ctx, sessionId: `cu-${platform}-${state}` as never,
+      roster: { sources: trigger => sources.filter(source => source.trigger === trigger), all: () => sources } })
+    const sent = vi.fn(), input = new SessionInputShell({ actx: scope.ctx, inputTriggers: () => controller, defaultSink: sent })
+    const off = scope.ctx.on('slash/input-insert-reference', req => input.insertReference(req.reference, req.span) ? true : undefined)
+    const call = vi.fn(async (_channel: string, endpoint: string, _data: unknown, _signal: AbortSignal) => endpoint === 'list'
+      ? { ok: true, value: { items: [{ id: 'computer-use', state: state === 'os-setup' ? 'setup-required' : state,
+        actions: state === 'os-setup' ? [{ id: 'open-accessibility-settings', label: '打开辅助功能设置' }] : [], detail: '原生状态说明' }] } }
+      : { ok: true })
+    registerComputerUseTrigger({ effect: (run: () => unknown) => run(), inputTriggers: { registerSource: (source: InputTriggerSource) => {
+      sources.push(source); controller.sourceAdded(source); return () => {}
+    } }, connection: { rpc: { call } } })
+    try {
+      input.setDraft('请保留正文 @ 后续文字')
+      input.addImages(['attachment-image', 'attachment-file'] as never)
+      const initial = input.state.getSnapshot(), caret = initial.draft.indexOf('@') + 1
+      controller.track(initial.draft, caret, { tier: 'plain' }, initial.draftRev)
+      await vi.waitFor(() => expect(controller.menu.getSnapshot().groups[0]?.status).toBe('ready'))
+      const candidate = controller.menu.getSnapshot().groups[0]!.items[0]!
+      if (state === 'blocked' || state === 'failed' || state === 'os-setup') {
+        expect(candidate).toMatchObject({ description: '原生状态说明', hint: state === 'os-setup' ? '打开系统设置' : '不可用' })
+        controller.pick('电脑操控', 0)
+        if (state === 'os-setup') await vi.waitFor(() => expect(call).toHaveBeenCalledWith('/emate.capabilities', 'action', {
+          capability_id: 'computer-use', action_id: 'open-accessibility-settings', data: {},
+        }, expect.any(AbortSignal)))
+        else expect(call).toHaveBeenCalledOnce()
+        expect(input.state.getSnapshot().draft).toBe(initial.draft)
+        expect(input.state.getSnapshot().imageIds).toEqual(initial.imageIds)
+        expect(input.state.getSnapshot().occurrences).toEqual([])
+        expect(sent).not.toHaveBeenCalled()
+        continue
+      }
+      expect(candidate.hint).toBe('可插入') // actual native menu retains the owner metadata
+      if (state === 'setup-required') expect(candidate.description).toContain('实际操作仍需原生应用授权')
+      controller.pick('电脑操控', 0)
+      const selected = input.state.getSnapshot()
+      expect(selected.draft).toBe('请保留正文 \ufffc 后续文字')
+      expect(selected.imageIds).toEqual(['attachment-image', 'attachment-file'])
+      expect(selected.occurrences).toMatchObject([{ source: '电脑操控', ref: 'computer-use', selected: true }])
+      expect(deriveDecorations(selected).chips).toMatchObject([{ label: '@电脑操控', invalid: false }])
+      input.actions.submit()
+      await vi.waitFor(() => expect(sent).toHaveBeenCalledOnce())
+      expect(sent).toHaveBeenCalledWith('请保留正文 @电脑操控 后续文字', ['attachment-image', 'attachment-file'], 'queue', [{ source: '电脑操控', ref: 'computer-use' }])
+      expect(call.mock.calls).toHaveLength(1) // insertion is intent; no grant/settings action was requested
+
+      // Verify the delivered source/ref against the actual Host explicit gate,
+      // without invoking any native tool or granting an application lease.
+      const builder = readFileSync('../../../../dsh-plugin-computer-use/scripts/build.mjs', 'utf8')
+      const start = builder.indexOf('`const COMPUTER_USE_MENTION') + 1
+      const end = builder.indexOf('const DIRECT_AUTOMATION', start)
+      const gate = new Function('session', builder.slice(start, end).replaceAll('export function ', 'function ') + '\nreturn hasExplicitComputerUseRequest(session)')
+      const event = { type: 'user/message', data: { source: { kind: 'user', mentions: sent.mock.calls[0][3] } } }
+      expect(gate({ events: [event] })).toBe(true)
+      expect(gate({ events: [{ type: 'user/message', data: { source: { kind: 'user' }, content: '@电脑操控' } }] })).toBe(false)
+      expect(gate({ events: [event, { type: 'user/message', data: { source: { kind: 'user' } } }] })).toBe(false)
+    } finally { off(); input.dispose(); controller.dispose(); await scope.fiber.dispose() }
+  }
 })
