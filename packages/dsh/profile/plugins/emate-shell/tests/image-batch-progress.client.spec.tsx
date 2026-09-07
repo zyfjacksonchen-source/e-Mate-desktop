@@ -7,6 +7,7 @@ import { useRef, useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProjectionValueStore } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/projection-store.ts'
 import type { SessionListState, UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { useImageBatchProjection } from '../src/client/image-batch-client.ts'
 import {
   ImageBatchProgress,
@@ -167,6 +168,7 @@ function renderProgress(
     retryCalls?: readonly ImageBatchRetryCall[]
     prepareRetry?: (task: ImageBatchRetryTask) => Promise<ImageBatchRetryResult>
   } = {},
+  addImageToCanvas?: (value: ImageAttachmentRef, ownerSessionId: string) => Promise<void>,
 ) {
   function Owner() {
     const view = useImageBatchProjection(useProjectionFrom(store), parentSessionId)
@@ -176,6 +178,7 @@ function renderProgress(
       {...retry.prepareRetry === undefined ? {} : { prepareRetry: retry.prepareRetry }}
       useSessions={sessions.useSessions}
       loadImage={loadImage}
+      {...addImageToCanvas ? { addImageToCanvas } : {}}
     />
   }
   const result = render(<Owner />)
@@ -183,6 +186,37 @@ function renderProgress(
 }
 
 describe('live image batch progress', () => {
+  it('restored batch cards add each exact child attachment to canvas without duplicating the gallery', async () => {
+    const store = new ProjectionValueStore()
+    store.apply('eMateImageBatches', projection(['completed', 'completed', 'completed'], { revisions: [3, 3, 3], terminal: true }), 1)
+    const add = vi.fn(async () => {})
+    renderProgress(store, sessionHarness(projectedSessions(['completed', 'completed', 'completed'])), undefined, {}, add)
+    for (let i = 1; i <= 3; i++) {
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: '加入画布：图片 ' + i })))
+      expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ attachmentId: 'sha256:' + '456'[i - 1]!.repeat(64) }), 'child-' + i)
+    }
+    expect(add).toHaveBeenCalledTimes(3)
+    expect(screen.getAllByRole('article')).toHaveLength(3)
+    expect(screen.getAllByRole('button', { name: /^查看原图/ })).toHaveLength(3)
+  })
+
+  it('keeps unresolved or review images disabled and reports canvas failures without replaying duplicate clicks', async () => {
+    const store = new ProjectionValueStore()
+    store.apply('eMateImageBatches', projection(['completed', 'needs-review'], { revisions: [3, 3] }), 1)
+    const sessions = sessionHarness(emptySessions())
+    let fail!: (reason: Error) => void
+    const add = vi.fn(() => new Promise<void>((_, reject) => { fail = reject }))
+    renderProgress(store, sessions, undefined, {}, add)
+    expect(screen.getByRole('button', { name: '加入画布：图片 1' }).hasAttribute('disabled')).toBe(true)
+    await act(async () => sessions.set(projectedSessions(['completed', 'needs-review'])))
+    expect(screen.getByRole('button', { name: '加入画布：图片 2' }).hasAttribute('disabled')).toBe(true)
+    const button = screen.getByRole('button', { name: '加入画布：图片 1' })
+    fireEvent.click(button); fireEvent.click(button)
+    expect(add).toHaveBeenCalledTimes(1)
+    await act(async () => fail(new Error('missing attachment')))
+    expect(screen.getByRole('status').textContent).toContain('图片未能加入画布')
+    expect(button.hasAttribute('disabled')).toBe(false)
+  })
   it('binds only image_batch calls to an open Turn tail while preserving legacy imagegen closure', () => {
     const start = { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }
     const initial = imageCallsDefinition.start({} as never, { event: start } as never, {} as never)
@@ -276,7 +310,7 @@ describe('live image batch progress', () => {
     expect(loadImage).toHaveBeenCalledWith(attachment, 'child-1')
   })
 
-  it('keeps one exact batch card and preserves unrelated explicit children across open-close', () => {
+  it('keeps one exact batch card and preserves unrelated explicit children across open-close', async () => {
     const store = new ProjectionValueStore()
     store.apply('eMateImageBatches', projection(['completed', 'failed'], { revisions: [3, 3], terminal: true }), 1)
     const sessions = sessionHarness({ ...emptySessions(), byId: {
@@ -295,13 +329,15 @@ describe('live image batch progress', () => {
       useSessions: sessions.useSessions,
       useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
       useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
-      addImageToDraft: vi.fn(async () => {}), draftBytes: () => 0, notify: vi.fn(), runResource: vi.fn(async () => {}),
+      addImageToDraft: vi.fn(async () => {}), addImageToCanvas: vi.fn(async () => {}), draftBytes: () => 0, notify: vi.fn(), runResource: vi.fn(async () => {}),
     }
     const openMatch = { callIds: [], batchCallIds: [parentCallId], paths: [], childSessionIds: [] }
     const view = render(<ArtifactTerminal {...common as never} matched={openMatch} turn={{
       turn: 1, status: 'open', start: undefined, end: undefined, steps: [], data: { get: () => undefined },
     } as never} />)
     const batchCard = screen.getByRole('article', { name: '第 1 张图片：已完成' })
+    await act(async () => fireEvent.click(within(batchCard).getByRole('button', { name: '加入画布：图片 1' })))
+    expect(common.addImageToCanvas).toHaveBeenCalledWith(attachment, 'child-1')
     expect(screen.getAllByRole('button', { name: '查看原图：first.png' })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: '查看原图：unrelated.png' })).toBeNull()
 

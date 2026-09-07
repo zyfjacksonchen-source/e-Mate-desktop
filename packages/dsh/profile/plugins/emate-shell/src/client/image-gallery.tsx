@@ -1156,6 +1156,7 @@ function ArtifactTerminalBody({
       {...prepareImageRetry === undefined ? {} : { prepareRetry: prepareImageRetry }}
       useSessions={useSessions}
       loadImage={loadImage}
+      {...addImageToCanvas === undefined ? {} : { addImageToCanvas }}
     />}
     <ImageTerminal items={items} loadImage={loadImage} openMenu={openMenu}
       {...addImageToCanvas ? { addToCanvas: (item: ImageGalleryItem) => {

@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useRef, useState } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -32,6 +32,7 @@ interface ImageBatchProgressProps {
   readonly prepareRetry?: (task: ImageBatchRetryTask) => Promise<ImageBatchRetryResult>
   readonly useSessions: UseSessions
   readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
+  readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId: string) => Promise<void>
 }
 
 interface ExactPreview {
@@ -111,12 +112,13 @@ function samePreview(left: ExactPreview | undefined, right: ExactPreview | undef
     && a.width === b.width && a.height === b.height && a.name === b.name
 }
 
-const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepareRetry, useSessions, loadImage }: {
+const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepareRetry, useSessions, loadImage, addImageToCanvas }: {
   readonly task: ImageBatchClientTask
   readonly retry?: ImageBatchRetryTask
   readonly prepareRetry?: ImageBatchProgressProps['prepareRetry']
   readonly useSessions: UseSessions
   readonly loadImage: ImageBatchProgressProps['loadImage']
+  readonly addImageToCanvas?: ImageBatchProgressProps['addImageToCanvas']
 }) {
   const preview = useSessions(sessions => exactPreview(sessions, task), samePreview)
   const loadPreview = useCallback(
@@ -125,6 +127,16 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
   )
   const [retryMessage, setRetryMessage] = useState<string>()
   const [preparing, setPreparing] = useState(false)
+  const adding = useRef(false)
+  const [addingToCanvas, setAddingToCanvas] = useState(false)
+  const [canvasError, setCanvasError] = useState<string>()
+  const addToCanvas = (): void => {
+    if (!addImageToCanvas || !preview || task.receipt?.status !== 'completed' || adding.current) return
+    adding.current = true; setAddingToCanvas(true); setCanvasError(undefined)
+    void addImageToCanvas(preview.attachment, preview.ownerSessionId).catch(() => {
+      setCanvasError('图片未能加入画布，请确认附件仍可用后重试。')
+    }).finally(() => { adding.current = false; setAddingToCanvas(false) })
+  }
   const label = '第 ' + task.ordinal + ' 张图片：' + stateLabels[task.state]
   const retryable = task.terminal && task.state !== 'completed' && retry !== undefined && prepareRetry !== undefined
   const sourceReason = retry?.imageIds.length ? '带参考图的任务暂不能安全准备重试，请重新附图后发送。' : undefined
@@ -150,6 +162,13 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
       <strong>图片 {task.ordinal}</strong>
       <span>{stateLabels[task.state]}</span>
     </div>
+    {addImageToCanvas && task.receipt && <div className={css.canvasAction}>
+      <button type="button" aria-label={`加入画布：图片 ${task.ordinal}`}
+        disabled={!preview || task.receipt.status !== 'completed' || addingToCanvas}
+        title={!preview ? '正在核对图片附件' : task.receipt.status !== 'completed' ? '图片仍待确认' : '加入画布'}
+        onClick={addToCanvas}>{addingToCanvas ? '正在加入…' : '加入画布'}</button>
+      {canvasError && <p role="status" className={css.reason}>{canvasError}</p>}
+    </div>}
     {task.state === 'unknown' && <p className={css.reason}>结果不确定，未自动重复生成</p>}
     {task.state === 'cancelled' && <p className={css.reason}>已取消；已完成图片仍会保留</p>}
     {task.state === 'interrupted' && <p className={css.reason}>任务未开始；未自动重新生成</p>}
@@ -169,7 +188,7 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
  * @returns the live batch cards, or null until an exact parent batch is projected.
  */
 export function ImageBatchProgress({
-  batches, retryCalls = [], prepareRetry, useSessions, loadImage,
+  batches, retryCalls = [], prepareRetry, useSessions, loadImage, addImageToCanvas,
 }: ImageBatchProgressProps) {
   const retries = new Map(retryCalls.flatMap(call => call.tasks.map(task => [
     call.parentCallId + '\0' + task.ordinal, task,
@@ -201,6 +220,7 @@ export function ImageBatchProgress({
               prepareRetry={prepareRetry}
               useSessions={useSessions}
               loadImage={loadImage}
+              addImageToCanvas={addImageToCanvas}
             />
           </div>)}
         </div>

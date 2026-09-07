@@ -127,6 +127,13 @@
   opacity: 0.55;
 }
 
+.canvasAction { display: grid; gap: 6px; padding: 0 10px 10px; }
+.canvasAction button { min-height: 44px; width: 100%; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; cursor: pointer; }
+.canvasAction button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.canvasAction button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+.canvasAction button:disabled { opacity: .55; cursor: default; }
+.canvasAction .reason { padding: 0; }
+
 .failures {
   display: grid;
   gap: 4px;
