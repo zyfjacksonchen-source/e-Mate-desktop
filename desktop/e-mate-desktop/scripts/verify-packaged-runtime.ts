@@ -382,7 +382,19 @@ export function verifyPackagedRuntime(
  */
 export async function afterPack(context: PackagedRuntimeContext): Promise<void> {
   verifyPackagedRuntime(context)
+  verifyPackagedCalc(context)
   verifyPackagedNodePty(context)
+}
+
+/** Read-only whole-payload verification; never downloads into a finished package. */
+export function verifyPackagedCalc(context: PackagedRuntimeContext, run: PtyProbeRunner = (command, args, options) => spawnSync(command, args, options)): void {
+  const targets = requiredPythonEntries(context).map(entry => entry.split('/')[1]!)
+  for (const target of targets) {
+    const result = run(process.execPath, [join(import.meta.dirname, 'prepare-calc-runtime.mjs'), '--verify-root', join(resolvePackagedResourcesRoot(context), 'calc-runtime'), '--target', target], {
+      encoding: 'utf8', env: process.env, timeout: 180_000,
+    })
+    if (result.error || result.status !== 0) throw new Error(`Packaged Calc verification failed for ${target}: ${result.error?.message ?? result.stderr ?? 'nonzero exit'}`)
+  }
 }
 
 export default afterPack

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { inventory, prepareTarget, verifyArchive } from './prepare-calc-runtime.mjs'
+import { inventory, prepareTarget, verifyArchive, verifyPreparedTarget } from './prepare-calc-runtime.mjs'
 
 test('archive validation checks size and full digest', async t => {
   const root = await mkdtemp(join(tmpdir(), 'calc-archive-test-'))
@@ -33,4 +33,16 @@ test('inventory detects altered bytes and preserves internal links while rejecti
 
 test('unknown native target is rejected before downloading or extracting', async () => {
   await assert.rejects(prepareTarget('unknown', '/unused', '/unused'), /not verified/)
+})
+
+test('package verification never prepares missing assets and rejects an incomplete matching receipt', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'calc-package-test-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const target = 'darwin-arm64', destination = join(root, target)
+  await assert.rejects(verifyPreparedTarget(target, root), { code: 'ENOENT' })
+  await assert.rejects(lstat(destination), { code: 'ENOENT' })
+  const manifest = JSON.parse(await readFile(new URL('./calc-runtime/manifest.json', import.meta.url), 'utf8'))
+  await mkdir(join(destination, 'LibreOffice.app'), { recursive: true })
+  await writeFile(join(destination, 'receipt.json'), JSON.stringify({ schema: 1, target, version: manifest.version, archiveSha256: manifest.targets[target].archive.sha256, entries: [] }))
+  await assert.rejects(verifyPreparedTarget(target, root), /Incomplete/)
 })

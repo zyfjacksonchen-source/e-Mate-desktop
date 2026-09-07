@@ -68,12 +68,7 @@ export async function prepareTarget(target, archiveDirectory, outputRoot) {
   let cached = false
   try { await lstat(destination); cached = true } catch (error) { if (error.code !== 'ENOENT') throw error }
   if (cached) {
-    const receipt = JSON.parse(await readFile(join(destination, 'receipt.json'), 'utf8'))
-    if (receipt.archiveSha256 !== expected.archive.sha256) throw new Error('Calc cache archive identity mismatch')
-    const current = await inventory(join(destination, 'LibreOffice.app'))
-    verifyInventory(current, expected)
-    if (JSON.stringify(current) !== JSON.stringify(receipt.entries)) throw new Error('Calc cache contents changed')
-    return receipt
+    return verifyPreparedTarget(target, outputRoot)
   }
   const archive = join(archiveDirectory, basename(new URL(expected.archive.url).pathname))
   await mkdir(archiveDirectory, { recursive: true })
@@ -108,15 +103,31 @@ export async function prepareTarget(target, archiveDirectory, outputRoot) {
   }
 }
 
+export async function verifyPreparedTarget(target, outputRoot) {
+  const expected = manifest.targets[target]
+  if (!expected) throw new Error(`Calc target has no verified manifest: ${target}`)
+  const destination = join(outputRoot, target)
+  const receipt = JSON.parse(await readFile(join(destination, 'receipt.json'), 'utf8'))
+  if (receipt.schema !== 1 || receipt.target !== target || receipt.version !== manifest.version || receipt.archiveSha256 !== expected.archive.sha256) throw new Error('Calc cache archive identity mismatch')
+  const current = await inventory(join(destination, 'LibreOffice.app'))
+  verifyInventory(current, expected)
+  if (JSON.stringify(current) !== JSON.stringify(receipt.entries)) throw new Error('Calc cache contents changed')
+  return receipt
+}
+
+const fontSource = resolve(packageRoot, '../../packages/dsh-plugin-office-skills/skills/pdf/assets/noto-sans-sc')
+const fontNames = ['NotoSansSC-Regular.ttf', 'SOURCE.json', 'OFL.txt', 'FONT-NOTICE.txt', 'REPRODUCE.md']
+async function verifyFonts(destination) {
+  await verifyArchive(join(destination, fontNames[0]), { bytes: 10596308, sha256: 'c7763f454946833081cc90e73186615f8e1189de9c5e5a5a8752871fd79fddbc' })
+  for (const file of fontNames) if (await fileDigest(join(fontSource, file)) !== await fileDigest(join(destination, file))) throw new Error('Calc font cache changed')
+}
+
 async function prepareFonts(outputRoot) {
-  const source = resolve(packageRoot, '../../packages/dsh-plugin-office-skills/skills/pdf/assets/noto-sans-sc')
-  const name = 'NotoSansSC-Regular.ttf'
-  await verifyArchive(join(source, name), { bytes: 10596308, sha256: 'c7763f454946833081cc90e73186615f8e1189de9c5e5a5a8752871fd79fddbc' })
-  const names = [name, 'SOURCE.json', 'OFL.txt', 'FONT-NOTICE.txt', 'REPRODUCE.md']
+  await verifyFonts(fontSource)
   const destination = join(outputRoot, 'fonts')
   try {
     await lstat(destination)
-    for (const file of names) if (await fileDigest(join(source, file)) !== await fileDigest(join(destination, file))) throw new Error('Calc font cache changed')
+    await verifyFonts(destination)
     return
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
@@ -125,17 +136,19 @@ async function prepareFonts(outputRoot) {
   }
   const staging = await mkdtemp(join(outputRoot, 'fonts.staging-'))
   try {
-    for (const file of names) await copyFile(join(source, file), join(staging, file))
+    for (const file of fontNames) await copyFile(join(fontSource, file), join(staging, file))
     await rename(staging, destination)
   } finally { await rm(staging, { recursive: true, force: true }) }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { 'archive-dir': { type: 'string' }, target: { type: 'string' } } })
-  const targets = values.target ? [values.target] : ['darwin-arm64', 'darwin-x64']
+  const { values } = parseArgs({ options: { 'archive-dir': { type: 'string' }, target: { type: 'string' }, 'verify-root': { type: 'string' } } })
+  const targets = values.target ? [values.target] : process.platform === 'darwin' ? ['darwin-arm64', 'darwin-x64'] : [`${process.platform}-${process.arch}`]
   for (const target of targets) {
-    const receipt = await prepareTarget(target, resolve(values['archive-dir'] ?? join(packageRoot, 'build/calc-downloads')), join(packageRoot, 'build/calc-runtime'))
+    const receipt = values['verify-root'] ? await verifyPreparedTarget(target, resolve(values['verify-root']))
+      : await prepareTarget(target, resolve(values['archive-dir'] ?? join(packageRoot, 'build/calc-downloads')), join(packageRoot, 'build/calc-runtime'))
     process.stdout.write(`Calc ${receipt.target}: ${receipt.entries.length} verified entries\n`)
   }
-  await prepareFonts(join(packageRoot, 'build/calc-runtime'))
+  if (values['verify-root']) await verifyFonts(join(resolve(values['verify-root']), 'fonts'))
+  else await prepareFonts(join(packageRoot, 'build/calc-runtime'))
 }

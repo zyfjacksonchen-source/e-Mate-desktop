@@ -9,4 +9,4 @@ node e-mate-desktop/scripts/prepare-calc-runtime.mjs --archive-dir /absolute/arc
 node --test e-mate-desktop/scripts/prepare-calc-runtime.spec.mjs
 ```
 
-This is asset preparation, not an installer or publication entry point. Native Windows extraction, source-companion delivery, packaged verification and build integration remain required before release. Unknown targets fail explicitly. Prepared bytes are generated output and remain outside source control.
+The existing Desktop build calls this preparation step; its afterPack hook uses `--verify-root` to inspect the finished resources without downloading or changing them. Both architectures are required for a universal Mac app. This is not a separate installer or publication entry point. Native Windows extraction, source-companion delivery and real installed acceptance remain required before release. Unknown targets fail explicitly. Prepared bytes are generated output and remain outside source control.

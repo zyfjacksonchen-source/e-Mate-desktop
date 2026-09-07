@@ -12,6 +12,7 @@ import {
   resolvePackagedResourcesRoot,
   resolvePackagedUnpackedRoot,
   verifyPackagedNodePty,
+  verifyPackagedCalc,
   verifyPackagedRuntime,
   type ArchiveLister,
   type FileProbe,
@@ -77,6 +78,21 @@ describe('packaged desktop runtime verification', () => {
 
     expect(() => verifyPackagedNodePty(context('/build', 'darwin'), run))
       .toThrow('packaged node-pty smoke failed: posix_spawnp failed.')
+  })
+
+  it('verifies both complete Calc payloads without allowing package-time downloads', () => {
+    const run = vi.fn<PtyProbeRunner>(() => ({ status: 0, stderr: '' }))
+    const runtimeContext = context('/build', 'darwin', 4)
+    verifyPackagedCalc(runtimeContext, run)
+    expect(run.mock.calls.map(([, args]) => args.at(-1))).toEqual(['darwin-arm64', 'darwin-x64'])
+    for (const [, args] of run.mock.calls) {
+      expect(args).toContain('--verify-root')
+      expect(args).toContain(join(resolvePackagedResourcesRoot(runtimeContext), 'calc-runtime'))
+      expect(args).not.toContain('--archive-dir')
+    }
+    const fail = vi.fn<PtyProbeRunner>(() => ({ status: 1, stderr: 'Calc cache contents changed' }))
+    expect(() => verifyPackagedCalc(runtimeContext, fail)).toThrow('Calc cache contents changed')
+    expect(fail).toHaveBeenCalledOnce()
   })
 
   it.each([1, 3])('defers macOS architecture %s until the final universal app', arch => {
