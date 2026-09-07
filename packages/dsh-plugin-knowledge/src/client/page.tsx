@@ -17,10 +17,17 @@ type ViewNode = KnowledgeNode & { source_only?: boolean; excerpt?: string }
 type GraphModule = { createGraph(element: HTMLElement, select: (id: string) => void, unavailable: () => void): GraphController }
 interface Props { callKnowledge: CallKnowledge; loadGraph(): Promise<GraphModule>; pickDirectory?: KnowledgeImportsProps['pickDirectory']; openTask?: KnowledgeImportsProps['openTask']; prepareDraft?: (text: string, signal: AbortSignal) => Promise<void> }
 const layerNames: Record<string, string> = { expert: '专家知识', case: '案例方法', source: '原始资料' }
+export function KnowledgeConstellationIcon({ size = 18 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="m6.2 7.1 6.1-2M5.7 9.2l3.4 7.4m2.8.8 6.4-3.8m-3.7-7.7 4.5 5.2" />
+    <circle cx="4.5" cy="7.5" r="2" /><circle cx="14" cy="4.5" r="2" />
+    <circle cx="10" cy="18.5" r="2" /><circle cx="20.5" cy="12.5" r="2" />
+  </svg>
+}
 export function KnowledgeEntry({ wide, KnowledgeIcon }: { wide: boolean; KnowledgeIcon: ComponentType<{ size?: number }> }) {
   const [active, setActive] = useState(location.pathname === '/knowledge')
   useEffect(() => { const sync = () => setActive(location.pathname === '/knowledge'); addEventListener('popstate', sync); return () => removeEventListener('popstate', sync) }, [])
-  return <button className={css.entry} data-emate-primary-action="" data-wide={wide || undefined} type="button" title="企业知识图谱" aria-label="企业知识图谱" aria-current={active ? 'page' : undefined} onClick={() => { if (!active) { history.pushState(null, '', '/knowledge'); dispatchEvent(new PopStateEvent('popstate')) } }}><KnowledgeIcon size={18} />{wide && <span>企业知识图谱</span>}</button>
+  return <button className={css.entry} data-emate-primary-action="" data-wide={wide || undefined} type="button" title="知识图谱" aria-label="知识图谱" aria-current={active ? 'page' : undefined} onClick={() => { if (!active) { history.pushState(null, '', '/knowledge'); dispatchEvent(new PopStateEvent('popstate')) } }}><KnowledgeIcon size={18} />{wide && <span>知识图谱</span>}</button>
 }
 function GraphView({ nodes, edges, selected, select, loadGraph, failed }: {
   nodes: ViewNode[]; edges: KnowledgeGraph['edges']; selected?: string; select(id: string): void; loadGraph: Props['loadGraph']; failed(): void
@@ -188,8 +195,8 @@ export function KnowledgePage({ callKnowledge, loadGraph, pickDirectory, openTas
   if (!open) return null
   const originals: OriginalVersion[] = selected ? selected.revision_id ? detail?.source_versions ?? [] : [{ source_id: selected.source_id, source_version: selected.source_version }] : []
   const graphical = view === 'graph' && !reduced && !unavailable && nodes.length > 0
-  return <main className={css.page} aria-label="企业知识图谱" data-emate-knowledge-page="">
-    <header className={css.header}><div><small>公司公共知识</small><h1>企业知识图谱</h1><p>沿知识、方法与原始资料，找到可追溯的依据。</p></div><button type="button" onClick={() => void refresh()} disabled={busy}>{busy ? '正在读取' : '刷新资料'}</button></header>
+  return <main className={css.page} aria-label="知识图谱" data-emate-knowledge-page="">
+    <header className={css.header}><div><small>公司公共知识</small><h1>知识图谱</h1><p>沿知识、方法与原始资料，找到可追溯的依据。</p></div><button type="button" onClick={() => void refresh()} disabled={busy}>{busy ? '正在读取' : '刷新资料'}</button></header>
     <KnowledgeImports openRequest={importRequest} callKnowledge={callKnowledge} pickDirectory={pickDirectory} openTask={openTask} replacement={selected && !selected.revision_id ? { source_id: selected.source_id, source_version: selected.source_version, title: selected.title } : undefined} />
     <form className={css.filters} onSubmit={event => { event.preventDefault(); void searchText() }}>
       <input maxLength={4000} aria-label="搜索知识" placeholder="筛选标题，或检索原文内容" value={query} onChange={event => { draftRequest.current?.abort(); setDrafting(false); generation.current++; request.current?.abort(); setBusy(false); setQuery(event.target.value); setSearch(undefined) }} />

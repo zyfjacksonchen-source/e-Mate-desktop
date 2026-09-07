@@ -24,7 +24,7 @@ afterEach(() => { cleanup(); document.body.replaceChildren(); history.replaceSta
 it('uses the native route and never makes fake nodes for an empty corpus', async () => {
   history.replaceState(null, '', '/')
   render(<KnowledgeEntry wide KnowledgeIcon={() => <svg />} />)
-  fireEvent.click(screen.getByRole('button', { name: '企业知识图谱' }))
+  fireEvent.click(screen.getByRole('button', { name: '知识图谱' }))
   expect(location.pathname).toBe('/knowledge')
   const loadGraph = vi.fn()
   render(<KnowledgePage callKnowledge={fixture([])} loadGraph={loadGraph} />)

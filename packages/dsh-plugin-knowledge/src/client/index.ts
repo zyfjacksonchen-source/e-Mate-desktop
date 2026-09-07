@@ -1,6 +1,5 @@
-import { IconDataOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CHANNEL, GRAPH_ASSET, GRAPH_MODULE, parseKnowledgeRpc } from '../contract.ts'
-import { KnowledgeEntry, KnowledgePage } from './page.tsx'
+import { KnowledgeConstellationIcon, KnowledgeEntry, KnowledgePage } from './page.tsx'
 export const inject = ['slots', 'connection', 'modules', 'workspaces', 'sessions', 'conversation']
 /** Use the native input and Workspace default projection; never submit or rebuild attachments. */
 export async function prepareKnowledgeDraft(ctx: any, text: string, signal: AbortSignal, viewActions: (id: string) => { setView(view: string): void } | undefined): Promise<void> {
@@ -76,6 +75,6 @@ export function apply(ctx: any): void {
   }, KnowledgePage))
   ctx.slots.inject('sidebar.primary.action', () => ctx.slots.register({
     name: 'sidebar.primary.action', id: 'e-mate-knowledge-entry', order: 30,
-    inject: () => ({ KnowledgeIcon: IconDataOutline16 }),
+    inject: () => ({ KnowledgeIcon: KnowledgeConstellationIcon }),
   }, KnowledgeEntry))
 }
