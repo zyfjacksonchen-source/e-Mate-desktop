@@ -33,7 +33,7 @@ function harness() {
 }
 it('registers the adjacent native view with the same store and opens without details or a header button', async () => {
   const h = harness()
-  expect(h.ctx.slots.register).toHaveBeenCalledWith(expect.objectContaining({ name: 'conversation.view', id: 'e-mate-canvas', order: 21, label: '画布', store: h.nativeStore }), expect.any(Function))
+  expect(h.ctx.slots.register).toHaveBeenCalledWith(expect.objectContaining({ name: 'conversation.view', id: 'e-mate-canvas', order: 19, label: '画布', store: h.nativeStore }), expect.any(Function))
   await h.service.open('a')
   expect(h.actions.setView).toHaveBeenCalledWith('e-mate-canvas')
   expect(h.ctx.layout.openDetails).not.toHaveBeenCalled()

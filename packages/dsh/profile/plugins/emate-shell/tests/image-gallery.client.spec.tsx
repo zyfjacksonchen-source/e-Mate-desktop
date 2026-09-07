@@ -289,7 +289,7 @@ describe('completed artifact terminal', () => {
     const entries = runtime.slots.entries('conversation.view')
     expect(entries).toHaveLength(1)
     expect(entries[0]?.options).toMatchObject({
-      id: 'e-mate-gallery', order: 20, label: '画廊',
+      id: 'e-mate-gallery', order: 18, label: '画廊',
     })
     expect(entries[0]?.component).toBe(ImageGalleryView)
     await runtime.dispose()

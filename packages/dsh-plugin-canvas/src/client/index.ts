@@ -81,7 +81,7 @@ export function apply(ctx: any): void {
     // Reuse the native header/body store handle, never create a parallel view state.
     const store = ctx.slots.entries('conversation.session').find((entry: any) => entry.store)?.store
     if (!store) throw new Error('画布缺少原生会话视图状态。')
-    ctx.slots.register({ name: 'conversation.view', id: CANVAS_VIEW, order: 21, label: '画布', store }, (props: any) => createElement(CanvasPage, { ...props, key: props.sessionId }))
+    ctx.slots.register({ name: 'conversation.view', id: CANVAS_VIEW, order: 19, label: '画布', store }, (props: any) => createElement(CanvasPage, { ...props, key: props.sessionId }))
     // The resident native header supplies its scope-bound actions even when
     // another tab is visible. This controller has no button or visual surface.
     ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({

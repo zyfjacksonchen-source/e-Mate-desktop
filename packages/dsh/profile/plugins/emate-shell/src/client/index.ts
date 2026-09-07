@@ -183,7 +183,7 @@ export function registerImageGallery(
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
     id: 'e-mate-gallery',
-    order: 20,
+    order: 18,
     label: '画廊',
     inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, notice),
   }, ImageGalleryView))
