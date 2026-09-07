@@ -75,6 +75,26 @@ class NativeExportGuardTests(unittest.TestCase):
             for color in slide.findall('.//p:sp/p:spPr/a:solidFill/a:srgbClr', NS)
         ]
 
+    def test_existing_private_pptx_keeps_permissions_after_export(self) -> None:
+        import os
+        import stat
+        import zipfile
+        from svg_to_pptx.pptx_package.builder import create_pptx_with_native_svg
+
+        if os.name == 'nt':
+            self.skipTest('POSIX mode regression; Windows DACL needs native acceptance')
+        self._svg('<rect id="box" x="10" y="10" width="100" height="100" fill="#123456"/>')
+        output = self.root / 'private.pptx'
+        output.write_bytes(b'old private document')
+        output.chmod(0o600)
+        create_pptx_with_native_svg(
+            [self.svg_path], output, resource_root=self.root,
+            pptx_structure='flat', workers=1, verbose=False,
+        )
+        self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+        with zipfile.ZipFile(output) as archive:
+            self.assertIn('ppt/slides/slide1.xml', archive.namelist())
+
     def test_huge_coordinate_export_fails_with_page_and_element(self) -> None:
         for transform in ('', 'transform="matrix(1 0 0 1 0 0)"'):
             with self.subTest(transform=transform):
@@ -649,6 +669,120 @@ class NotesDiscoveryTests(unittest.TestCase):
             notes = find_notes_files(self.root, [self.root / 'slide01.svg'])
         self.assertEqual(notes, {'slide01': 'SLIDE NOTE'})
         self.assertEqual(stderr.getvalue(), '')
+
+
+class NativeOutputPermissionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import os
+        from unittest.mock import Mock
+        from svg_to_pptx.pptx_package import builder
+
+        self.builder = builder
+        self.native_os = os
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.output = self.root / 'existing.pptx'
+        self.output.write_bytes(b'private original')
+        self.output.chmod(0o600)
+        self.replacement = self.root / 'validated.pptx'
+        self.replacement.write_bytes(b'validated replacement')
+        self.windows_os = Mock(wraps=os)
+        self.windows_os.name = 'nt'
+
+    def _windows(self, implementation, error: int = 5):
+        import ctypes
+        from contextlib import ExitStack
+        from unittest.mock import Mock
+
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        api = Mock(side_effect=implementation)
+        library = Mock(ReplaceFileW=api)
+        stack.enter_context(patch.object(self.builder, 'os', self.windows_os))
+        loader = stack.enter_context(patch.object(ctypes, 'WinDLL', return_value=library, create=True))
+        stack.enter_context(patch.object(ctypes, 'get_last_error', return_value=error, create=True))
+        stack.enter_context(patch.object(ctypes, 'WinError', side_effect=lambda code: OSError(code, 'replacement failed'), create=True))
+        command = stack.enter_context(patch('subprocess.run', side_effect=AssertionError('No permission command allowed')))
+        return api, loader, command
+
+    def test_windows_existing_file_uses_acl_preserving_replace_with_backup(self) -> None:
+        def replace(output, replacement, backup, flags, exclude, reserved):
+            self.assertEqual((flags, exclude, reserved), (0, None, None))
+            self.assertEqual(Path(backup).parent, self.root)
+            self.native_os.rename(output, backup)
+            self.native_os.rename(replacement, output)
+            return 1
+
+        api, loader, command = self._windows(replace)
+        self.builder._publish_output_file(self.replacement, self.output)
+        loader.assert_called_once_with('kernel32', use_last_error=True)
+        api.assert_called_once()
+        self.assertEqual(api.call_args.args[:2], (str(self.output), str(self.replacement)))
+        self.assertEqual(self.output.read_bytes(), b'validated replacement')
+        self.assertFalse(list(self.root.glob('*.replace-backup-*')))
+        self.windows_os.chmod.assert_not_called()
+        self.windows_os.replace.assert_not_called()
+        command.assert_not_called()
+
+    def test_windows_failure_never_falls_back_to_overwriting_original(self) -> None:
+        api, _, command = self._windows(lambda *_args: 0)
+        with self.assertRaises(OSError):
+            self.builder._publish_output_file(self.replacement, self.output)
+        self.assertEqual(self.output.read_bytes(), b'private original')
+        self.assertEqual(self.replacement.read_bytes(), b'validated replacement')
+        api.assert_called_once()
+        self.windows_os.rename.assert_not_called()
+        self.windows_os.replace.assert_not_called()
+        command.assert_not_called()
+
+    def test_windows_partial_failure_restores_original_from_system_backup(self) -> None:
+        def partial(output, _replacement, backup, *_args):
+            self.native_os.rename(output, backup)
+            return 0
+
+        _, _, command = self._windows(partial, error=1177)
+        with self.assertRaises(OSError):
+            self.builder._publish_output_file(self.replacement, self.output)
+        self.assertEqual(self.output.read_bytes(), b'private original')
+        self.assertEqual(self.replacement.read_bytes(), b'validated replacement')
+        self.windows_os.replace.assert_not_called()
+        command.assert_not_called()
+
+    def test_windows_restore_failure_retains_original_backup(self) -> None:
+        def partial(output, _replacement, backup, *_args):
+            self.native_os.rename(output, backup)
+            return 0
+
+        self._windows(partial, error=1177)
+        self.windows_os.rename.side_effect = PermissionError('restore denied')
+        with self.assertRaisesRegex(OSError, 'original retained at') as caught:
+            self.builder._publish_output_file(self.replacement, self.output)
+        backups = list(self.root.glob('*.replace-backup-*'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), b'private original')
+        self.assertIn(str(backups[0]), str(caught.exception))
+        self.assertEqual(self.replacement.read_bytes(), b'validated replacement')
+
+    def test_windows_new_file_keeps_native_creation_without_permission_commands(self) -> None:
+        self.output.unlink()
+        _, loader, command = self._windows(lambda *_args: self.fail('No replacement API for new output'))
+        self.builder._publish_output_file(self.replacement, self.output)
+        self.assertEqual(self.output.read_bytes(), b'validated replacement')
+        loader.assert_not_called()
+        self.windows_os.rename.assert_called_once_with(self.replacement, self.output)
+        self.windows_os.chmod.assert_not_called()
+        command.assert_not_called()
+
+    def test_posix_atomic_replacement_failure_preserves_private_original(self) -> None:
+        import stat
+        if self.native_os.name == 'nt':
+            self.skipTest('POSIX mode and atomic replacement regression')
+        with patch.object(self.builder.os, 'replace', side_effect=OSError('replace denied')):
+            with self.assertRaises(OSError):
+                self.builder._publish_output_file(self.replacement, self.output)
+        self.assertEqual(self.output.read_bytes(), b'private original')
+        self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), 0o600)
 
 
 if __name__ == '__main__':

@@ -11,7 +11,6 @@ import random
 import re
 import shutil
 import stat
-import subprocess
 import tempfile
 import uuid
 import zipfile
@@ -5093,45 +5092,46 @@ def _create_writable_work_dir(output_path: Path) -> Path:
     )
 
 
-def _relax_output_permissions(output_path: Path) -> list[str]:
-    """Make exported files readable outside the sandbox owner where possible."""
-    warnings: list[str] = []
-
+def _publish_output_file(temporary: Path, output: Path) -> None:
+    """Publish validated bytes without widening the destination's permissions."""
     try:
-        current_mode = output_path.stat().st_mode
-        readable_mode = (
-            current_mode
-            | stat.S_IRUSR
-            | stat.S_IWUSR
-            | stat.S_IRGRP
-            | stat.S_IROTH
-        )
-        os.chmod(output_path, readable_mode)
-    except OSError as exc:
-        warnings.append(f"chmod skipped for {output_path}: {exc}")
+        previous = output.lstat()
+    except FileNotFoundError:
+        previous = None
+    if previous is not None and not stat.S_ISREG(previous.st_mode):
+        raise ValueError(f"PPTX output is not a regular file: {output}")
 
     if os.name != 'nt':
-        return warnings
+        if previous is not None:
+            temporary.chmod(stat.S_IMODE(previous.st_mode))
+        os.replace(temporary, output)
+        return
+    if previous is None:
+        # Windows rename refuses a destination that appeared after our check.
+        os.rename(temporary, output)
+        return
 
-    # Windows ACLs can remain sandbox-only even when the file mode looks sane.
-    # Grant the built-in Users SID read access; the SID avoids localization
-    # issues on non-English Windows installations.
-    try:
-        result = subprocess.run(
-            ['icacls', str(output_path), '/grant', '*S-1-5-32-545:R'],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        warnings.append(f"icacls skipped for {output_path}: {exc}")
-    else:
-        if result.returncode != 0:
-            message = (result.stderr or result.stdout or '').strip()
-            details = f": {message}" if message else ''
-            warnings.append(f"icacls failed for {output_path}{details}")
+    import ctypes
 
-    return warnings
+    replace_file = ctypes.WinDLL('kernel32', use_last_error=True).ReplaceFileW
+    replace_file.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+                             ctypes.c_ulong, ctypes.c_void_p, ctypes.c_void_p]
+    replace_file.restype = ctypes.c_int
+    # ReplaceFileW preserves the original DACL. A backup is required because
+    # errors 1176/1177 can rename the original before the replacement fails.
+    backup = output.with_name(f'.{output.name}.replace-backup-{uuid.uuid4().hex}')
+    if not replace_file(str(output), str(temporary), str(backup), 0, None, None):
+        error = ctypes.WinError(ctypes.get_last_error())
+        if backup.exists() and not output.exists():
+            try:
+                os.rename(backup, output)
+            except OSError as restore_error:
+                raise OSError(
+                    f"PPTX replacement failed; original retained at {backup}. "
+                    f"Restore failed: {restore_error}"
+                ) from error
+        raise error
+    backup.unlink()
 
 
 _NOTES_MASTER_REL_TYPE = (
@@ -8221,8 +8221,7 @@ def create_pptx_with_native_svg(
             raise RuntimeError(
                 f'PPTX animation package validation failed: {exc}'
             ) from exc
-        shutil.move(str(temp_output_path), str(output_path))
-        permission_warnings = _relax_output_permissions(output_path)
+        _publish_output_file(temp_output_path, output_path)
 
         if conversion_trace_path and conversion_trace is not None:
             conversion_trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -8250,8 +8249,6 @@ def create_pptx_with_native_svg(
         if verbose:
             print()
             print(f"[Done] Saved: {output_path}")
-            for warning in permission_warnings:
-                print(f"  [warn] {warning}")
             if conversion_trace_path and conversion_trace is not None:
                 print(f"  Trace: {conversion_trace_path}")
             print(

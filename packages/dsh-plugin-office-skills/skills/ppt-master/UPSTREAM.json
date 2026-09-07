@@ -120,6 +120,36 @@
           "to": "pptx-animations.md"
         }
       ]
+    },
+    {
+      "path": "scripts/svg_to_pptx/pptx_package/builder.py",
+      "upstream_path": "skills/ppt-master/scripts/svg_to_pptx/pptx_package/builder.py",
+      "original_bytes": 319004,
+      "original_git_blob_sha1": "7080ec06711f7bc825a9c446c7e1ad4f2eec0cde",
+      "original_sha256": "f6425c38a70bb5601860e8a55ebe0e1e76d983b549bef98fc0ce9071e6ff158f",
+      "distributed_bytes": 319242,
+      "distributed_sha256": "336fa3d8335700ec3d093f9954eb51254f33a985fbf2655e40547c71b5fff937",
+      "changes": [
+        {
+          "type": "permission-preserving-publication",
+          "description": "Replace post-export POSIX/Windows permission widening with atomic publication: preserve existing POSIX mode; use Windows ReplaceFileW with flags=0 and a retained/restorable backup; never fall back to overwriting after replacement failure."
+        }
+      ]
+    },
+    {
+      "path": "scripts/tests/test_native_export_guards.py",
+      "upstream_path": "skills/ppt-master/scripts/tests/test_native_export_guards.py",
+      "original_bytes": 35996,
+      "original_git_blob_sha1": "3207b0cb79f3c483869c84ae13b1a095e5df39e5",
+      "original_sha256": "67f4f10c6c16b27350a88d863d819399e63f46bf39b696fc7b831e2791640899",
+      "distributed_bytes": 42775,
+      "distributed_sha256": "d136172ce2944cac992d540cce19214252757a876e83f7da8800fc50752f1798",
+      "changes": [
+        {
+          "type": "permission-preserving-publication",
+          "description": "Add real private-file export regression and focused native publication/Windows API failure and recovery checks."
+        }
+      ]
     }
   ],
   "host_additions": [
@@ -91100,5 +91130,5 @@
       ]
     }
   ],
-  "identity_note": "files records the original 12953 upstream blobs; modified and supplementary source records separately identify exact distributed SHA256. Only reference URLs changed; prose and runnable source are preserved."
+  "identity_note": "files records the original 12953 upstream blobs; modified and supplementary source records separately identify exact distributed SHA256. Four original documents adapt reference URLs; one export owner and its existing regression test preserve output permissions. Entry, attribution guard and other runnable sources retain original bytes."
 }
