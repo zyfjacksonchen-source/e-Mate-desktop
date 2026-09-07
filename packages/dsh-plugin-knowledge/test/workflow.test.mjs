@@ -42,9 +42,9 @@ class Adapter extends LlmAdapter {
   }
 }
 function server() {
-  let compilation; const revisions = new Map(); const calls = []; let lostCreate = false, lostCommit = false, lostClaim = false, lostCheckpoint = false, conflict = false, rejectedCitations = 0, unreachableCreates = 0
+  let compilation; const revisions = new Map(); const calls = []; let lostCreate = false, lostCommit = false, lostClaim = false, lostCheckpoint = false, conflict = false, rejectedCitations = 0, unreachableCreates = 0, pauseAfterPrepared = false
   const response = value => Response.json({ schema_version: 1, scope: { kind: 'enterprise-subject' }, ...structuredClone(value) })
-  return { calls, revisions, get compilation() { return compilation }, loseCreate() { lostCreate = true }, loseCommit() { lostCommit = true }, loseLeaseReplies() { lostClaim = true; lostCheckpoint = true }, conflict() { conflict = true }, clearConflict() { conflict = false }, rejectCitationOnce() { rejectedCitations = 1 }, failCreates(count) { unreachableCreates = count },
+  return { calls, revisions, get compilation() { return compilation }, loseCreate() { lostCreate = true }, loseCommit() { lostCommit = true }, loseLeaseReplies() { lostClaim = true; lostCheckpoint = true }, conflict() { conflict = true }, clearConflict() { conflict = false }, rejectCitationOnce() { rejectedCitations = 1 }, failCreates(count) { unreachableCreates = count }, pauseAfterPrepared() { pauseAfterPrepared = true },
     async request(url, init) {
       const path = url.pathname.split('/knowledge/v1')[1]; const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
       calls.push({ method: init.method, path, query: url.search, body })
@@ -57,6 +57,7 @@ function server() {
       if (init.method === 'GET' && path.startsWith('/compilations')) return compilation ? response(compilation) : Response.json({ error: 'NOT_FOUND' }, { status: 404 })
       if (path.endsWith('/claim')) { assert.equal(body.expected_version, compilation.version); compilation.version++; compilation.state = 'running'; compilation.lease_token = 'c'.repeat(64); compilation.runner_id = body.runner_id; if (lostClaim) { lostClaim = false; throw Error('claim response lost') }; return response(compilation) }
       if (init.method === 'PATCH') {
+        if (pauseAfterPrepared && body.checkpoint.completed_units?.length) { pauseAfterPrepared = false; return Response.json({ error: 'REVISION_CONFLICT' }, { status: 409 }) }
         if (body.expected_version !== compilation.version) return Response.json({ error: 'LEASE_CONFLICT' }, { status: 409 })
         compilation.version++; compilation.state = body.state; compilation.checkpoint = { ...bCheckpointDefaults, ...body.checkpoint }; if (lostCheckpoint) { lostCheckpoint = false; throw Error('checkpoint response lost') }; return response(compilation)
       }
@@ -91,12 +92,13 @@ async function runtime(t, backend = server(), root, dependencies = {}) {
   let principal = { tenantId: 'enterprise', userId: 'u1' }
   const identity = { localAccountPrincipal: () => principal, request: backend.request }
   ctx.reflect.provide('emateIdentity', identity)
-  const workflow = createKnowledgeWorkflow(ctx, { installModelSelection, ...dependencies })
+  let selection = { provider: 'mock', model: 'model' }
+  const workflow = createKnowledgeWorkflow(ctx, { installModelSelection, resolveSelection: async () => structuredClone(selection), ...dependencies })
   const caller = await workflow.openOperation({ provider: 'mock', model: 'model' })
   let disposed = false
   const dispose = async () => { if (disposed) return; disposed = true; await workflow.dispose(); await ctx.fiber.dispose() }
   t.after(async () => { await dispose(); if (!root) await rm(directory, { recursive: true, force: true }) })
-  return { ctx, workflow, caller, adapter, backend, root: directory, dispose, changeAccount() { principal = { ...principal, userId: 'u2' }; workflow.changed() } }
+  return { ctx, workflow, caller, adapter, backend, root: directory, dispose, setSelection(value) { selection = value }, changeAccount() { principal = { ...principal, userId: 'u2' }; workflow.changed() } }
 }
 const request = () => ({ operationId: randomUUID(), sourceVersions: [source], topics: [{ key: 'general', expected_revision_id: null }], model: { id: 'model', reasoning_effort: 'none' }, scope: { kind: 'public' } })
 async function done(run, result) {
@@ -138,6 +140,7 @@ test('real native Session, spawn, Goal and Job compile only frozen public chunks
 
 test('model policy mismatch fails before a real native adapter stream and preserves a resumable compilation', async t => {
   const run = await runtime(t, server(), undefined, { installModelSelection(agentCtx, selection) { return installModelSelection(agentCtx, { ...selection, current: { ...selection.current, model: 'unexpected-model' } }) } })
+  run.setSelection({ provider: 'mock', model: 'model', reasoningEffort: 'medium' })
   const input = request(); input.model.reasoning_effort = 'medium'
   const result = await run.workflow.start({ agent: run.caller }, input)
   assert.equal((await done(run, result)).status, 'failed')
@@ -306,6 +309,7 @@ test('native model selection freezes medium thinking while preserving the enterp
   const checked = []
   run.ctx.on('agent/request', async (_payload, next) => { const config = await next(); checked.push(config); return config })
   run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  run.setSelection({ provider: 'mock', model: 'model', reasoningEffort: 'medium' })
   const input = request(); input.model.reasoning_effort = 'medium'
   const result = await run.workflow.start({ agent: run.caller }, input)
   assert.equal((await done(run, result)).status, 'completed')
@@ -506,4 +510,45 @@ test('read-only Host tools reuse the same native execution owner authorization b
   assert.equal(await run.workflow.authorize(captured), owner)
   run.changeAccount()
   await assert.rejects(run.workflow.authorize(captured), { code: 'scope-changed' })
+})
+
+
+test('the native picked provider is frozen before the first turn and survives restart despite a different current selection', async t => {
+  const persistedRoot = await mkdtemp(join(tmpdir(), 'emate-provider-freeze-'))
+  const backend = server(); backend.pauseAfterPrepared()
+  const selection = { current: { provider: 'picked', model: 'picked-model', reasoningEffort: 'medium' }, assembled: undefined }
+  let resolves = 0
+  const first = await runtime(t, backend, persistedRoot, { resolveSelection: async () => { resolves++; return structuredClone(selection.current) } })
+  installModelSelection(first.caller.ctx, selection)
+  const picked = new Adapter(); picked.reasoning = { efforts: [{ id: 'medium', name: 'Medium' }] }
+  first.ctx.llm.registerAdapter(['picked'], picked)
+  picked.script.push(toolChunks('first-topic', 'structured_output', output))
+  assert.equal(first.caller.options.provider, 'mock')
+  assert.equal(first.caller.session.events.some(event => event.type === 'request/header'), false)
+  const input = { ...request(), model: { id: 'picked-model', reasoning_effort: 'medium' }, topics: [{ key: 'one' }, { key: 'two' }] }
+  const started = await first.workflow.start({ agent: first.caller }, input)
+  assert.equal((await done(first, started)).status, 'failed')
+  assert.equal(first.adapter.requests.length, 0)
+  assert.equal(picked.requests.length, 1)
+  assert.equal(picked.requests[0].provider, 'picked')
+  assert.equal(picked.requests[0].reasoningEffort, 'medium')
+  const recorded = events(first.caller).find(event => event.kind === 'compilation-request')
+  assert.deepEqual(recorded.selection, selection.current)
+  assert.equal(backend.compilation.request.model.provider, undefined)
+  selection.current = { provider: 'mock', model: 'model' }
+  await first.dispose()
+  const second = await runtime(t, backend, persistedRoot, { resolveSelection: async () => { throw Error('resume must not read the new user selection') } })
+  t.after(() => rm(persistedRoot, { recursive: true, force: true }))
+  const resumedProvider = new Adapter(); resumedProvider.reasoning = { efforts: [{ id: 'medium', name: 'Medium' }] }
+  resumedProvider.script.push(toolChunks('second-topic', 'structured_output', output))
+  second.ctx.llm.registerAdapter(['picked'], resumedProvider)
+  const resumed = await second.workflow.resume({ agent: second.caller }, started.compilation_id)
+  assert.equal(second.ctx.agents.get(resumed.session_id).options.provider, 'picked')
+  assert.equal((await done(second, resumed)).status, 'completed')
+  assert.equal(second.adapter.requests.length, 0)
+  assert.equal(resumedProvider.requests.length, 1)
+  assert.equal(resumedProvider.requests[0].provider, 'picked')
+  assert.equal(resumedProvider.requests[0].model, 'picked-model')
+  assert.equal(resumedProvider.requests[0].reasoningEffort, 'medium')
+  assert.equal(resolves, 1)
 })

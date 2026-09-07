@@ -8,6 +8,11 @@ const PERSONA = '你是知识整理子任务。仅依据本任务冻结的来源
 const citation = { type: 'object', properties: { source_id: { type: 'string' }, source_version: { type: 'string' }, parse_revision: { type: 'string' }, chunk_id: { type: 'integer' }, quote: { type: 'string' } }, required: ['source_id', 'source_version', 'parse_revision', 'chunk_id', 'quote'], additionalProperties: false }
 export const CLAIMS_SCHEMA = { type: 'object', properties: { claims: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string', enum: ['original_fact', 'model_organized', 'inference', 'conflict'] }, text: { type: 'string', description: 'benchmark_query_ids 非空时使用固定说明：结构化指标见下方快照。实际数值由服务端展示；其余内容按声明类型保留原文依据。' }, citations: { type: 'array', items: citation }, benchmark_query_ids: { type: 'array', description: '仅选本次冻结 benchmark_evidence 的 query_id；非空时 kind 建议为 model_organized，不能在 text 改写指标数值。', items: { type: 'string' } } }, required: ['kind', 'text', 'citations', 'benchmark_query_ids'], additionalProperties: false } } }, required: ['claims'], additionalProperties: false }
 type Compilation = { id: string; operation_id: string; request: any; version: number; state: string; lease_token?: string; checkpoint: any; revision_ids: Record<string, string>; benchmark_evidence?: unknown[] }
+type FrozenSelection = { provider: string; model: string; reasoningEffort?: string }
+function freezeSelection(value: any, model: any): FrozenSelection {
+  if (typeof value?.provider !== 'string' || !value.provider || value.provider.length > 128 || value.model !== model.id || (value.reasoningEffort ?? 'none') !== model.reasoning_effort) fail('model-changed')
+  return { provider: value.provider, model: value.model, ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort }) }
+}
 type Running = { owner: string; controller: AbortController; agent: any; jobId: string; done?: Promise<any> }
 function receipt(value: any): Compilation {
   if (!UUID.test(value?.id) || !OPERATION.test(value?.operation_id) || !Number.isSafeInteger(value?.version) || value.version < 1 || !['created', 'pending', 'running', 'paused', 'failed', 'committed'].includes(value?.state)
@@ -57,7 +62,7 @@ export async function recoverNativeClaims(ctx: any, agent: any, compilationId: s
 
 /** Native owner adapter only: no model adapter, worker queue, credential store, or renderer identity. */
 export type XinKnowledgeCall = (name: string, args: Record<string, unknown>, exec: Execution, signal?: AbortSignal) => Promise<any>
-export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCall?: XinKnowledgeCall; installModelSelection?: (agentCtx: any, selection: any) => () => void } = {}) {
+export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCall?: XinKnowledgeCall; resolveSelection?: (exec: Execution) => Promise<FrozenSelection>; installModelSelection?: (agentCtx: any, selection: any) => () => void } = {}) {
   const identity = ctx.get?.('emateIdentity') ?? ctx.emateIdentity
   const transport = createKnowledgeTransport(identity)
   const turns = new WeakMap<object, Map<number, string | undefined>>()
@@ -125,21 +130,21 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
     const value = receipt(await selectedTransport(exec, scope).request(owner, 'GET', `/compilations/${compilationId}`, undefined, exec.signal))
     return { scope_key: owner, ...publicReceipt(value), ...(running.get(compilationId)?.owner === owner ? { job_id: running.get(compilationId)!.jobId } : {}) }
   }
-  const launch = (exec: Execution, initial: Compilation, owner: string): Promise<any> => {
+  const launch = (exec: Execution, initial: Compilation, owner: string, selection: FrozenSelection): Promise<any> => {
     const key = owner + ':' + initial.id
     const pending = launches.get(key)
     if (pending) return pending
-    const task = launchOnce(exec, initial, owner).finally(() => { launches.delete(key) })
+    const task = launchOnce(exec, initial, owner, selection).finally(() => { launches.delete(key) })
     launches.set(key, task)
     return task
   }
-  const launchOnce = async (exec: Execution, initial: Compilation, owner: string) => {
+  const launchOnce = async (exec: Execution, initial: Compilation, owner: string, selection: FrozenSelection) => {
     assertExecution(exec, owner)
     const existing = running.get(initial.id)
     if (existing) { if (existing.owner !== owner) fail('scope-changed'); return { ...publicReceipt(initial), job_id: existing.jobId, session_id: existing.agent.id } }
     if (initial.state === 'committed') return publicReceipt(initial)
     if (initial.state === 'failed') fail('failed-compilation')
-    const options = { provider: exec.agent.options.provider, model: initial.request.model.id }
+    const options = freezeSelection(selection, initial.request.model)
     if (typeof options.provider !== 'string' || !options.provider) fail('model-unavailable')
     const controller = new AbortController()
     const abort = () => controller.abort()
@@ -151,10 +156,12 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
         const live = ctx.agents.get(prior)
         if (live) handle = { agent: live, dispose: async () => {} }
         else handle = await ctx.agents.resume({ resumeSessionId: prior, agentOptions: options, signal: controller.signal, setup: isolate })
-        if (!events(handle.agent).some(event => event.kind === 'compilation-session' && event.compilationId === initial.id && event.owner === owner)) fail('invalid-recovery-session')
+        const marker = events(handle.agent).find(event => event.kind === 'compilation-session' && event.compilationId === initial.id && event.owner === owner)
+        if (!marker || (marker.selection && digest(freezeSelection(marker.selection, initial.request.model)) !== digest(selection))) fail('invalid-recovery-session')
+        if (handle.agent.options.provider !== options.provider || handle.agent.options.model !== options.model) fail('model-changed')
       } else {
         handle = await ctx.agents.create({ sessionId: randomUUID(), agentOptions: options, signal: controller.signal, setup: isolate })
-        await persist(ctx, handle.agent, { kind: 'compilation-session', owner, compilationId: initial.id })
+        await persist(ctx, handle.agent, { kind: 'compilation-session', owner, compilationId: initial.id, selection })
       }
       assertExecution(exec, owner)
       const agent = handle.agent
@@ -325,6 +332,21 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       throw error
     } finally { heartbeat?.(); if (activeRun) await activeRun.dispose() }
   }
+  const recoverySelection = async (exec: Execution, value: Compilation, owner: string): Promise<FrozenSelection> => {
+    const original = events(exec.agent).find(event => event.kind === 'compilation-request' && event.operationId === value.operation_id && event.owner === owner)
+    if (original?.selection) return freezeSelection(original.selection, value.request.model)
+    const sessionId = value.checkpoint.session_id
+    if (!sessionId) fail('invalid-recovery-session', '缺少冻结模型的原生回执，请从原知识任务恢复。')
+    const live = ctx.agents.get(sessionId)
+    const stored = live ? { events: live.session.events } : await ctx.sessionPersistence.readFrom(sessionId, 0)
+    exec.signal?.throwIfAborted(); assertExecution(exec, owner)
+    const marker = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.compilationId === value.id && event.data.owner === owner)?.data
+    if (!marker) fail('invalid-recovery-session')
+    if (marker.selection) return freezeSelection(marker.selection, value.request.model)
+    // Legacy live coordinators still expose the actual provider they were created with.
+    if (live && live.options.model === value.request.model.id && typeof live.options.provider === 'string') return freezeSelection({ provider: live.options.provider, model: live.options.model, ...(value.request.model.reasoning_effort === 'none' ? {} : { reasoningEffort: value.request.model.reasoning_effort }) }, value.request.model)
+    fail('invalid-recovery-session', '缺少冻结模型的原生回执，请从原知识任务恢复。')
+  }
   const startCompilation = async (exec: Execution, options: { operationId: string; sourceVersions: any[]; topics: any[]; model: { id: string; reasoning_effort: string }; scope?: Scope; benchmarkQueryIds?: string[]; sourceReplacements?: { source_id: string; source_version: string; replacement_source_id: string }[] }) => {
       const owner = await transport.capture(); assertExecution(exec, owner)
       if (!OPERATION.test(options.operationId) || !Array.isArray(options.topics) || options.topics.length < 1 || options.topics.length > 30 || (options.sourceReplacements && options.scope?.kind !== 'project')) fail('invalid-request')
@@ -332,12 +354,19 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       const request = { operation_id: options.operationId, source_versions: options.sourceVersions, topics: options.topics.map(topic => ({ ...topic, expected_revision_id: topic.expected_revision_id ?? null })), model: options.model, scope: options.scope ?? { kind: 'uploader-private' }, benchmark_query_ids: options.benchmarkQueryIds ?? [], ...(options.sourceReplacements ? { source_replacements: options.sourceReplacements } : {}) }
       const previous = events(exec.agent).find(event => event.kind === 'compilation-request' && event.operationId === options.operationId && event.owner === owner)
       if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict')
-      if (!previous) await persist(ctx, exec.agent, { kind: 'compilation-request', owner, operationId: options.operationId, request })
+      let selection: FrozenSelection
+      if (previous?.selection) selection = freezeSelection(previous.selection, request.model)
+      else {
+        if (previous || !dependencies.resolveSelection) fail('model-selection-unavailable')
+        selection = freezeSelection(await dependencies.resolveSelection(exec), request.model)
+        assertExecution(exec, owner)
+        await persist(ctx, exec.agent, { kind: 'compilation-request', owner, operationId: options.operationId, request, selection })
+      }
       const frozen = previous?.request ?? events(exec.agent).findLast(event => event.kind === 'compilation-request' && event.operationId === options.operationId && event.owner === owner).request
       const value = receipt(await findOrCreate(io, owner, 'compilations', frozen, previous !== undefined, exec.signal))
       if (digest({ ...value.request, source_replacements: value.request.source_replacements ?? [] }) !== digest({ ...request, source_replacements: request.source_replacements ?? [] })) fail('idempotency-conflict')
       await persist(ctx, exec.agent, { kind: 'compilation-receipt', owner, compilationId: value.id, operationId: value.operation_id })
-      return launch(exec, value, owner)
+      return launch(exec, value, owner, selection)
   }
 
   return {
@@ -354,7 +383,9 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
     },
     async resume(exec: Execution, compilationId: string, scope?: Scope) {
       const owner = await transport.capture(); assertExecution(exec, owner); if (!UUID.test(compilationId)) fail('invalid-request')
-      return launch(exec, receipt(await selectedTransport(exec, scope).request(owner, 'GET', `/compilations/${compilationId}`, undefined, exec.signal)), owner)
+      const value = receipt(await selectedTransport(exec, scope).request(owner, 'GET', `/compilations/${compilationId}`, undefined, exec.signal))
+      if (value.state === 'committed') return publicReceipt(value)
+      return launch(exec, value, owner, await recoverySelection(exec, value, owner))
     },
     async stop(exec: Execution, compilationId: string, scope?: Scope) {
       const owner = await transport.capture(); assertExecution(exec, owner)
