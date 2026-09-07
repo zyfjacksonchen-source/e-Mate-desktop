@@ -24,10 +24,13 @@ function readScope(value: any): Scope {
 function sameScope(value: any, scope: Scope) {
   if (!object(value) || value.kind !== scope.kind || scope.kind === 'project' && value.project_id !== scope.project_id) fail('scope-changed')
 }
-function source(value: any, scope: Scope, id?: string, version?: string) {
+function source(value: any, scope: Scope, id?: string, version?: string, allowShared = false) {
   if (!object(value) || !UUID.test(value.id) || !HASH.test(value.file_hash) || value.kind !== 'knowledge'
     || !SOURCE_STATES.has(value.status) || value.parse_revision != null && !HASH.test(value.parse_revision)) fail('invalid-response')
-  if (scope.kind === 'project' && value.project_id !== scope.project_id) fail('scope-changed')
+  // B's ProjectKnowledgeReader can cite an authorized shared original as well as
+  // the selected project's originals. A project import lookup remains exact.
+  if (scope.kind === 'project' && (!['xin', 'public'].includes(value.visibility)
+    || value.project_id !== scope.project_id && !(allowShared && value.project_id === null))) fail('scope-changed')
   if (id !== undefined && value.id !== id || version !== undefined && value.file_hash !== version) fail('source-changed')
   return value
 }
@@ -111,7 +114,7 @@ export function createKnowledgeUiRead({ host, workflow, xinCapture }: Dependenci
     await check(reply.scope_key)
     const value = reply.result
     if (!object(value) || value.error || value.status === 'failed') fail('invalid-response')
-    if (endpoint === 'source') source(value.source, scope, payload.source_id as string, payload.version as string)
+    if (endpoint === 'source') source(value.source, scope, payload.source_id as string, payload.version as string, true)
     else if (endpoint === 'revisions') revisions(value, scope, args.limit as number, payload.corpus_revision as string | undefined)
     else if (scope.kind === 'project') {
       if (value.schema_version !== 1) fail('invalid-response')

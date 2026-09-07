@@ -6,7 +6,7 @@ const key = 'a'.repeat(64), hash = 'b'.repeat(64), parse = 'c'.repeat(64)
 const id = 'a1234567-1234-1234-1234-123456789012', revision = 'b1234567-1234-1234-1234-123456789012'
 const privateScope = { kind: 'uploader-private' }, project = { kind: 'project', project_id: 17 }
 const exec = { agent: {} }
-const original = (extra = {}) => ({ id, file_hash: hash, parse_revision: parse, project_id: 17, kind: 'knowledge', status: 'ready', ...extra })
+const original = (extra = {}) => ({ id, file_hash: hash, parse_revision: parse, project_id: 17, kind: 'knowledge', visibility: 'xin', status: 'ready', ...extra })
 const library = (scope = project) => ({ schema_version: 1, scope, corpus_revision: hash, truncated: false, items: [{ topic_key: 'source/' + id, title: '真实资料标题', revision_id: revision, source_versions: [{ source_id: id, source_version: hash, parse_revision: parse }] }] })
 const imported = (scope = privateScope) => ({ schema_version: 1, scope, import_id: id, operation_id: 'original_operation_01', request_hash: hash, status: 'ready', source: original({ project_id: null }) })
 function setup() {
@@ -68,6 +68,25 @@ test('project source identity, hash, kind and actual project scope must match', 
     state.response = { structuredContent: { source: original(patch) } }
     await assert.rejects(read({ endpoint: 'source', payload: { scope: project, source_id: id, version: hash }, exec }))
   }
+})
+test('a project topic may retain an authorized shared original, but private/shared import substitutions are rejected', async () => {
+  const { read, state } = setup()
+  // B library() freezes source_versions; ProjectKnowledgeReader's SQL permits
+  // project_id IS NULL plus the exact current project, excluding private rows.
+  state.response = library()
+  const topic = (await read({ endpoint: 'revisions', payload: { scope: project }, exec })).result.items[0]
+  const input = topic.source_versions[0]
+  const request = { endpoint: 'source', payload: { scope: project, source_id: input.source_id, version: input.source_version }, exec }
+  for (const visibility of ['xin', 'public']) {
+    state.response = { content: [{ type: 'text', text: JSON.stringify({ source: original({ project_id: null, visibility }), rows: [], row_count: 0, truncated: false }) }] }
+    assert.equal((await read(request)).result.source.parse_revision, input.parse_revision)
+  }
+  for (const patch of [{ project_id: null, visibility: 'uploader-private' }, { project_id: 18, visibility: 'xin' }, { project_id: null, visibility: undefined }]) {
+    state.response = { source: original(patch) }
+    await assert.rejects(read(request), { code: 'scope-changed' })
+  }
+  state.response = { schema_version: 1, source: original({ project_id: null, visibility: 'public' }) }
+  await assert.rejects(read({ endpoint: 'import', payload: { scope: project, sha256: hash }, exec }), { code: 'scope-changed' })
 })
 test('project directory is minimal, preserves read-only targets and derives completeness from actual envelope', async () => {
   const { read, state, calls } = setup()
