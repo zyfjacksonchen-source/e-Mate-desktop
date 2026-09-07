@@ -99,6 +99,7 @@ describe('e-Mate desktop profile', () => {
   let installEmateDesktopProfile: ProfileModule['installEmateDesktopProfile']
   let packagedSource: string
   // Navigation source checks do not need a built profile; installation checks do.
+  // Copy/cleanup includes bundled Skill assets; these hooks are not startup measurements.
   beforeAll(async () => {
     packagedSource = mkdtempSync(join(tmpdir(), 'e-mate-packaged-profile-'))
     // Match electron-builder's declaration exclusion without mutating shared build resources.
@@ -114,12 +115,12 @@ describe('e-Mate desktop profile', () => {
     ;({ EMATE_DESKTOP_PROFILE_VERSION, EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS,
       EMATE_BUNDLED_PROFILE_COMPONENT_IDS, cleanupEmateDesktopProfileArtifact,
       installEmateDesktopProfile } = await import('../src/e-mate-profile.ts'))
-  })
+  }, 60_000)
 
   afterAll(() => {
     vi.doUnmock('../src/packaged-runtime-path.ts')
     if (packagedSource) rmSync(packagedSource, { recursive: true, force: true })
-  })
+  }, 60_000)
 
   it('installs the fixed product profile and replaces legacy CLI update guidance', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
