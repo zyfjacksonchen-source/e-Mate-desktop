@@ -4658,6 +4658,13 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-'))
   const tables = { bindings: new Map(), outbox: new Map() }
   const taskTables = { bindings: new Map(), outbox: new Map() }
+  let accountSubject = 'tenant-207:user-207'
+  let principalActive = true
+  taskTables.bindings.set(`${createHash('sha256').update('historical-preview-session').digest('hex')}:3`, {
+    schema_version: 1,
+    account_subject_sha256: createHash('sha256').update(accountSubject).digest('hex'),
+    created_at: new Date().toISOString(),
+  })
   const handlers = new Map()
   const cleanups = []
   const uploads = []
@@ -4718,7 +4725,10 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       } } },
       sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
       storageDomain: { open: async () => domain(openedDomains++ === 0 ? tables : taskTables) },
-      emateIdentity: { localAccountSubject: () => 'tenant-207:user-207' },
+      emateIdentity: {
+        localAccountSubject: () => accountSubject,
+        localAccountPrincipal: () => principalActive ? { tenantId: accountSubject.split(':')[0], userId: accountSubject.split(':')[1] } : undefined,
+      },
       emateModelPolicy: {
         auditContext: async model => {
           assert.equal(model, 'gpt-5.6-luna')
@@ -4764,6 +4774,21 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     assert.equal(rpc.channel, AUDIT_CHANNEL)
     assert.deepEqual(rpc.options, { authority: 'loopback' })
     assert.equal(interval.milliseconds, 30_000)
+    assert.equal(audit.ownsTask('historical-preview-session', 3), true)
+    assert.equal(audit.ownsTask('historical-preview-session', 2), false)
+    assert.equal(audit.ownsTask('missing-session', 3), false)
+    for (const sessionId of ['', null, 3]) assert.equal(audit.ownsTask(sessionId, 3), false)
+    for (const turn of [0, -1, 1.5, '3', NaN]) assert.equal(audit.ownsTask('historical-preview-session', turn), false)
+    principalActive = false
+    assert.equal(audit.ownsTask('historical-preview-session', 3), false)
+    principalActive = true
+    accountSubject = 'tenant-207:another-user'
+    assert.equal(audit.ownsTask('historical-preview-session', 3), false)
+    accountSubject = 'another-tenant:user-207'
+    assert.equal(audit.ownsTask('historical-preview-session', 3), false)
+    accountSubject = 'tenant-207:user-207'
+    assert.equal(audit.ownsTask('historical-preview-session', 3), true)
+    assert.equal(taskTables.bindings.size, 1)
     const startedAt = Date.now()
     handlers.get('session/event')({ id: 'audit-session-1' }, {
       type: 'turn/start', seq: 0, time: startedAt, data: { turn: 1 },
@@ -4819,7 +4844,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     await audit.drain('audit-session-1')
     assert.equal(tables.bindings.size, 1)
     assert.equal(tables.outbox.size, 1)
-    assert.equal(taskTables.bindings.size, 1)
+    assert.equal(taskTables.bindings.size, 2)
     assert.equal(taskTables.outbox.size, 5)
     assert.deepEqual(
       [...taskTables.outbox.values()].map(record => record.payload.type),

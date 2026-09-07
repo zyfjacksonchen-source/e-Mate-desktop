@@ -857,7 +857,17 @@ function createAuditService(
     return flushPromise
   }
 
-  return { captureBinding, captureBindingFailure, captureEvent, captureTaskEvent, captureToolResult, closeSession, drain, flush, status }
+  // Reuse the original turn's account binding for Host-only restoration checks.
+  // Missing historical evidence must never be assigned to the current account.
+  const ownsTask = (sessionId, turn) => {
+    if (typeof sessionId !== 'string' || !sessionId || !Number.isSafeInteger(turn) || turn < 1) return false
+    const principal = ctx.emateIdentity.localAccountPrincipal?.()
+    const subject = ctx.emateIdentity.localAccountSubject?.()
+    if (!principal?.tenantId || !principal?.userId || typeof subject !== 'string' || !subject) return false
+    return taskBindings.get(taskBindingKey(sessionId, turn))?.account_subject_sha256 === sha256(subject)
+  }
+
+  return { captureBinding, captureBindingFailure, captureEvent, captureTaskEvent, captureToolResult, closeSession, drain, flush, status, ownsTask }
 }
 
 async function backfill(ctx, service) {
