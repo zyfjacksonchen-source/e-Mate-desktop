@@ -67,6 +67,12 @@ test('registers five Skills with accurate runtime states and two target Tool/Job
       assert.match(loaded.content, /DSH_EMATE_PYTHON/u)
       const original = await readFile(join(loaded.resourceBase.path, 'SKILL.md'))
       assert.equal(createHash('sha256').update(original).digest('hex'), 'afc4472ec4d625f703e9f414fe6814ce3cfa0ec51c7a07887fe587264c8b561e')
+      const fontRoot = join(loaded.resourceBase.path, 'assets', 'noto-sans-sc')
+      const fontSource = JSON.parse(await readFile(join(fontRoot, 'SOURCE.json'), 'utf8'))
+      const font = await readFile(join(fontRoot, fontSource.file))
+      assert.equal(font.length, fontSource.bytes)
+      assert.equal(createHash('sha256').update(font).digest('hex'), fontSource.sha256)
+      assert.match(await readFile(join(fontRoot, 'OFL.txt'), 'utf8'), /SIL OPEN FONT LICENSE/u)
     }
     if (skill.name === 'meeting-summary') {
       assert.match(skill.description, /^会议总结/u)

@@ -38,6 +38,7 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - `HOST.md` maps resource paths, the native Python environment and real attachment delivery to e-Mate. The marker helper only checks its arguments; it is not evidence of successful generation or rendering.
 - Python dependencies and a real renderer remain a separate acceptance gate. The provider reports `needs-runtime` until that gate is verified.
 - e-Mate adds `scripts/render_pdf.py` and `references/rendering.md` using publicly distributed pypdfium2/PDFium. Rendering tests use real PDFs and PNGs; the original four upstream Skill files remain unchanged. Packaged dependency verification is separate.
+- The PDF Skill adds a static Noto Sans SC Regular 400 font for ReportLab, derived reproducibly from the fixed official variable font. Its OFL, modification notice, hashes and reproduction instructions are under `skills/pdf/assets/noto-sans-sc`; fontTools is not a client dependency. The original variable font defaults to Thin 100 and is not silently treated as Regular. Actual document glyph coverage and rendered layout still require checking.
 
 ## Codex Spreadsheets replacement
 

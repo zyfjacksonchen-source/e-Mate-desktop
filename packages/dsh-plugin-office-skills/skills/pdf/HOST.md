@@ -12,6 +12,9 @@
 
 ## 标记、路径和交付
 
+- 中文正文可使用本 Skill 内的 `assets/noto-sans-sc/NotoSansSC-Regular.ttf`，通过 ReportLab 的 `pdfmetrics.registerFont(TTFont('NotoSansSC', 字体绝对路径))` 注册，再把段落、表格和画布文字的字体设为 `NotoSansSC`。这是固定 400 字重的静态 TTF，客户端无需字体转换工具，也无需系统预装该字体。
+- 字体并不覆盖所有 Unicode 字符。生成前用已注册字体的 `face.charToGlyph` 核对实际文字（排除换行等控制字符）；缺字时使用已授权且覆盖对应字符的字体，不能把方框或丢字当成完成。最终仍须检查嵌入、文字提取和真实逐页渲染。字体来源、修改和 OFL 许可保存在同目录。
+
 - 原版 `container_tools/mark_artifact_operation_started.mjs` 使用现有原生 Node 执行，路径为该资源目录下的完整路径。它仅验证 `create/edit`、预期数量和 `pdf` 参数，成功退出不表示已生成、保存、渲染或登记任何产物。
 - 原版 `tmp/pdfs/` 和 `output/pdf/` 均相对于当前任务工作区。保留输入原件，实际产物用新的文件名保存；不要写进此只读 Skill 资源目录。
 - e-Mate 不消费 Codex 专用 `:codex-file-citation{...}` 标记。将原版要求的最终文件引用通过当前 e-Mate 原生附件/产物路径交付，引用实际存在的 PDF；不要把未解析标记、临时 PNG 或标记脚本的退出码当成已交付文件。

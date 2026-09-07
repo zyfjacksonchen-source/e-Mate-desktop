@@ -12,6 +12,7 @@ This package bundles the following redistributable components:
 | jszip | 3.10.1 | MIT |
 | @xmldom/xmldom | 0.9.11 | MIT |
 | Noto Sans SC Variable | 5.3.0 | SIL Open Font License 1.1 |
+| Noto Sans SC Regular (weight-400 instance) | noto-cjk f8d157532fbfaeda587e826d4cd5b21a49186f7c | SIL Open Font License 1.1 |
 | terravic/meeting-transcript-summary-skill | 510aab036c6190f3ee547628cb66409def639ac6 | Apache-2.0 |
 | OpenAI PDF Skill | 26.905.11957 | MIT declaration in retained upstream plugin manifest |
 | hugohe3/ppt-master | c45b7427e707d8695f1bf7df4d20360d05f82e7c | MIT; bundled assets retain their own notices |
@@ -22,6 +23,8 @@ The meeting-summary preset preserves the upstream Skill, references, template an
 
 
 The Word workflow uses the existing MIT docx dependency. The Hermes Python Skill is no longer included.
+
+The PDF Skill includes a static weight-400 instance of the official Noto Sans SC variable font. Original copyright, the reserved font name, OFL text, modification notice and exact source/output hashes are retained under `skills/pdf/assets/noto-sans-sc`. fontTools was used only for reproducible asset preparation and is not included as a client dependency.
 
 PPT Master retains its original license and attribution guard under `skills/ppt-master`. Its icon, audio and geometry assets retain their upstream notices; see `skills/ppt-master/SOURCE.md` for the source manifest and adapted document references. No PyMuPDF runtime is distributed.
 
