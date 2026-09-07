@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { useSyncExternalStore } from 'react'
+import { createElement, useSyncExternalStore } from 'react'
 import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -25,8 +25,16 @@ import { createTransientGalleryNotice, registerImageGallery } from '../src/clien
 import { LegacyArtifacts } from '../src/client/legacy-artifacts.tsx'
 import fileCss from '../../../../../dsh-plugin-file-import/src/client/style.module.css'
 
-vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
-  MessageImage: ({ attachment, labels }: {
+const nativeImageRendering = vi.hoisted(() => ({ enabled: false }))
+vi.mock('@deepseek-ai/dsh-client-ui-attachment', async () => {
+  const actual = await vi.importActual<typeof import('@deepseek-ai/dsh-client-ui-attachment')>('@deepseek-ai/dsh-client-ui-attachment')
+  return {
+    MessageImage: (props: Parameters<typeof actual.MessageImage>[0]) => nativeImageRendering.enabled
+      ? createElement(actual.MessageImage, props)
+      : mockMessageImage(props),
+  }
+})
+const mockMessageImage = ({ attachment, labels }: {
     attachment: { name?: string }
     labels: { open: string; openNamed: (label: string) => string }
   }) => (
@@ -36,10 +44,9 @@ vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
       title={labels.open}
       aria-label={labels.openNamed(attachment.name ?? 'image')}
     >{attachment.name ?? 'image'}</button>
-  ),
-}))
+  )
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); nativeImageRendering.enabled = false })
 
 const attachment = {
   attachmentId: `sha256:${'a'.repeat(64)}`,
@@ -1205,4 +1212,84 @@ describe('completed artifact terminal', () => {
     expect(apply).not.toContain('ctx.conversation.input.for(scope).notify')
     expect(apply).toContain('releaseDraftImages(images)')
   })
+})
+
+
+describe('native image render stability', () => {
+  it.each(['gallery', 'terminal'] as const)('keeps loaded %s images visible through 20 unrelated renders', async kind => {
+    nativeImageRendering.enabled = true
+    const item = { ...parseImageOutputReceipt(receipt())!, createdAt: 1234 }
+    const props = kind === 'gallery'
+      ? galleryProps('session-1', [hidden(item)])
+      : terminalProps([hidden(item)])
+    const component = () => kind === 'gallery'
+      ? <ImageGalleryView {...props as any} />
+      : <ArtifactTerminal {...props as any} />
+    const view = render(component())
+    await waitFor(() => expect(screen.getByRole('img')).toBeTruthy())
+    const image = screen.getByRole('img')
+    for (let i = 0; i < 20; i++) {
+      view.rerender(component())
+      expect.soft(screen.queryByRole('img')).toBe(image)
+      await waitFor(() => expect(screen.getByRole('img')).toBeTruthy())
+    }
+    expect(props.loadImage).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains native failure retry and reloads when the authorized loader changes', async () => {
+    nativeImageRendering.enabled = true
+    const item = parseImageOutputReceipt(receipt())!
+    const loadImage = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue('blob:retry')
+    const props = galleryProps('session-1', [hidden(item)], { loadImage })
+    const view = render(<ImageGalleryView {...props as any} />)
+    const retry = await screen.findByRole('button', { name: /重试/ })
+    view.rerender(<ImageGalleryView {...props as any} />)
+    expect(loadImage).toHaveBeenCalledTimes(1)
+    fireEvent.click(retry)
+    await waitFor(() => expect(screen.getByRole('img').getAttribute('src')).toBe('blob:retry'))
+    expect(loadImage).toHaveBeenCalledTimes(2)
+    const replacement = vi.fn(async () => 'blob:new-identity')
+    view.rerender(<ImageGalleryView {...props as any} loadImage={replacement} />)
+    await waitFor(() => expect(screen.getByRole('img').getAttribute('src')).toBe('blob:new-identity'))
+    expect(replacement).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['attachmentId', `sha256:${'b'.repeat(64)}`], ['mediaType', 'image/jpeg'],
+    ['bytes', 99], ['width', 8], ['height', 9], ['name', 'renamed.png'],
+  ])('reloads changed attachment %s instead of retaining stale metadata', async (field, value) => {
+    nativeImageRendering.enabled = true
+    const item = parseImageOutputReceipt(receipt())!
+    const loadImage = vi.fn(async () => 'blob:image')
+    const view = render(<ImageGalleryView {...galleryProps('session-1', [hidden(item)], { loadImage }) as any} />)
+    await screen.findByRole('img')
+    const nextAttachment = { ...attachment, [field]: value }
+    const next = { ...item, attachment: nextAttachment }
+    view.rerender(<ImageGalleryView {...galleryProps('session-1', [hidden(next)], { loadImage }) as any} />)
+    await screen.findByRole('img')
+    expect(loadImage).toHaveBeenCalledTimes(2)
+    expect(loadImage).toHaveBeenLastCalledWith(nextAttachment, undefined)
+  })
+
+  it('changes owner and revision without displaying a late result from the previous owner', async () => {
+    nativeImageRendering.enabled = true
+    const item = parseImageOutputReceipt(receipt())!
+    let finishOld!: (url: string) => void
+    const loadImage = vi.fn((_attachment, owner) => owner === 'old-owner'
+      ? new Promise<string>(resolve => { finishOld = resolve })
+      : Promise.resolve('blob:new-owner'))
+    const owned = (sessionId: string, revision: number) => ({ ...item, revision,
+      source: { kind: 'subagent' as const, sessionId, label: 'child', ordinal: 1, mode: 'one-shot' as const },
+    })
+    const view = render(<ImageGalleryView {...galleryProps('session-1', [hidden(owned('old-owner', 2))], { loadImage }) as any} />)
+    view.rerender(<ImageGalleryView {...galleryProps('session-1', [hidden(owned('new-owner', 2))], { loadImage }) as any} />)
+    await waitFor(() => expect(screen.getByRole('img').getAttribute('src')).toBe('blob:new-owner'))
+    await act(async () => { finishOld('blob:old-owner') })
+    expect(screen.getByRole('img').getAttribute('src')).toBe('blob:new-owner')
+    view.rerender(<ImageGalleryView {...galleryProps('session-1', [hidden(owned('new-owner', 3))], { loadImage }) as any} />)
+    await screen.findByRole('img')
+    expect(loadImage).toHaveBeenCalledTimes(3)
+    expect(loadImage.mock.calls.map(call => call[1])).toEqual(['old-owner', 'new-owner', 'new-owner'])
+  })
+
 })

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject, RefObject } from 'react'
 import type {
   ChatConversationViewNode,
@@ -823,8 +823,8 @@ export function ImageGalleryView({
               </div>
               : <>
                 <div className={css.galleryPreview}>
-                  <MessageImage attachment={attachment}
-                    load={value => loadImage(value, item.source?.sessionId)} variant="tile" labels={imageLabels} />
+                  <GalleryMessageImage attachment={attachment}
+                    loadImage={loadImage} ownerSessionId={item.source?.sessionId} />
                   {item.status === 'review-required' && <span className={css.status}>待确认</span>}
                 </div>
                 <div className={css.galleryMeta}>
@@ -912,6 +912,26 @@ function Menu({ state, menuRef, buttonRefs, close, activate }: {
   </div>
 }
 
+/** Bind the native renderer to immutable metadata, not fresh projection objects.
+ * URL ownership, retry and release remain with native MessageImage/conversation.
+ */
+function GalleryMessageImage({ attachment, ownerSessionId, loadImage }: {
+  readonly attachment: ImageAttachmentRef
+  readonly ownerSessionId?: string
+  readonly loadImage: ImageGalleryViewProps['loadImage']
+}) {
+  const { attachmentId, mediaType, bytes, width, height, name } = attachment
+  const stableAttachment = useMemo(
+    () => ({ attachmentId, mediaType, bytes, width, height, name }),
+    [attachmentId, mediaType, bytes, width, height, name],
+  )
+  const load = useCallback(
+    (value: ImageAttachmentRef) => loadImage(value, ownerSessionId),
+    [loadImage, ownerSessionId],
+  )
+  return <MessageImage attachment={stableAttachment} load={load} variant="tile" labels={imageLabels} />
+}
+
 function ImageTerminal({ items, loadImage, openMenu, addToCanvas }: {
   readonly addToCanvas?: (item: ImageGalleryItem) => void
   readonly items: readonly ImageGalleryItem[]
@@ -944,8 +964,8 @@ function ImageTerminal({ items, loadImage, openMenu, addToCanvas }: {
           data-status={item.status}
           onContextMenu={event => { event.preventDefault(); openMenu({ kind: 'image', item }, event) }}
         >
-          <MessageImage attachment={item.attachment}
-            load={value => loadImage(value, item.source?.sessionId)} variant="tile" labels={imageLabels} />
+          <GalleryMessageImage attachment={item.attachment}
+            loadImage={loadImage} ownerSessionId={item.source?.sessionId} />
           {item.status === 'review-required' && <span className={css.status}>待确认</span>}
           {addToCanvas && <button type="button" className={`${css.imageAction} ${css.imageCanvasAction}`}
             disabled={item.status === 'review-required'} aria-label={`加入画布：${galleryAttachmentName(item.attachment)}`}
