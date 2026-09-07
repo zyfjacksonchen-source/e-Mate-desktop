@@ -13,7 +13,7 @@ vi.mock('@excalidraw/excalidraw', () => {
     native.props = props
     const elements = useRef(props.initialData.elements); const [, refresh] = useState(0)
     useEffect(() => { props.excalidrawAPI(native.api = { getSceneElementsIncludingDeleted: () => elements.current,
-      updateScene: ({ elements: next }: any) => { if (next) elements.current = next; refresh(value => value + 1) }, addFiles: () => {}, scrollToContent: native.scroll, setActiveTool: ({ type }: any) => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {}, activeTool: { type } }),
+      updateScene: ({ elements: next }: any) => { if (next) elements.current = next; refresh(value => value + 1) }, addFiles: vi.fn(), scrollToContent: native.scroll, setActiveTool: ({ type }: any) => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {}, activeTool: { type } }),
     }) }, [])
     return <div data-testid="scene" data-theme={props.theme}><span>{elements.current.length} elements</span><button onClick={() => {
       elements.current = [...elements.current, { id: 'mark', type: 'arrow', x: 1, y: 1, points: [[0, 0], [10, 10]] }]
@@ -332,4 +332,116 @@ it('selection causes no save and the latest pan/zoom persists on leaving', async
   expect(h.calls.filter(([name]) => name === 'save')).toHaveLength(1)
   expect(h.read().pages[0].view).toEqual({ scrollX: 30, scrollY: -30, zoom: .8, background: '#ffffff' })
   expect(h.read().pages[0].elements).toEqual(elements)
+})
+
+function hydrationHarness(count = 10) {
+  const fixtures = Array.from({ length: count + 1 }, (_, index) => {
+    const bytes = Buffer.concat([imageBytes, Buffer.from(String(index))])
+    return { bytes, asset: { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: `sha256:${createHash('sha256').update(bytes).digest('hex')}`, bytes: bytes.length, name: `image-${index}.png` } } }
+  })
+  let project = emptyProject('main')
+  for (const { asset } of fixtures.slice(0, count)) project = insertAsset(project, 'page-1', asset)
+  const h = harness(project), fallback = h.bridge.call.getMockImplementation()!
+  const reads: { projectId: string; attachmentId: string; bytes: number }[] = []
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'image') {
+      const fixture = fixtures.find(item => item.asset.ref.attachmentId === payload.attachment_id)!
+      reads.push({ projectId: payload.project_id, attachmentId: payload.attachment_id, bytes: fixture.bytes.length })
+      return { ref: fixture.asset.ref, bytes_base64: fixture.bytes.toString('base64') }
+    }
+    return fallback(endpoint, payload)
+  })
+  h.bridge.stageImages.mockResolvedValue([fixtures[count].asset] as never)
+  return { ...h, fixtures, reads }
+}
+function selectHydrationImage(container: HTMLElement) {
+  fireEvent.change(container.querySelector('input[type="file"][multiple]')!, { target: { files: [new File([imageBytes], 'new.png', { type: 'image/png' })] } })
+}
+it('hydrates only the new image while retaining all ten verified project assets', async () => {
+  const h = hydrationHarness()
+  const { container } = render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  expect(h.reads).toHaveLength(10)
+  const initialBytes = h.reads.reduce((sum, item) => sum + item.bytes, 0)
+  h.reads.length = 0
+  selectHydrationImage(container)
+  await waitFor(() => expect(native.api.addFiles).toHaveBeenCalledOnce())
+  expect(initialBytes).toBe(690)
+  expect(h.reads.reduce((sum, item) => sum + item.bytes, 0)).toBe(70)
+  expect(h.reads.map(item => item.attachmentId)).toEqual([h.fixtures[10].asset.ref.attachmentId])
+  expect(native.api.addFiles.mock.calls[0][0]).toHaveLength(11)
+  expect(h.read().assets).toHaveLength(11)
+})
+it('does not reuse verified images for another project that denies the image read', async () => {
+  const h = hydrationHarness(1), fallback = h.bridge.call.getMockImplementation()!
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'list') return [{ id: 'main', title: 'Main' }, { id: 'other', title: 'Other' }]
+    if (endpoint === 'load' && payload.project_id === 'other') return { project: { ...h.read(), id: 'other' }, revision: 'c'.repeat(64), recovered: false }
+    if (endpoint === 'image' && payload.project_id === 'other') throw new Error('permission denied')
+    return fallback(endpoint, payload)
+  })
+  render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  fireEvent.change(screen.getByLabelText('选择项目'), { target: { value: 'other' } })
+  expect((await screen.findByRole('alert')).textContent).toContain('permission denied')
+  expect(h.bridge.call).toHaveBeenCalledWith('image', { project_id: 'other', attachment_id: h.fixtures[0].asset.ref.attachmentId })
+  expect((screen.getByLabelText('选择项目') as HTMLSelectElement).value).toBe('main')
+})
+it('revalidates files after identity changes and rejects a changed attachment receipt', async () => {
+  const h = hydrationHarness(1), fallback = h.bridge.call.getMockImplementation()!
+  let changed = false
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'image' && changed && payload.attachment_id === h.fixtures[0].asset.ref.attachmentId) throw new Error('account access denied')
+    return fallback(endpoint, payload)
+  })
+  const { container } = render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene'); h.bridge.call.mockClear(); changed = true
+  act(() => { dispatchEvent(new Event('emate:identity-changed')) })
+  selectHydrationImage(container)
+  expect((await screen.findByRole('alert')).textContent).toContain('account access denied')
+  expect(h.bridge.call).toHaveBeenCalledWith('image', { project_id: 'main', attachment_id: h.fixtures[0].asset.ref.attachmentId })
+  expect(native.api.addFiles).not.toHaveBeenCalled()
+})
+it('new files still require exact hash and byte length before reaching Excalidraw', async () => {
+  const h = hydrationHarness(1), fallback = h.bridge.call.getMockImplementation()!
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'image' && payload.attachment_id === h.fixtures[1].asset.ref.attachmentId) return { ref: h.fixtures[1].asset.ref, bytes_base64: h.fixtures[0].bytes.toString('base64') }
+    return fallback(endpoint, payload)
+  })
+  const { container } = render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene'); selectHydrationImage(container)
+  expect((await screen.findByRole('alert')).textContent).toContain('素材已损坏')
+  expect(native.api.addFiles).not.toHaveBeenCalled()
+})
+it('same-project reload validates changed asset metadata instead of using its cached bytes', async () => {
+  const h = hydrationHarness(1), fallback = h.bridge.call.getMockImplementation()!
+  let changed = false
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    const result = await fallback(endpoint, payload)
+    if (endpoint === 'load' && changed) { const next = structuredClone(result); next.project.assets[0].ref.bytes += 1; return next }
+    return result
+  })
+  const { rerender } = render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene'); changed = true; h.reads.length = 0
+  rerender(<CanvasPanel bridge={h.bridge} initialProjectId="main" initialAsset={h.fixtures[0].asset} />)
+  expect((await screen.findByRole('alert')).textContent).toContain('素材已损坏')
+  expect(h.reads).toHaveLength(1)
+})
+it('discards late hydration on unmount and reads all assets again after remount', async () => {
+  const h = hydrationHarness(1), fallback = h.bridge.call.getMockImplementation()!
+  let resolve!: (value: unknown) => void
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'image' && payload.attachment_id === h.fixtures[1].asset.ref.attachmentId) return new Promise(done => { resolve = done })
+    return fallback(endpoint, payload)
+  })
+  const view = render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene'); selectHydrationImage(view.container)
+  await waitFor(() => expect(resolve).toBeDefined())
+  const oldApi = native.api
+  view.unmount()
+  await act(async () => { resolve({ ref: h.fixtures[1].asset.ref, bytes_base64: h.fixtures[1].bytes.toString('base64') }) })
+  expect(oldApi.addFiles).not.toHaveBeenCalled()
+  h.reads.length = 0; h.bridge.call.mockImplementation(fallback)
+  render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene'); expect(h.reads).toHaveLength(2)
 })

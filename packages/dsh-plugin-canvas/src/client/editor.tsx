@@ -57,6 +57,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   const selected = useRef<string[]>([])
   const selectedElements = useRef<string[]>([])
   const syncLane = useRef(false)
+  const hydrated = useRef<{ bridge: CanvasBridge; projectId: string; generation: number; entries: Map<string, BinaryFiles[string]> } | undefined>(undefined)
   const instructionInput = useRef<HTMLTextAreaElement>(null)
   const arrowGesture = useRef<{ previous: Set<string>; released: boolean } | null>(null)
   const focusFrame = useRef<number | undefined>(undefined)
@@ -103,19 +104,41 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     timer.current = setTimeout(() => { if (!state.current.blocked) void flush().catch(() => {}) }, 400)
   }, [flush])
   const imageFiles = useCallback(async (document: CanvasProject): Promise<BinaryFiles> => {
+    const epoch = generation.current
+    let cache = hydrated.current
+    if (!cache || cache.bridge !== bridge || cache.projectId !== document.id || cache.generation !== epoch) {
+      cache = { bridge, projectId: document.id, generation: epoch, entries: new Map() }
+      hydrated.current = cache
+    }
+    const currentCache = cache
+    const check = () => {
+      if (!alive.current || generation.current !== epoch || hydrated.current !== currentCache) throw new Error('画布已切换，未显示迟到的素材。')
+    }
     const loaded: BinaryFiles = {}
-    // Native CAS is the byte owner. Limit concurrent hydration reads; no model scheduling here.
+    const keys = new Set<string>()
+    // Reuse only this mounted project's verified files. Reloads, project/account
+    // changes and unmount discard them; the Host still authorizes every new read.
     let next = 0
     await Promise.all(Array.from({ length: Math.min(4, document.assets.length) }, async () => {
       while (next < document.assets.length) {
+        check()
         const asset = document.assets[next++]!
+        const key = JSON.stringify([asset.ownerSessionId, asset.ref.attachmentId, asset.ref.mediaType, asset.ref.bytes, asset.ref.width, asset.ref.height, asset.ref.name])
+        keys.add(key)
+        const id = asset.ref.attachmentId.slice(7)
+        const known = currentCache.entries.get(key)
+        if (known) { loaded[id] = known; continue }
         const result = await bridge.call('image', { project_id: document.id, attachment_id: asset.ref.attachmentId })
+        check()
         const bytes = bytesOf(result.bytes_base64)
         if (`sha256:${await digest(bytes)}` !== asset.ref.attachmentId || bytes.byteLength !== asset.ref.bytes) throw new Error('素材已损坏，未在画布显示。')
-        const id = asset.ref.attachmentId.slice(7)
-        loaded[id] = { id: id as any, mimeType: asset.ref.mediaType as any, dataURL: `data:${asset.ref.mediaType};base64,${base64(bytes)}` as any, created: 0 }
+        check()
+        const file = { id: id as any, mimeType: asset.ref.mediaType as any, dataURL: `data:${asset.ref.mediaType};base64,${base64(bytes)}` as any, created: 0 }
+        currentCache.entries.set(key, file); loaded[id] = file
       }
     }))
+    check()
+    for (const key of currentCache.entries.keys()) if (!keys.has(key)) currentCache.entries.delete(key)
     return loaded
   }, [bridge])
   const openProject = useCallback(async (id: string, asset?: CanvasAsset) => {
@@ -124,6 +147,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     try {
       await flush()
       const token = ++generation.current
+      hydrated.current = undefined
       const result: ProjectReceipt | null = await bridge.call('load', { project_id: id })
       if (!alive.current || token !== generation.current) return
       let next = result?.project ?? emptyProject(id)
@@ -147,8 +171,9 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     alive.current = true
     void openProject(initialProjectId, initialAsset).catch(error => { if (alive.current) setError(error.message) })
     const unload = (event: BeforeUnloadEvent) => { if (state.current.dirty) { event.preventDefault(); event.returnValue = '' } }
-    addEventListener('beforeunload', unload)
-    return () => { alive.current = false; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current); if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current); generation.current += 1; if (timer.current) clearTimeout(timer.current); removeEventListener('beforeunload', unload); void flush().catch(() => {}) }
+    const identity = () => { hydrated.current = undefined; generation.current += 1 }
+    addEventListener('beforeunload', unload); addEventListener('emate:identity-changed', identity)
+    return () => { alive.current = false; hydrated.current = undefined; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current); if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current); generation.current += 1; if (timer.current) clearTimeout(timer.current); removeEventListener('beforeunload', unload); removeEventListener('emate:identity-changed', identity); void flush().catch(() => {}) }
   }, [initialProjectId, initialAsset, openProject, flush])
 
   const syncOutputs = useCallback(async () => {
@@ -187,8 +212,8 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
         }
       }
       if (state.current.dirty && state.current.project) {
-        await flush(); const loaded = await imageFiles(state.current.project)
-        if (alive.current) { setFiles(loaded); api.current?.addFiles(Object.values(loaded)); setNotice('原生任务的成功产物已插入，已有素材已去重。') }
+        await flush(); const token = generation.current; const loaded = await imageFiles(state.current.project)
+        if (alive.current && generation.current === token && state.current.project?.id === original.id) { setFiles(loaded); api.current?.addFiles(Object.values(loaded)); setNotice('原生任务的成功产物已插入，已有素材已去重。') }
       }
     } catch (error) { if (alive.current) setError((error as Error).message) }
     finally { syncLane.current = false }
@@ -247,7 +272,10 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     if (transitioning.current || !next || next.id !== document.id || !next.pages.some(page => page.id === targetPage)) throw new Error('项目或目标页面已变化，图片仍保留在会话中。')
     for (const asset of assets) next = insertAsset(next, targetPage, asset)
     update(next); await flush()
-    const loaded = await imageFiles(next); setFiles(loaded); api.current?.addFiles(Object.values(loaded))
+    const token = generation.current
+    const loaded = await imageFiles(next)
+    if (!alive.current || generation.current !== token || transitioning.current || state.current.project?.id !== document.id) return
+    setFiles(loaded); api.current?.addFiles(Object.values(loaded))
     if (api.current) fitScene(api.current)
   }
   const exportImage = async () => {
@@ -263,7 +291,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     if (tool === 'arrow') api.current?.updateScene({ appState: { currentItemStrokeColor: '#eb5b16' } })
     api.current?.setActiveTool({ type: tool }); setActiveTool(tool)
   }
-  const act = (action: () => Promise<void> | void) => { void Promise.resolve().then(action).catch(error => setError(error.message)) }
+  const act = (action: () => Promise<void> | void) => { void Promise.resolve().then(action).catch(error => { if (alive.current) setError(error.message) }) }
   if (sessionId && sessionId !== bridge.sessionId) return <div className={css.empty}>此画布属于先前会话。<button onClick={() => act(async () => { await flush(); bridge.close() })}>保存并关闭</button></div>
   return <div className={css.panel} data-emate-canvas data-theme={theme}>
     {error && <div role="alert" className={css.error}>{error}<div>
