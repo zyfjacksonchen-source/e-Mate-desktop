@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { Script } from 'node:vm'
@@ -360,8 +360,28 @@ test('packaged runtime verifies the adapter and actual client hashes instead of 
     writeFileSync(join(root, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'), artifactClient)
     writeFileSync(join(root, 'e-mate-artifact-links-adapter.mjs'), artifactAdapter)
     const manifest = { commit: 'pinned', artifact_links_adapter_sha256: digest(artifactAdapter), artifact_links_client_sha256: digest(artifactClient), conversation_adapter_sha256: digest(adapter), conversation_client_sha256: digest(adapted) }
+    const additional = [
+      ['artifact_deliverables_client_sha256', 'node_modules/@deepseek-ai/dsh-client-ui-deliverables/lib/client.js', 'verified deliverables fixture'],
+      ['slot_error_adapter_sha256', 'e-mate-slot-error-adapter.mjs', 'verified slot adapter fixture'],
+      ['slot_error_client_sha256', 'node_modules/@deepseek-ai/dsh-client-runtime/lib/client.js', 'verified slot client fixture'],
+    ]
+    for (const [field, relative, bytes] of additional) {
+      mkdirSync(dirname(join(root, relative)), { recursive: true })
+      writeFileSync(join(root, relative), bytes)
+      manifest[field] = digest(bytes)
+    }
     writeFileSync(join(directory, 'runtime/source-manifest.json'), JSON.stringify(manifest))
     assert.equal(resolvePackage().source, 'packaged-runtime')
+    for (const [field, relative, bytes] of additional) {
+      writeFileSync(join(root, relative), 'changed')
+      assert.throws(resolvePackage, /provenance is missing or mismatched/u)
+      writeFileSync(join(root, relative), bytes)
+      const missing = { ...manifest }; delete missing[field]
+      writeFileSync(join(directory, 'runtime/source-manifest.json'), JSON.stringify(missing))
+      assert.throws(resolvePackage, /provenance is missing or mismatched/u)
+      writeFileSync(join(directory, 'runtime/source-manifest.json'), JSON.stringify(manifest))
+      assert.equal(resolvePackage().source, 'packaged-runtime')
+    }
     writeFileSync(client, native)
     assert.throws(resolvePackage, /provenance is missing or mismatched/u)
     writeFileSync(client, adapted)

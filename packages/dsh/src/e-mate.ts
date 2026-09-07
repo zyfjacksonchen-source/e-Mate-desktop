@@ -240,6 +240,9 @@ function harnessFromPackage() {
   for (const [expected, path] of [
     [source?.artifact_links_adapter_sha256, join(root, 'e-mate-artifact-links-adapter.mjs')],
     [source?.artifact_links_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-primitives', 'lib', 'index.js')],
+    [source?.artifact_deliverables_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-deliverables', 'lib', 'client.js')],
+    [source?.slot_error_adapter_sha256, join(root, 'e-mate-slot-error-adapter.mjs')],
+    [source?.slot_error_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-runtime', 'lib', 'client.js')],
     [source?.conversation_adapter_sha256, join(root, 'e-mate-conversation-adapter.mjs')],
     [source?.conversation_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-conversation', 'lib', 'client.js')],
   ]) {

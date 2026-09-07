@@ -10,7 +10,7 @@ import { adaptHarnessFsSource, applyHarnessRuntimeAdapters } from './harness-run
 import { adaptHarnessFsBytesSource, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
-import { adaptHarnessArtifactLinksSource, ARTIFACT_LINKS_PACKAGE } from './harness-artifact-links-adapter.mjs'
+import { adaptHarnessArtifactLinksSource, ARTIFACT_LINKS_PACKAGE, adaptHarnessArtifactDeliverablesSource, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { adaptHarnessSlotErrorSource, SLOT_ERROR_PACKAGE } from './harness-slot-error-adapter.mjs'
 
 const rc7Seam = `\tasync resolvePolicy(toolName, args, exec) {
@@ -36,6 +36,7 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
   const runtime = join(directory, 'runtime')
   const nativeRoot = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
   const nativeArtifactLinks = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-primitives/lib/index.js'), 'utf8')
+  const nativeDeliverables = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-deliverables/lib/client.js'), 'utf8')
   const nativeSlots = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/runtime/lib/client.js'), 'utf8')
   const nativeConversation = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js'), 'utf8')
   const nativeExport = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/host/apiproxy/lib/index.js'), 'utf8')
@@ -45,6 +46,7 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
     { name: FS_BYTES_PACKAGE, file: 'index.js', input: nativeBytes, adapt: adaptHarnessFsBytesSource },
     { name: SESSION_EXPORT_PACKAGE, file: 'index.js', input: nativeExport, adapt: adaptHarnessSessionExportSource },
     { name: ARTIFACT_LINKS_PACKAGE, file: 'index.js', input: nativeArtifactLinks, adapt: adaptHarnessArtifactLinksSource },
+    { name: ARTIFACT_DELIVERABLES_PACKAGE, file: 'client.js', input: nativeDeliverables, adapt: adaptHarnessArtifactDeliverablesSource },
     { name: SLOT_ERROR_PACKAGE, file: 'client.js', input: nativeSlots, adapt: adaptHarnessSlotErrorSource },
     { name: CONVERSATION_PACKAGE, file: 'client.js', input: nativeConversation, adapt: adaptHarnessConversationSource },
   ]

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
-import { ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE } from './harness-artifact-links-adapter.mjs'
+import { ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { SLOT_ERROR_PACKAGE, SLOT_ERROR_ADAPTER_PATH } from './harness-slot-error-adapter.mjs'
 import { HARNESS_COMMIT, HARNESS_VERSION, verifyHarnessBuildReceipt, materializeFrontendDist, HARNESS_FRONTEND_PACKAGE } from './harness-provenance.mjs'
 
@@ -181,6 +181,7 @@ async function main() {
       frontend: buildReceipt.frontend,
       artifact_links_adapter_sha256: sha256(artifactLinksAdapter),
       artifact_links_client_sha256: sha256(join(assembled, 'node_modules', ARTIFACT_LINKS_PACKAGE, 'lib', 'index.js')),
+      artifact_deliverables_client_sha256: sha256(join(assembled, 'node_modules', ARTIFACT_DELIVERABLES_PACKAGE, 'lib', 'client.js')),
       slot_error_adapter_sha256: sha256(slotErrorAdapter),
       slot_error_client_sha256: sha256(join(assembled, 'node_modules', SLOT_ERROR_PACKAGE, 'lib', 'client.js')),
       conversation_adapter_sha256: sha256(conversationAdapter),
