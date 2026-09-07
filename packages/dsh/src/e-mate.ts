@@ -177,6 +177,7 @@ export function installProfile(dshHome = resolveDshHome()) {
   const toolsModule = resolveHarnessModule(harness, 'packages/core/tools', '@deepseek-ai/dsh-tools')
   const storageDomainModule = resolveHarnessModule(harness, 'packages/storage/storage-domain', '@deepseek-ai/dsh-storage-domain')
   const llmModule = resolveHarnessModule(harness, 'packages/llm/llm', '@deepseek-ai/dsh-llm')
+  const compactionModule = resolveHarnessModule(harness, 'packages/compaction/compaction', '@deepseek-ai/dsh-compaction')
   const scheduleModule = resolveHarnessModule(harness, 'packages/schedule/schedule', '@deepseek-ai/dsh-schedule')
   const credentialsModule = resolveHarnessModule(harness, 'packages/credentials/credentials', '@deepseek-ai/dsh-credentials')
   const launchEnvironmentModule = resolveHarnessModule(harness, 'packages/util/launch-environment', '@deepseek-ai/dsh-launch-environment')
@@ -193,6 +194,8 @@ export function installProfile(dshHome = resolveDshHome()) {
     storage_domain_module_sha256: createHash('sha256').update(readFileSync(storageDomainModule)).digest('hex'),
     llm_module: llmModule,
     llm_module_sha256: createHash('sha256').update(readFileSync(llmModule)).digest('hex'),
+    compaction_module: compactionModule,
+    compaction_module_sha256: createHash('sha256').update(readFileSync(compactionModule)).digest('hex'),
     schedule_module: scheduleModule,
     schedule_module_sha256: createHash('sha256').update(readFileSync(scheduleModule)).digest('hex'),
     credentials_module: credentialsModule,

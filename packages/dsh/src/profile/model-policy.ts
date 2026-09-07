@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { LOGGED_OUT_CREDENTIAL } from './credentials-os.js'
-import { loadTargetStorageDomain } from './target-runtime.js'
+import { loadTargetStorageDomain, loadTargetCompaction } from './target-runtime.js'
+import { compactRequestHistory, requestSizeFailure } from './request-size.js'
 
 export const name = 'emate-model-policy'
 export const inject = ['apiProxy', 'connection', 'credentials', 'settings', 'storageDomain', 'llm', 'emateIdentity']
@@ -273,6 +274,7 @@ export function createQuotaService(ctx, snapshotsTable, reservationsTable, usage
     refresh,
     armRequest,
     isArmed,
+    disarmRequest(options) { if (isArmed(options)) armed.delete(options.sessionId) },
     admit,
     finish,
     captureEvent,
@@ -1147,6 +1149,14 @@ export async function apply(ctx, config = {}) {
   const service = createService(ctx, policyTable, domain.table('runtime_projection'), quota)
   ctx.provide('emateModelPolicy', service)
   ctx.effect(() => installApiPolicy(ctx, service), 'emate.modelPolicy: target ApiProxy policy projection')
+  const pairing = await loadTargetCompaction(config.bindingPath)
+  ctx.on('agent/pre-step', async (payload, next) => {
+    const decision = await next()
+    if (decision.kind === 'enter' && !payload.signal.aborted) {
+      await compactRequestHistory(ctx, { ...payload, messages: decision.messages }, pairing)
+    }
+    return decision
+  })
   ctx.on('agent/request', async (payload, next) => {
     const request = await next()
     await service.assertModel(request.model)
@@ -1155,6 +1165,12 @@ export async function apply(ctx, config = {}) {
   })
   ctx.on('llm/stream', (options, next) => (async function* () {
     if (!quota.isArmed(options)) await service.assertModel(options.model)
+    const oversized = requestSizeFailure(options)
+    if (oversized) {
+      quota.disarmRequest(options)
+      yield { type: 'finish', reason: { kind: 'error', failure: oversized } }
+      return
+    }
     const reservation = await quota.admit(options)
     let terminal
     let realUsage
@@ -1162,13 +1178,20 @@ export async function apply(ctx, config = {}) {
       for await (const chunk of next()) {
         if (chunk?.type === 'usage') realUsage = chunk.usage
         if (chunk?.type === 'finish') terminal = chunk.reason?.kind
-        yield chunk
+        const sizeFailure = chunk?.type === 'finish' && chunk.reason?.kind === 'error'
+          ? requestSizeFailure(options, chunk.reason.failure) : undefined
+        yield sizeFailure ? { ...chunk, reason: { ...chunk.reason, failure: sizeFailure } } : chunk
       }
     } catch (error) {
       try {
         await quota.finish(reservation, undefined, options.signal?.aborted ? 'aborted' : 'error')
       } catch {
         ctx.logger?.warn?.('e-Mate local weekly quota failed to release an errored request')
+      }
+      const sizeFailure = requestSizeFailure(options, error)
+      if (sizeFailure) {
+        yield { type: 'finish', reason: { kind: 'error', failure: sizeFailure } }
+        return
       }
       throw error
     }

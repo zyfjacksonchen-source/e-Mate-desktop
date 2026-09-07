@@ -126,3 +126,20 @@ export async function loadTargetCredentials(bindingPath) {
     launchEnvironmentOf: environment.launchEnvironmentOf,
   }
 }
+
+/** Fixed rc.7 surface-pairing owner; never copy its tool-call boundary rules. */
+export async function loadTargetCompaction(bindingPath) {
+  const binding = readManagedBinding(bindingPath)
+  if (!isAbsolute(binding.compaction_module) || !SHA256.test(binding.compaction_module_sha256)) {
+    throw new Error('e-Mate local compaction binding is invalid')
+  }
+  if (!lstatSync(binding.compaction_module).isFile()
+    || createHash('sha256').update(readFileSync(binding.compaction_module)).digest('hex') !== binding.compaction_module_sha256) {
+    throw new Error('e-Mate local compaction module checksum mismatch')
+  }
+  const module = await import(pathToFileURL(binding.compaction_module).href)
+  if (typeof module.toolPairingBalancedBefore !== 'function' || typeof module.toolPairingBalancedAfter !== 'function') {
+    throw new Error('e-Mate local compaction API is unavailable')
+  }
+  return module
+}

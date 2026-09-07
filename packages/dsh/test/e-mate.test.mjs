@@ -442,6 +442,7 @@ test('managed profile installation is idempotent', () => {
     const binding = JSON.parse(readFileSync(join(first.profile, 'plugins', 'runtime-binding.json'), 'utf8'))
     assert.match(binding.storage_domain_module_sha256, /^[0-9a-f]{64}$/)
     assert.match(binding.llm_module_sha256, /^[0-9a-f]{64}$/)
+    assert.match(binding.compaction_module_sha256, /^[0-9a-f]{64}$/)
     assert.match(binding.schedule_module_sha256, /^[0-9a-f]{64}$/)
     assert.match(binding.credentials_module_sha256, /^[0-9a-f]{64}$/)
     assert.match(binding.launch_environment_module_sha256, /^[0-9a-f]{64}$/)
@@ -3994,7 +3995,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       on: (event, handler) => {
         if (event === 'agent/request') requestPolicy = handler
         else if (event === 'llm/stream') streamPolicy = handler
-        else if (event === 'session/event' || event === 'session/flush') modelPolicyHandlers.set(event, handler)
+        else if (event === 'agent/pre-step' || event === 'session/event' || event === 'session/flush') modelPolicyHandlers.set(event, handler)
         else if (event === 'credentials/updated') modelPolicyHandlers.set(event, handler)
         else assert.fail(`unexpected model policy event ${event}`)
         return () => {}
@@ -4312,6 +4313,30 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     rejectProjectionMarkerWrite = false
     await modelPolicy.refresh({ force: true })
     assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+    await requestPolicy({ agent: { id: 'oversized-session' }, turn: 1, step: 1 }, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' }))
+    const sizeBlocked = []
+    for await (const chunk of streamPolicy(
+      { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', sessionId: 'oversized-session', messages: [{ role: 'user', content: [{ type: 'image', attachment: { bytes: 37 * 1024 * 1024 } }] }] },
+      () => { assert.fail('oversized request must not reach the provider or attachment reader') },
+    )) sizeBlocked.push(chunk)
+    assert.equal(sizeBlocked[0].reason.failure.code, 'REQUEST_TOO_LARGE')
+    assert.equal(sizeBlocked[0].reason.failure.status, 413)
+    for (const thrown of [false, true]) {
+      let sent = 0
+      const failed = []
+      for await (const chunk of streamPolicy(
+        { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', sessionId: `size-rejected-${thrown}` },
+        () => (async function* () {
+          sent++
+          const failure = { code: 'PI_AI_ERROR', status: 413, message: 'OpenAI API error (413): <html>private upstream diagnostic</html>' }
+          if (thrown) throw Object.assign(new Error(failure.message), failure)
+          yield { type: 'finish', reason: { kind: 'error', failure } }
+        })(),
+      )) failed.push(chunk)
+      assert.equal(sent, 1)
+      assert.equal(failed[0].reason.failure.code, 'REQUEST_TOO_LARGE')
+      assert.doesNotMatch(failed[0].reason.failure.message, /html|private/u)
+    }
     const policyCallsBeforeHotPath = calls.policy
     await requestPolicy(
       { agent: { id: 'session-1' }, turn: 1, step: 1 },
@@ -4487,6 +4512,12 @@ test('local weekly quota serializes finite accounts and settles only real termin
     provider: 'e-mate-enterprise',
     model: 'gpt-5.6-luna',
   })
+
+  arm('oversized')
+  assert.equal(quota.isArmed(options('oversized')), true)
+  quota.disarmRequest(options('oversized'))
+  assert.equal(quota.isArmed(options('oversized')), false)
+  assert.equal(records.reservations.size, 0)
 
   await quota.refresh(policy())
   arm('quota-session-1')
