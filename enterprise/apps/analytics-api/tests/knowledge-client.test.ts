@@ -185,3 +185,11 @@ test('revocation while receiving a write body prevents any private upstream muta
     assert.equal(res.status, 401); assert.equal(authCalls, 2); assert.equal(mutations, 0);
   } finally { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); }
 });
+
+
+test('revision continuation forwards a bounded offset and the required original snapshot', () => {
+  const url = (query: string) => new URL(KNOWLEDGE_PREFIX + '/revisions?' + query, 'http://local');
+  const revision = 'a'.repeat(64);
+  assert.deepEqual(knowledgeRoute('GET', url('scope=public&limit=100&offset=100&corpus_revision=' + revision), undefined), { action: 'revisions.list', params: { scope: { kind: 'public' }, limit: 100, offset: 100, corpus_revision: revision } });
+  for (const query of ['offset=1', 'offset=-1', 'offset=1.5', 'offset=10001&corpus_revision=' + revision, 'offset=100&corpus_revision=no']) assert.throws(() => knowledgeRoute('GET', url(query), undefined));
+});

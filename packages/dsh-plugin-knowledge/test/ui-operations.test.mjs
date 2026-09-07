@@ -80,7 +80,10 @@ function service() {
     },
     async read({ endpoint, payload }) {
       if (endpoint === 'import') { const value = [...imports.values()].find(value => value.operation_id === payload.operation_id); if (!value) throw Object.assign(Error('missing'), { code: 'not-found' }); return { source: value.source, status: value.source?.status ?? value.status } }
-      if (endpoint === 'revisions') return { items: typeof library === 'function' ? library() : library, truncated }
+      if (endpoint === 'revisions') {
+        const items = typeof library === 'function' ? library() : library, offset = payload.offset ?? 0
+        return { schema_version: 1, scope: payload.scope, corpus_revision: digest(items), items: items.slice(offset, offset + payload.limit), truncated: truncated || items.length > offset + payload.limit, next_offset: items.length > offset + payload.limit ? offset + payload.limit : null }
+      }
       if (endpoint === 'source') return { source: sources.get(payload.source_id) }
       if (endpoint === 'projects') return { items: [{ id: 42, title: '真实合同形状的项目', can_import: true }], complete: true }
       throw Error('unexpected read ' + endpoint)
@@ -285,4 +288,96 @@ test('bounded recovery finds an older paused import behind more than twenty newe
   assert.equal(completed.compiled_count, 1)
   assert.equal(backend.calls.filter(call => call.path === '/imports' && call.method === 'POST').length, 1)
   await restored.dispose()
+})
+
+
+test('101 revision heads use frozen pages and recovered plan does not compile twice', async t => {
+  const backend = service(), targetRevision = randomUUID()
+  const heads = Array.from({ length: 100 }, (_, i) => ({ topic_key: 'other/' + i, revision_id: randomUUID(), source_versions: [] }))
+  backend.setLibrary(() => {
+    const source = [...backend.sources.values()][0]
+    return [...heads, { topic_key: 'existing/page-101', revision_id: targetRevision, source_versions: [{ source_id: source.id, source_version: source.file_hash, parse_revision: source.parse_revision }] }]
+  })
+  const pages = [], read = backend.read
+  backend.read = async request => { if (request.endpoint === 'revisions') pages.push(request.payload); return read(request) }
+  const run = await harness(t, backend), path = join(run.root, 'paged.txt'); await writeFile(path, '分页后的原件。')
+  const prepared = (await run.ui.call('ui.import.prepare', { paths: [path] })).result
+  await run.ui.call('ui.import.start', ref(prepared)); assert.equal((await waitPhase(run, prepared, ['complete', 'partial'])).phase, 'complete')
+  assert.deepEqual(pages.map(page => page.offset), [0, 100]); assert.match(pages[1].corpus_revision, /^[a-f0-9]{64}$/)
+  assert.deepEqual([...backend.compilations.values()][0].request.topics, [{ key: 'existing/page-101', expected_revision_id: targetRevision }])
+  const requests = run.adapter.requests.length
+  const resumed = (await run.ui.call('ui.import.resume', ref(prepared))).result
+  if (resumed.job_id) await run.ctx.jobs.wait(resumed.job_id, 5000, run.ctx.agents.get(prepared.session_id))
+  assert.equal(backend.compilations.size, 1); assert.equal(run.adapter.requests.length, requests); assert.equal(pages.length, 2)
+})
+
+test('changed snapshots, duplicate heads and nonadvancing pages stop before compilation', async t => {
+  for (const failure of ['snapshot', 'topic', 'revision', 'offset', 'scope']) {
+    const backend = service(), items = Array.from({ length: 101 }, (_, i) => ({ topic_key: 'topic/' + i, revision_id: randomUUID(), source_versions: [] }))
+    backend.setLibrary(items)
+    const read = backend.read, pages = []
+    let run
+    backend.read = async request => {
+      const result = await read(request)
+      if (request.endpoint !== 'revisions') return result
+      pages.push(request.payload.offset)
+      if (failure === 'offset') return { ...result, next_offset: 0 }
+      if (!request.payload.offset) return result
+      if (failure === 'snapshot') result.corpus_revision = hash('changed')
+      if (failure === 'topic') result.items[0].topic_key = items[0].topic_key
+      if (failure === 'revision') result.items[0].revision_id = items[0].revision_id
+      if (failure === 'scope') result.scope = { kind: 'public' }
+      return result
+    }
+    run = await harness(t, backend); const path = join(run.root, failure + '.txt'); await writeFile(path, '保留原件。')
+    const prepared = (await run.ui.call('ui.import.prepare', { paths: [path] })).result
+    await run.ui.call('ui.import.start', ref(prepared)); await waitPhase(run, prepared, ['failed', 'partial', 'paused'])
+    assert.equal(backend.compilations.size, 0); assert.equal(run.adapter.requests.length, 0)
+    assert.deepEqual(pages, failure === 'offset' ? [0] : [0, 100])
+  }
+})
+
+
+test('a failed continuation retains its snapshot across resume instead of silently switching libraries', async t => {
+  const backend = service(), items = Array.from({ length: 101 }, (_, i) => ({ topic_key: 'topic/' + i, revision_id: randomUUID(), source_versions: [] }))
+  backend.setLibrary(items)
+  const read = backend.read, requests = []; let failPage = true
+  backend.read = async request => {
+    if (request.endpoint === 'revisions') {
+      requests.push(structuredClone(request.payload))
+      if (request.payload.offset && failPage) throw Error('temporary read failure')
+    }
+    return read(request)
+  }
+  const run = await harness(t, backend), path = join(run.root, 'snapshot.txt'); await writeFile(path, '保持原快照。')
+  const prepared = (await run.ui.call('ui.import.prepare', { paths: [path] })).result
+  await run.ui.call('ui.import.start', ref(prepared)); await waitPhase(run, prepared, ['failed', 'partial'])
+  const snapshot = requests[1].corpus_revision; assert.match(snapshot, /^[a-f0-9]{64}$/)
+  failPage = false; backend.setLibrary([...items, { topic_key: 'changed', revision_id: randomUUID(), source_versions: [] }])
+  const resumed = (await run.ui.call('ui.import.resume', ref(prepared))).result
+  if (resumed.job_id) await run.ctx.jobs.wait(resumed.job_id, 5000, run.ctx.agents.get(prepared.session_id))
+  assert.deepEqual(requests.map(request => request.offset), [0, 100, 0]); assert.equal(requests[2].corpus_revision, snapshot)
+  assert.equal(backend.compilations.size, 0); assert.equal(run.adapter.requests.length, 0)
+  assert.equal(events(run.ctx.agents.get(prepared.session_id)).filter(event => event.kind === 'ui-import-library-snapshot').length, 1)
+})
+
+
+test('stop and account switch during a continuation cannot start compilation', async t => {
+  for (const action of ['stop', 'account']) {
+    const backend = service(); backend.setLibrary(Array.from({ length: 101 }, (_, i) => ({ topic_key: 'topic/' + i, revision_id: randomUUID(), source_versions: [] })))
+    let reached, release
+    const arrived = new Promise(resolve => { reached = resolve }), gate = new Promise(resolve => { release = resolve }), read = backend.read
+    backend.read = async request => { if (request.endpoint === 'revisions' && request.payload.offset) { reached(); await gate }; return read(request) }
+    const run = await harness(t, backend), path = join(run.root, action + '.txt'); await writeFile(path, '停止分页。')
+    const prepared = (await run.ui.call('ui.import.prepare', { paths: [path] })).result
+    const started = (await run.ui.call('ui.import.start', ref(prepared))).result
+    await arrived
+    let stopping
+    if (action === 'stop') stopping = run.ui.call('ui.import.stop', ref(prepared))
+    else run.changeOwner()
+    release()
+    if (stopping) await stopping
+    await run.ctx.jobs.wait(started.job_id, 5000, run.ctx.agents.get(prepared.session_id))
+    assert.equal(backend.compilations.size, 0); assert.equal(run.adapter.requests.length, 0)
+  }
 })

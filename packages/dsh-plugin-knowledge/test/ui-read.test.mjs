@@ -154,3 +154,20 @@ test('cancellation is checked before transport and after a delayed response', as
   await new Promise(resolve => setImmediate(resolve)); late.abort(); finish()
   await assert.rejects(pending, { name: 'AbortError' })
 })
+
+
+test('all revision scopes preserve bounded pagination and reject invalid continuations', async () => {
+  for (const scope of [project, privateScope, { kind: 'public' }]) {
+    const { read, state, calls } = setup()
+    state.response = { ...library(scope), next_offset: null }
+    await read({ endpoint: 'revisions', payload: { scope, limit: 100, offset: 100, corpus_revision: hash }, exec })
+    assert.equal(calls.at(-1)[2].offset, 100)
+    assert.equal(calls.at(-1)[2].corpus_revision, hash)
+    for (const patch of [{ offset: 10001 }, { offset: -1 }, { offset: 1.5 }, { offset: 1, corpus_revision: undefined }])
+      await assert.rejects(read({ endpoint: 'revisions', payload: { scope, limit: 100, corpus_revision: hash, ...patch }, exec }))
+    for (const patch of [{ next_offset: 101 }, { truncated: true, next_offset: 100 }, { corpus_revision: parse }]) {
+      state.response = { ...library(scope), next_offset: null, ...patch }
+      await assert.rejects(read({ endpoint: 'revisions', payload: { scope, limit: 100, offset: 100, corpus_revision: hash }, exec }))
+    }
+  }
+})

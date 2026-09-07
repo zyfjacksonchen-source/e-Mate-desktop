@@ -166,8 +166,34 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
     }
     const additions = ready.filter(source => !covered.has(source.source_id))
     if (!additions.length) return previous
-    const library = await ownedRead(entry, 'revisions', { scope: marker.scope, limit: 100 })
-    if (!Array.isArray(library.items) || library.truncated === true) fail('library-too-large')
+    const library: { items: any[] } = { items: [] }
+    const topicKeys = new Set<string>(), revisionIds = new Set<string>()
+    const sourceSet = digest(additions)
+    let offset = 0, corpusRevision: string | undefined = events(agent).find(event => event.kind === 'ui-import-library-snapshot'
+      && event.operationId === marker.operationId && event.owner === marker.owner && event.sourceSet === sourceSet)?.corpusRevision
+    if (corpusRevision !== undefined && !HASH.test(corpusRevision)) fail('invalid-recovery-session')
+    do {
+      const page = await ownedRead(entry, 'revisions', { scope: marker.scope, limit: 100, offset, ...(corpusRevision ? { corpus_revision: corpusRevision } : {}) })
+      if (!HASH.test(page.corpus_revision) || !Array.isArray(page.items) || page.items.length > 100
+        || digest(page.scope) !== digest(marker.scope) || typeof page.truncated !== 'boolean') fail('invalid-response')
+      if (corpusRevision && page.corpus_revision !== corpusRevision) fail('source-changed')
+      if (!corpusRevision) {
+        corpusRevision = page.corpus_revision
+        await persist(ctx, agent, { kind: 'ui-import-library-snapshot', owner: marker.owner, operationId: marker.operationId, sourceSet, corpusRevision })
+      }
+      for (const item of page.items) {
+        if (!UUID.test(item.revision_id) || typeof item.topic_key !== 'string' || !item.topic_key
+          || topicKeys.has(item.topic_key) || revisionIds.has(item.revision_id)) fail('invalid-response')
+        topicKeys.add(item.topic_key); revisionIds.add(item.revision_id); library.items.push(item)
+      }
+      if (!page.truncated) {
+        if (page.next_offset != null) fail('invalid-response')
+        break
+      }
+      if (!Number.isSafeInteger(page.next_offset) || page.items.length !== 100
+        || page.next_offset !== offset + page.items.length || page.next_offset > 10000) fail('invalid-response')
+      offset = page.next_offset
+    } while (true)
     const topics = new Map<string, { key: string; title?: string; expected_revision_id: string | null; sources: any[] }>()
     for (const source of additions) {
       const priorId = marker.supersedes?.source_id ?? source.source_id

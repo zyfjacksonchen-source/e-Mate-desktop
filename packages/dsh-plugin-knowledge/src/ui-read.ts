@@ -34,11 +34,14 @@ function source(value: any, scope: Scope, id?: string, version?: string, allowSh
   if (id !== undefined && value.id !== id || version !== undefined && value.file_hash !== version) fail('source-changed')
   return value
 }
-function revisions(value: any, scope: Scope, limit: number, revision?: string) {
+function revisions(value: any, scope: Scope, limit: number, revision?: string, offset = 0) {
   sameScope(value?.scope, scope)
   if (value.schema_version !== 1 || !HASH.test(value.corpus_revision) || !Array.isArray(value.items)
     || value.items.length > limit || typeof value.truncated !== 'boolean') fail('invalid-response')
   if (revision !== undefined && value.corpus_revision !== revision) fail('source-changed')
+  if (value.next_offset !== undefined && (value.truncated
+    ? !Number.isSafeInteger(value.next_offset) || value.next_offset !== offset + value.items.length || value.items.length !== limit || value.next_offset > 10000
+    : value.next_offset !== null)) fail('invalid-response')
   const keys = new Set<string>()
   for (const item of value.items) {
     if (!object(item) || !UUID.test(item.revision_id) || typeof item.topic_key !== 'string' || !item.topic_key
@@ -79,7 +82,7 @@ export function createKnowledgeUiRead({ host, workflow, xinCapture }: Dependenci
     }
     // Source reads belong to a validated native operation Agent, never a renderer identity.
     if (!exec || owner === undefined) fail('unauthorized')
-    exact(payload, endpoint === 'source' ? ['scope', 'source_id', 'version'] : endpoint === 'import' ? ['scope', 'operation_id', 'sha256'] : ['scope', 'question', 'limit', 'corpus_revision'])
+    exact(payload, endpoint === 'source' ? ['scope', 'source_id', 'version'] : endpoint === 'import' ? ['scope', 'operation_id', 'sha256'] : ['scope', 'question', 'limit', 'offset', 'corpus_revision'])
     const scope = readScope(payload.scope)
     const args: Record<string, unknown> = {}
     if (endpoint === 'source') {
@@ -94,11 +97,12 @@ export function createKnowledgeUiRead({ host, workflow, xinCapture }: Dependenci
         args.operation_id = payload.operation_id
       }
     } else {
-      const limit = payload.limit ?? 100
+      const limit = payload.limit ?? 100, offset = payload.offset ?? 0
+      if (!Number.isSafeInteger(offset) || (offset as number) < 0 || (offset as number) > 10000 || (offset as number) > 0 && payload.corpus_revision === undefined) fail('invalid-request')
       if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 100
         || payload.question !== undefined && (typeof payload.question !== 'string' || payload.question.length > 4000)
         || payload.corpus_revision !== undefined && (typeof payload.corpus_revision !== 'string' || !HASH.test(payload.corpus_revision))) fail('invalid-request')
-      Object.assign(args, { limit, ...(payload.question !== undefined ? { question: payload.question } : {}), ...(payload.corpus_revision !== undefined ? { corpus_revision: payload.corpus_revision } : {}) })
+      Object.assign(args, { limit, ...(payload.offset !== undefined ? { offset } : {}), ...(payload.question !== undefined ? { question: payload.question } : {}), ...(payload.corpus_revision !== undefined ? { corpus_revision: payload.corpus_revision } : {}) })
     }
     let reply: Reply
     if (scope.kind === 'project') {
@@ -115,7 +119,7 @@ export function createKnowledgeUiRead({ host, workflow, xinCapture }: Dependenci
     const value = reply.result
     if (!object(value) || value.error || value.status === 'failed') fail('invalid-response')
     if (endpoint === 'source') source(value.source, scope, payload.source_id as string, payload.version as string, true)
-    else if (endpoint === 'revisions') revisions(value, scope, args.limit as number, payload.corpus_revision as string | undefined)
+    else if (endpoint === 'revisions') revisions(value, scope, args.limit as number, payload.corpus_revision as string | undefined, (args.offset as number | undefined) ?? 0)
     else if (scope.kind === 'project') {
       if (value.schema_version !== 1) fail('invalid-response')
       source(value.source, scope, undefined, payload.sha256 as string)

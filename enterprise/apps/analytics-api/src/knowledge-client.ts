@@ -90,7 +90,7 @@ export function knowledgeRoute(method: string | undefined, url: URL, payload: un
   const chunksPath = /^\/sources\/([a-f0-9-]{36})\/chunks$/.exec(path);
   if (method === 'GET' && (path === '/revisions' || chunksPath)) {
     const params: Record<string, unknown> = {};
-    const keys = chunksPath ? ['version', 'parse_revision', 'scope', 'offset'] : ['scope', 'question', 'limit', 'corpus_revision'];
+    const keys = chunksPath ? ['version', 'parse_revision', 'scope', 'offset'] : ['scope', 'question', 'limit', 'offset', 'corpus_revision'];
     for (const [key, value] of url.searchParams) {
       if (!keys.includes(key) || Object.hasOwn(params, key)) throw new KnowledgeError(400, 'INVALID_QUERY');
       params[key] = value;
@@ -101,6 +101,7 @@ export function knowledgeRoute(method: string | undefined, url: URL, payload: un
       if (!/^(0|[1-9][0-9]*)$/.test(String(params[key]))) throw new KnowledgeError(400, 'INVALID_QUERY');
       params[key] = Number(params[key]);
     }
+    if (!chunksPath && params.offset !== undefined && (!Number.isSafeInteger(params.offset) || Number(params.offset) > 10000 || Number(params.offset) > 0 && (typeof params.corpus_revision !== 'string' || !sha256.test(params.corpus_revision)))) throw new KnowledgeError(400, 'INVALID_QUERY');
     if (chunksPath) {
       const version = { source_id: chunksPath[1], source_version: params.version, parse_revision: params.parse_revision };
       delete params.parse_revision; params.version = version;

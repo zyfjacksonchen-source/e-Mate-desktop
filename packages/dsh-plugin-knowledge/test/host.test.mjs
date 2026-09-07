@@ -269,3 +269,12 @@ test('same-subject cold imports retain the original binding, while legacy missin
   assert.equal(xin.calls.filter(call => call.name === 'prepare_source_upload').length, 2)
   t.after(() => rm(root, { recursive: true, force: true }))
 })
+
+
+test('revision Host URL retains the bounded offset and fixed corpus snapshot', () => {
+  const corpus_revision = 'a'.repeat(64)
+  const target = knowledgeTarget('revisions', { scope: 'public', limit: 100, offset: 100, corpus_revision })
+  const url = new URL(target.url)
+  assert.equal(url.searchParams.get('offset'), '100'); assert.equal(url.searchParams.get('corpus_revision'), corpus_revision)
+  for (const payload of [{ offset: 1 }, { offset: 10001, corpus_revision }, { offset: -1 }, { offset: 0.5 }]) assert.throws(() => knowledgeTarget('revisions', payload))
+})

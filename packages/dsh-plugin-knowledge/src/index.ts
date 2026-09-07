@@ -24,7 +24,7 @@ const allowed: Record<string, { method: string; path: string; keys: string[] }> 
   benchmark: { method: 'POST', path: '/benchmark', keys: ['media', 'industry', 'metric', 'period', 'source_id', 'marketing_purpose'] },
   evidence: { method: 'GET', path: '/evidence', keys: ['query_id', 'scope'] },
   original: { method: 'GET', path: '/sources', keys: ['source_id', 'version', 'scope'] },
-  revisions: { method: 'GET', path: '/revisions', keys: ['question', 'limit', 'corpus_revision', 'scope'] },
+  revisions: { method: 'GET', path: '/revisions', keys: ['question', 'limit', 'offset', 'corpus_revision', 'scope'] },
   revision: { method: 'GET', path: '/revisions', keys: ['revision_id'] },
   import: { method: 'GET', path: '/imports', keys: ['operation_id'] },
 }
@@ -46,9 +46,10 @@ export function knowledgeTarget(endpoint: string, payload: any) {
   }
   for (const key of ['version', 'corpus_revision', 'root_id']) if (input[key] !== undefined && (typeof input[key] !== 'string' || !HASH.test(input[key]))) reject('知识版本无效。')
   if (endpoint === 'original' && !HASH.test(input.version ?? '')) reject('读取原件必须明确版本。')
-  for (const [key, max] of [['limit', endpoint === 'graph' ? 500 : endpoint === 'search' ? 20 : 100], ['depth', 2], ['offset', 100000]] as const) {
+  for (const [key, max] of [['limit', endpoint === 'graph' ? 500 : endpoint === 'search' ? 20 : 100], ['depth', 2], ['offset', endpoint === 'revisions' ? 10000 : 100000]] as const) {
     if (input[key] !== undefined && (!Number.isInteger(input[key]) || input[key] < (key === 'limit' ? 1 : 0) || input[key] > max)) reject('知识查询范围无效。')
   }
+  if (endpoint === 'revisions' && input.offset > 0 && !HASH.test(input.corpus_revision ?? '')) reject('后续分页必须明确原查询快照。')
   if (operation.method === 'GET') {
     for (const [key, value] of Object.entries(input)) {
       if (!['string', 'number'].includes(typeof value) || String(value).length > 4000) reject('知识请求参数无效。')
