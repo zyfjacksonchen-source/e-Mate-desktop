@@ -896,3 +896,119 @@ test('knowledge binding without an existing grant does not start OAuth consent o
   assert.deepEqual(h.counts(), { authorizeCount: 0, confirmCount: 0 })
   assert.equal(h.entries.size, 0)
 })
+
+test('OAuth issuer is exact and required when advertised without bypassing state or query validation', () => {
+  const path = '/oauth/callback/xin-business-assistant'
+  const binding = { issuer: 'https://issuer.example', required: true }
+  const query = '?code=ok&state=nonce&iss=https%3A%2F%2Fissuer.example'
+  assert.deepEqual(parseOAuthCallback(path + query, path, 'nonce', binding), { code: 'ok' })
+  assert.deepEqual(parseOAuthCallback(path + query.replace('code=ok', 'error=access_denied'), path, 'nonce', binding), { error: 'access_denied' })
+  for (const value of [path + '?code=ok&state=nonce', path + query + '&iss=x', path + query + '&resource=x', path + query + '&unknown=x', path + query.replace('issuer.example', 'other.example'), path + query.replace('nonce', 'wrong'), path + query + '&error=access_denied', path + query + '#fragment', 'https://other.example' + path + query, '/' + path + query, path + query.replace('issuer.example', 'issuer.example%2F')]) {
+    assert.throws(() => parseOAuthCallback(value, path, 'nonce', binding), /Invalid OAuth callback/)
+  }
+  assert.throws(() => parseOAuthCallback(path + query, path, 'nonce'), /Invalid OAuth callback/)
+  assert.deepEqual(parseOAuthCallback(path + '?code=ok&state=nonce', path, 'nonce', { issuer: binding.issuer }), { code: 'ok' })
+})
+
+test('real loopback callback accepts issuer once; early and invalid callbacks do not consume it', async () => {
+  const { startOAuthCallback } = await import('../lib/oauth-callback.mjs')
+  const callback = await startOAuthCallback('http://127.0.0.1:0/oauth/callback/test', 'nonce')
+  const valid = callback.redirectUrl + '?code=ok&state=nonce&iss=https%3A%2F%2Fissuer.example'
+  try {
+    assert.equal((await fetch(valid)).status, 400)
+    callback.bindIssuer('https://issuer.example', true)
+    assert.equal((await fetch(valid.replace('nonce', 'wrong'))).status, 400)
+    const accepted = await fetch(valid)
+    assert.equal(accepted.status, 200)
+    assert.match(await accepted.text(), /已收到授权回调/)
+    assert.throws(() => callback.bindIssuer('https://other.example', true), /expired/)
+    assert.equal(await callback.result, 'ok')
+    assert.equal((await fetch(valid)).status, 410)
+  } finally { await callback.close() }
+  await assert.rejects(fetch(valid))
+})
+
+test('loopback cancellation, timeout and close reject pending results and never accept late codes', async () => {
+  const { startOAuthCallback } = await import('../lib/oauth-callback.mjs')
+  const aborted = new AbortController(); aborted.abort()
+  await assert.rejects(startOAuthCallback('http://127.0.0.1:0/oauth/callback/test', 'nonce', aborted.signal), /取消/)
+  for (const mode of ['cancel', 'timeout', 'close']) {
+    const controller = new AbortController()
+    const callback = await startOAuthCallback('http://127.0.0.1:0/oauth/callback/test', 'nonce', controller.signal, mode === 'timeout' ? 20 : 60000)
+    callback.bindIssuer(undefined, false)
+    const failure = assert.rejects(callback.result, mode === 'timeout' ? /超时/ : /取消/)
+    try {
+      if (mode === 'cancel') controller.abort()
+      if (mode === 'close') await callback.close()
+      await failure
+      if (mode !== 'close') assert.equal((await fetch(callback.redirectUrl + '?code=late&state=nonce')).status, 410)
+    } finally { await callback.close() }
+    await assert.rejects(fetch(callback.redirectUrl))
+  }
+})
+
+test('pinned SDK keeps PKCE, redirect and protected resource bound through issuer-bearing loopback callback', async () => {
+  const { auth } = await import('@modelcontextprotocol/sdk/client/auth.js')
+  const { createHash } = await import('node:crypto')
+  const { startOAuthCallback } = await import('../lib/oauth-callback.mjs')
+  const callback = await startOAuthCallback('http://127.0.0.1:0/oauth/callback/test', 'nonce')
+  const issuer = 'https://issuer.example'
+  const resource = 'https://resource.example/mcp'
+  const discovery = {
+    authorizationServerUrl: issuer,
+    authorizationServerMetadata: { issuer, authorization_endpoint: issuer + '/authorize', token_endpoint: issuer + '/token', response_types_supported: ['code'], code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['none'], authorization_response_iss_parameter_supported: true },
+    resourceMetadata: { resource, authorization_servers: [issuer] },
+  }
+  let verifier, saved, requests = 0
+  const provider = {
+    redirectUrl: callback.redirectUrl, clientMetadata: { redirect_uris: [callback.redirectUrl] },
+    state: () => 'nonce', discoveryState: () => discovery,
+    clientInformation: () => ({ client_id: 'synthetic-client' }), tokens: () => undefined,
+    saveTokens: value => { saved = value }, saveCodeVerifier: value => { verifier = value },
+    codeVerifier: () => { if (!verifier) throw new Error('missing PKCE'); return verifier },
+    redirectToAuthorization: async url => {
+      callback.bindIssuer(discovery.authorizationServerMetadata.issuer, true)
+      assert.equal(url.searchParams.get('state'), 'nonce')
+      assert.equal(url.searchParams.get('resource'), resource)
+      assert.equal(url.searchParams.get('redirect_uri'), callback.redirectUrl)
+      assert.equal(url.searchParams.get('code_challenge_method'), 'S256')
+      assert.equal(url.searchParams.get('code_challenge'), createHash('sha256').update(verifier).digest('base64url'))
+      assert.equal((await fetch(callback.redirectUrl + '?state=nonce&code=synthetic&iss=' + encodeURIComponent(issuer))).status, 200)
+    },
+  }
+  const fetchFn = async (url, init) => {
+    requests++
+    assert.equal(String(url), issuer + '/token')
+    const params = new URLSearchParams(init.body)
+    assert.equal(params.get('code_verifier'), verifier)
+    assert.equal(params.get('resource'), resource)
+    assert.equal(params.get('redirect_uri'), callback.redirectUrl)
+    assert.equal(params.get('code'), 'synthetic')
+    return new Response(JSON.stringify({ access_token: 'synthetic-token', token_type: 'Bearer' }), { headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    assert.equal(await auth(provider, { serverUrl: resource, fetchFn }), 'REDIRECT')
+    const code = await callback.result
+    assert.equal(await auth(provider, { serverUrl: resource, authorizationCode: code, fetchFn }), 'AUTHORIZED')
+    assert.equal(saved.access_token, 'synthetic-token')
+    assert.equal(requests, 1)
+    verifier = undefined
+    await assert.rejects(auth(provider, { serverUrl: resource, authorizationCode: code, fetchFn }), /missing PKCE/)
+    discovery.resourceMetadata.resource = 'https://other.example/mcp'
+    await assert.rejects(auth(provider, { serverUrl: resource, authorizationCode: code, fetchFn }), /does not match expected/)
+    assert.equal(requests, 1)
+  } finally { await callback.close() }
+})
+
+test('abort during loopback listen is observed before issuer binding and finally releases the port', async () => {
+  const { startOAuthCallback } = await import('../lib/oauth-callback.mjs')
+  const controller = new AbortController()
+  const starting = startOAuthCallback('http://127.0.0.1:0/oauth/callback/test', 'nonce', controller.signal)
+  controller.abort()
+  const callback = await starting
+  try {
+    await assert.rejects(callback.result, /取消/)
+    assert.throws(() => callback.bindIssuer('https://issuer.example', true), /expired/)
+  } finally { await callback.close() }
+  await assert.rejects(fetch(callback.redirectUrl))
+})

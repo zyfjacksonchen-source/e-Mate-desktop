@@ -1,7 +1,6 @@
 import { createGrantLedger, validXinGrant, type XinGrant, type GrantLedgerState } from './xin-grant-ledger.ts'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { createServer, type Server } from 'node:http'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
@@ -14,7 +13,7 @@ import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } fr
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import { readCollectedOutput } from './collected-output.ts'
-import { parseOAuthCallback } from './oauth-callback.ts'
+import { startOAuthCallback } from './oauth-callback.ts'
 import { validatePluginInstall, validatePluginPackageName } from './plugin-source.ts'
 import { isMcpServerActive, validXinPrincipal, parseXinCapabilities, hasUnexpiredOAuthAccess, oauthFailureKind, type XinCapabilityProof } from './status.ts'
 import { readFeishuConnection } from './feishu-status.ts'
@@ -365,89 +364,6 @@ export function oauthRequestFetch(signal?: AbortSignal, lease?: OAuthLease, fetc
   }
 }
 
-interface OAuthCallbackHandle {
-  redirectUrl: string
-  result: Promise<string>
-  close(): Promise<void>
-}
-
-async function startOAuthCallback(name: string, state: string, signal?: AbortSignal): Promise<OAuthCallbackHandle> {
-  const path = `/oauth/callback/${name}`
-  let resolveResult!: (code: string) => void
-  let rejectResult!: (error: Error) => void
-  let settled = false
-  const result = new Promise<string>((resolve, reject) => {
-    resolveResult = resolve
-    rejectResult = reject
-  })
-  const server: Server = createServer((request, response) => {
-    const send = (status: number, body: string) => {
-      response.writeHead(status, {
-        'content-type': 'text/html; charset=utf-8',
-        'cache-control': 'no-store',
-        'x-content-type-options': 'nosniff',
-      })
-      response.end(body)
-    }
-    if (request.method !== 'GET' || request.socket.remoteAddress !== '127.0.0.1') {
-      send(404, 'Not found')
-      return
-    }
-    let callback: { code?: string; error?: string }
-    try { callback = parseOAuthCallback(request.url ?? '/', path, state) } catch {
-      send(400, 'Invalid OAuth callback')
-      return
-    }
-    if (callback.code !== undefined) {
-      send(200, '<h1>授权成功</h1><p>可以关闭此页面并返回 e-Mate。</p>')
-      if (!settled) {
-        settled = true
-        resolveResult(callback.code)
-      }
-      return
-    }
-    send(400, '<h1>授权未完成</h1><p>请返回 e-Mate 后重试。</p>')
-    if (callback.error !== undefined && !settled) {
-      settled = true
-      rejectResult(new Error('用户未完成外部服务授权。'))
-    }
-  })
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => reject(error)
-    server.once('error', onError)
-    server.listen(OAUTH_CALLBACK_PORT, '127.0.0.1', () => {
-      server.off('error', onError)
-      resolve()
-    })
-  }).catch((error) => {
-    server.close()
-    throw new Error(`无法启动 OAuth 本机回调端口 ${OAUTH_CALLBACK_PORT}。请关闭其他 e-Mate 实例后重试。`, { cause: error })
-  })
-  const timeout = setTimeout(() => {
-    if (!settled) {
-      settled = true
-      rejectResult(new Error('外部服务授权已超时。'))
-    }
-  }, OAUTH_CALLBACK_TIMEOUT_MS)
-  timeout.unref()
-  const onAbort = () => {
-    if (!settled) {
-      settled = true
-      rejectResult(new Error('外部服务授权已取消。'))
-    }
-  }
-  signal?.addEventListener('abort', onAbort, { once: true })
-  return {
-    redirectUrl: oauthCallbackUrl(name),
-    result,
-    close: async () => {
-      clearTimeout(timeout)
-      signal?.removeEventListener('abort', onAbort)
-      if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()))
-    },
-  }
-}
-
 async function openExternal(ctx: Context, url: URL, signal?: AbortSignal): Promise<void> {
   const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'rundll32.exe' : 'xdg-open'
   const executable = await ctx.subprocess.resolveExecutable(command, {}, signal)
@@ -564,9 +480,14 @@ async function oauthProvider(
 
 async function authorizeOAuth(ctx: Context, spec: McpServerSpec, signal?: AbortSignal, lease?: OAuthLease): Promise<string> {
   const stateNonce = randomBytes(32).toString('base64url')
-  const callback = await startOAuthCallback(spec.name, stateNonce, signal)
+  const callback = await startOAuthCallback(oauthCallbackUrl(spec.name), stateNonce, signal, OAUTH_CALLBACK_TIMEOUT_MS)
   try {
-    const provider = await oauthProvider(ctx, spec, callback.redirectUrl, stateNonce, url => openExternal(ctx, url, signal), lease)
+    const provider = await oauthProvider(ctx, spec, callback.redirectUrl, stateNonce, async url => {
+      const discovery = await provider.discoveryState?.()
+      callback.bindIssuer(discovery?.authorizationServerMetadata?.issuer,
+        discovery?.authorizationServerMetadata?.authorization_response_iss_parameter_supported === true)
+      await openExternal(ctx, url, signal)
+    }, lease)
     const first = await authorizeMcp(provider, {
       serverUrl: spec.url,
       ...(spec.oauthScope === '' ? {} : { scope: spec.oauthScope }),
