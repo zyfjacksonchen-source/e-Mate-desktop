@@ -157,7 +157,7 @@ test('settings URL is a lifecycle projection over the target SettingsRoot state'
   assert.match(source, /addEventListener\('popstate', syncPanel\)/)
   assert.match(source, /removeEventListener\('popstate', syncPanel\)/)
   assert.match(source, /const SETTINGS_RETURN_KEY = 'eMateSettingsReturn'/)
-  assert.match(source, /history\.pushState\(\{ \[SETTINGS_RETURN_KEY\]: returnPath \}, '', SETTINGS_PATH\)/)
+  assert.match(source, /history\.pushState\(\{ \[SETTINGS_RETURN_KEY\]: returnPath, [^\n]+\}, '', SETTINGS_PATH\)/)
   assert.match(source, /const returnPath = history\.state\?\.\[SETTINGS_RETURN_KEY\]/)
   assert.match(source, /history\.replaceState\(null, '', typeof returnPath === 'string' \? returnPath : '\/'\)/)
   assert.doesNotMatch(source, /history\.back\(\)/)
@@ -3532,11 +3532,8 @@ test('enterprise identity provider maps target credentials and the production HT
   refreshRejected = true
   refreshRejectionCode = 'TOKEN_REUSED'
   const refreshRequestsBeforeTerminal = requests.filter(request => request.path.endsWith('/v1/auth/refresh')).length
-  await assert.rejects(provider.bootstrap(), error => {
-    assert.equal(error.code, refreshRejectionCode)
-    assert.match(error.message, /登录刷新凭据已失效/u)
-    return true
-  })
+  assert.deepEqual(await provider.bootstrap(), { authenticated: false, workspace_unlocked: false })
+  assert.equal(provider.localAccountPrincipal(), undefined)
   assert.equal(
     requests.filter(request => request.path.endsWith('/v1/auth/refresh')).length,
     refreshRequestsBeforeTerminal + 1,
