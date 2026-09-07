@@ -135,3 +135,53 @@ test('real signed access sessions are rechecked on every knowledge request and r
     assert.equal(databaseReads, 2);
   } finally { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); }
 });
+
+test('knowledge writes bind canonical paths and reject caller identities and foreign route targets', () => {
+  const url = (path: string) => new URL(KNOWLEDGE_PREFIX + path, 'http://local');
+  const id = '12345678-1234-1234-1234-123456789abc';
+  assert.equal(knowledgeRoute('POST', url('/imports'), { operation_id: 'stable-operation-id' }).action, 'imports.create');
+  assert.deepEqual(knowledgeRoute('GET', url('/imports?operation_id=stable-operation-id'), undefined), { action: 'imports.lookup', params: { operation_id: 'stable-operation-id' } });
+  assert.throws(() => knowledgeRoute('GET', url('/compilations?operation_id=stable-operation-id&subject_id=other'), undefined));
+  assert.deepEqual(knowledgeRoute('PUT', url(`/imports/${id}/content`), Buffer.from('file')).params, { import_id: id, content: Buffer.from('file') });
+  assert.equal(knowledgeRoute('PATCH', url(`/compilations/${id}`), { expected_version: 2, lease_token: 'a', state: 'paused', checkpoint: {} }).action, 'compilations.checkpoint');
+  assert.equal(knowledgeRoute('GET', url(`/sources/${id}/chunks?version=${'a'.repeat(64)}&parse_revision=${'b'.repeat(64)}&offset=20&scope=uploader-private`), undefined).action, 'sources.chunks');
+  for (const payload of [{ subject_id: 'another' }, { tenant_id: 'other' }, { project_id: 1 }, { actor: {} }]) assert.throws(() => knowledgeRoute('POST', url('/imports'), payload));
+  assert.throws(() => knowledgeRoute('POST', url(`/compilations/${id}/claim`), { compilation_id: 'different' }));
+  assert.throws(() => knowledgeRoute('PUT', url(`/imports/${id}/content?actor=another`), Buffer.from('file')));
+});
+
+test('binary upload uses exact bytes and fixed verified UDS context without forwarding credentials', async () => {
+  const id = '12345678-1234-1234-1234-123456789abc';
+  const bytes = Buffer.from([0, 255, 127, 10, 13]);
+  let received = 0;
+  const upstream = await fixture(async (request, res) => {
+    assert.equal(request.method, 'PUT'); assert.equal(request.url, `/imports/${id}/content`);
+    assert.equal(request.headers.authorization, undefined); assert.equal(request.headers.cookie, undefined);
+    const context = JSON.parse(Buffer.from(String(request.headers['x-knowledge-context']), 'base64').toString());
+    assert.deepEqual(context, { actor: { enterprise_tenant_id: 'enterprise', subject_id: 'employee-1' }, knowledge_tenant_id: 'xin', action: 'imports.content', params: {} });
+    const parts: Buffer[] = []; for await (const part of request) parts.push(part);
+    assert.deepEqual(Buffer.concat(parts), bytes); received++;
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ schema_version: 1, request_id: 'receipt', scope: { kind: 'uploader-private' }, import_id: id, status: 'parsing' }));
+  });
+  const facade = createAnalyticsServer({ authenticate: async () => principal, knowledge: { authenticate: async token => token === 'access-only' ? principal : null, client: createKnowledgeClient({ socketPath: upstream.socketPath, tenantMappings: { enterprise: 'xin' }, accessClientId: 'e-mate-web' }) } });
+  facade.listen(0, '127.0.0.1'); await once(facade, 'listening');
+  const url = `http://127.0.0.1:${(facade.address() as AddressInfo).port}${KNOWLEDGE_PREFIX}/imports/${id}/content`;
+  try {
+    assert.equal((await fetch(url, { method: 'PUT', headers: { authorization: 'Bearer admin-key', 'content-type': 'application/octet-stream' }, body: bytes })).status, 401);
+    assert.equal((await fetch(url, { method: 'PUT', headers: { authorization: 'Bearer access-only', 'content-type': 'application/octet-stream' }, body: bytes })).status, 200);
+    assert.equal(received, 1);
+  } finally { facade.closeAllConnections(); await new Promise<void>(r => facade.close(() => r())); await upstream.close(); }
+});
+
+test('revocation while receiving a write body prevents any private upstream mutation', async () => {
+  let authCalls = 0; let mutations = 0;
+  const server = createAnalyticsServer({ authenticate: async () => principal, knowledge: {
+    authenticate: async () => ++authCalls === 1 ? principal : null,
+    client: { async read() { mutations++; throw Error('must not dispatch'); } },
+  } });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  try {
+    const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}${KNOWLEDGE_PREFIX}/imports`, { method: 'POST', headers: { authorization: 'Bearer access', 'content-type': 'application/json' }, body: JSON.stringify({ operation_id: 'valid-operation-id' }) });
+    assert.equal(res.status, 401); assert.equal(authCalls, 2); assert.equal(mutations, 0);
+  } finally { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); }
+});

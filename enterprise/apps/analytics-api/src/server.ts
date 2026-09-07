@@ -115,7 +115,7 @@ async function principal(
   return authenticated;
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
+async function readJson(request: IncomingMessage, maximum = maxBodyBytes): Promise<unknown> {
   const mediaType = request.headers['content-type']?.split(';', 1)[0]?.trim();
   if (mediaType?.toLowerCase() !== 'application/json') {
     throw new HttpError(415, 'CONTENT_TYPE_UNSUPPORTED', 'Content-Type must be application/json');
@@ -126,7 +126,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     if (!Number.isSafeInteger(length) || length < 0) {
       throw new HttpError(400, 'INVALID_REQUEST', 'Invalid Content-Length');
     }
-    if (length > maxBodyBytes) {
+    if (length > maximum) {
       throw new HttpError(413, 'REQUEST_TOO_LARGE', 'Request body too large');
     }
   }
@@ -136,7 +136,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.byteLength;
-    if (bytes > maxBodyBytes) {
+    if (bytes > maximum) {
       tooLarge = true;
       continue;
     }
@@ -150,6 +150,17 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   } catch {
     throw new HttpError(400, 'INVALID_JSON', 'Request body must be valid JSON');
   }
+}
+
+async function readKnowledgeOriginal(request: IncomingMessage): Promise<Buffer> {
+  if (request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/octet-stream') throw new HttpError(415, 'CONTENT_TYPE_UNSUPPORTED', 'Content-Type must be application/octet-stream');
+  const chunks: Buffer[] = []; let size = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); size += bytes.length;
+    if (size > 20 * 1024 * 1024) throw new HttpError(413, 'REQUEST_TOO_LARGE', 'Original exceeds 20 MiB');
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks);
 }
 
 function methodNotAllowed(response: ServerResponse, allow: string): void {
@@ -450,7 +461,13 @@ export function createAnalyticsHandler({
         request.once('aborted', abort);
         response.once('close', abort);
         try {
-          const input = knowledgeRoute(request.method, url, request.method === 'POST' ? await readJson(request) : undefined);
+          const binary = request.method === 'PUT' && /^\/imports\/[a-f0-9-]{36}\/content$/.test(url.pathname.slice(KNOWLEDGE_PREFIX.length));
+          const payload = binary ? await readKnowledgeOriginal(request) : ['POST', 'PUT', 'PATCH'].includes(request.method ?? '') ? await readJson(request, 1024 * 1024) : undefined;
+          const input = knowledgeRoute(request.method, url, payload);
+          if (request.method !== 'GET') {
+            const current = await principal(request, knowledge.authenticate);
+            if (current.tenantId !== identity.tenantId || current.userId !== identity.userId) throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Authentication changed');
+          }
           const result = await knowledge.client.read(identity, input.action, input.params, cancellation.signal);
           if (cancellation.signal.aborted) return;
           response.writeHead(result.status, { 'cache-control': 'private, no-store', 'content-type': result.contentType,
