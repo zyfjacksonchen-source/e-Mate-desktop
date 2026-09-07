@@ -81,10 +81,8 @@ async function loadModelPolicySource() {
       "import { LOGGED_OUT_CREDENTIAL } from './credentials-os.js'",
       `const LOGGED_OUT_CREDENTIAL = '${LOGGED_OUT_CREDENTIAL}'`,
     )
-    .replace(
-      "import { loadTargetStorageDomain } from './target-runtime.js'",
-      "const loadTargetStorageDomain = () => { throw new Error('unused in lifecycle test') }",
-    )
+    .replace("from './target-runtime.js'", `from '${new URL('../src/profile/target-runtime.ts', import.meta.url).href}'`)
+    .replace("from './request-size.js'", `from '${new URL('../src/profile/request-size.ts', import.meta.url).href}'`)
     .replace('function createService(ctx, table, projectionTable, quota)',
       'export function createService(ctx, table, projectionTable, quota)')
   const compiled = stripTypeScriptTypes(source, { mode: 'transform' })
