@@ -32,3 +32,9 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - MIT, Copyright (c) 2026 Nous Research; full license in `skills/documents/LICENSE`. Only the current MIT rewrite is included, not its proprietary predecessor or the Hermes runtime.
 - Local differences and retained upstream references are recorded in `skills/documents/UPSTREAM.md`. Fixes cover replacement rescanning, shared parts, Chinese styles and relationship validation.
 - Python, python-docx/lxml and real document rendering are separate runtime requirements. This source replacement is marked `needs-runtime` until the packaged environment is integrated and verified. It is not an installed-readiness claim.
+
+## Codex PDF replacement
+
+- OpenAI PDF plugin `26.905.11957`; its original four Skill files are retained byte-for-byte. Exact file hashes, the original MIT plugin manifest and the licensing inspection scope are recorded in `skills/pdf/SOURCE.md` and `skills/pdf/UPSTREAM.json`.
+- `HOST.md` maps resource paths, the native Python environment and real attachment delivery to e-Mate. The marker helper only checks its arguments; it is not evidence of successful generation or rendering.
+- Python dependencies and a real renderer remain a separate acceptance gate. The provider reports `needs-runtime` until that gate is verified.

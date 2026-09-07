@@ -13,6 +13,7 @@ This package bundles the following redistributable components:
 | @xmldom/xmldom | 0.9.11 | MIT |
 | Noto Sans SC Variable | 5.3.0 | SIL Open Font License 1.1 |
 | terravic/meeting-transcript-summary-skill | 510aab036c6190f3ee547628cb66409def639ac6 | Apache-2.0 |
+| OpenAI PDF Skill | 26.905.11957 | MIT declaration in retained upstream plugin manifest |
 
 The exact pdf2json and font license texts are included beside their assets. Transitive JavaScript license texts are included by the repository release SBOM and third-party-license process.
 

@@ -84,7 +84,7 @@ interface SkillSpec {
 const skillRoot = fileURLToPath(new URL('../skills/', import.meta.url))
 const SPECS: readonly SkillSpec[] = [
   { name: 'documents', description: 'Word 文档：创建、编辑和套用模板，支持中文排版、批注与修订。', whenToUse: '用于 Word 文档创建、模板填充、格式保留编辑、批注和修订；使用前验证 Python 依赖。', directory: `${skillRoot}documents`, format: 'docx', hostGuide: 'HOST.md', runtimePending: true },
-  { name: 'pdf', description: 'Create, read, and safely regenerate PDF documents locally.', whenToUse: 'Use for text-first PDF creation, extraction, review, and supported edits.', directory: `${skillRoot}pdf`, format: 'pdf' },
+  { name: 'pdf', description: 'PDF 文档：创建、提取、填写和检查版式，交付前渲染验证。', whenToUse: '用于 PDF 阅读、生成、表单填写及视觉检查；使用前验证 Python 和渲染依赖。', directory: `${skillRoot}pdf`, format: 'pdf', hostGuide: 'HOST.md', runtimePending: true },
   { name: 'spreadsheets', description: 'Create, read, and safely regenerate XLSX workbooks locally.', whenToUse: 'Use for tabular XLSX authoring, reading, analysis, and supported edits.', directory: `${skillRoot}spreadsheets`, format: 'xlsx' },
   { name: 'presentations', description: 'Create, read, and safely regenerate PPTX presentations locally.', whenToUse: 'Use for text-first PPTX authoring, extraction, review, and supported edits.', directory: `${skillRoot}presentations`, format: 'pptx' },
   { name: 'meeting-summary', description: '会议总结：从本地转录文本整理会议纪要、决策与行动项，保留事实来源。', whenToUse: '用于会议转录文本、VTT、SRT 的总结和行动项整理；不负责录音或音频转录。', directory: `${skillRoot}meeting-summary`, hostGuide: 'HOST.md' },

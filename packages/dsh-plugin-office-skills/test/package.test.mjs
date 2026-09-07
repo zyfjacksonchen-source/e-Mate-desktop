@@ -16,7 +16,7 @@ import {
   writeOfficeBuffer,
 } from '../lib/index.js'
 
-test('registers five ready Skills and two target Tool/Job paths', async () => {
+test('registers five Skills with accurate runtime states and two target Tool/Job paths', async () => {
   let provider
   const capabilities = []
   const tools = []
@@ -35,7 +35,7 @@ test('registers five ready Skills and two target Tool/Job paths', async () => {
   for (const skill of skills) {
     assert.equal(skill.rank, 600)
     assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
-    assert.equal(skill.metadata.state, skill.name === 'documents' ? 'needs-runtime' : 'ready')
+    assert.equal(skill.metadata.state, ['documents', 'pdf'].includes(skill.name) ? 'needs-runtime' : 'ready')
     const loaded = await provider.get(skill, {})
     assert.ok(loaded.content.length > 300)
     assert.doesNotMatch(loaded.content, /^---/u)
@@ -45,6 +45,14 @@ test('registers five ready Skills and two target Tool/Job paths', async () => {
       assert.ok(loaded.content.includes(loaded.resourceBase.path))
       assert.match(loaded.content, /python-docx/u)
       assert.match(await readFile(join(loaded.resourceBase.path, 'LICENSE'), 'utf8'), /Nous Research/u)
+    }
+    if (skill.name === 'pdf') {
+      assert.equal(skill.metadata.adapter, 'upstream')
+      assert.ok(loaded.content.includes(loaded.resourceBase.path))
+      assert.doesNotMatch(loaded.content, /\{\{SKILL_DIR\}\}/u)
+      assert.match(loaded.content, /DSH_EMATE_PYTHON/u)
+      const original = await readFile(join(loaded.resourceBase.path, 'SKILL.md'))
+      assert.equal(createHash('sha256').update(original).digest('hex'), 'afc4472ec4d625f703e9f414fe6814ce3cfa0ec51c7a07887fe587264c8b561e')
     }
     if (skill.name === 'meeting-summary') {
       assert.match(skill.description, /^会议总结/u)
