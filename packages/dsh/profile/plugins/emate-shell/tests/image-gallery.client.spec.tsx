@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement, useSyncExternalStore } from 'react'
 import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
+import { bindSnapshotSelector } from '../../../../../../upstream/deepseek-harness/packages/client/web-react/src/bind.ts'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseImageOutputReceipt } from '../src/client/image-gallery-contract.ts'
@@ -117,6 +118,15 @@ function projectionHook(imageBatches: unknown = undefined): UseProjection {
   }) as UseProjection
 }
 
+function chatNodeFixture(nodes: readonly any[]) {
+  return {
+    nodes: { values: () => nodes, get: (key: string) => nodes.find(node => node.key === key) },
+    locations: { getTurn: (turn: number) => nodes.filter(node =>
+      (node.location?.kind === 'turn' || node.location?.kind === 'step') && node.location.turn.turn === turn,
+    ).map(node => node.key) },
+  }
+}
+
 function terminalProps(
   nodes: readonly unknown[],
   matched = { callIds: ['call-image-1'], paths: [] as string[], childSessionIds: [] as string[] },
@@ -128,7 +138,7 @@ function terminalProps(
     turn: turn({}),
     seq: 20,
     openFile: vi.fn(),
-    useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => nodes.values() } } }),
+    useSession: (selector: (value: unknown) => unknown) => selector({ chat: chatNodeFixture(nodes) }),
     useSessions: (selector: (value: unknown) => unknown) => selector({ byId: { 'session-1': { cwd: '/work' } } }),
     useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
     useProjection: projectionHook(),
@@ -166,7 +176,7 @@ function galleryProps(
     sessionId,
     useSession: (selector: (value: unknown) => unknown) => selector({
       chat: {
-        nodes: { values: () => nodes.values() },
+        ...chatNodeFixture(nodes),
         timeline: { turnOrder: [], turns: new Map() },
       },
     }),
@@ -1292,4 +1302,36 @@ describe('native image render stability', () => {
     expect(loadImage.mock.calls.map(call => call[1])).toEqual(['old-owner', 'new-owner', 'new-owner'])
   })
 
+})
+
+
+describe('indexed terminal projection', () => {
+  it('reads only its turn and no child receipts across unrelated updates, while a live reader still applies revisions and removals', () => {
+    const original = parseImageOutputReceipt(receipt())!
+    const rows = new Map<string, any>([['receipt', hidden(original)]])
+    const get = vi.fn((key: string) => rows.get(key))
+    const values = vi.fn(() => [...rows.values()])
+    const getTurn = vi.fn((turn: number) => turn === 1 ? [...rows.keys()] : [])
+    const chat = { nodes: { get, values }, locations: { getTurn } }
+    let snapshot = { chat }
+    const listeners = new Set<() => void>()
+    const useSession = bindSnapshotSelector({ getSnapshot: () => snapshot, subscribe: fn => { listeners.add(fn); return () => { listeners.delete(fn) } } })
+    const childProjection = vi.fn(() => { throw new Error('unrelated child must not be read') })
+    const sessions = { byId: { 'session-1': {}, child: { get projectionValues() { return childProjection() } } }, subagentsByParent: { 'session-1': { entries: [{ kind: 'child', id: 'child', mode: 'one-shot' }] } } }
+    const props = terminalProps([], undefined, {useSession, useSessions: (select: any) => select(sessions)})
+    render(<ArtifactTerminal {...props as any} />)
+    expect(screen.getByRole('button', {name: '查看原图：result.png'})).toBeTruthy()
+    get.mockClear()
+    for(let i = 0; i < 20; i++) act(() => { snapshot = {chat}; listeners.forEach(fn => fn()) })
+    expect(values).not.toHaveBeenCalled()
+    expect(childProjection).not.toHaveBeenCalled()
+    expect(get.mock.calls.every(([key]) => key === 'receipt')).toBe(true)
+    act(() => {
+      rows.set('receipt', hidden({...original, revision: 3, attachment: {...attachment, name: 'updated.png'}}))
+      snapshot = {chat}; listeners.forEach(fn => fn())
+    })
+    expect(screen.getByRole('button', {name: '查看原图：updated.png'})).toBeTruthy()
+    act(() => { rows.clear(); snapshot = {chat}; listeners.forEach(fn => fn()) })
+    expect(screen.queryByRole('button', {name: /查看原图/})).toBeNull()
+  })
 })

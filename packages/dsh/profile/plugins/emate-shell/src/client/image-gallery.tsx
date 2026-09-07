@@ -8,6 +8,7 @@ import type {
   ConversationSnapshot,
   SessionListState,
   UseProjection,
+  UseConversationSession,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
@@ -513,6 +514,7 @@ function projectedImageReceipts(value: unknown): readonly ProjectedImageReceipt[
 export function childGalleryImageItems(
   sessions: Pick<SessionListState, 'byId' | 'subagentsByParent'>,
   parentSessionId: string,
+  selectedChildren?: ReadonlySet<string>,
 ): readonly ImageGalleryItem[] {
   const candidates: Array<{
     readonly item: ImageGalleryItem
@@ -521,7 +523,7 @@ export function childGalleryImageItems(
   }> = []
   const entries = sessions.subagentsByParent?.[parentSessionId]?.entries ?? []
   for (const [index, entry] of entries.entries()) {
-    if (entry.kind !== 'child') continue
+    if (entry.kind !== 'child' || selectedChildren && !selectedChildren.has(entry.id)) continue
     const summary = sessions.byId[entry.id]
     const projection = (summary?.projectionValues as Readonly<Record<string, unknown>> | undefined)
       ?.[IMAGE_RECEIPTS_PROJECTION]
@@ -628,7 +630,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
   readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly matched: ArtifactTerminalMatch
   readonly sessionId: string
-  readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
+  readonly useSession: UseConversationSession
   readonly useSessions: <T>(
     selector: (snapshot: SessionListState) => T, equal?: (left: T, right: T) => boolean
   ) => T
@@ -645,7 +647,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
 interface ImageGalleryViewProps {
   readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly sessionId: string
-  readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
+  readonly useSession: UseConversationSession
   readonly useSessions: <T>(
     selector: (snapshot: SessionListState) => T, equal?: (left: T, right: T) => boolean
   ) => T
@@ -1065,27 +1067,34 @@ function ArtifactTerminalBody({
   const menuButtons = useRef<Array<HTMLButtonElement | null>>([])
   const menuOrigin = useRef<HTMLElement | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
-  const snapshot = useSession(value => value)
   const input = useInput(value => value)
   const limits = useProjection('imageLimits')
-  const sessions = useSessions(value => value)
-  const summary = sessions.byId[sessionId]
-  const ambiguousBatch = (matched.batchCallIds?.length ?? 0) > 0 && batches.length === 0
+  const summary = useSessions(value => value.byId[sessionId],
+    (left, right) => left?.title === right?.title && left?.cwd === right?.cwd)
+  const title = summary?.title
   const root = summary?.cwd
+  const ambiguousBatch = (matched.batchCallIds?.length ?? 0) > 0 && batches.length === 0
+  const includeChildren = !ambiguousBatch && (matched.childSessionIds.length > 0 || matched.foregroundWindow !== undefined)
+  const sessions = useSessions(value => includeChildren ? value : undefined)
+  // rc.7 readers are live objects: compare the actual indexed nodes, not store identity.
+  const nodes = useSession(value => value.chat.locations.getTurn(turn.turn).flatMap(key => {
+    const node = value.chat.nodes.get(key)
+    return node === undefined ? [] : [node]
+  }), (left, right) => left.length === right.length && left.every((node, index) => node === right[index]))
+  const settled = useSession(value => includeChildren && matched.foregroundWindow !== undefined
+    ? settledChildSessions(value.chat.nodes.values()) : NO_BATCH_CHILD_IDS,
+  (left, right) => left.size === right.size && [...left].every(id => right.has(id)))
   const items = useMemo(
-    () => {
-      const nodes = [...snapshot.chat.nodes.values()]
-      return namedGalleryImageItems([
-        ...terminalImageItems(nodes, matched.callIds, turn.turn),
-        ...ambiguousBatch ? [] : terminalChildImageItems(
-          childGalleryImageItems(sessions, sessionId).filter(
-            item => item.source === undefined || !batchChildIds.has(item.source.sessionId),
-          ),
-          matched.childSessionIds, matched.foregroundWindow, settledChildSessions(nodes),
-        ),
-      ], summary?.title ?? '')
-    },
-    [ambiguousBatch, batchChildIds, matched.callIds, matched.childSessionIds, matched.foregroundWindow, sessionId, sessions, snapshot, summary?.title, turn.turn],
+    () => namedGalleryImageItems([
+      ...terminalImageItems(nodes, matched.callIds, turn.turn),
+      ...sessions === undefined ? [] : terminalChildImageItems(
+        childGalleryImageItems(sessions, sessionId,
+          matched.foregroundWindow === undefined ? new Set(matched.childSessionIds) : undefined,
+        ).filter(item => item.source === undefined || !batchChildIds.has(item.source.sessionId)),
+        matched.childSessionIds, matched.foregroundWindow, settled,
+      ),
+    ], title ?? ''),
+    [batchChildIds, matched.callIds, matched.childSessionIds, matched.foregroundWindow, nodes, sessionId, sessions, settled, title, turn.turn],
   )
   const seenFailures = useRef(new Set<string>())
   const existingBytes = draftBytes(input.imageIds)

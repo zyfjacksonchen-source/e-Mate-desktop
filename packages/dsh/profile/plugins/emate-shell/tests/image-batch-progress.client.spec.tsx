@@ -325,7 +325,7 @@ describe('live image batch progress', () => {
     ] } } } as never)
     const common = {
       sessionId: parentSessionId, seq: 20, openFile: vi.fn(),
-      useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => [][Symbol.iterator]() } } }),
+      useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => [], get: () => undefined }, locations: { getTurn: () => [] } } }),
       useSessions: sessions.useSessions,
       useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
       useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
