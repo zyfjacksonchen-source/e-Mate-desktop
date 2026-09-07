@@ -2,6 +2,16 @@ import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { HASH, SOURCE_ID, parseGraph, type CallKnowledge, type KnowledgeGraph, type KnowledgeNode } from '../contract.ts'
 import type { GraphController } from './graph-renderer.ts'
 import css from './page.module.css'
+type OriginalVersion = { source_id: string; source_version: string; parse_revision?: string }
+function revisionOriginals(value: any): OriginalVersion[] {
+  const seen = new Set<string>()
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) throw Error('编译知识的原件引用无效。')
+  for (const source of value) {
+    if (!SOURCE_ID.test(source?.source_id) || !HASH.test(source?.source_version) || !HASH.test(source?.parse_revision) || seen.has(source.source_id)) throw Error('编译知识的原件引用无效。')
+    seen.add(source.source_id)
+  }
+  return value
+}
 type ViewNode = KnowledgeNode & { source_only?: boolean; excerpt?: string }
 type GraphModule = { createGraph(element: HTMLElement, select: (id: string) => void, unavailable: () => void): GraphController }
 interface Props { callKnowledge: CallKnowledge; loadGraph(): Promise<GraphModule> }
@@ -89,7 +99,7 @@ export function KnowledgePage({ callKnowledge, loadGraph }: Props) {
     const needle = query.trim().toLocaleLowerCase()
     const fromSearch = search?.question === query.trim()
     const rows: ViewNode[] = fromSearch ? search.nodes : graph?.nodes ?? []
-    return rows.filter(node => (layer === 'all' || node.layer === layer) && (fromSearch || !needle || node.title.toLocaleLowerCase().includes(needle)))
+    return rows.filter(node => (fromSearch || layer === 'all' || node.layer === layer) && (fromSearch || !needle || node.title.toLocaleLowerCase().includes(needle)))
   }, [graph, query, layer, search])
   useEffect(() => { if (selected && !nodes.some(node => node.id === selected.id)) { reads.current++; readingRequest.current?.abort(); setSelected(undefined); setDetail(undefined); setReading(false) } }, [nodes, selected])
   const searchText = async () => {
@@ -102,7 +112,7 @@ export function KnowledgePage({ callKnowledge, loadGraph }: Props) {
       if (ticket !== generation.current || controller.signal.aborted) return
       if (reply.scope_key !== scope) throw Object.assign(Error('登录账号已变化，请重新加载。'), { code: 'scope-changed' })
       if (reply.result?.corpus_revision !== graph.corpus_revision || !Array.isArray(reply.result.data) || reply.result.data.length > 20 || !Array.isArray(reply.result.sources)) throw Error('知识检索版本不一致，请刷新。')
-      const known = new Map(graph.nodes.map(node => [node.source_id, node])), seen = new Set<string>()
+      const known = new Map(graph.nodes.filter(node => node.revision_id === undefined).map(node => [node.source_id, node])), seen = new Set<string>()
       const result = reply.result.data.map((hit: any) => {
         const source = reply.result.sources.find((value: any) => value.id === hit.source_id)
         if (!source || typeof source.id !== 'string' || typeof source.file_hash !== 'string' || !SOURCE_ID.test(source.id) || !HASH.test(source.file_hash) || typeof source.title !== 'string' || typeof hit.text !== 'string' || seen.has(source.id)) throw Error('知识检索来源无效。')
@@ -125,24 +135,29 @@ export function KnowledgePage({ callKnowledge, loadGraph }: Props) {
       if (reply.scope_key !== scope) throw Object.assign(Error('登录账号已变化，请重新加载。'), { code: 'scope-changed' })
       const version = node.source_only ? reply.result?.source?.file_hash : reply.result?.source_version
       if (version !== node.source_version || (node.source_only ? reply.result.source.id !== node.source_id : reply.result.id !== node.id || reply.result.source_id !== node.source_id || reply.result.untrusted !== true || typeof reply.result.content !== 'string')) throw Error('原文版本不一致，请刷新。')
+      if (node.revision_id !== undefined) {
+        if (reply.result.revision_id !== node.revision_id) throw Error('知识修订身份不一致，请刷新。')
+        revisionOriginals(reply.result.source_versions)
+      }
       setDetail(reply.result)
     } catch (reason) { if (ticket === reads.current && !controller.signal.aborted) report(reason) }
     finally { if (ticket === reads.current) setReading(false) }
   }
-  const download = async () => {
+  const download = async (original: OriginalVersion) => {
     if (!selected || downloading) return
     const ticket = ++downloadGeneration.current, controller = new AbortController(); downloadRequest.current = controller
     setDownloading(true); setError('')
     try {
-      const reply = await callKnowledge('original', { source_id: selected.source_id, version: selected.source_version }, controller.signal)
+      const reply = await callKnowledge('original', { source_id: original.source_id, version: original.source_version }, controller.signal)
       if (ticket !== downloadGeneration.current || controller.signal.aborted) return
       if (reply.scope_key !== scope) throw Object.assign(Error('登录账号已变化，请重新加载。'), { code: 'scope-changed' })
-      if (reply.result?.sha256 !== selected.source_version || !/^\/emate-knowledge-downloads\/[a-f0-9-]{36}$/u.test(reply.result?.url)) throw Error('原件下载身份无效。')
+      if (reply.result?.sha256 !== original.source_version || !/^\/emate-knowledge-downloads\/[a-f0-9-]{36}$/u.test(reply.result?.url)) throw Error('原件下载身份无效。')
       const anchor = document.createElement('a'); anchor.href = reply.result.url; anchor.click()
     } catch (reason) { if (ticket === downloadGeneration.current && !controller.signal.aborted) report(reason) }
     finally { if (ticket === downloadGeneration.current) setDownloading(false) }
   }
   if (!open) return null
+  const originals: OriginalVersion[] = selected ? selected.revision_id ? detail?.source_versions ?? [] : [{ source_id: selected.source_id, source_version: selected.source_version }] : []
   const graphical = view === 'graph' && !reduced && !unavailable && nodes.length > 0
   return <main className={css.page} aria-label="企业知识图谱" data-emate-knowledge-page="">
     <header className={css.header}><div><small>公司公共知识</small><h1>企业知识图谱</h1><p>沿知识、方法与原始资料，找到可追溯的依据。</p></div><button type="button" onClick={() => void refresh()} disabled={busy}>{busy ? '正在读取' : '刷新资料'}</button></header>
@@ -159,12 +174,13 @@ export function KnowledgePage({ callKnowledge, loadGraph }: Props) {
       <section className={css.browse} aria-label="知识结果">
         {graph && !nodes.length && <p className={css.empty}>{query || layer !== 'all' ? '未找到匹配条目。可调整筛选，或检索原文。' : '当前没有可读取的公共知识。'}</p>}
         {graphical && <div className={css.graphStage}><GraphView nodes={nodes} edges={graph!.edges} selected={selected?.id} select={id => { const node = nodes.find(value => value.id === id); if (node) void read(node) }} loadGraph={loadGraph} failed={() => setUnavailable(true)} /><span className={css.graphHint}>拖动旋转 · 滚轮缩放 · 点击查看来源</span></div>}
-        {nodes.length > 0 && <ul ref={listElement} className={`${css.list} ${graphical ? css.graphList : ''}`} aria-label="知识条目列表">{nodes.map(node => <li key={node.id}><button type="button" aria-pressed={selected?.id === node.id} onClick={() => void read(node)}><span className={css.dot} /><span><strong>{node.title}</strong><small>{layerNames[node.layer]} · {node.source_only ? '来源资料' : '知识节点'} · {node.source_version.slice(0, 8)}</small></span><span aria-hidden="true">↗</span></button></li>)}</ul>}
+        {nodes.length > 0 && <ul ref={listElement} className={`${css.list} ${graphical ? css.graphList : ''}`} aria-label="知识条目列表">{nodes.map(node => <li key={node.id}><button type="button" aria-pressed={selected?.id === node.id} onClick={() => void read(node)}><span className={css.dot} /><span><strong>{node.title}</strong><small>{layerNames[node.layer]} · {node.revision_id ? '编译知识' : node.source_only ? '来源资料' : '知识节点'} · {node.source_version.slice(0, 8)}</small></span><span aria-hidden="true">↗</span></button></li>)}</ul>}
       </section>
-      {selected && <aside className={css.detail} aria-label="知识原文"><header><span>{layerNames[selected.layer]}</span><button type="button" onClick={() => { reads.current++; readingRequest.current?.abort(); setSelected(undefined); setDetail(undefined) }}>关闭</button></header><h2>{selected.title}</h2><details><summary>来源与版本</summary><p>来源 {selected.source_id}</p><code>sha256:{selected.source_version}</code></details>
-        <button type="button" className={css.download} disabled={downloading} onClick={() => void download()}>{downloading ? '正在核验原件' : '下载此版本原件'}</button>
+      {selected && <aside className={css.detail} aria-label="知识原文"><header><span>{layerNames[selected.layer]}</span><button type="button" onClick={() => { reads.current++; readingRequest.current?.abort(); setSelected(undefined); setDetail(undefined) }}>关闭</button></header><h2>{selected.title}</h2><details><summary>来源与版本</summary><p>{selected.revision_id ? `修订 ${selected.revision_id}` : `来源 ${selected.source_id}`}</p><code>sha256:{selected.source_version}</code></details>
+        {selected.revision_id && <h3>引用的原始资料</h3>}
+        {originals.map((original, index) => <button key={original.source_id} type="button" className={css.download} disabled={downloading} onClick={() => void download(original)}>{downloading ? '正在核验原件' : selected.revision_id ? `下载原件：${graph?.nodes.find(node => node.revision_id === undefined && node.source_id === original.source_id && node.source_version === original.source_version)?.title ?? `原始资料 ${index + 1}`}` : '下载此版本原件'}</button>)}
         {selected.excerpt && <section><h3>检索片段</h3><p className={css.bodyText}>{selected.excerpt}</p></section>}
-        {reading ? <p role="status">正在读取对应版本…</p> : detail?.content ? <section><h3>原文内容</h3><div className={css.bodyText}>{detail.content}</div></section> : detail?.source ? <p>来源：{detail.source.publisher}。可下载已核验版本的完整原件。</p> : null}
+        {reading ? <p role="status">正在读取对应版本…</p> : detail?.content ? <section><h3>{selected.revision_id ? '编译内容' : '原文内容'}</h3><div className={css.bodyText}>{detail.content}</div></section> : detail?.source ? <p>来源：{detail.source.publisher}。可下载已核验版本的完整原件。</p> : null}
       </aside>}
     </div>
   </main>

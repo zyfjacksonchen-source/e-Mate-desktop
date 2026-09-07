@@ -62,7 +62,7 @@ async function bytes(response: Response, maximum: number, signal: AbortSignal) {
   return Buffer.concat(chunks, length)
 }
 export function createKnowledgeHost(identity: any, schedule = (callback: () => void, delay: number) => { const timer = setTimeout(callback, delay); timer.unref(); return () => clearTimeout(timer) }) {
-  let lifetime = new AbortController()
+  let lifetime = new AbortController(); let disposed = false
   const downloads = new Map<string, { owner: string; bytes: Buffer; disposition: string; expires: number; cancel: () => void }>()
   const owner = () => {
     const value = identity.localAccountPrincipal?.()
@@ -71,17 +71,18 @@ export function createKnowledgeHost(identity: any, schedule = (callback: () => v
   }
   const clearDownloads = () => { for (const entry of downloads.values()) entry.cancel(); downloads.clear() }
   let lastOwner = owner()
-  const synchronize = () => { const next = owner(); if (next !== lastOwner) { lastOwner = next; lifetime.abort(); lifetime = new AbortController(); clearDownloads() } return next }
-  const check = (key: string | undefined) => { if (!key || owner() !== key) reject('登录账号已变化，请重新加载企业知识。', 'scope-changed') }
+  const synchronize = () => { const next = owner(); if (!disposed && next !== lastOwner) { lastOwner = next; lifetime.abort(); lifetime = new AbortController(); clearDownloads() } return next }
+  const check = (key: string | undefined) => { if (disposed) reject('知识页面已关闭。', 'cancelled'); if (!key || owner() !== key) reject('登录账号已变化，请重新加载企业知识。', 'scope-changed') }
   return {
     changed() { synchronize() },
-    dispose() { lifetime.abort(); clearDownloads() },
+    dispose() { disposed = true; lifetime.abort(); clearDownloads() },
     takeDownload(id: string) {
       const value = downloads.get(id); downloads.delete(id); value?.cancel()
       if (!value || value.expires < Date.now()) return undefined
       try { check(value.owner); return value } catch { return undefined }
     },
     async call(endpoint: string, payload: unknown, signal?: AbortSignal) {
+      if (disposed) reject('知识页面已关闭。', 'cancelled')
       const target = knowledgeTarget(endpoint, payload)
       signal?.throwIfAborted()
       if (!owner()) {

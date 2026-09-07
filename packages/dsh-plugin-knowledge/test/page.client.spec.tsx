@@ -92,3 +92,60 @@ it('uses the same filtered items for graph and list and disposes on context loss
   expect(controller.dispose).toHaveBeenCalledOnce()
   expect(within(screen.getByRole('list')).getAllByRole('button')).toHaveLength(1)
 })
+
+it('keeps compiled revision identity separate from each cited original for search and downloads', async () => {
+  const compiled = { ...one, id: '3'.repeat(64), title: '接口夹具：编译知识', source_version: 'f'.repeat(64), revision_id: 'c'.repeat(36) }
+  const sourceVersions = [one, two].map(node => ({ source_id: node.source_id, source_version: node.source_version, parse_revision: 'e'.repeat(64) }))
+  const original = fixture([one, two, compiled])
+  const call = vi.fn(async (endpoint: string, body: any) => {
+    if (endpoint === 'node' && body.node_id === compiled.id) return answer({ ...compiled, untrusted: true, content: '已标注的编译内容', source_versions: sourceVersions })
+    if (endpoint === 'original') return { scope_key: scope, result: { url: '/emate-knowledge-downloads/' + 'd'.repeat(36), sha256: body.version, bytes: 10 } }
+    if (endpoint === 'search') return answer({ data: [{ source_id: one.source_id, text: '真实来源命中' }], sources: [{ id: one.source_id, file_hash: one.source_version, title: one.title }] })
+    return original(endpoint, body)
+  })
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  try {
+    render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+    const list = await screen.findByRole('list')
+    fireEvent.click(within(list).getByRole('button', { name: /接口夹具：编译知识/ }))
+    await screen.findByText('已标注的编译内容')
+    expect(screen.getByText('编译内容')).toBeTruthy()
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '下载原件：接口夹具：搜索方法' })))
+    expect(call).toHaveBeenCalledWith('original', { source_id: one.source_id, version: one.source_version }, expect.any(AbortSignal))
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '下载原件：接口夹具：案例方法' })))
+    expect(call).toHaveBeenCalledWith('original', { source_id: two.source_id, version: two.source_version }, expect.any(AbortSignal))
+    expect(click).toHaveBeenCalledTimes(2)
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索知识' }), { target: { value: '原文查询' } })
+    fireEvent.click(screen.getByRole('button', { name: '检索原文' }))
+    await screen.findByRole('button', { name: /接口夹具：搜索方法/ })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(within(screen.getByRole('list')).getAllByRole('button')).toHaveLength(1)
+  } finally { click.mockRestore() }
+})
+
+it('retains server-filtered search hits outside the initial graph instead of filtering their source rows away', async () => {
+  const other = { id: 'd'.repeat(36), file_hash: 'e'.repeat(64), title: '首屏外的专家知识来源' }
+  const original = fixture([two])
+  const call = vi.fn(async (endpoint: string, body: any) => endpoint === 'search'
+    ? answer({ data: [{ source_id: other.id, text: '真实匹配内容' }], sources: [other] }) : original(endpoint, body))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  await screen.findByRole('list')
+  fireEvent.change(screen.getByRole('combobox', { name: '知识类型' }), { target: { value: 'expert' } })
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索知识' }), { target: { value: '行业方法' } })
+  fireEvent.click(screen.getByRole('button', { name: '检索原文' }))
+  await screen.findByRole('button', { name: /首屏外的专家知识来源/ })
+  expect(call).toHaveBeenCalledWith('search', { question: '行业方法', limit: 20, layer: 'expert', corpus_revision: revision }, expect.any(AbortSignal))
+  expect(within(screen.getByRole('list')).getAllByRole('button')).toHaveLength(1)
+})
+
+it('does not expose original download actions for a mismatched or incomplete compiled revision receipt', async () => {
+  const compiled = { ...one, revision_id: 'c'.repeat(36) }
+  const original = fixture([compiled])
+  const call = vi.fn(async (endpoint: string, body: any) => endpoint === 'node' ? answer({ ...compiled, revision_id: 'd'.repeat(36), untrusted: true, content: '错误修订', source_versions: [] }) : original(endpoint, body))
+  render(<KnowledgePage callKnowledge={call} loadGraph={vi.fn()} />)
+  const list = await screen.findByRole('list')
+  fireEvent.click(within(list).getAllByRole('button')[0]!)
+  await screen.findByRole('alert')
+  expect(screen.queryByRole('button', { name: /下载原件/ })).toBeNull()
+  expect(screen.queryByText('错误修订')).toBeNull()
+})

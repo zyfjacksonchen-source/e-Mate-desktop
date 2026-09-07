@@ -5,7 +5,7 @@ export const GRAPH_ASSET = '/emate-knowledge-assets/graph.js'
 export const MAX_NODES = 500
 export const HASH = /^[a-f0-9]{64}$/u
 export const SOURCE_ID = /^[a-f0-9-]{36}$/u
-export interface KnowledgeNode { id: string; title: string; source_id: string; source_version: string; layer: string }
+export interface KnowledgeNode { id: string; title: string; source_id: string; source_version: string; layer: string; revision_id?: string }
 export interface KnowledgeEdge { from: string; to: string; kind: string; source_id: string }
 export interface KnowledgeGraph { schema_version: 1; scope: { kind: 'public' }; corpus_revision: string; nodes: KnowledgeNode[]; edges: KnowledgeEdge[]; truncated: boolean }
 export interface KnowledgeReply { scope_key: string; result: any }
@@ -18,7 +18,7 @@ export function parseGraph(value: any): KnowledgeGraph {
   const ids = new Set<string>()
   for (const node of value.nodes) {
     if (typeof node.id !== 'string' || !HASH.test(node.id) || ids.has(node.id) || typeof node.title !== 'string' || node.title.length > 500
-      || typeof node.source_id !== 'string' || typeof node.source_version !== 'string' || !SOURCE_ID.test(node.source_id) || !HASH.test(node.source_version) || !['expert', 'case', 'source'].includes(node.layer)) throw Error('知识节点身份无效。')
+      || typeof node.source_id !== 'string' || typeof node.source_version !== 'string' || !SOURCE_ID.test(node.source_id) || !HASH.test(node.source_version) || !['expert', 'case', 'source'].includes(node.layer) || (node.revision_id !== undefined && (typeof node.revision_id !== 'string' || !SOURCE_ID.test(node.revision_id)))) throw Error('知识节点身份无效。')
     ids.add(node.id)
   }
   for (const edge of value.edges) {

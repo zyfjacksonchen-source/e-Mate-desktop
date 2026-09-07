@@ -88,3 +88,15 @@ test('a revoked identity is recognized even when the native request rejects befo
   await assert.rejects(host.call('catalog', {}), error => error.code === 'scope-changed')
   host.dispose()
 })
+
+test('disposing during cold identity bootstrap cannot revive a request or mint a download', async () => {
+  let active, finish, requests = 0
+  const bootstrap = new Promise(resolve => { finish = resolve })
+  const host = createKnowledgeHost({ localAccountPrincipal: () => active, state: () => bootstrap, request: async () => { requests++; return reply(result) } })
+  const pending = host.call('catalog', {})
+  host.dispose()
+  active = principal; host.changed(); finish({ authenticated: true, workspace_unlocked: true })
+  await assert.rejects(pending, error => error.code === 'cancelled')
+  await assert.rejects(host.call('catalog', {}), error => error.code === 'cancelled')
+  assert.equal(requests, 0)
+})
