@@ -56,38 +56,80 @@ def iter_part_roots(doc):
 
 
 def replace_in_paragraph(para, old: str, new: str) -> int:
-    """Replace `old` with `new` in a paragraph, preserving run formatting.
+    """Replace original text matches without rewriting runs or non-text XML.
 
-    Strategy: first replace occurrences fully contained in a single run
-    (formatting fully preserved). If the needle spans multiple runs, the
-    matched runs are collapsed: the replacement inherits the formatting of
-    the run where the match starts. Returns number of replacements made.
+    A match may span ordinary text nodes/runs. Field results and unsupported
+    containers are protected; crossing a drawing, field, tab or break is
+    rejected before any mutation. Replacement text inherits its first node's
+    run formatting. Existing drawings, field codes and other children survive.
     """
     if not old or old not in para.text:
         return 0
-    runs = para.runs
-    full = "".join(r.text for r in runs)
+    from docx.oxml.ns import qn
+
+    pieces, nodes, barriers, protected = [], [], set(), []
+    offset = 0
+    field_depth = 0
+    for child in para._p:
+        if child.tag == qn("w:pPr"):
+            continue
+        if child.tag != qn("w:r"):
+            text = "".join(t.text or "" for t in child.iter(qn("w:t")))
+            barriers.add(offset)
+            protected.append((offset, offset + len(text)))
+            pieces.append(text)
+            offset += len(text)
+            barriers.add(offset)
+            continue
+        for node in child:
+            if node.tag == qn("w:rPr"):
+                continue
+            if node.tag == qn("w:t"):
+                text = node.text or ""
+                pieces.append(text)
+                nodes.append((node, offset, offset + len(text)))
+                if field_depth:
+                    protected.append((offset, offset + len(text)))
+                offset += len(text)
+            else:
+                barriers.add(offset)
+                if node.tag == qn("w:fldChar"):
+                    kind = node.get(qn("w:fldCharType"))
+                    if kind == "begin":
+                        field_depth += 1
+                    elif kind == "end":
+                        field_depth = max(0, field_depth - 1)
+                text = "\t" if node.tag == qn("w:tab") else (
+                    "\n" if node.tag in (qn("w:br"), qn("w:cr")) else "")
+                pieces.append(text)
+                if text:
+                    protected.append((offset, offset + len(text)))
+                    offset += len(text)
+                    barriers.add(offset)
+    full = "".join(pieces)
     matches = []
     cursor = 0
     while True:
         start = full.find(old, cursor)
         if start < 0:
             break
-        matches.append((start, start + len(old)))
-        cursor = start + len(old)
-    offsets = []
-    cursor = 0
-    for run in runs:
-        offsets.append((cursor, cursor + len(run.text)))
-        cursor += len(run.text)
-    # Work backwards against original offsets; never scan inserted text.
+        end = start + len(old)
+        if any(start < boundary < end for boundary in barriers) or any(
+                left < end and right > start for left, right in protected):
+            raise ValueError("replacement crosses protected Word structure; document was not saved")
+        matches.append((start, end))
+        cursor = end
+    if matches and any(char in new for char in ("\t", "\r", "\n")):
+        raise ValueError("replacement containing tabs or line breaks is unsupported; document was not saved")
+    # Validate all matches first, then work backwards on original offsets.
     for start, end in reversed(matches):
         first = True
-        for run, (left, right) in zip(runs, offsets):
+        for node, left, right in nodes:
             if right <= start or left >= end:
                 continue
             cut_start, cut_end = max(start, left) - left, min(end, right) - left
-            text = run.text
-            run.text = text[:cut_start] + (new if first else "") + text[cut_end:]
+            text = node.text or ""
+            node.text = text[:cut_start] + (new if first else "") + text[cut_end:]
+            node.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
             first = False
     return len(matches)

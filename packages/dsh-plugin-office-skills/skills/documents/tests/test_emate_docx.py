@@ -35,6 +35,74 @@ class EmateDocxTests(unittest.TestCase):
         self.assertTrue(p.runs[1].italic)
         self.assertEqual(p.runs[1].text, '后')
 
+    def test_same_run_image_text_survives_save_and_reopen(self):
+        import base64
+        from io import BytesIO
+        from lxml import etree
+        doc = Document()
+        p = doc.add_paragraph()
+        run = p.add_run('报告')
+        run.bold = True
+        run.add_picture(BytesIO(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=')))
+        run.add_text('附图')
+        drawing = etree.tostring(run._r.find(qn('w:drawing')))
+        self.assertEqual(replace_in_paragraph(p, '报告', '年度报告'), 1)
+        self.assertEqual(etree.tostring(run._r.find(qn('w:drawing'))), drawing)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'out.docx'
+            doc.save(path)
+            result = Document(path)
+            self.assertEqual(len(result.inline_shapes), 1)
+            self.assertEqual(result.paragraphs[0].text, '年度报告附图')
+            self.assertTrue(result.paragraphs[0].runs[0].bold)
+
+    def test_tabs_breaks_and_fields_remain_unchanged(self):
+        from docx.oxml import OxmlElement
+        from lxml import etree
+        p = Document().add_paragraph()
+        run = p.add_run('报告')
+        run.add_tab()
+        run.add_text('后文')
+        run.add_break()
+        for kind in ('begin', 'separate', 'end'):
+            node = OxmlElement('w:fldChar')
+            node.set(qn('w:fldCharType'), kind)
+            run._r.append(node)
+            if kind == 'begin':
+                instruction = OxmlElement('w:instrText')
+                instruction.text = ' PAGE '
+                run._r.append(instruction)
+            elif kind == 'separate':
+                run.add_text('1')
+        protected = [etree.tostring(n) for n in run._r if n.tag != qn('w:t')]
+        self.assertEqual(replace_in_paragraph(p, '报告', '年度报告'), 1)
+        self.assertEqual([etree.tostring(n) for n in run._r if n.tag != qn('w:t')], protected)
+        self.assertEqual(p.text, '年度报告\t后文\n1')
+        before = etree.tostring(p._p)
+        with self.assertRaisesRegex(ValueError, 'protected Word structure'):
+            replace_in_paragraph(p, '1', '2')
+        self.assertEqual(etree.tostring(p._p), before)
+        with self.assertRaisesRegex(ValueError, 'protected Word structure'):
+            replace_in_paragraph(p, '报告\t后文', '替换')
+        self.assertEqual(etree.tostring(p._p), before)
+
+    def test_cross_drawing_refusal_preserves_in_place_input(self):
+        from docx.oxml import OxmlElement
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'original.docx'
+            doc = Document()
+            run = doc.add_paragraph().add_run('报')
+            run._r.append(OxmlElement('w:drawing'))
+            run.add_text('告')
+            doc.save(path)
+            before = path.read_bytes()
+            proc = subprocess.run([sys.executable, str(SCRIPTS/'docx_edit.py'),
+                'replace',str(path),'--find','报告','--replace','年度报告'],
+                capture_output=True, text=True, encoding='utf-8', timeout=10)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn('protected Word structure', proc.stderr)
+            self.assertEqual(path.read_bytes(), before)
+
     def test_linked_headers_and_merged_cells_visited_once(self):
         doc = Document()
         doc.sections[0].header.paragraphs[0].text = '报告'
