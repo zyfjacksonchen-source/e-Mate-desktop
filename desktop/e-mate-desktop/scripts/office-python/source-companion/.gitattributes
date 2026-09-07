@@ -1,0 +1,2 @@
+# Preserve source/recipe bytes used by the distribution manifest on every host.
+** -text
