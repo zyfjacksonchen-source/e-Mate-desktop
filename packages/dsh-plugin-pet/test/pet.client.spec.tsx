@@ -142,7 +142,7 @@ describe('native sprite host',()=>{
   it('native Settings controls are writable only when ready and errors stay visible',async()=>{
     const settings={...store({status:'ready',writable:true,value:{enabled:true,position:{x:0.5,y:0.5}}}),set:vi.fn(async()=>{throw new Error('private error')})}
     const resources={...store({status:'unavailable'}),retry:vi.fn()}
-    render(<PetsSection settings={settings} resources={resources as never}/>);fireEvent.click(screen.getByRole('checkbox'))
+    render(<PetsSection settings={settings} resources={resources as never}/>);expect(screen.getByRole('switch',{name:'启用小芯智能伙伴'}).hasAttribute('aria-describedby')).toBe(true);fireEvent.click(screen.getByRole('switch'))
     await act(async()=>{});expect(settings.set).toHaveBeenCalledWith('enabled',false);expect(screen.getByText('设置未保存，请重试。')).toBeTruthy();expect(screen.queryByText('private error')).toBeNull()
     fireEvent.click(screen.getByRole('button',{name:'重新加载资源'}));expect(resources.retry).toHaveBeenCalledTimes(1)
   })
@@ -155,7 +155,7 @@ describe('native sprite host',()=>{
     fireEvent.keyDown(button,{key:'ArrowRight'});expect(button.style.left).not.toBe(original)
     await act(async()=>{});expect(button.style.left).toBe(original);expect(screen.getByText('位置未保存')).toBeTruthy()
     view.unmount()
-    render(<PetsSection settings={settings} resources={resources as never}/>);fireEvent.click(screen.getByRole('checkbox'))
+    render(<PetsSection settings={settings} resources={resources as never}/>);fireEvent.click(screen.getByRole('switch'))
     await act(async()=>{});expect(screen.getByText('设置未保存，请重试。')).toBeTruthy()
   })
   it('verified writes use native readback; stale and unmounted gestures cannot report failure or retry resources',async()=>{
@@ -166,11 +166,11 @@ describe('native sprite host',()=>{
     settings.set.mockImplementationOnce(async()=>{cell.set({...settings.getSnapshot(),value:{...settings.getSnapshot().value,enabled:false}})})
     const resources={...store({status:'ready',pet:{...pet(),extensionStatus:'unavailable'}}),retry:vi.fn()}
     const view=render(<PetsSection settings={settings} resources={resources as never}/>);
-    fireEvent.click(screen.getByRole('checkbox'));fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('switch'));fireEvent.click(screen.getByRole('switch'))
     await act(async()=>{});await act(async()=>{finishFirst()});expect(screen.queryByText('设置未保存，请重试。')).toBeNull()
     let finishLast:()=>void=()=>{}
     settings.set.mockImplementationOnce(()=>new Promise<void>(resolve=>{finishLast=resolve}))
-    fireEvent.click(screen.getByRole('checkbox'));view.unmount()
+    fireEvent.click(screen.getByRole('switch'));view.unmount()
     await act(async()=>{cell.set({...settings.getSnapshot(),value:{...settings.getSnapshot().value,enabled:true}});finishLast()})
     expect(resources.retry).not.toHaveBeenCalled()
     await expect(setPetSetting(settings,'enabled',true)).resolves.toBeUndefined()
@@ -181,7 +181,7 @@ describe('native sprite host',()=>{
     const resources={...store({status:'ready',pet:{...pet(),extensionStatus:'unavailable'}}),retry:vi.fn()}
     render(<PetsSection settings={settings} resources={resources as never}/>);
     fireEvent.click(screen.getByRole('button',{name:'重新加载办公动画'}));expect(resources.retry).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('checkbox'));await act(async()=>{});expect(resources.retry).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('switch'));await act(async()=>{});expect(resources.retry).toHaveBeenCalledTimes(2)
   })
   it('first-response or hidden state cancels idle asset loading, with no timer left after disposal',()=>{
     const projection=store({...pause,firstResponsePending:true})

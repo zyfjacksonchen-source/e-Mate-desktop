@@ -1,6 +1,14 @@
-.section { padding: 16px; color: var(--dsw-alias-text-primary, #222); }
-.section h2 { font-size: 16px; margin: 0 0 12px; }
-.toggle { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 24px; cursor: pointer; }
-.toggle input { width: 44px; height: 44px; accent-color: var(--dsw-alias-brand-primary, #5865e8); cursor: pointer; }
-.note { display: block; margin-top: 4px; color: var(--dsw-alias-text-secondary, #666); font-size: 13px; }
-.retry { min-width: 88px; min-height: 44px; margin: 8px; border-radius: 6px; }
+.section { padding: 16px; color: var(--dsw-alias-label-primary); font: inherit; }
+.section h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+.toggle { display: flex; min-height: 56px; align-items: center; justify-content: space-between; gap: 24px; cursor: pointer; font-size: 14px; }
+.controls { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; }
+.status { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.toggle input { appearance: none; position: relative; box-sizing: border-box; width: 40px; height: 24px; margin: 0; border: 1px solid var(--dsw-alias-border-l3); border-radius: 999px; background: var(--dsw-alias-border-l2); cursor: pointer; }
+.toggle input::before { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--dsw-alias-label-secondary); transition: transform 120ms ease; }
+.toggle input:checked { background: var(--dsw-alias-state-business-primary); border-color: var(--dsw-alias-state-business-primary); }
+.toggle input:checked::before { background: white; transform: translateX(16px); }
+.toggle input:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 3px; }
+.toggle input:disabled { cursor: default; opacity: .55; }
+.note { display: block; margin-top: 4px; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.retry { min-width: 88px; min-height: 44px; margin: 8px; border: 1px solid var(--dsw-alias-border-l3); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: inherit; font: inherit; }
+@media (prefers-reduced-motion: reduce) { .toggle input::before { transition: none; } }

@@ -18,7 +18,7 @@ export function apply(ctx: ClientContext): void {
   const resources = new PetResources()
   const settings = ctx.settingsScope.bind({ namespace: PET_SETTINGS_NAMESPACE, decode: decodeSettings })
   ctx.effect(() => () => resources.dispose(), 'e-mate-pet: asset disposal')
-  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'appearance-motion', order: 30, label: '外观与动效', inject: () => ({ settings, resources }) }, PetsSection))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'appearance-motion', order: 30, label: '智能伙伴', inject: () => ({ settings, resources }) }, PetsSection))
   ctx.inject(['ematePetDetails'], detailsCtx => registerOverlay(detailsCtx, detailsCtx.ematePetDetails))
   function registerOverlay(scope: ClientContext, details: PetDetails): void {
     const projection = new NativePetProjection(scope.sessions, documentVisibility(), details.readWorkFacts)

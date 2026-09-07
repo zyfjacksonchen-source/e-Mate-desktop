@@ -23,10 +23,12 @@ export function PetsSection({ settings, resources }: { settings: PetSettingsScop
     }, () => { if (mounted.current && revision === writeRevision.current) setFailed(true) })
   }
   return <section className={css.section} aria-labelledby="emate-pet-title">
-    <h2 id="emate-pet-title">桌面宠物</h2>
-    <label className={css.toggle}><span>显示小芯<span className={css.note}>跟随当前任务状态，可拖动或使用方向键移动。</span></span>
-      <input type="checkbox" aria-label="显示桌面宠物小芯" checked={value.enabled} disabled={snapshot.status !== 'ready' || !snapshot.writable}
-        onChange={event => saveEnabled(event.currentTarget.checked)} />
+    <h2 id="emate-pet-title">小芯智能伙伴</h2>
+    <label className={css.toggle}><span>启用小芯<span id="emate-pet-description" className={css.note}>跟随任务状态，支持拖动。关闭后可在这里重新开启。</span></span>
+      <span className={css.controls}><span className={css.status}>{value.enabled ? '已开启' : '已关闭'}</span>
+        <input type="checkbox" role="switch" aria-label="启用小芯智能伙伴" aria-describedby="emate-pet-description" checked={value.enabled} disabled={snapshot.status !== 'ready' || !snapshot.writable}
+          onChange={event => saveEnabled(event.currentTarget.checked)} />
+      </span>
     </label>
     {failed && <p role="status">设置未保存，请重试。</p>}
     {assets.status === 'unavailable' && <div role="status">小芯资源暂不可用。<button type="button" className={css.retry} onClick={resources.retry}>重新加载资源</button></div>}
