@@ -89,6 +89,41 @@ export async function digest(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(value)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
+/** Select only an unambiguous image at the arrow head, then fall back to its tail.
+ * Excalidraw stores linear points relative to the element and rotates around its bounds.
+ */
+export function arrowImageTarget(elements: CanvasPage['elements'], arrow: CanvasPage['elements'][number]) {
+  if (arrow.type !== 'arrow' || arrow.isDeleted || !Array.isArray(arrow.points) || arrow.points.length < 2) return undefined
+  const points = arrow.points.filter((point): point is Json[] => Array.isArray(point))
+  if (points.length !== arrow.points.length || points.some(point => !Number.isFinite(Number(point[0])) || !Number.isFinite(Number(point[1])))) return undefined
+  if (!points.some(point => Math.hypot(Number(point[0]) - Number(points[0]![0]), Number(point[1]) - Number(points[0]![1])) >= 2)) return undefined
+  const images = elements.filter(item => item.type === 'image' && !item.isDeleted)
+  const endpoint = (point: Json[], binding: Json | undefined) => {
+    const id = binding && typeof binding === 'object' && !Array.isArray(binding) ? binding.elementId : undefined
+    const bound = images.filter(image => image.id === id)
+    if (bound.length) return bound
+    const [x, y] = arrowPoint(arrow, point)
+    return images.filter(image => imageContains(image, x, y))
+  }
+  const head = endpoint(points.at(-1)!, arrow.endBinding)
+  if (head.length) return head.length === 1 ? head[0] : undefined
+  const tail = endpoint(points[0]!, arrow.startBinding)
+  return tail.length === 1 ? tail[0] : undefined
+}
+function arrowPoint(arrow: Record<string, Json>, point: Json[]) {
+  const points = arrow.points as Json[][]
+  const xs = points.map(value => Number(value[0])), ys = points.map(value => Number(value[1]))
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2
+  const angle = Number(arrow.angle ?? 0), dx = Number(point[0]) - cx, dy = Number(point[1]) - cy
+  return [Number(arrow.x) + cx + dx * Math.cos(angle) - dy * Math.sin(angle), Number(arrow.y) + cy + dx * Math.sin(angle) + dy * Math.cos(angle)] as const
+}
+function imageContains(image: Record<string, Json>, x: number, y: number) {
+  const cx = Number(image.x) + Number(image.width) / 2, cy = Number(image.y) + Number(image.height) / 2
+  const angle = -Number(image.angle ?? 0), dx = x - cx, dy = y - cy
+  const localX = dx * Math.cos(angle) - dy * Math.sin(angle), localY = dx * Math.sin(angle) + dy * Math.cos(angle)
+  return Number.isFinite(localX) && Number.isFinite(localY) && Math.abs(localX) <= Number(image.width) / 2 && Math.abs(localY) <= Number(image.height) / 2
+}
+
 /** Render-only modification reference: selected images and their on-image marks.
  * Never mutate the project or include a different image just because it shares a page.
  */
@@ -96,23 +131,17 @@ export function selectedAnnotationElements(elements: CanvasPage['elements'], sel
   const wanted = new Set(selectedImageIds)
   const images = elements.filter(item => item.type === 'image' && !item.isDeleted && wanted.has(String(item.id)))
   const selected = new Set(images.map(item => item.id))
-  const contains = (image: Record<string, Json>, x: number, y: number) => {
-    const cx = Number(image.x) + Number(image.width) / 2, cy = Number(image.y) + Number(image.height) / 2
-    const angle = -Number(image.angle ?? 0), dx = x - cx, dy = y - cy
-    const localX = dx * Math.cos(angle) - dy * Math.sin(angle), localY = dx * Math.sin(angle) + dy * Math.cos(angle)
-    return Number.isFinite(localX) && Number.isFinite(localY) && Math.abs(localX) <= Number(image.width) / 2 && Math.abs(localY) <= Number(image.height) / 2
-  }
   const bindingId = (value: Json | undefined) => value && typeof value === 'object' && !Array.isArray(value) ? value.elementId : undefined
   const arrows = elements.filter(item => {
     if (item.type !== 'arrow' || item.isDeleted) return false
     if (selected.has(bindingId(item.startBinding) as Json) || selected.has(bindingId(item.endBinding) as Json)) return true
     if (!Array.isArray(item.points) || !item.points.length) return false
-    return [item.points[0], item.points.at(-1)].some(point => Array.isArray(point) && images.some(image => contains(image, Number(item.x) + Number(point[0]), Number(item.y) + Number(point[1]))))
+    return [item.points[0], item.points.at(-1)].some(point => Array.isArray(point) && images.some(image => imageContains(image, ...arrowPoint(item, point))))
   })
   const included = new Set([...images, ...arrows].map(item => item.id))
   const texts = elements.filter(item => item.type === 'text' && !item.isDeleted && (item.containerId
     ? included.has(item.containerId)
-    : images.some(image => contains(image, Number(item.x) + Number(item.width) / 2, Number(item.y) + Number(item.height) / 2))))
+    : images.some(image => imageContains(image, Number(item.x) + Number(item.width) / 2, Number(item.y) + Number(item.height) / 2))))
   for (const text of texts) included.add(text.id)
   return elements.filter(item => included.has(item.id)).map(item => {
     const copy = structuredClone(item)

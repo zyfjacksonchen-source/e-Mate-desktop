@@ -3,15 +3,17 @@ import { createHash, webcrypto } from 'node:crypto'
 import { fireEvent, render, screen, waitFor, cleanup, act } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { emptyPage, emptyProject, validateProject } from '../src/contract.ts'
-import { htmlDocument, insertAsset, pagesFromHtml, selectedAnnotationElements } from '../src/client/model.ts'
+import { arrowImageTarget, htmlDocument, insertAsset, pagesFromHtml, selectedAnnotationElements } from '../src/client/model.ts'
 import { createBridge } from '../src/client/bridge.ts'
+const native = vi.hoisted(() => ({ props: null as any, api: null as any, scroll: vi.fn() }))
 vi.mock('@excalidraw/excalidraw', () => {
   const MainMenu: any = ({ children }: any) => <div>{children}</div>
   MainMenu.DefaultItems = { ClearCanvas: () => null, ToggleTheme: () => null }
   return { MainMenu, exportToBlob: vi.fn(async () => new Blob(['png'])), Excalidraw: (props: any) => {
+    native.props = props
     const elements = useRef(props.initialData.elements); const [, refresh] = useState(0)
-    useEffect(() => { props.excalidrawAPI({ getSceneElementsIncludingDeleted: () => elements.current,
-      updateScene: ({ elements: next }: any) => { if (next) elements.current = next; refresh(value => value + 1) }, addFiles: () => {}, scrollToContent: () => {}, setActiveTool: ({ type }: any) => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {}, activeTool: { type } }),
+    useEffect(() => { props.excalidrawAPI(native.api = { getSceneElementsIncludingDeleted: () => elements.current,
+      updateScene: ({ elements: next }: any) => { if (next) elements.current = next; refresh(value => value + 1) }, addFiles: () => {}, scrollToContent: native.scroll, setActiveTool: ({ type }: any) => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {}, activeTool: { type } }),
     }) }, [])
     return <div data-testid="scene" data-theme={props.theme}><span>{elements.current.length} elements</span><button onClick={() => {
       elements.current = [...elements.current, { id: 'mark', type: 'arrow', x: 1, y: 1, points: [[0, 0], [10, 10]] }]
@@ -20,7 +22,7 @@ vi.mock('@excalidraw/excalidraw', () => {
   } }
 })
 import { CanvasPanel } from '../src/client/editor.tsx'
-beforeEach(() => vi.stubGlobal('crypto', webcrypto))
+beforeEach(() => { vi.stubGlobal('crypto', webcrypto); native.scroll.mockClear() })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const imageAsset = { ownerSessionId: 'parent', ref: { attachmentId: `sha256:${createHash('sha256').update(imageBytes).digest('hex')}`, mediaType: 'image/png', bytes: imageBytes.length, width: 100, height: 100 } }
@@ -212,4 +214,67 @@ it('marked edits stage a preview then submit originals and annotation with expli
   expect(args[1].sourceIds).toEqual([imageAsset.ref.attachmentId, preview.ref.attachmentId])
   expect(args[2]).toContain('最后一张为这些原图的箭头和文字标注参考')
   expect(args[2]).toContain('不要把标注添加到成品')
+})
+
+it('fits the initial viewport once without changing pixels or resetting later user zoom', async () => {
+  const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  project.pages[0].view.zoom = 0.4
+  const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  await waitFor(() => expect(native.scroll).toHaveBeenCalledOnce())
+  expect(native.scroll).toHaveBeenCalledWith(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: 0.4, animate: false })
+  expect(native.props.initialData.appState.currentItemStrokeColor).toBe('#eb5b16')
+  fireEvent.click(screen.getByText('Draw mark'))
+  await act(async () => { await h.leave() })
+  expect(native.scroll).toHaveBeenCalledOnce()
+  expect(h.read().pages[0].elements[0]).toEqual(project.pages[0].elements[0])
+})
+it('finishing one new arrow selects its exact image and focuses the existing edit input once', async () => {
+  const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  const arrow = { id: 'new-arrow', type: 'arrow', x: -20, y: 20, width: 40, height: 0, points: [[0, 0], [40, 0]] }
+  const scene = [...project.pages[0].elements, arrow]
+  const state = { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: { 'new-arrow': true }, activeTool: { type: 'arrow' }, newElement: arrow, multiElement: null }
+  act(() => { native.api.updateScene({ elements: scene }); native.props.onPointerDown({ type: 'arrow' }, { originalElements: new Map(project.pages[0].elements.map(item => [item.id, item])) }); native.props.onChange(scene, state); native.props.onPointerUp() })
+  expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
+  act(() => native.props.onChange(scene, { ...state, newElement: null, multiElement: arrow }))
+  expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
+  act(() => native.props.onChange(scene, { ...state, newElement: null }))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('图片修改需求')))
+  fireEvent.change(screen.getByLabelText('图片修改需求'), { target: { value: '改成橙色' } })
+  expect((screen.getByRole('button', { name: '修改图片', exact: true }) as HTMLButtonElement).disabled).toBe(false)
+  const preview = { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: `sha256:${'c'.repeat(64)}` } }
+  h.bridge.stageImages.mockResolvedValue([preview] as never)
+  fireEvent.click(screen.getByRole('button', { name: '修改图片', exact: true }))
+  await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
+  expect(h.read().intents[0].sourceIds).toEqual([imageAsset.ref.attachmentId, preview.ref.attachmentId])
+  screen.getByRole('button', { name: '选择', exact: true }).focus()
+  act(() => { native.props.onPointerDown({ type: 'selection' }, { originalElements: new Map(scene.map(item => [item.id, item])) }); native.props.onPointerUp(); native.props.onChange(scene, { ...state, newElement: null }) })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
+  expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
+})
+it('arrow targeting handles overlap, rotated images, bindings and cancelled empty arrows conservatively', () => {
+  const first = { id: 'first', type: 'image', x: 0, y: 0, width: 100, height: 100 }
+  const second = { ...first, id: 'second', x: 200 }
+  const arrow = { id: 'arrow', type: 'arrow', x: 50, y: 50, width: 200, height: 0, points: [[0, 0], [200, 0]] }
+  expect(arrowImageTarget([first, second], arrow)?.id).toBe('second')
+  expect(arrowImageTarget([first, { ...first, id: 'overlap' }], { ...arrow, width: 10, points: [[0, 0], [10, 0]] })).toBeUndefined()
+  expect(arrowImageTarget([first, { ...first, id: 'overlap' }], { ...arrow, endBinding: { elementId: 'first' } })?.id).toBe('first')
+  expect(arrowImageTarget([first], { ...arrow, points: [[0, 0], [0, 0]] })).toBeUndefined()
+  expect(arrowImageTarget([first], { ...arrow, isDeleted: true })).toBeUndefined()
+  const rotated = { ...second, x: 100, y: 100, width: 100, height: 20, angle: Math.PI / 2 }
+  expect(arrowImageTarget([rotated], { ...arrow, x: 150, y: 50, width: 0, height: 40, points: [[0, 0], [0, 40]] })?.id).toBe('second')
+})
+
+it('Escape cancels the pending arrow-to-instruction focus transition', async () => {
+  const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  const sceneNode = await screen.findByTestId('scene')
+  const arrow = { id: 'cancelled-arrow', type: 'arrow', x: 10, y: 10, points: [[0, 0], [20, 20]] }
+  act(() => native.props.onPointerDown({ type: 'arrow' }, { originalElements: new Map(project.pages[0].elements.map(item => [item.id, item])) }))
+  fireEvent.keyDown(sceneNode, { key: 'Escape' })
+  act(() => { native.props.onPointerUp(); native.props.onChange([...project.pages[0].elements, arrow], { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#fff', selectedElementIds: {}, newElement: null, multiElement: null }) })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
+  expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
 })

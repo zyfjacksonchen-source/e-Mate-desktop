@@ -3,7 +3,7 @@ import { Excalidraw, MainMenu, exportToBlob } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI, BinaryFiles } from '@excalidraw/excalidraw/types'
 import { ASSET_PATH, emptyProject, type CanvasAsset, type CanvasIntent, type CanvasProject, type ProjectReceipt } from '../contract.ts'
 import type { CanvasBridge } from './bridge.ts'
-import { base64, bytesOf, digest, insertAsset, pagesFromHtml, scenePage, selectedAnnotationElements } from './model.ts'
+import { arrowImageTarget, base64, bytesOf, digest, insertAsset, pagesFromHtml, scenePage, selectedAnnotationElements } from './model.ts'
 import css from './style.module.css'
 
 (window as any).EXCALIDRAW_ASSET_PATH = new URL(ASSET_PATH, location.origin).href
@@ -57,10 +57,21 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   const selected = useRef<string[]>([])
   const selectedElements = useRef<string[]>([])
   const syncLane = useRef(false)
+  const instructionInput = useRef<HTMLTextAreaElement>(null)
+  const arrowGesture = useRef<{ previous: Set<string>; released: boolean } | null>(null)
+  const focusFrame = useRef<number | undefined>(undefined)
+  const fitFrame = useRef<number | undefined>(undefined)
   const imageInput = useRef<HTMLInputElement>(null)
   const importInput = useRef<HTMLInputElement>(null)
   const page = project?.pages.find(item => item.id === pageId)
 
+  // Leave space for the floating tools and footer; never upscale small images.
+  const fitScene = (value: ExcalidrawImperativeAPI, maxZoom = 1) => {
+    if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current)
+    fitFrame.current = requestAnimationFrame(() => {
+      if (alive.current && api.current === value) value.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: Math.min(1, maxZoom), animate: false })
+    })
+  }
   const refreshList = useCallback(async () => { const value = await bridge.call('list'); if (alive.current) setProjects(value) }, [bridge])
   const flush = useCallback(async () => {
     if (timer.current) clearTimeout(timer.current)
@@ -127,7 +138,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
       // Keep the outgoing document/revision intact until the complete next project can be shown.
       state.current = { project: next, revision, dirty: false, blocked: false }
       setSceneLoad(value => value + 1)
-      api.current = null; selected.current = []; selectedElements.current = []; setSelectionCount(0); setActiveTool('selection'); setFiles(loaded); setProject(next); setPageId(next.pages[0]!.id); setRecovered(result?.recovered ?? false)
+      api.current = null; arrowGesture.current = null; selected.current = []; selectedElements.current = []; setSelectionCount(0); setActiveTool('selection'); setFiles(loaded); setProject(next); setPageId(next.pages[0]!.id); setRecovered(result?.recovered ?? false)
       setNotice(result?.recovered ? '已恢复上一份完整保存，损坏原件保留。请检查后保存。' : '已恢复项目')
       setError(null); if (asset) consumed.current?.(); void refreshList().catch(error => { if (alive.current) setError(error.message) })
     } finally { transitioning.current = false; if (alive.current) setSwitching(false) }
@@ -137,7 +148,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     void openProject(initialProjectId, initialAsset).catch(error => { if (alive.current) setError(error.message) })
     const unload = (event: BeforeUnloadEvent) => { if (state.current.dirty) { event.preventDefault(); event.returnValue = '' } }
     addEventListener('beforeunload', unload)
-    return () => { alive.current = false; generation.current += 1; if (timer.current) clearTimeout(timer.current); removeEventListener('beforeunload', unload); void flush().catch(() => {}) }
+    return () => { alive.current = false; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current); if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current); generation.current += 1; if (timer.current) clearTimeout(timer.current); removeEventListener('beforeunload', unload); void flush().catch(() => {}) }
   }, [initialProjectId, initialAsset, openProject, flush])
 
   const syncOutputs = useCallback(async () => {
@@ -237,7 +248,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     for (const asset of assets) next = insertAsset(next, targetPage, asset)
     update(next); await flush()
     const loaded = await imageFiles(next); setFiles(loaded); api.current?.addFiles(Object.values(loaded))
-    api.current?.scrollToContent(undefined, { fitToViewport: true })
+    if (api.current) fitScene(api.current)
   }
   const exportImage = async () => {
     if (!state.current.project) return
@@ -247,6 +258,9 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     download(`${state.current.project.id}-${item.id}.png`, blob)
   }
   const chooseTool = (tool: 'selection' | 'hand' | 'arrow' | 'text') => {
+    if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current)
+    arrowGesture.current = null
+    if (tool === 'arrow') api.current?.updateScene({ appState: { currentItemStrokeColor: '#eb5b16' } })
     api.current?.setActiveTool({ type: tool }); setActiveTool(tool)
   }
   const act = (action: () => Promise<void> | void) => { void Promise.resolve().then(action).catch(error => setError(error.message)) }
@@ -262,7 +276,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
           {!projects.some(item => item.id === project.id) && <option value={project.id}>{project.title}</option>}
           {projects.map(item => <option key={item.id} value={item.id}>{item.title}{item.error ? ' · 无法载入' : ''}</option>)}
         </select>
-        {project.pages.length > 1 && <select aria-label="选择画布页" value={pageId} onChange={event => { selected.current = []; selectedElements.current = []; setSelectionCount(0); setPageId(event.target.value) }}>
+        {project.pages.length > 1 && <select aria-label="选择画布页" value={pageId} onChange={event => { arrowGesture.current = null; selected.current = []; selectedElements.current = []; setSelectionCount(0); setPageId(event.target.value) }}>
           {project.pages.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
         </select>}
         <span className={css.saveState} role="status">{switching ? '正在载入…' : saving ? '保存中…' : recovered ? '已恢复备份' : notice}</span>
@@ -281,8 +295,9 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
         if (incoming.length) act(() => addImages(incoming))
       }} />
       <input hidden ref={importInput} type="file" accept=".zip" onChange={event => { const file = event.target.files?.[0]; if (!file) return; act(async () => { if (file.size > 100 * 1024 * 1024) throw new Error('项目压缩包超过 100 MiB。'); await flush(); const id = fresh(); const result = await bridge.call('import', { project_id: id, archive_base64: base64(new Uint8Array(await file.arrayBuffer())) }); await openProject(result.project.id) }); event.target.value = '' }} />
-      <div className={css.stage} onContextMenuCapture={event => { event.preventDefault(); event.stopPropagation() }}
+      <div className={css.stage} onPointerCancelCapture={() => { arrowGesture.current = null; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current) }} onContextMenuCapture={event => { event.preventDefault(); event.stopPropagation() }}
         onKeyDownCapture={event => {
+          if (event.key === 'Escape') { arrowGesture.current = null; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current) }
           if ((event.target as HTMLElement).closest('input,textarea,[contenteditable=true]') || event.ctrlKey || event.metaKey || event.altKey) return
           if (['r', 'd', 'o', 'l', 'p', 'f', 'e', '2', '3', '4', '6', '7', '9', '0'].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation() }
         }}
@@ -294,12 +309,19 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
         </div>
         {page.elements.every(item => item.isDeleted) && <div className={css.stageHint}>添加图片，或从画廊加入图片</div>}
         <Excalidraw key={`${project.id}:${page.id}:${sceneLoad}`} theme={theme}
-          excalidrawAPI={value => { api.current = value }}
-          initialData={{ elements: page.elements as any, files, appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as any }, viewBackgroundColor: page.view.background, currentItemFontFamily: 2, currentItemFontSize: 16, currentItemRoughness: 0 } }}
+          excalidrawAPI={value => { api.current = value; fitScene(value, page.view.zoom) }}
+          initialData={{ elements: page.elements as any, files, appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as any }, viewBackgroundColor: page.view.background, currentItemFontFamily: 2, currentItemFontSize: 16, currentItemRoughness: 0, currentItemStrokeColor: '#eb5b16' } }}
           viewModeEnabled={switching || busy} langCode="zh-CN" validateEmbeddable={() => false}
           UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false, changeViewBackgroundColor: false }, tools: { image: false } }}
           onLinkOpen={(element, event) => { event.preventDefault(); if (element.link && /^https?:\/\//u.test(element.link)) window.open(element.link, '_blank', 'noopener,noreferrer') }}
           onPaste={() => false}
+          onPointerDown={(tool, pointer) => {
+            if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current)
+            if (tool.type === 'arrow' && !arrowGesture.current) arrowGesture.current = { previous: new Set(pointer.originalElements.keys()), released: false }
+            else if (tool.type !== 'arrow') arrowGesture.current = null
+            if (arrowGesture.current) arrowGesture.current.released = false
+          }}
+          onPointerUp={() => { if (arrowGesture.current) arrowGesture.current.released = true }}
           onChange={(elements, appState) => {
             const chosen = elements.filter(item => item.type === 'image' && !item.isDeleted && appState.selectedElementIds[item.id])
             selectedElements.current = chosen.map(item => item.id)
@@ -307,6 +329,22 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
             setSelectionCount(selected.current.length)
             if (['selection', 'hand', 'arrow', 'text'].includes(appState.activeTool?.type)) setActiveTool(appState.activeTool.type)
             if (transitioning.current || busy) return
+            const gesture = arrowGesture.current
+            if (gesture?.released && !appState.newElement && !appState.multiElement) {
+              arrowGesture.current = null
+              const arrows = elements.filter(item => item.type === 'arrow' && !item.isDeleted && !gesture.previous.has(item.id))
+              const arrow = arrows.length === 1 ? arrows[0] : undefined
+              const image = arrow && arrowImageTarget(elements as any, arrow as any)
+              if (image && arrow) {
+                const value = api.current
+                focusFrame.current = requestAnimationFrame(() => {
+                  if (!alive.current || transitioning.current || api.current !== value || !value) return
+                  value.updateScene({ appState: { selectedElementIds: { [String(image.id)]: true, [arrow.id]: true } } })
+                  selectedElements.current = [String(image.id)]; selected.current = [`sha256:${image.fileId}`]; setSelectionCount(1)
+                  instructionInput.current?.focus({ preventScroll: true })
+                })
+              }
+            }
             const current = state.current.project
             const existing = current?.pages.find(item => item.id === page.id)
             if (!current || !existing || current.id !== project.id) return
@@ -315,7 +353,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
           }}><MainMenu /></Excalidraw>
       </div>
       <div className={css.ai}>
-        <textarea aria-label="图片修改需求" placeholder={selectionCount === 1 ? '描述如何修改选中的图片…' : '选中一张图片后，描述修改要求…'} value={instruction} maxLength={18000} onChange={event => setInstruction(event.target.value)} />
+        <textarea ref={instructionInput} aria-label="图片修改需求" placeholder={selectionCount === 1 ? '描述如何修改选中的图片…' : '选中一张图片后，描述修改要求…'} value={instruction} maxLength={18000} onChange={event => setInstruction(event.target.value)} />
         <button disabled={busy || selectionCount !== 1 || !instruction.trim() || !!error} onClick={() => act(submit)}>{busy ? '提交中…' : '修改图片'}</button>
       </div>
     </fieldset>}
