@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
+import { ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { HARNESS_COMMIT, HARNESS_VERSION, verifyHarnessBuildReceipt } from './harness-provenance.mjs'
 
 const PRODUCT_VERSION = '2.0.18'
@@ -157,6 +158,8 @@ async function main() {
     })
     await arrangeRuntime(stage, assembled)
     await applyHarnessRuntimeAdapters(assembled)
+    const artifactLinksAdapter = join(root, ARTIFACT_LINKS_ADAPTER_PATH)
+    await writeFile(join(assembled, 'e-mate-artifact-links-adapter.mjs'), readFileSync(artifactLinksAdapter))
     const conversationAdapter = join(root, CONVERSATION_ADAPTER_PATH)
     await writeFile(join(assembled, 'e-mate-conversation-adapter.mjs'), readFileSync(conversationAdapter))
     const reported = capture(process.execPath, [join(assembled, 'apps', 'cli', 'lib', 'bin.js'), '--version'])
@@ -170,6 +173,8 @@ async function main() {
       commit: HARNESS_COMMIT,
       lockfile_sha256: sha256(join(harnessRoot, 'pnpm-lock.yaml')),
       adapters_sha256: sha256(adaptersPath),
+      artifact_links_adapter_sha256: sha256(artifactLinksAdapter),
+      artifact_links_client_sha256: sha256(join(assembled, 'node_modules', ARTIFACT_LINKS_PACKAGE, 'lib', 'index.js')),
       conversation_adapter_sha256: sha256(conversationAdapter),
       conversation_client_sha256: sha256(join(assembled, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')),
       package_manager: `pnpm@${PNPM_VERSION}`,

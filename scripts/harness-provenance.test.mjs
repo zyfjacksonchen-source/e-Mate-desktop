@@ -18,6 +18,7 @@ import {
 import { pinnedPnpmInvocation } from './package-manager.mjs'
 import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
+import { ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 
 const root = resolve(import.meta.dirname, '..')
@@ -28,6 +29,11 @@ test('runtime and Desktop materialization share the conversation owner adapter a
   const desktop = readFileSync(join(root, 'scripts/harness-provenance.mjs'), 'utf8')
   assert.equal(CONVERSATION_PACKAGE, '@deepseek-ai/dsh-client-ui-conversation')
   assert.equal(CONVERSATION_ADAPTER_PATH, 'scripts/harness-conversation-adapter.mjs')
+  assert.equal(ARTIFACT_LINKS_ADAPTER_PATH, 'scripts/harness-artifact-links-adapter.mjs')
+  assert.equal(ARTIFACT_LINKS_PACKAGE, '@deepseek-ai/dsh-client-ui-primitives')
+  assert.match(runtime, /adaptHarnessArtifactLinksSource\(await readFile\(artifactTarget/u)
+  assert.match(desktop, /adaptHarnessArtifactLinksSource\(readFileSync\(entry/u)
+  assert.match(desktop, /adaptHarnessArtifactLinksSource\(readFileSync\(join\(sourceLib, 'index.js'\)/u)
   assert.match(runtime, /adaptHarnessConversationSource\(await readFile\(conversationTarget/u)
   assert.match(desktop, /adaptHarnessConversationSource\(readFileSync\(client/u)
   assert.match(desktop, /adapter: adapter === null \? null : \{ path: adapter, sha256:/u)

@@ -7,6 +7,7 @@ import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { Script } from 'node:vm'
 import { adaptHarnessConversationSource } from './harness-conversation-adapter.mjs'
+import { adaptHarnessArtifactLinksSource } from './harness-artifact-links-adapter.mjs'
 
 const native = readFileSync(process.env.EMATE_TEST_NATIVE_ROOT ? join(process.env.EMATE_TEST_NATIVE_ROOT, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js') : new URL('../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', import.meta.url), 'utf8')
 const adapted = adaptHarnessConversationSource(native)
@@ -17,7 +18,7 @@ const section = (start, end) => adapted.slice(adapted.indexOf(start), adapted.in
 const owners = new Function('_deepseek_ai_dsh_client_runtime_client', [
   section('function emateDraftFiles(', '\t\t//#endregion'),
   section('\t\t//#region lib/types/client/queue/store.js', '\t\t//#region ../../../vendor/cosmokit/src/misc.ts'),
-  'return { SessionInputShell, InputHub, createChatStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateCanvasNavigationRequest, emateCanvasBeforeView }',
+  'return { SessionInputShell, InputHub, createChatStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView }',
 ].join('\n'))({
   defineStore: value => value,
   createSnapshotStore(initial) {
@@ -352,7 +353,13 @@ test('packaged runtime verifies the adapter and actual client hashes instead of 
     writeFileSync(join(root, 'e-mate-conversation-adapter.mjs'), adapter)
     writeFileSync(client, adapted)
     const digest = bytes => createHash('sha256').update(bytes).digest('hex')
-    const manifest = { commit: 'pinned', conversation_adapter_sha256: digest(adapter), conversation_client_sha256: digest(adapted) }
+    const artifactAdapter = readFileSync(new URL('./harness-artifact-links-adapter.mjs', import.meta.url))
+    const artifactNative = readFileSync(join(process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname, 'upstream/deepseek-harness/packages/client/ui-primitives/lib/index.js'), 'utf8')
+    const artifactClient = adaptHarnessArtifactLinksSource(artifactNative)
+    mkdirSync(join(root, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib'), { recursive: true })
+    writeFileSync(join(root, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'), artifactClient)
+    writeFileSync(join(root, 'e-mate-artifact-links-adapter.mjs'), artifactAdapter)
+    const manifest = { commit: 'pinned', artifact_links_adapter_sha256: digest(artifactAdapter), artifact_links_client_sha256: digest(artifactClient), conversation_adapter_sha256: digest(adapter), conversation_client_sha256: digest(adapted) }
     writeFileSync(join(directory, 'runtime/source-manifest.json'), JSON.stringify(manifest))
     assert.equal(resolvePackage().source, 'packaged-runtime')
     writeFileSync(client, native)
@@ -507,4 +514,29 @@ test('identity changes invalidate native tab and breadcrumb saves even before th
     assert.equal(h.current(), 'one')
   }
   assert.match(adapted, /isCurrentViewSession:.*!document\.querySelector\("\[data-emate-identity-gate\]"\)/u)
+})
+
+
+test('native chat opener reports failed artifact opening through its own input notice', async () => {
+  const original = adapted.slice(adapted.indexOf('openFile: (path) => {'), adapted.indexOf('loadOlder:', adapted.indexOf('openFile: (path) => {')))
+  const notices = []
+  const openFile = new Function('sessions', 'sessionId', 'workspaces', 'ctx', '_deepseek_ai_dsh_client_runtime_client', `return ({${original}}).openFile`)(
+    { list: { getSnapshot: () => ({ byId: { current: { cwd: '/project' } } }) }, scope: () => ({}) }, 'current',
+    { openPath: async () => { throw Error('synthetic missing artifact /private/not-for-ui') } },
+    { conversation: { input: { for: () => ({ notify: (...args) => notices.push(args) }) } } },
+    { resolveWorkspacePath: (cwd, path) => cwd + '/' + path },
+  )
+  openFile('missing.pdf')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(notices, [['error', '文件不存在、已移出项目或无法打开，请检查原产物后重试。']])
+})
+
+
+test('explicit Markdown paths reuse native chat opener without promoting unknown inline-code mentions', () => {
+  const opened = []
+  const mentions = owners.emateArtifactFileMentions({ get: () => ({ forClosing: () => ({ resolve: value => value === 'known.pdf' ? { open: () => opened.push('known-owner'), label: 'known', title: 'known.pdf' } : undefined }) }) }, { openFile: value => opened.push(value) })
+  assert.equal(mentions.resolve('/project/copied.png'), undefined)
+  mentions.resolveLink('/project/copied.png').open()
+  mentions.resolveLink('known.pdf').open()
+  assert.deepEqual(opened, ['/project/copied.png', 'known-owner'])
 })

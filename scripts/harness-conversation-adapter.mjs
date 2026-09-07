@@ -92,6 +92,20 @@ function emateQueuePreview(row) {
   return chars.length > 200 ? chars.slice(0, 200).join('') + '…' : text
 }
 
+// Explicit Markdown links may request a local file on click. Inline-code
+// mentions retain the native produced-file vocabulary and do not gain guesses.
+function emateArtifactFileMentions(ctx, owner) {
+  const native = ctx.get("chatFileMentions")?.forClosing(owner);
+  return {
+    resolve: value => native?.resolve(value),
+    resolveLink: value => native?.resolve(value) ?? {
+      open: () => owner.openFile(value),
+      label: "打开 " + value.slice(Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\")) + 1),
+      title: value,
+    },
+  };
+}
+
 // An async transition fence over the existing tab action. Selection remains
 // wholly in the native chat store; this ref only discards stale save outcomes.
 function emateCanvasNavigationRequest(sequence, beforeNavigate, isCurrentSession, selectView, reportError) {
@@ -131,6 +145,12 @@ export function adaptNavigationSource(source) {
 export function adaptHarnessConversationSource(source) {
   const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
 
+  change('fileMentions: (owner) => ctx.get("chatFileMentions")?.forClosing(owner),',
+    'fileMentions: (owner) => emateArtifactFileMentions(ctx, owner),', 'artifacts/explicit-link-owner')
+  // Every native file chip and receipt-derived prose link shares this opener.
+  change('workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => {});',
+    'workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => { const scope = sessions.scope(sessionId); if (scope) ctx.conversation.input.for(scope).notify("error", "文件不存在、已移出项目或无法打开，请检查原产物后重试。"); });', 'artifacts/open-error')
+
   // Native Header still commits via its own scoped actions; failed saves do
   // not change view, and pending work cannot redirect a newer session/click.
   change('function ConversationSessionHeader({ sessionId, useSession, useSessions, useStore, actions, renderSlot, views, open, t }) {',
@@ -147,7 +167,7 @@ export function adaptHarnessConversationSource(source) {
   change('\t\t\ttag.textContent = css$6;', '\t\t\ttag.textContent = css$6 + ' + JSON.stringify(CANVAS_FRAME_CSS) + ';', 'canvas/frame-css')
 
   // stores.ts: extend the existing per-session dsh.conversation.chat record.
-  change('\t\tfunction createChatStore() {', `${[emateDraftFiles, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateCanvasNavigationRequest, emateCanvasBeforeView].map(fn => fn.toString()).join('\n')}\n\t\tfunction createChatStore() {`, 'stores/helper')
+  change('\t\tfunction createChatStore() {', `${[emateDraftFiles, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView].map(fn => fn.toString()).join('\n')}\n\t\tfunction createChatStore() {`, 'stores/helper')
   change('\t\t\t\t\tdraft: "",\n\t\t\t\t\tview: null,', '\t\t\t\t\tdraft: "",\n\t\t\t\t\tfileRefs: [],\n\t\t\t\t\timageRefs: [],\n\t\t\t\t\tview: null,', 'stores/init')
   change('\t\t\t\t\tsetDraft: (d, text) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t},', '\t\t\t\t\tsetDraft: (d, text, fileRefs = [], imageRefs = []) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t\td.fileRefs = fileRefs;\n\t\t\t\t\t\td.imageRefs = imageRefs;\n\t\t\t\t\t},', 'stores/mirror-action')
 
