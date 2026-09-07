@@ -36,3 +36,44 @@ test('preserves the pinned GenUI Tool, Skill, and client surfaces on the rc.7 co
   assert.match(skill, /dsh-ui/u)
   assert.doesNotMatch(shippedJs.join('\n'), /@omdsh-dev\/dsh-genui/)
 })
+
+test('serves the renamed package assets through its registered Host route', async () => {
+  const { apply } = await import('../lib/index.js')
+  const routes = []
+  apply({
+    systemPrompt: { section() {} },
+    reflect: { get: name => name === 'webServer' ? { register: route => routes.push(route) } : undefined },
+    on() {},
+  })
+  assert.equal(routes.length, 1)
+  const route = routes[0]
+  assert.equal(route.kind, 'prefix')
+  assert.equal(route.path, '/plugins/@e-mate/dsh-plugin-genui/assets')
+  const request = async (url, method = 'GET') => {
+    let status, headers, body
+    await route.handler({ url, method }, {
+      writeHead(code, value) { status = code; headers = value },
+      end(value) { body = value },
+    })
+    return { status, headers, body }
+  }
+
+  for (const name of ['mermaid.js', 'three.js']) {
+    const expected = await readFile(resolve(root, 'lib', 'assets', name))
+    const response = await request(`${route.path}/${name}?rev=package-contract`)
+    assert.equal(response.status, 200, name)
+    assert.equal(response.headers['content-type'], 'text/javascript; charset=utf-8')
+    assert.deepEqual(response.body, expected)
+    assert.equal((await request(`${route.path}/${name}`, 'HEAD')).status, 200)
+  }
+  for (const url of [
+    `${route.path}-other/mermaid.js`,
+    '/plugins/@omdsh-dev/dsh-genui/assets/mermaid.js',
+    `${route.path}/%2E%2E%2Findex.js`,
+    `${route.path}/%2E%2E%5Cindex.js`,
+    `${route.path}/../index.js`,
+    `${route.path}/missing.js`,
+  ]) assert.equal((await request(url)).status, 404, url)
+  assert.equal((await request(`${route.path}/%ZZ`)).status, 400)
+  assert.equal((await request(`${route.path}/mermaid.js`, 'POST')).status, 405)
+})
