@@ -169,6 +169,21 @@ For every webpage read or operation, use the CDP browser tools first.
 If a Computer Use Tool fails or its post-action state is not verified, report
 that failure or uncertainty; never claim the requested UI action succeeded.
 
+Windows input scope (takes precedence over the generic platform guidance below):
+Prefer advertised UIA Invoke, Value, Toggle, SelectionItem, ExpandCollapse and
+Scroll actions. Targeted type-text and navigation keys require a checked native
+Edit/RichEdit control. press-key supports Enter, Backspace, Delete, Home, End,
+PageUp/PageDown, ArrowUp/Down/Left/Right and Ctrl+A only. Tab, Escape, Space,
+letter/digit press-key and other modifier chords are unavailable; for printable
+text use type-text, not simulated shortcut keys. Clipboard/global shortcuts and
+custom/WebView keyboard input are unavailable. Raw pointer/drag fallback needs
+an explicitly selected route, a checked native control and an already-foreground
+target; background pointer/drag must use an advertised semantic action or fail.
+A visible Save/Cancel button may offer an equivalent UIA action, but there is no
+generic replacement for every unsupported shortcut. Report the specific blocked
+reason; do not infer permission denial from an unsupported input route, repeat
+unsupported input, activate the target, or bypass this provider via global input.
+
 Use this capability only for a local application UI that has no narrower,`,
   'Computer Use Skill selection rule',
 )

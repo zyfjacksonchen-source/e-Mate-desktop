@@ -180,14 +180,28 @@ class HelperSession {
     this.buffer = Buffer.alloc(0)
     this.pending = undefined
     if (exact(envelope, ['protocolVersion', 'requestId', 'ok', 'value']) && envelope.ok === true) { pending.resolve(envelope.value); return }
-    if (exact(envelope, ['protocolVersion', 'requestId', 'ok', 'error']) && envelope.ok === false && exact(envelope.error, ['code', 'message']) && boundedString(envelope.error.message, 4096, true)) {
+    if (exact(envelope, ['protocolVersion', 'requestId', 'ok', 'error']) && envelope.ok === false && exact(envelope.error, ['code', 'message'], ['reason']) && boundedString(envelope.error.message, 4096, true)
+      && (envelope.error.reason === undefined || boundedString(envelope.error.reason, 128))) {
       const messages = {
         COMPUTER_STALE_OBSERVATION: 'Windows target state changed; observe again before acting.',
-        COMPUTER_ACTION_BLOCKED: 'Windows denied the requested UI action because required desktop or integrity authority is unavailable.',
+        COMPUTER_ACTION_BLOCKED: 'Windows could not perform this action with the current target, input route or permissions. Re-observe the target and use an available UI Automation action.',
         COMPUTER_PROVIDER_FAILURE: 'Windows Computer Use provider failed.',
       } as const
       const code = typeof envelope.error.code === 'string' && Object.hasOwn(messages, envelope.error.code) ? envelope.error.code as keyof typeof messages : 'COMPUTER_PROVIDER_FAILURE'
-      pending.reject(new HelperCommandError(code, messages[code])); return
+      const reasons = {
+        'unsupported-key': 'Windows does not support this targeted key or modifier combination. Native Edit/RichEdit supports navigation keys and Ctrl+A; use type-text for text or an advertised UI Automation action. Clipboard and global shortcuts are unavailable.',
+        'unsupported-control': 'This Windows control does not support reliable targeted input. Use an advertised UI Automation action or writable ValuePattern; custom/WebView keyboard input is unavailable.',
+        'background-pointer': 'Raw pointer or drag input is unavailable while this Windows target is in the background. Use an advertised UI Automation action; the target will not be activated automatically.',
+        'uia-unavailable': 'The required Windows UI Automation pattern is unavailable or the target is disabled/read-only. Re-observe and choose an action actually advertised by the target.',
+        'focus-policy': 'The requested input route is not permitted by the current focus or pointer policy. Use an available semantic action; do not activate the target as a fallback.',
+        'desktop-unavailable': 'The Windows desktop is locked, noninteractive, secure, or changing sessions. Resume the logged-in desktop before retrying.',
+        'integrity-unavailable': 'Windows target identity or integrity authority is unavailable; elevated/UIPI targets are not supported by this provider.',
+        'capture-unavailable': 'The exact Windows target cannot be captured, for example because it is minimized or its renderer rejects capture. Re-observe after the target is capturable; another window will not be substituted.',
+      } as const
+      const reason = envelope.error.reason
+      const message = code === 'COMPUTER_ACTION_BLOCKED' && typeof reason === 'string' && Object.hasOwn(reasons, reason)
+        ? reasons[reason as keyof typeof reasons] : messages[code]
+      pending.reject(new HelperCommandError(code, message)); return
     }
     const error = new ComputerUseError('COMPUTER_PROVIDER_FAILURE', 'Windows helper returned an invalid envelope')
     this.fail(error); pending.reject(error)

@@ -17,7 +17,26 @@ try {
 }
 
 function Reply-Ok($value) { [Console]::Out.WriteLine((ConvertTo-Json -Depth 40 -Compress @{ protocolVersion=2; requestId=$script:requestId; ok=$true; value=$value })); [Console]::Out.Flush() }
-function Reply-Fail([string]$code, [string]$message) { [Console]::Out.WriteLine((ConvertTo-Json -Compress @{ protocolVersion=2; requestId=$script:requestId; ok = $false; error = @{ code = $code; message = $message.Substring(0, [Math]::Min(1000, $message.Length)) } })); [Console]::Out.Flush() }
+# Only fixed categories cross the public error boundary; native messages may contain private paths.
+function Get-BlockedReason([string]$message) {
+  switch -Regex ($message) {
+    '^unsupported targeted (key|modifiers);' { return 'unsupported-key' }
+    '^target (keyboard control unavailable|control does not support reliable background messages)$' { return 'unsupported-control' }
+    '^background raw pointer input is unavailable for this target$' { return 'background-pointer' }
+    '^(UIA (Invoke|Toggle|SelectionItem|ExpandCollapse|Scroll)Pattern unavailable|writable UIA ValuePattern unavailable|enabled UIA target unavailable|unsupported UIA semantic action|UI Automation root unavailable)$' { return 'uia-unavailable' }
+    '^(preserve focus policy denies AXRaise|targeted pointer policy is required|coordinate fallback was not explicitly selected|configured activation policy denies fallback while target is not foreground)$' { return 'focus-policy' }
+    '^(locked or noninteractive Windows session|secure desktop or locked session is active|unsupported RDP/session transition)$' { return 'desktop-unavailable' }
+    '^(target executable identity unavailable|target integrity authority unavailable|elevated/UIPI target is not supported)' { return 'integrity-unavailable' }
+    '^(minimized target window cannot be captured|exact target window capture unavailable)$' { return 'capture-unavailable' }
+  }
+  return $null
+}
+function Reply-Fail([string]$code, [string]$message) {
+  $errorBody=@{ code=$code; message=$message.Substring(0, [Math]::Min(1000, $message.Length)) }
+  $reason=Get-BlockedReason $message
+  if($null-ne$reason){$errorBody.code='COMPUTER_ACTION_BLOCKED';$errorBody.reason=$reason}
+  [Console]::Out.WriteLine((ConvertTo-Json -Compress @{ protocolVersion=2; requestId=$script:requestId; ok=$false; error=$errorBody })); [Console]::Out.Flush()
+}
 function Assert-Int($value, [int64]$min, [int64]$max, [string]$name) { if ($null -eq $value -or [int64]$value -lt $min -or [int64]$value -gt $max) { throw "$name is out of bounds" }; return [int64]$value }
 
 try {

@@ -307,3 +307,69 @@ test('composition keeps one owner, bounded health probes, exact cleanup, and no 
   assert.ok(leases.includes("approvalPolicy(this.ctx, agent) === 'never'")); assert.ok(leases.includes('this.controlGrants.get(agent)?.get(app.bundleId) === turn')); assert.ok(confirmations.includes('agentRecords?.delete(token)'))
   assert.equal(createHash('sha256').update(helper).digest('hex'), JSON.parse(manifest).source.sha256)
 })
+
+test('blocked reasons distinguish unsupported input from desktop authority without exposing native messages', async () => {
+  const cases = [
+    ['unsupported-key', /does not support this targeted key/u], ['unsupported-control', /does not support reliable targeted input/u],
+    ['background-pointer', /in the background/u], ['uia-unavailable', /pattern is unavailable/u],
+    ['focus-policy', /current focus or pointer policy/u], ['desktop-unavailable', /locked, noninteractive/u],
+    ['integrity-unavailable', /elevated\/UIPI/u], ['capture-unavailable', /cannot be captured/u],
+  ]
+  let index = 0
+  await withClient(async ({ client, calls, children }) => {
+    for (const [, message] of cases) await assert.rejects(client.invoke({ command: 'act' }, freshSignal()), error => {
+      assert.equal(error.code, 'COMPUTER_ACTION_BLOCKED'); assert.match(error.message, message)
+      assert.equal(error.message.includes('private-user'), false); return true
+    })
+    assert.equal(calls.length, 1)
+    assert.equal(children[0].requests.length, cases.length + 1) // one handshake, no action replay
+    assert.equal(children[0].terminated(), 0)
+  }, () => ({ ok: false, error: { code: 'COMPUTER_ACTION_BLOCKED', reason: cases[index++][0], message: 'C:\\private-user\\secret.txt' } }))
+  const helper = await readFile(new URL('native/windows/dsh-computer-use-helper.ps1', root), 'utf8')
+  for (const [reason] of cases) assert.ok(helper.includes(`return '${reason}'`))
+  assert.match(helper, /\$reason=Get-BlockedReason \$message/u)
+  assert.match(helper, /\$errorBody\.code='COMPUTER_ACTION_BLOCKED';\$errorBody\.reason=\$reason/u)
+})
+
+test('legacy, unknown and mismatched reason fields keep safe error classification; malformed fields fail closed', async () => {
+  for (const reason of [undefined, 'future-reason-private-user', '__proto__']) {
+    await withClient(async ({ client, calls }) => {
+      await assert.rejects(client.invoke({ command: 'act' }, freshSignal()), error => {
+        assert.equal(error.code, 'COMPUTER_ACTION_BLOCKED')
+        assert.match(error.message, /current target, input route or permissions/u)
+        assert.doesNotMatch(error.message, /private-user|integrity authority is unavailable/u); return true
+      })
+      assert.equal(calls.length, 1)
+    }, () => ({ ok: false, error: { code: 'COMPUTER_ACTION_BLOCKED', message: 'private-user', ...(reason === undefined ? {} : { reason }) } }))
+  }
+  await withClient(async ({ client }) => {
+    await assert.rejects(client.invoke({ command: 'act' }, freshSignal()), error => {
+      assert.equal(error.code, 'COMPUTER_STALE_OBSERVATION'); assert.match(error.message, /state changed/u); return true
+    })
+  }, () => ({ ok: false, error: { code: 'COMPUTER_STALE_OBSERVATION', message: 'private-user', reason: 'unsupported-key' } }))
+  for (const reason of [{ value: 'unsupported-key' }, 'x'.repeat(129)]) await withClient(async ({ client, children }) => {
+    await assert.rejects(client.invoke({ command: 'act' }, freshSignal()), error => error.code === 'COMPUTER_PROVIDER_FAILURE')
+    assert.equal(children[0].waited(), 1)
+  }, () => ({ ok: false, error: { code: 'COMPUTER_ACTION_BLOCKED', message: 'private-user', reason } }))
+})
+
+test('the actual build Skill adaptation teaches Windows supported input and truthful UIA alternatives', async () => {
+  const build = await readFile(new URL('scripts/build.mjs', root), 'utf8')
+  const original = await readFile(new URL('../../upstream/plugins/dsh-computer-use/lib/skill.js', root), 'utf8')
+  const replaceOwner = build.slice(build.indexOf('function replaceExactlyOnce('), build.indexOf('const exposurePath ='))
+  const skillOwner = build.slice(build.indexOf('const skillPath ='), build.indexOf('const runtimeSource ='))
+  let output
+  // Execute only the existing pure Skill materialization section, with in-memory
+  // read/write seams; never invoke native builder, subprocess or application UI.
+  await new Function('root', 'join', 'readText', 'writeFile', `return (async () => { ${replaceOwner}\n${skillOwner} })()`)(
+    '/fixture', join, async () => original, async (_path, text) => { output = text },
+  )
+  assert.match(output, /Windows input scope \(takes precedence/u)
+  assert.match(output, /UIA Invoke, Value, Toggle, SelectionItem, ExpandCollapse and/u)
+  assert.match(output, /Ctrl\+A only/u)
+  assert.match(output, /Tab, Escape, Space,[\s\S]*other modifier chords are unavailable/u)
+  assert.match(output, /there is no\ngeneric replacement/u)
+  assert.match(output, /do not infer permission denial from an unsupported input route/u)
+  assert.match(output, /e-Mate @电脑操控 trigger/u)
+  assert.match(output, /use the CDP browser tools first/u)
+})
