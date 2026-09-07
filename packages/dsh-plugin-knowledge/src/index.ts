@@ -9,16 +9,18 @@ export const inject = ['emateIdentity', 'connection', 'webServer', 'timer', 'age
 const MAX_BYTES = 20 * 1024 * 1024
 const DOWNLOAD_ROOT = '/emate-knowledge-downloads/'
 const allowed: Record<string, { method: string; path: string; keys: string[] }> = {
-  catalog: { method: 'GET', path: '/catalog', keys: [] },
-  graph: { method: 'GET', path: '/graph', keys: ['root_id', 'depth', 'limit', 'corpus_revision'] },
-  sources: { method: 'GET', path: '/sources', keys: ['kind', 'offset', 'limit', 'corpus_revision'] },
-  source: { method: 'GET', path: '/sources', keys: ['source_id', 'version'] },
-  node: { method: 'GET', path: '/nodes', keys: ['node_id', 'version'] },
-  search: { method: 'POST', path: '/search', keys: ['question', 'limit', 'layer', 'corpus_revision'] },
+  catalog: { method: 'GET', path: '/catalog', keys: ['scope'] },
+  graph: { method: 'GET', path: '/graph', keys: ['root_id', 'depth', 'limit', 'corpus_revision', 'scope'] },
+  sources: { method: 'GET', path: '/sources', keys: ['kind', 'offset', 'limit', 'corpus_revision', 'scope'] },
+  source: { method: 'GET', path: '/sources', keys: ['source_id', 'version', 'scope'] },
+  node: { method: 'GET', path: '/nodes', keys: ['node_id', 'version', 'scope'] },
+  search: { method: 'POST', path: '/search', keys: ['question', 'limit', 'layer', 'corpus_revision', 'scope'] },
   benchmarks: { method: 'GET', path: '/benchmark', keys: ['keyword'] },
   benchmark: { method: 'POST', path: '/benchmark', keys: ['media', 'industry', 'metric', 'period', 'source_id', 'marketing_purpose'] },
-  evidence: { method: 'GET', path: '/evidence', keys: ['query_id'] },
-  original: { method: 'GET', path: '/sources', keys: ['source_id', 'version'] },
+  evidence: { method: 'GET', path: '/evidence', keys: ['query_id', 'scope'] },
+  original: { method: 'GET', path: '/sources', keys: ['source_id', 'version', 'scope'] },
+  revisions: { method: 'GET', path: '/revisions', keys: ['question', 'limit', 'corpus_revision', 'scope'] },
+  revision: { method: 'GET', path: '/revisions', keys: ['revision_id'] },
 }
 function reject(message: string, code = 'invalid-request'): never { throw Object.assign(Error(message), { code }) }
 export function knowledgeTarget(endpoint: string, payload: any) {
@@ -27,7 +29,9 @@ export function knowledgeTarget(endpoint: string, payload: any) {
     || Object.keys(payload).some(key => !operation.keys.includes(key))) reject('知识请求字段无效。')
   const url = new URL(API_ROOT + operation.path)
   const input = { ...payload }
-  const field = endpoint === 'node' ? 'node_id' : endpoint === 'evidence' ? 'query_id' : ['source', 'original'].includes(endpoint) ? 'source_id' : null
+  if (input.scope !== undefined && !['public', 'uploader-private'].includes(input.scope)) reject('知识范围无效。')
+  if (endpoint === 'revisions') input.scope ??= 'public'
+  const field = endpoint === 'revision' ? 'revision_id' : endpoint === 'node' ? 'node_id' : endpoint === 'evidence' ? 'query_id' : ['source', 'original'].includes(endpoint) ? 'source_id' : null
   if (field) {
     if (typeof input[field] !== 'string' || !(field === 'node_id' ? HASH : SOURCE_ID).test(input[field])) reject('知识来源身份无效。')
     url.pathname += '/' + input[field] + (endpoint === 'original' ? '/original' : '')
@@ -124,7 +128,9 @@ export function createKnowledgeHost(identity: any, schedule = (callback: () => v
       if (response.headers.get('content-type')?.split(';', 1)[0] !== 'application/json') reject('知识服务响应格式无效。', 'invalid-response')
       let result: any
       try { result = JSON.parse(content.toString('utf8')) } catch { reject('知识服务响应无效。', 'invalid-response') }
-      if (result?.schema_version !== 1 || result.scope?.kind !== 'public' || !HASH.test(result.corpus_revision)) reject('知识服务返回了不匹配的资料范围。', 'invalid-response')
+      const expectedScope = endpoint === 'revision' ? 'enterprise-subject' : (payload as any).scope ?? 'public'
+      if (result?.schema_version !== 1 || result.scope?.kind !== expectedScope || endpoint !== 'revision' && !HASH.test(result.corpus_revision)) reject('知识服务返回了不匹配的资料范围。', 'invalid-response')
+      if (endpoint === 'revision' && (result.revision_id !== (payload as any).revision_id || typeof result.markdown !== 'string' || !Array.isArray(result.source_versions))) reject('知识修订身份无效。', 'invalid-response')
       return { scope_key: key, result }
     },
   }

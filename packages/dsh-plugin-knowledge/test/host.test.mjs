@@ -24,6 +24,24 @@ test('Host bootstraps the native identity once before capturing the owner and re
   host.dispose()
 })
 
+test('private and Wiki reads keep the current enterprise owner and exact service scope', async () => {
+  let wrongScope = false
+  const id = '11111111-1111-4111-8111-111111111111'
+  const host = createKnowledgeHost({ localAccountPrincipal: () => principal, async request(url) {
+    if (url.pathname.endsWith('/revisions/' + id)) return reply({ schema_version: 1, scope: { kind: 'enterprise-subject' }, revision_id: id, markdown: 'Exact verified revision', source_versions: [] })
+    assert.equal(url.searchParams.get('scope'), 'uploader-private')
+    return reply({ ...result, scope: { kind: wrongScope ? 'public' : 'uploader-private' }, items: [] })
+  } })
+  assert.equal((await host.call('revisions', { scope: 'uploader-private' })).result.scope.kind, 'uploader-private')
+  wrongScope = true
+  await assert.rejects(host.call('catalog', { scope: 'uploader-private' }), { code: 'invalid-response' })
+  assert.equal((await host.call('revision', { revision_id: id })).result.revision_id, id)
+  for (const scope of ['project', { kind: 'uploader-private', subject_id: 'another' }]) assert.throws(() => knowledgeTarget('catalog', { scope }))
+  assert.throws(() => knowledgeTarget('revision', { revision_id: id, tenant_id: 'another' }))
+  assert.throws(() => knowledgeTarget('compilations', {}))
+  host.dispose()
+})
+
 test('account change during response body consumption cancels or rejects the old result', async () => {
   let active = principal, stream
   const host = createKnowledgeHost({ localAccountPrincipal: () => active, request: async () => new Response(new ReadableStream({ start(controller) { stream = controller } }), { headers: { 'content-type': 'application/json' } }) })

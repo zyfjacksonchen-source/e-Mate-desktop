@@ -28,6 +28,15 @@ The only remote root is `https://mvdcm.ecoremedia.net/ecorex-agent/client/knowle
 | `benchmark` | existing read-only BenchmarkQuery | POST `/benchmark` |
 | `evidence` | `{query_id}` | GET `/evidence/:id` |
 | `original` | `{source_id,version}` | GET `/sources/:id/original?version=...` |
+| `revisions` | `{question?,limit?,corpus_revision?,scope?}` | GET `/revisions` |
+| `revision` | `{revision_id}` | GET `/revisions/:id` |
+
+Source reads, catalog, graph, search, evidence and originals additionally accept
+`scope:"public"|"uploader-private"`; omission keeps public behavior. Scope never
+accepts another subject/tenant or a project override. Revision reads use exact
+revision identity and the server's current owner/project authorization. Raw
+compilation endpoints remain private to the Host workflow because they carry
+execution leases.
 
 Ordinary results preserve the actual API schema, public scope, corpus revision, source identities, status and missing/truncated results. UI requires matching catalog/graph scope and revision; graph nodes are capped at 500 and dangling edges are rejected. Search results retain actual source IDs, hashes and excerpts. A real source outside the returned graph is shown as a source item, with no invented relationships. Graph and list render the same filtered item collection.
 
