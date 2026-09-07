@@ -359,6 +359,20 @@ describe('published package surface', () => {
     expect(manifest.devDependencies?.['@electron/asar']).toBe('3.4.1')
   })
 
+  it('preserves architecture-scoped Python dylibs with the universal merger matching rules', () => {
+    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+    const universalRequire = createRequire(workspaceRequire.resolve('@electron/universal'))
+    const { minimatch } = universalRequire('minimatch') as {
+      minimatch(path: string, pattern: string, options: { matchBase: boolean }): boolean
+    }
+    const pattern = String(manifest.build?.mac?.x64ArchFiles)
+    for (const arch of ['arm64', 'x64']) {
+      expect(minimatch(`Contents/Resources/python-runtime/darwin-${arch}/python/lib/python3.12/site-packages/PIL/.dylibs/libXau.6.dylib`, pattern, { matchBase: true })).toBe(true)
+    }
+    expect(minimatch('Contents/Resources/unscoped/PIL/.dylibs/libXau.6.dylib', pattern, { matchBase: true })).toBe(false)
+    expect(minimatch('Contents/Frameworks/Unexpected.dylib', pattern, { matchBase: true })).toBe(false)
+  })
+
   it('keeps dsh-desktop as the only package and update owner', () => {
     const agentUpdate = readFileSync(new URL('src/agent-update.ts', packageRoot), 'utf8')
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
