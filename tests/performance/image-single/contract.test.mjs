@@ -342,7 +342,7 @@ test('current single evidence preserves EM218 identity and cannot mix historical
   assert.equal(source.ticket, 'EM218-108')
   assert.equal(source.contract, 'tests/performance/image-single/protocol.mjs')
   const mixed = structuredClone(value); mixed.repetitions[0].ticket = 'EM217-108'
-  assert.throws(() => validateAggregate(mixed), /release identities differ/u)
+  assert.throws(() => validateAggregate(mixed), /EM218-108 evidence invalid: .*release identities differ/u)
   const historicalGui = guiEvidence()
   assert.throws(() => createPassManifest(value, source.external_raw.uri, raw, historicalGui.raw, historicalGui.descriptor.uri), /identities or commits differ/u)
 })

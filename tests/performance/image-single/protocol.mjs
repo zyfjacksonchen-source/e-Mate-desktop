@@ -69,7 +69,7 @@ export function historySummary(samples) {
   return { delta: { p95_ms: p95, p99_ms: p99 }, pass: p95 <= HISTORY_SCENARIO.p95Ms && p99 <= HISTORY_SCENARIO.p99Ms }
 }
 
-function fail(message) { throw new Error('EM217-108 evidence invalid: ' + message) }
+function fail(message) { throw new Error(TICKET + ' evidence invalid: ' + message) }
 function expect(condition, message) { if (!condition) fail(message) }
 function record(value, label) { expect(value !== null && typeof value === 'object' && !Array.isArray(value), label + ' must be an object'); return value }
 function finite(value, label) { expect(typeof value === 'number' && Number.isFinite(value) && value >= 0, label + ' must be a non-negative finite number'); return value }
