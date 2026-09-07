@@ -1,11 +1,11 @@
 // @ts-check
+import { validateCandidateManifest } from './update-acceptance-validation.mjs'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 const SOURCE_HEADER = 'X-e-Mate-Candidate-Source'
 const MAX_MANIFEST_BYTES = 16 * 1024
 const HASH = /^[0-9a-f]{64}$/u
 const COMMIT = /^[0-9a-f]{40}$/u
-const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
 const PLATFORM_BY_PATH = new Map([
   ['/desktop/downloads/mac', 'darwin'],
   ['/desktop/downloads/windows', 'win32'],
@@ -13,7 +13,7 @@ const PLATFORM_BY_PATH = new Map([
 const encoder = new TextEncoder()
 
 /** @typedef {{ key: string, bytes: number, sha256: string }} Artifact */
-/** @typedef {{ schema_version: 1, source_commit: string, version: string, artifacts: { darwin: Artifact, win32: Artifact } }} CandidateManifest */
+/** @typedef {{ schema_version: 1 | 2, source_commit: string, version: string, artifacts: { darwin: Artifact, win32: Artifact }, source_companion?: Artifact }} CandidateManifest */
 /** @typedef {{ key: string, size: number, body: ReadableStream<Uint8Array>, customMetadata?: Record<string, string>, arrayBuffer(): Promise<ArrayBuffer> }} CandidateR2Object */
 /** @typedef {{ get(key: string): Promise<CandidateR2Object | null> }} CandidateR2Bucket */
 /** @typedef {{ CANDIDATES: CandidateR2Bucket, MANIFEST_KEY: string, TOKEN_SHA256: string, EXPIRES_AT: string }} Env */
@@ -22,47 +22,12 @@ function response(status, message) {
   return new Response(message, { status, headers: NO_STORE })
 }
 
-function exactKeys(value, keys) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    && Object.keys(value).length === keys.length
-    && keys.every(key => Object.hasOwn(value, key))
-}
-
-function validArtifact(value, key) {
-  return exactKeys(value, ['key', 'bytes', 'sha256'])
-    && value.key === key
-    && Number.isSafeInteger(value.bytes)
-    && value.bytes > 0
-    && typeof value.sha256 === 'string'
-    && HASH.test(value.sha256)
-}
-
 /** @returns {CandidateManifest | null} */
 function parseManifest(bytes, manifestKey) {
-  let value
   try {
-    value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-  } catch {
-    return null
-  }
-  if (!exactKeys(value, ['schema_version', 'source_commit', 'version', 'artifacts'])
-    || value.schema_version !== 1
-    || typeof value.source_commit !== 'string'
-    || !COMMIT.test(value.source_commit)
-    || typeof value.version !== 'string'
-    || !VERSION.test(value.version)
-    || manifestKey !== 'desktop/candidates/' + value.source_commit + '/manifest.json'
-    || !exactKeys(value.artifacts, ['darwin', 'win32'])) return null
-
-  const root = 'desktop/candidates/' + value.source_commit + '/'
-  if (!validArtifact(
-    value.artifacts.darwin,
-    root + 'darwin/e-Mate-' + value.version + '-mac-universal.dmg',
-  ) || !validArtifact(
-    value.artifacts.win32,
-    root + 'win32/e-Mate-' + value.version + '-win-x64-Setup.exe',
-  )) return null
-  return /** @type {CandidateManifest} */ (value)
+    const value = validateCandidateManifest(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)))
+    return manifestKey === 'desktop/candidates/' + value.source_commit + '/manifest.json' ? value : null
+  } catch { return null }
 }
 
 function expiryMillis(value) {

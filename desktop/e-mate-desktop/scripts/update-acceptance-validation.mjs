@@ -51,8 +51,12 @@ function continuityState(value, label) {
 }
 function receipt(value, platform, manifest, artifactRow) {
   const label = platform + ' receipt'
-  const row = exact(value, ['schema_version', 'platform', 'source_commit', 'version', 'installer', 'native_download', 'native_install', 'normal_launch', 'continuity', 'debug'], label)
-  if (row.schema_version !== 1 || row.platform !== platform || row.source_commit !== manifest.source_commit || row.version !== manifest.version) fail(label + ' identity mismatch')
+  const row = exact(value, ['schema_version', 'platform', 'source_commit', 'version', 'installer', 'native_download', 'native_install', 'normal_launch', 'continuity', 'debug', ...(manifest.schema_version === 2 ? ['source_companion'] : [])], label)
+  if (row.schema_version !== manifest.schema_version || row.platform !== platform || row.source_commit !== manifest.source_commit || row.version !== manifest.version) fail(label + ' identity mismatch')
+  if (manifest.schema_version === 2) {
+    const companion = artifact(row.source_companion, label + '.source_companion', manifest.source_companion.key)
+    if (companion.bytes !== manifest.source_companion.bytes || companion.sha256 !== manifest.source_companion.sha256) fail(label + ' source companion identity mismatch')
+  }
   const installer = exact(row.installer, ['bytes', 'sha256'], label + '.installer')
   const download = exact(row.native_download, ['succeeded', 'bytes', 'sha256'], label + '.native_download')
   const install = exact(row.native_install, ['succeeded'], label + '.native_install')
@@ -72,29 +76,39 @@ function receipt(value, platform, manifest, artifactRow) {
   }
 }
 
-export function validateUpdateAcceptance(manifestValue, macValue, windowsValue) {
-  const manifest = exact(manifestValue, ['schema_version', 'source_commit', 'version', 'artifacts'], 'manifest')
-  if (manifest.schema_version !== 1) fail('manifest schema_version mismatch')
+export function validateCandidateManifest(manifestValue) {
+  const schema = record(manifestValue, 'manifest').schema_version
+  if (schema !== 1 && schema !== 2) fail('manifest schema_version mismatch')
+  const manifest = exact(manifestValue, ['schema_version', 'source_commit', 'version', 'artifacts', ...(schema === 2 ? ['source_companion'] : [])], 'manifest')
   text(manifest.source_commit, SOURCE, 'manifest.source_commit')
   text(manifest.version, VERSION, 'manifest.version')
+  const [major, minor, patch] = manifest.version.split('.').map(BigInt)
+  if (schema === 1 && (major > 2n || major === 2n && (minor > 0n || minor === 0n && patch >= 18n))) fail('source companion required from 2.0.18')
   const artifacts = exact(manifest.artifacts, ['darwin', 'win32'], 'manifest.artifacts')
-  const candidateRoot = 'desktop/candidates/' + manifest.source_commit + '/'
-  const macName = 'e-Mate-' + manifest.version + '-mac-universal.dmg'
-  const winName = 'e-Mate-' + manifest.version + '-win-x64-Setup.exe'
-  const darwin = artifact(artifacts.darwin, 'manifest.artifacts.darwin', candidateRoot + 'darwin/' + macName)
-  const win32 = artifact(artifacts.win32, 'manifest.artifacts.win32', candidateRoot + 'win32/' + winName)
+  const root = 'desktop/candidates/' + manifest.source_commit + '/'
+  artifact(artifacts.darwin, 'manifest.artifacts.darwin', root + 'darwin/e-Mate-' + manifest.version + '-mac-universal.dmg')
+  artifact(artifacts.win32, 'manifest.artifacts.win32', root + 'win32/e-Mate-' + manifest.version + '-win-x64-Setup.exe')
+  if (schema === 2) artifact(manifest.source_companion, 'manifest.source_companion', root + 'sources/e-Mate-' + manifest.version + '-calc-sources.tar')
+  return manifest
+}
+
+export function validateUpdateAcceptance(manifestValue, macValue, windowsValue) {
+  const manifest = validateCandidateManifest(manifestValue)
+  const { darwin, win32 } = manifest.artifacts
   receipt(macValue, 'darwin', manifest, darwin)
   receipt(windowsValue, 'win32', manifest, win32)
   const releaseRoot = 'desktop/releases/v' + manifest.version + '/' + manifest.source_commit + '/'
+  const releaseArtifact = row => Object.freeze({ ...row, key: releaseRoot + row.key.split('/').at(-1) })
   return Object.freeze({
     status: 'accepted',
     source_commit: manifest.source_commit,
     version: manifest.version,
-    candidate_artifacts: Object.freeze({ darwin, win32 }),
-    release_artifacts: Object.freeze({
-      darwin: Object.freeze({ key: releaseRoot + macName, bytes: darwin.bytes, sha256: darwin.sha256 }),
-      win32: Object.freeze({ key: releaseRoot + winName, bytes: win32.bytes, sha256: win32.sha256 }),
-    }),
+    candidate_artifacts: Object.freeze({ darwin: Object.freeze({ ...darwin }), win32: Object.freeze({ ...win32 }) }),
+    release_artifacts: Object.freeze({ darwin: releaseArtifact(darwin), win32: releaseArtifact(win32) }),
+    ...(manifest.schema_version === 2 ? {
+      candidate_source_companion: Object.freeze({ ...manifest.source_companion }),
+      release_source_companion: releaseArtifact(manifest.source_companion),
+    } : {}),
     promotion: Object.freeze({ atomic: false, aliases: Object.freeze(['desktop/downloads/mac', 'desktop/downloads/windows']), read_back_aliases: true, version_last: 'desktop/version.json' }),
   })
 }

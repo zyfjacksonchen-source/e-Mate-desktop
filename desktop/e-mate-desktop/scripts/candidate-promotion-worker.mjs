@@ -9,7 +9,7 @@ const MAX_JSON_BYTES = 64 * 1024
 const MAX_TOKEN_TTL_MS = 15 * 60 * 1000
 const RELEASE_RECORD_KEY = 'desktop/releases/release-record.json'
 const PLATFORM = Object.freeze({ darwin: 'mac', win32: 'windows' })
-const CONTENT_TYPE = Object.freeze({ darwin: 'application/x-apple-diskimage', win32: 'application/vnd.microsoft.portable-executable' })
+const CONTENT_TYPE = Object.freeze({ darwin: 'application/x-apple-diskimage', win32: 'application/vnd.microsoft.portable-executable', sources: 'application/x-tar' })
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'
 const encoder = new TextEncoder()
 
@@ -54,16 +54,17 @@ function identity(object, expected, httpMetadata) {
 }
 function artifactIdentity(value) { return exact(value, ['bytes', 'sha256']) && Number.isSafeInteger(value.bytes) && value.bytes > 0 && typeof value.sha256 === 'string' && HASH.test(value.sha256) }
 function releaseIdentity(value) {
-  return exact(value, ['version', 'source_commit', 'artifacts']) && typeof value.version === 'string' && VERSION.test(value.version)
+  return exact(value, ['version', 'source_commit', 'artifacts', ...(value?.source_companion !== undefined ? ['source_companion'] : [])]) && typeof value.version === 'string' && VERSION.test(value.version)
     && typeof value.source_commit === 'string' && SOURCE.test(value.source_commit) && exact(value.artifacts, ['darwin', 'win32'])
     && artifactIdentity(value.artifacts.darwin) && artifactIdentity(value.artifacts.win32)
+    && (value.source_companion === undefined || artifactIdentity(value.source_companion))
 }
 function sameIdentity(left, right) { return JSON.stringify(left) === JSON.stringify(right) }
 function candidateIdentity(accepted) {
   return { version: accepted.version, source_commit: accepted.source_commit, artifacts: {
     darwin: { bytes: accepted.candidate_artifacts.darwin.bytes, sha256: accepted.candidate_artifacts.darwin.sha256 },
     win32: { bytes: accepted.candidate_artifacts.win32.bytes, sha256: accepted.candidate_artifacts.win32.sha256 },
-  } }
+  }, ...(accepted.candidate_source_companion ? { source_companion: { bytes: accepted.candidate_source_companion.bytes, sha256: accepted.candidate_source_companion.sha256 } } : {}) }
 }
 async function loadJsonObject(bucket, key) {
   const object = await bucket.get(key)
@@ -106,7 +107,7 @@ async function markRetryable(bucket, claim) {
 async function candidateObject(bucket, artifact, accepted) {
   const object = await bucket.get(artifact.key)
   if (object === null || object.body === null || object.body === undefined || object.key !== artifact.key || object.size !== artifact.bytes
-    || !exactMetadata(object.customMetadata, { sha256: artifact.sha256, sourceCommit: accepted.source_commit, version: accepted.version })) reject('candidate_installer_identity')
+    || !checksumMatches(object, artifact.sha256) || !exactMetadata(object.customMetadata, { sha256: artifact.sha256, sourceCommit: accepted.source_commit, version: accepted.version })) reject('candidate_installer_identity')
   return object
 }
 function publicExpected(key, artifact, accepted, platform) { return { key, bytes: artifact.bytes, sha256: artifact.sha256, customMetadata: { sha256: artifact.sha256, sourceCommit: accepted.source_commit, version: accepted.version, platform } } }
@@ -140,9 +141,11 @@ async function writeVersion(bucket, accepted, operations, markPublic) {
   await verifiedHead(bucket, expected, httpMetadata, 'version_readback'); operations.push('version-readback:' + key)
 }
 function completionReceipt(accepted) {
-  return { schema_version: 1, status: 'promotion-complete', atomic: false, source_commit: accepted.source_commit, version: accepted.version,
+  return { schema_version: accepted.candidate_source_companion ? 2 : 1, status: 'promotion-complete', atomic: false, source_commit: accepted.source_commit, version: accepted.version,
     artifacts: { darwin: { bytes: accepted.release_artifacts.darwin.bytes, sha256: accepted.release_artifacts.darwin.sha256 }, win32: { bytes: accepted.release_artifacts.win32.bytes, sha256: accepted.release_artifacts.win32.sha256 } },
+    ...(accepted.release_source_companion ? { source_companion: accepted.release_source_companion } : {}),
     completed_operations: [
+      ...(accepted.release_source_companion ? [{ phase: 'immutable', platform: 'sources', key: accepted.release_source_companion.key, read_back: true }] : []),
       { phase: 'immutable', platform: 'darwin', key: accepted.release_artifacts.darwin.key, read_back: true }, { phase: 'immutable', platform: 'win32', key: accepted.release_artifacts.win32.key, read_back: true },
       { phase: 'alias', platform: 'darwin', key: 'desktop/downloads/mac', read_back: true }, { phase: 'alias', platform: 'win32', key: 'desktop/downloads/windows', read_back: true }, { phase: 'version', platform: null, key: 'desktop/version.json', read_back: true },
     ] }
@@ -182,19 +185,22 @@ export async function handleRequest(request, env) {
     const accepted = validateUpdateAcceptance(manifest.value, mac.value, windows.value)
     if (accepted.source_commit !== env.SOURCE_COMMIT) reject('fixed_source_mismatch')
     const candidate = candidateIdentity(accepted), candidates = {}
-    for (const platform of ['darwin', 'win32']) candidates[platform] = await candidateObject(env.CANDIDATES, accepted.candidate_artifacts[platform], accepted)
+    const kinds = accepted.candidate_source_companion ? ['sources', 'darwin', 'win32'] : ['darwin', 'win32']
+    const privateArtifacts = { ...accepted.candidate_artifacts, sources: accepted.candidate_source_companion }
+    const releaseArtifacts = { ...accepted.release_artifacts, sources: accepted.release_source_companion }
+    for (const platform of kinds) candidates[platform] = await candidateObject(env.CANDIDATES, privateArtifacts[platform], accepted)
     phase = 'claim'; claim = await claimRelease(env.CANDIDATES, candidate)
     phase = 'immutable-preflight'
     const immutableExpected = {}, preflight = {}
-    for (const platform of ['darwin', 'win32']) {
-      immutableExpected[platform] = publicExpected(accepted.release_artifacts[platform].key, accepted.release_artifacts[platform], accepted, platform)
+    for (const platform of kinds) {
+      immutableExpected[platform] = publicExpected(releaseArtifacts[platform].key, releaseArtifacts[platform], accepted, platform)
       const existing = await env.BUCKET.head(immutableExpected[platform].key)
       if (existing !== null && !identity(existing, immutableExpected[platform], metadata(platform, IMMUTABLE_CACHE))) reject('immutable_preflight_conflict')
       preflight[platform] = existing
     }
     const markPublic = () => { publicProgress = true }, immutable = {}
     phase = 'immutable'
-    for (const platform of ['darwin', 'win32']) { const expected = immutableExpected[platform]; immutable[platform] = preflight[platform] === null ? await writeImmutable(env.BUCKET, candidates[platform], expected, metadata(platform, IMMUTABLE_CACHE), operations, markPublic) : { key: expected.key, bytes: expected.bytes, sha256: expected.sha256, reused: true } }
+    for (const platform of kinds) { const expected = immutableExpected[platform]; immutable[platform] = preflight[platform] === null ? await writeImmutable(env.BUCKET, candidates[platform], expected, metadata(platform, IMMUTABLE_CACHE), operations, markPublic) : { key: expected.key, bytes: expected.bytes, sha256: expected.sha256, reused: true } }
     phase = 'aliases'
     for (const platform of ['darwin', 'win32']) { const key = 'desktop/downloads/' + PLATFORM[platform], expected = publicExpected(key, accepted.release_artifacts[platform], accepted, platform); await writeAlias(env.BUCKET, immutableExpected[platform], key, expected, metadata(platform, 'no-store'), operations, markPublic) }
     phase = 'version'; await writeVersion(env.BUCKET, accepted, operations, markPublic)
