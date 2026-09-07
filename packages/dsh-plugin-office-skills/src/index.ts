@@ -1,5 +1,6 @@
 /** Lightweight, local Office execution for the e-Mate rc.7 Harness profile. */
 
+import { createCalcRuntime } from './calc-runtime.ts'
 import { randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, sep } from 'node:path'
@@ -327,6 +328,11 @@ const readOutput = {
 
 /** Register bundled Skills and two real Tool/Job paths on target Harness seams. */
 export function apply(ctx: OfficeContext): void {
+  let calcHost: any | undefined
+  ctx.inject(['fs', 'subprocess', 'sandbox', 'shellEnv'], host => {
+    calcHost = host
+    host.effect(() => () => { if (calcHost === host) calcHost = undefined })
+  })
   let svgRenderer: Partial<SvgRenderer> | undefined
   let preview: ReturnType<typeof createOfficePreview> | undefined
   ctx.inject(['desktopRuntime', 'emateIdentity', 'emateAudit', 'connection', 'workspaceRegistry', 'sessions', 'subprocess', 'shellEnv', 'fs'], host => {
@@ -360,7 +366,7 @@ export function apply(ctx: OfficeContext): void {
   ctx.effect(() => ctx.jobs.attachController('emate-office'), 'emate.office: target Job controller')
   ctx.effect(() => ctx.tools.register({
     name: 'office_write',
-    description: 'Create a local Office file. DOCX supports styled creation, template filling and text replacement. PNG renders a standalone workspace SVG using the native Desktop renderer: document={source_svg,width,height}. Other formats use normalized JSON. Always writes a new file and preserves the source.',
+    description: 'Create a local Office file. DOCX supports styled creation, template filling and text replacement. PNG renders a standalone workspace SVG using the native Desktop renderer: document={source_svg,width,height}. XLSX/PDF also accept document={operation:"recalculate",source_path:"workspace.xlsx"} using managed Calc; other formats use normalized JSON. Always writes a new file and preserves the source.',
     parameters: {
       type: 'object', additionalProperties: false, required: ['document', 'filename', 'format'],
       properties: {
@@ -381,7 +387,21 @@ export function apply(ctx: OfficeContext): void {
       const started = startJob(ctx, exec.agent, exec.signal, `Write ${targetName}`, async jobSignal => {
         jobSignal.throwIfAborted()
         let data: Buffer
-        if (targetFormat === 'png') {
+        const document = input.document as Record<string, unknown> | null
+        if (document?.operation === 'recalculate') {
+          if (targetFormat !== 'xlsx' && targetFormat !== 'pdf') throw new Error('Calc output must be XLSX or PDF')
+          if (Array.isArray(document) || Object.keys(document).some(key => !['operation', 'source_path'].includes(key))) throw new Error('Calc operation contains an unsupported field')
+          const source = await workspaceFile(root, document.source_path)
+          if (extname(source.name).toLowerCase() !== '.xlsx') throw new Error('Calc source must be an XLSX file')
+          const host = calcHost
+          const environment = host?.shellEnv.collect(exec)
+          const executable = environment?.DSH_EMATE_CALC
+          const fontDirectory = environment?.DSH_EMATE_CALC_FONTS
+          if (typeof executable !== 'string' || !isAbsolute(executable) || typeof fontDirectory !== 'string' || !isAbsolute(fontDirectory)) throw new Error('受管 Calc 运行时尚不可用。')
+          const runtime = createCalcRuntime({ fs: host.fs, subprocess: host.subprocess, sandbox: host.sandbox }, { executable, fontDirectory })
+          const result = await runtime.convert({ sourcePath: source.path, workspaceRoot: root, output: targetFormat, signal: jobSignal })
+          data = Buffer.from(result.bytes)
+        } else if (targetFormat === 'png') {
           const renderer = svgRenderer
           if (renderer?.renderSvgPage === undefined) throw new Error('Native Desktop SVG renderer is unavailable')
           const document = input.document as Record<string, unknown> | null

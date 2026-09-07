@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -255,7 +255,7 @@ test('Tools stay inside the current workspace and never overwrite output', async
   const previewPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jKAAAAABJRU5ErkJggg==', 'base64')
   apply({
     inject(dependencies, callback) {
-      if (dependencies.includes('connection')) return // Optional native preview services are absent in this CLI fixture.
+      if (dependencies.includes('connection') || dependencies.includes('sandbox')) return // Optional native preview services are absent in this CLI fixture.
       assert.deepEqual(dependencies, ['desktopRuntime'])
       callback({ desktopRuntime: { async renderSvgPage(request) {
         request.signal.throwIfAborted()
@@ -373,4 +373,70 @@ test('Tools stay inside the current workspace and never overwrite output', async
   await assert.rejects(read.execute({ path: '../outside.docx' }, execution), /escapes the workspace/u)
   await symlink(join(root, first.relative_path), join(root, 'linked.docx'))
   await assert.rejects(read.execute({ path: 'linked.docx' }, execution), /unavailable or too large/u)
+})
+
+test('Calc writes use existing Jobs, native services and collision-safe publication', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'office-calc-tool-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const original = await writeOfficeBuffer('xlsx', { sheets: [{ name: '中文', rows: [['金额', 3]] }] })
+  await writeFile(join(root, 'source.xlsx'), original)
+  const executable = join(root, 'soffice'), fonts = join(root, 'fonts')
+  await writeFile(executable, 'fixture'); await mkdir(fonts)
+  const tools = [], calls = []
+  let mode = 'workspace-write', fail = false, environment = {}, dispose
+  const { PDFDocument } = await import('pdf-lib')
+  const pdf = await PDFDocument.create(); pdf.addPage(); const pdfBytes = await pdf.save()
+  apply({
+    inject(dependencies, callback) {
+      if (!dependencies.includes('sandbox')) return
+      callback({
+        shellEnv: { collect(execution) { assert.ok(execution.agent); return environment } },
+        fs: { async resolve(path, options) { assert.equal(options.cwd, root); return join(root, path) }, async readBytes(path) { return await readFile(path) } },
+        sandbox: { confine(argv, policy) { assert.equal(policy.mode, 'workspace-write'); assert.notEqual(policy.workspaceRoot, root); return { argv, enforcement: 'full' } } },
+        subprocess: { spawn(spec) {
+          calls.push(spec)
+          const done = (async () => {
+            if (fail) return { exitCode: 1 }
+            const output = spec.argv[spec.argv.indexOf('--outdir') + 1]
+            const isPdf = spec.argv.includes('pdf:calc_pdf_Export')
+            await writeFile(join(output, isPdf ? 'input.pdf' : 'input.xlsx'), isPdf ? pdfBytes : original)
+            return { exitCode: 0 }
+          })()
+          return { done, terminate() {}, async waitForExit() { return true }, collected: {} }
+        } },
+        effect(register) { dispose = register() },
+      })
+    },
+    skills: { registerProvider() {} }, tools: { register(tool) { tools.push(tool) } },
+    jobs: { attachController() {}, start(spec) { spec.run(); return 'calc-job' }, async wait() {} },
+    sandboxPolicy: { resolve() { return { mode } } }, emateCapabilities: { register() {} }, effect(register) { register() },
+  })
+  assert.deepEqual(tools.map(tool => tool.name), ['office_write', 'office_read'])
+  const writer = tools[0], execution = { agent: { session: { header: { cwd: root } } }, signal: new AbortController().signal }
+  const args = { format: 'xlsx', filename: '结果.xlsx', document: { operation: 'recalculate', source_path: 'source.xlsx' } }
+  await assert.rejects(writer.execute(args, execution), /Calc 运行时尚不可用/)
+  environment = { DSH_EMATE_CALC: executable, DSH_EMATE_CALC_FONTS: fonts }
+  for (const document of [{ operation: 'recalculate' }, { ...args.document, extra: true }, { ...args.document, source_path: '../escape.xlsx' }]) {
+    await assert.rejects(writer.execute({ ...args, document }, execution))
+  }
+  await assert.rejects(writer.execute({ ...args, format: 'docx', filename: 'bad.docx' }, execution), /Calc output/)
+  mode = 'read-only'; await assert.rejects(writer.execute(args, execution), /read-only/); mode = 'workspace-write'
+  assert.equal(calls.length, 0)
+  const first = await writer.execute(args, execution)
+  const second = await writer.execute(args, execution)
+  assert.equal(first.relative_path, '.e-mate/office/结果.xlsx'); assert.equal(second.relative_path, '.e-mate/office/结果-2.xlsx')
+  assert.equal(first.job_id, 'calc-job')
+  assert.deepEqual(await readFile(join(root, first.relative_path)), original)
+  const rendered = await writer.execute({ ...args, format: 'pdf', filename: '结果.pdf' }, execution)
+  assert.equal((await PDFDocument.load(await readFile(join(root, rendered.relative_path)))).getPageCount(), 1)
+  assert.equal(calls.length, 4)
+  await writer.execute({ format: 'xlsx', filename: '普通.xlsx', document: { sheets: [{ name: '数据', rows: [[1]] }] } }, execution)
+  assert.equal(calls.length, 4)
+  fail = true; await assert.rejects(writer.execute({ ...args, filename: '失败.xlsx' }, execution), /Calc conversion failed/)
+  await assert.rejects(readFile(join(root, '.e-mate/office/失败.xlsx')))
+  const controller = new AbortController(); controller.abort(new Error('cancelled'))
+  await assert.rejects(writer.execute({ ...args, filename: '取消.xlsx' }, { ...execution, signal: controller.signal }), /cancelled/)
+  await assert.rejects(readFile(join(root, '.e-mate/office/取消.xlsx')))
+  assert.deepEqual(await readFile(join(root, 'source.xlsx')), original)
+  dispose(); await assert.rejects(writer.execute(args, execution), /Calc 运行时尚不可用/)
 })
