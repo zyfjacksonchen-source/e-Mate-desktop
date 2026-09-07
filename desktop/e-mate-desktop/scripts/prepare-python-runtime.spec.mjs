@@ -1,11 +1,30 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { createHash } from 'node:crypto'
 
-import { download, officeInstallArguments, installOfficeNotices } from './prepare-python-runtime.mjs'
+import { download, officeInstallArguments, installOfficeNotices, prepareOfficeSources } from './prepare-python-runtime.mjs'
+
+test('a corrupt source download preserves the previous prepared sources and clears staging', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'e-mate-office-sources-'))
+  const destination = join(directory, 'office-sources')
+  await mkdir(destination)
+  await writeFile(join(destination, 'previous'), 'retained')
+  let requests = 0
+  try {
+    await assert.rejects(prepareOfficeSources(destination, async () => {
+      requests++
+      return new Response('corrupt archive')
+    }), /Office source SHA-256 or size mismatch/u)
+    assert.equal(requests, 1)
+    assert.equal(await readFile(join(destination, 'previous'), 'utf8'), 'retained')
+    assert.deepEqual(await readdir(directory), ['office-sources'])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 
 test('supplemental runtime notices are copied byte-for-byte into the packaged runtime', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'e-mate-office-notices-'))

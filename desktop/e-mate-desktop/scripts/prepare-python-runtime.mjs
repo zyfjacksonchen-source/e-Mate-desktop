@@ -1,7 +1,7 @@
 /** Download the fixed Python bootstrap exposed to the rc.7 Vision component. */
 
 import { createHash } from 'node:crypto'
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -127,6 +127,43 @@ function sha256(filename) {
   return createHash('sha256').update(readFileSync(filename)).digest('hex')
 }
 
+/** Source and build materials travel inside the same existing Python resource volume. */
+export async function prepareOfficeSources(destination = join(outputRoot, 'office-sources'), request = fetch) {
+  const sourceRoot = join(packageRoot, 'scripts', 'office-python', 'source-companion')
+  const manifestBytes = readFileSync(join(sourceRoot, 'manifest.json'))
+  const manifest = JSON.parse(manifestBytes)
+  const valid = (root, file) => {
+    try {
+      const bytes = readFileSync(join(root, file.distribution_path))
+      return bytes.length === file.bytes && createHash('sha256').update(bytes).digest('hex') === file.sha256
+    } catch { return false }
+  }
+  if (existsSync(join(destination, 'manifest.json'))
+    && readFileSync(join(destination, 'manifest.json')).equals(manifestBytes)
+    && manifest.files.every(file => valid(destination, file))) return
+  const staging = `${destination}.staging-${process.pid}-${Date.now()}`
+  mkdirSync(staging, { recursive: true })
+  try {
+    for (const file of manifest.files) {
+      const output = join(staging, file.distribution_path)
+      mkdirSync(dirname(output), { recursive: true })
+      if (file.role !== 'original-source-archive') {
+        copyFileSync(join(sourceRoot, file.distribution_path), output)
+      } else if (valid(destination, file)) {
+        copyFileSync(join(destination, file.distribution_path), output)
+      } else {
+        await download(file.url, output, request)
+      }
+      if (!valid(staging, file)) throw new Error(`Office source SHA-256 or size mismatch: ${file.distribution_path}`)
+    }
+    writeFileSync(join(staging, 'manifest.json'), manifestBytes, { mode: 0o644 })
+    rmSync(destination, { recursive: true, force: true })
+    renameSync(staging, destination)
+  } finally {
+    rmSync(staging, { recursive: true, force: true })
+  }
+}
+
 async function prepare(target) {
   const asset = ASSETS[target]
   const finalRoot = join(outputRoot, target)
@@ -193,4 +230,5 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     throw new Error(`e-Mate Python runtime target is unsupported on ${process.platform}-${process.arch}`)
   }
   for (const target of targets) await prepare(target)
+  await prepareOfficeSources()
 }
