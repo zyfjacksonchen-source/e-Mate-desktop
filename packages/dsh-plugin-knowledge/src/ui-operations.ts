@@ -302,21 +302,30 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
     } catch (error) { active.delete(marker.operationId); epoch.removeEventListener('abort', shutdown); throw error }
     return project(agent, marker)
   }
-  async function scan(expected: string, signal?: AbortSignal) {
+  async function scan(expected: string, signal?: AbortSignal, forRecovery = false) {
+    let candidate: Reference | undefined
     const snapshots = await ctx.sessionPersistence.listSnapshots(signal); check(expected, signal)
     snapshots.sort((a: any, b: any) => b.header.createdAt - a.header.createdAt)
     if (cursor >= snapshots.length) cursor = 0
     const batch = snapshots.slice(cursor, cursor + 24); cursor += batch.length
     for (const item of batch) {
-      if (item.header.parentSession || scanned.get(item.header.id) === item.revision) continue
+      if (item.header.parentSession || !forRecovery && scanned.get(item.header.id) === item.revision) continue
       const stored = await ctx.sessionPersistence.readFrom(item.header.id, 0, signal).catch(() => undefined); check(expected, signal)
       if (stored) { scanned.set(item.header.id, item.revision); if (scanned.size > 1024) scanned.delete(scanned.keys().next().value!) }
       const marker = stored?.events.find((event: any) => event.type === 'knowledge/workflow' && event.data.kind === 'ui-import' && event.data.owner === expected)?.data
       if (!marker) continue
       const viewAgent = ctx.agents.get(item.header.id) ?? { id: item.header.id, session: { events: stored.events } }
-      try { markerOf(viewAgent, expected); project(viewAgent, marker) } catch { /* Invalid local operation records never become successful UI rows. */ }
+      try {
+        markerOf(viewAgent, expected)
+        const view = project(viewAgent, marker)
+        // Execution candidates come from this bounded physical scan, not the
+        // twenty-row UI projection. Recheck unchanged records on recovery passes.
+        if (forRecovery && !candidate && ['importing', 'parsing', 'compiling', 'paused'].includes(view.phase) && control(viewAgent, marker) !== 'stop') {
+          candidate = { operation_id: view.operation_id, session_id: view.session_id }
+        }
+      } catch { /* Invalid local operation records never become successful UI rows. */ }
     }
-    return { items: [...recent.values()].sort((a, b) => b.updated_at - a.updated_at).slice(0, 20), has_more: cursor < snapshots.length }
+    return { list: { items: [...recent.values()].sort((a, b) => b.updated_at - a.updated_at).slice(0, 20), has_more: cursor < snapshots.length }, candidate }
   }
   return {
     changed, selectionFor,
@@ -346,7 +355,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         await persist(ctx, agent, marker); check(expected, signal)
         return { scope_key: expected, result: project(agent, marker) }
       }
-      if (endpoint === 'ui.import.recent') { exact(payload, []); return { scope_key: expected, result: await scan(expected, signal) } }
+      if (endpoint === 'ui.import.recent') { exact(payload, []); return { scope_key: expected, result: (await scan(expected, signal)).list } }
       if (endpoint === 'ui.import.projects') { exact(payload, []); const result = await read({ endpoint: 'projects', payload: {}, signal }); check(expected, signal); if (result.scope_key !== expected) fail('scope-changed'); return result }
       if (!['ui.import.start', 'ui.import.status', 'ui.import.stop', 'ui.import.resume'].includes(endpoint)) fail('invalid-request')
       const { agent, marker } = await load(payload, expected, signal)
@@ -369,11 +378,10 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
       check(expected, signal); return { scope_key: expected, result: project(agent, marker) }
     },
     async recover(signal?: AbortSignal) {
-      const expected = await capture(signal); const list = await scan(expected, signal)
+      const expected = await capture(signal); const { list, candidate } = await scan(expected, signal, true)
       if (active.size) return list
-      const item = list.items.find(item => ['importing', 'parsing', 'compiling', 'paused'].includes(item.phase))
-      if (item) {
-        const { agent, marker } = await load({ operation_id: item.operation_id, session_id: item.session_id }, expected, signal)
+      if (candidate) {
+        const { agent, marker } = await load(candidate, expected, signal)
         if (control(agent, marker) !== 'stop') launch(agent, marker, true, true)
       }
       return list

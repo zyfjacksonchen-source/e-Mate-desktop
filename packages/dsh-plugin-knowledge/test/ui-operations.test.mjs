@@ -253,3 +253,36 @@ test('resume keeps a frozen parse version conflict and never replaces its plan o
   assert.deepEqual(events(run.ctx.agents.get(prepared.session_id)).filter(event => event.kind === 'ui-import-plan'), before)
   assert.equal(run.backend.compilations.size, 1)
 })
+
+test('bounded recovery finds an older paused import behind more than twenty newer stopped UI rows', async t => {
+  const backend = service(); backend.setParsing('parsing')
+  const first = await harness(t, backend)
+  const file = join(first.root, 'older-original.txt'); await writeFile(file, '应恢复的旧资料。')
+  const older = (await first.ui.call('ui.import.prepare', { paths: [file] })).result
+  await first.ui.call('ui.import.start', ref(older)); await waitPhase(first, older, ['parsing'])
+  await first.dispose()
+  const later = await harness(t, backend, first.root)
+  for (let i = 0; i < 26; i++) {
+    const newer = (await later.ui.call('ui.import.prepare', { paths: [file], title: '已停止 ' + i })).result
+    await later.ui.call('ui.import.stop', ref(newer))
+  }
+  await later.dispose(); backend.setParsing('ready')
+  const restored = await harness(t, backend, first.root)
+  await restored.ui.call('ui.import.recent', {})
+  const visible = (await restored.ui.call('ui.import.recent', {})).result
+  assert.equal(visible.items.length, 20)
+  assert.equal(visible.items.some(item => item.operation_id === older.operation_id), false)
+  // A UI scan may already have cached the unchanged physical records. The
+  // execution scan still needs to consider them, across its 24-record boundary.
+  for (let i = 0; i < 4; i++) {
+    const result = await restored.ui.recover()
+    const active = restored.ctx.agents.list().flatMap(agent => restored.ctx.jobs.list(agent)).filter(job => job.kind === 'knowledge-import' && ['running', 'stopping'].includes(job.status))
+    assert(active.length <= 1)
+    if (!result.has_more) break
+  }
+  const completed = await waitPhase(restored, older, ['complete', 'partial'])
+  assert.equal(completed.phase, 'complete')
+  assert.equal(completed.compiled_count, 1)
+  assert.equal(backend.calls.filter(call => call.path === '/imports' && call.method === 'POST').length, 1)
+  await restored.dispose()
+})
