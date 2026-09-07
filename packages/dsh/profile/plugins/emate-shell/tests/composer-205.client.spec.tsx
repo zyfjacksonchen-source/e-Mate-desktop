@@ -30,6 +30,8 @@ function applyFileImportStyles(button: HTMLButtonElement): void {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   document.head.querySelector('[data-emate-home-test]')?.remove()
   document.head.querySelector('[data-emate-file-import-test]')?.remove()
   delete document.body.dataset.dshDesktopPlatform
@@ -354,5 +356,97 @@ describe('e-Mate 2.0.17 composer projection', () => {
     expect(styles).not.toContain("[data-slot='conversation.composer.bar'] > div")
     expect(styles).not.toContain('margin-top: -12px')
     expect(styles).not.toContain('--emate-composer-frame-bottom')
+  })
+})
+
+
+describe('connector status polling lifecycle', () => {
+  const idle = { schema_version: 1 as const, service: 'xin-business-assistant' as const, name: 'xin-business-assistant' as const, transport: 'streamable-http' as const, state: 'authorization-required' as const, active: false, authorized: false }
+  function visibility() {
+    vi.useFakeTimers()
+    const visible = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true)
+    return {
+      hide: () => { visible.mockReturnValue('hidden'); fireEvent(document, new Event('visibilitychange')) },
+      show: () => { visible.mockReturnValue('visible'); fireEvent(document, new Event('visibilitychange')) },
+      offline: () => { online.mockReturnValue(false); fireEvent(window, new Event('offline')) },
+      online: () => { online.mockReturnValue(true); fireEvent(window, new Event('online')) },
+    }
+  }
+
+  it('keeps one in-flight read per service during a 60 second response, and pauses automatic reads when hidden or offline', async () => {
+    const state = visibility()
+    const finishes: Array<() => void> = []
+    const loadConnections = vi.fn((_signal: AbortSignal) => new Promise<any>(resolve => { finishes.push(() => resolve([])) }))
+    const loadXin = vi.fn((_signal: AbortSignal) => new Promise<typeof idle>(resolve => { finishes.push(() => resolve(idle)) }))
+    const view = render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={loadConnections} loadXin={loadXin} prepareDraft={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect.soft(loadConnections).toHaveBeenCalledTimes(1)
+    expect.soft(loadXin).toHaveBeenCalledTimes(1)
+    await act(async () => { finishes.splice(0).forEach(finish => finish()) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(14_999) })
+    expect.soft(loadConnections).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect.soft(loadConnections).toHaveBeenCalledTimes(2)
+    expect.soft(loadXin).toHaveBeenCalledTimes(2)
+    state.hide()
+    await act(async () => { finishes.splice(0).forEach(finish => finish()); await vi.advanceTimersByTimeAsync(60_000) })
+    expect.soft(loadConnections).toHaveBeenCalledTimes(2)
+    expect.soft(loadXin).toHaveBeenCalledTimes(2)
+    state.show()
+    expect.soft(loadConnections).toHaveBeenCalledTimes(3)
+    expect.soft(loadXin).toHaveBeenCalledTimes(3)
+    state.offline()
+    await act(async () => { finishes.splice(0).forEach(finish => finish()); await vi.advanceTimersByTimeAsync(60_000) })
+    expect.soft(loadConnections).toHaveBeenCalledTimes(3)
+    state.online()
+    expect.soft(loadConnections).toHaveBeenCalledTimes(4)
+    expect.soft(loadXin).toHaveBeenCalledTimes(4)
+    view.unmount()
+    expect(loadConnections.mock.calls.at(-1)?.[0].aborted).toBe(true)
+    expect(loadXin.mock.calls.at(-1)?.[0].aborted).toBe(true)
+  })
+
+  it.each(['ensure', 'disconnect'] as const)('does not cancel explicit %s while backgrounded or offline', async action => {
+    const state = visibility()
+    let finish!: (value: typeof idle) => void
+    let signal!: AbortSignal
+    const invoke = vi.fn((value: AbortSignal) => { signal = value; return new Promise<typeof idle>(resolve => { finish = resolve }) })
+    const loadConnections = vi.fn(async () => [])
+    render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={loadConnections} loadXin={async () => action === 'ensure' ? idle : { ...idle, state: 'ready', active: true, authorized: true }} ensureXin={action === 'ensure' ? invoke : undefined} disconnectXin={action === 'disconnect' ? invoke : undefined} prepareDraft={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await act(async () => {})
+    fireEvent.click(screen.getByRole('button', { name: action === 'ensure' ? '连接芯助手' : '断开并忘记芯助手' }))
+    state.hide(); state.offline()
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(signal.aborted).toBe(false)
+    expect(invoke).toHaveBeenCalledTimes(1)
+    await act(async () => { finish(idle) })
+    expect(signal.aborted).toBe(false)
+    const calls = loadConnections.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await act(async () => {})
+    expect(loadConnections).toHaveBeenCalledTimes(calls + 1)
+  })
+
+  it('does not restore previous-account status from late reads after an identity change', async () => {
+    let changed!: () => void
+    let finishConnections!: (value: any) => void
+    let finishXin!: (value: any) => void
+    const loadConnections = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finishConnections = resolve })).mockResolvedValue([])
+    const loadXin = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finishXin = resolve })).mockResolvedValue(idle)
+    render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={loadConnections} loadXin={loadXin} prepareDraft={vi.fn()}
+      subscribeIdentity={listener => { changed = listener; return () => {} }} />)
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await act(async () => {
+      changed()
+      finishConnections([{ id: 'feishu', state: 'connected' }])
+      finishXin({ ...idle, state: 'ready', active: true, authorized: true, binding: { tenant_id: 'old-tenant', user_id: 2, principal_id: 3 } })
+    })
+    fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
+    await waitFor(() => expect(screen.getByText('待授权')).toBeTruthy())
+    expect(screen.queryByText('已连接')).toBeNull()
+    expect(screen.queryByText(/old-tenant/)).toBeNull()
   })
 })

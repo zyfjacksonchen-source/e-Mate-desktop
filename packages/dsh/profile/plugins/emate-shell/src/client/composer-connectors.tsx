@@ -70,6 +70,8 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
   loader.current = loadConnections
   const [open, setOpen] = useState(false)
   const [reload, setReload] = useState(0)
+  const lastConnectionsReload = useRef(0)
+  const lastXinReload = useRef(0)
   const [items, setItems] = useState<ConnectionItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -84,6 +86,7 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
   xinLoader.current = loadXin
   const session = useRef(sessionId)
   session.current = sessionId
+  const identityRevision = useRef(0)
   const xinRevision = useRef(0)
   const operation = useRef<{ controller: AbortController; revision: number; sessionId: string } | null>(null)
   const invalidateXin = () => {
@@ -92,7 +95,7 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
     setXin(undefined); setXinBusy(null); setXinChecking(false); setXinNotice(''); setXinError('')
   }
   useLayoutEffect(() => { invalidateXin() }, [sessionId])
-  useEffect(() => subscribeIdentity?.(() => { invalidateXin(); setOpen(false); setItems([]); setError('') }), [subscribeIdentity])
+  useEffect(() => subscribeIdentity?.(() => { identityRevision.current++; invalidateXin(); setOpen(false); setItems([]); setLoading(false); setError('') }), [subscribeIdentity])
   useEffect(() => () => { xinRevision.current++; operation.current?.controller.abort(); operation.current = null }, [])
   const runXin = (action: 'ensure' | 'disconnect') => {
     const invoke = action === 'ensure' ? ensureXin : disconnectXin
@@ -118,9 +121,15 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
   }
   useEffect(() => {
     if (!open || !xinLoader.current) return
+    const manual = lastXinReload.current !== reload
+    lastXinReload.current = reload
     const controller = new AbortController()
-    const refresh = async () => {
-      if (operation.current) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let running = false
+    const visible = () => document.visibilityState !== 'hidden' && navigator.onLine !== false
+    const refresh = async (manual = false) => {
+      if (controller.signal.aborted || running || !manual && !visible() || operation.current) return
+      running = true
       const revision = ++xinRevision.current
       setXinChecking(true)
       try {
@@ -128,11 +137,25 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
         if (!controller.signal.aborted && revision === xinRevision.current) { setXin(next); setXinNotice(''); setXinError(next.state === 'unavailable' && !next.disconnection ? '芯助手暂不可用，请重新检查连接。' : '') }
       } catch {
         if (!controller.signal.aborted && revision === xinRevision.current) { setXin(undefined); setXinError('芯助手状态暂不可用，请重试。') }
-      } finally { if (!controller.signal.aborted && revision === xinRevision.current) setXinChecking(false) }
+      } finally {
+        running = false
+        if (!controller.signal.aborted) {
+          if (revision === xinRevision.current) setXinChecking(false)
+          if (visible()) timer = setTimeout(() => { void refresh() }, 15_000)
+        }
+      }
     }
-    void refresh()
-    const timer = setInterval(() => { void refresh() }, 15000)
-    return () => { controller.abort(); clearInterval(timer) }
+    const wake = () => { clearTimeout(timer); if (visible()) void refresh() }
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('online', wake)
+    window.addEventListener('offline', wake)
+    // Only automatic status polling pauses; explicit refresh and Host operations remain available.
+    void refresh(manual)
+    return () => {
+      controller.abort(); clearTimeout(timer)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake); window.removeEventListener('offline', wake)
+    }
   }, [open, reload, xinReload, sessionId])
   useEffect(() => { setOpen(false); setItems([]); setError('') }, [sessionId])
   useLayoutEffect(() => {
@@ -166,21 +189,42 @@ export function ComposerConnectors({ LinkIcon, sessionId, loadConnections, prepa
   }, [open])
   useEffect(() => {
     if (!open) return
+    const manual = lastConnectionsReload.current !== reload
+    lastConnectionsReload.current = reload
     const controller = new AbortController()
-    let sequence = 0
-    const refresh = async () => {
-      const request = ++sequence
+    const identity = identityRevision.current
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let running = false
+    const visible = () => document.visibilityState !== 'hidden' && navigator.onLine !== false
+    const current = () => !controller.signal.aborted && identity === identityRevision.current
+    const refresh = async (manual = false) => {
+      if (!current() || running || !manual && !visible()) return
+      running = true
       setLoading(true)
       try {
         const next = await loader.current(controller.signal)
-        if (!controller.signal.aborted && request === sequence) setItems(next)
+        if (current()) setItems(next)
       } catch {
-        if (!controller.signal.aborted && request === sequence) setItems(CONNECTIONS.map(({ id }) => ({ id, state: 'failed' })))
-      } finally { if (!controller.signal.aborted && request === sequence) setLoading(false) }
+        if (current()) setItems(CONNECTIONS.map(({ id }) => ({ id, state: 'failed' })))
+      } finally {
+        running = false
+        if (current()) {
+          setLoading(false)
+          if (visible()) timer = setTimeout(() => { void refresh() }, 15_000)
+        }
+      }
     }
-    void refresh()
-    const timer = setInterval(() => { void refresh() }, 15_000)
-    return () => { controller.abort(); clearInterval(timer) }
+    const wake = () => { clearTimeout(timer); if (visible()) void refresh() }
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('online', wake)
+    window.addEventListener('offline', wake)
+    // Only automatic status polling pauses; explicit refresh and Host operations remain available.
+    void refresh(manual)
+    return () => {
+      controller.abort(); clearTimeout(timer)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake); window.removeEventListener('offline', wake)
+    }
   }, [open, reload, sessionId])
   return <div className={css.root}>
     <button
