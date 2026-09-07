@@ -200,19 +200,27 @@ export function apply(ctx: any): void {
   const recovery = createKnowledgeRecovery(ctx, { workflow })
   let recoveryTimer: (() => void) | undefined
   let recovering = false, recoveryRequested = false
+  let scanImports = true, scanCompilations = true
   let stopped = false
-  const scheduleRecovery = () => {
-    if (stopped || recoveryTimer) return
-    if (recovering) { recoveryRequested = true; return }
+  const scheduleRecovery = (continuePass = false) => {
+    if (stopped) return
+    if (!continuePass) recoveryRequested = true
+    if (recovering || recoveryTimer) return
+    if (recoveryRequested) { recoveryRequested = false; scanImports = true; scanCompilations = true }
     recoveryTimer = ctx.timeout(() => {
       recoveryTimer = undefined
       recovering = true
-      void ui.recover().then(async imports => {
-        const result = await recovery.scan()
-        if (result.has_more || imports.has_more) recoveryRequested = true
-      }).catch(() => { /* Preserve physical checkpoints; later identity/Job events retry recovery. */ }).finally(() => {
+      void (async () => {
+        // Each reader completes one pass independently; never wrap an exhausted
+        // cursor merely because the other reader still has a remaining batch.
+        if (scanImports) scanImports = (await ui.recover()).has_more
+        if (scanCompilations) scanCompilations = (await recovery.scan()).has_more
+      })().catch(() => {
+        scanImports = false; scanCompilations = false
+        // Preserve physical checkpoints; later identity/Job events retry recovery.
+      }).finally(() => {
         recovering = false
-        if (recoveryRequested) { recoveryRequested = false; scheduleRecovery() }
+        if (recoveryRequested || scanImports || scanCompilations) scheduleRecovery(true)
       })
     }, 250)
   }
@@ -224,7 +232,7 @@ export function apply(ctx: any): void {
   ctx.effect(() => () => host.dispose(), 'emate.knowledge: release pending reads')
   ctx.effect(() => {
     // Native identity restores persisted access asynchronously on startup.
-    void Promise.resolve().then(() => ctx.emateIdentity.state()).then(scheduleRecovery, () => {})
+    void Promise.resolve().then(() => ctx.emateIdentity.state()).then(() => scheduleRecovery(), () => {})
     return async () => { stopped = true; recoveryTimer?.(); await ui.dispose(); await recovery.dispose(); await workflow.dispose() }
   }, 'emate.knowledge: bounded local startup recovery')
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: GRAPH_ASSET, async handler(req: any, res: any) {

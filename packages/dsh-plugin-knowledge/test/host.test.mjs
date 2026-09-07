@@ -278,3 +278,24 @@ test('revision Host URL retains the bounded offset and fixed corpus snapshot', (
   assert.equal(url.searchParams.get('offset'), '100'); assert.equal(url.searchParams.get('corpus_revision'), corpus_revision)
   for (const payload of [{ offset: 1 }, { offset: 10001, corpus_revision }, { offset: -1 }, { offset: 0.5 }]) assert.throws(() => knowledgeTarget('revisions', payload))
 })
+
+test('Host finishes unequal recovery passes without wrapping the completed reader and restarts for a new identity event', async t => {
+  const { mkdtemp, rm } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-recovery-pass-'))
+  const run = await nativeApplyReview(t, root, { subject: 'xin-a', epoch: 1, captures: [], calls: [] })
+  let imports = 0, compilations = 0
+  run.ctx.emateKnowledgeUi.recover = async () => ({ items: [], has_more: ++imports % 2 !== 0 })
+  run.ctx.emateKnowledgeRecovery.scan = async () => ({ items: [], recovered: 0, has_more: ++compilations % 3 !== 0 })
+  const waitFor = async predicate => {
+    const end = Date.now() + 5000
+    while (!predicate()) { assert(Date.now() < end, 'recovery pass did not finish'); await new Promise(resolve => setTimeout(resolve, 20)) }
+  }
+  await waitFor(() => compilations === 3)
+  await new Promise(resolve => setTimeout(resolve, 350))
+  assert.equal(imports, 2); assert.equal(compilations, 3)
+  run.ctx.emit('credentials/updated', 'E_MATE_ENTERPRISE_SESSION')
+  await waitFor(() => compilations === 6)
+  await new Promise(resolve => setTimeout(resolve, 350))
+  assert.equal(imports, 4); assert.equal(compilations, 6)
+  await run.dispose(); await rm(root, { recursive: true, force: true })
+})

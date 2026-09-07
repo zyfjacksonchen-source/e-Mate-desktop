@@ -381,3 +381,30 @@ test('stop and account switch during a continuation cannot start compilation', a
     assert.equal(backend.compilations.size, 0); assert.equal(run.adapter.requests.length, 0)
   }
 })
+
+test('UI recent scans cannot put background import and compilation recovery out of phase', async () => {
+  const { createKnowledgeRecovery } = await import('../src/recovery.ts')
+  const identity = { localAccountPrincipal: () => ({ tenantId: 'test', userId: 'test' }) }
+  const snapshots = Array.from({ length: 50 }, (_, index) => ({ header: { id: String(index).padStart(8, '0') + '-0000-4000-a000-000000000000', createdAt: 50 - index }, revision: 'revision-1' }))
+  let lists = 0, reads = 0
+  const ctx = { get: () => identity, agents: { list: () => [], get: () => undefined }, jobs: { list: () => [] }, sessionPersistence: {
+    async listSnapshots() { lists++; return structuredClone(snapshots) },
+    async readFrom(id) { reads++; return { meta: { id }, events: [] } },
+  } }
+  const workflow = {}
+  const ui = createKnowledgeUiOperations(ctx, { workflow, read: async () => { throw Error('Unexpected network') }, resolveSelection: async () => { throw Error('Unexpected model') } })
+  const recovery = createKnowledgeRecovery(ctx, { workflow })
+  try {
+    await ui.call('ui.import.recent', {})
+    const rounds = []
+    for (let index = 0; index < 3; index++) {
+      const imports = await ui.recover(), compilations = await recovery.scan()
+      rounds.push([imports.has_more, compilations.has_more])
+      // Exercise the user opening/refreshing the panel between every batch.
+      if (index < 2) await ui.call('ui.import.recent', {})
+    }
+    assert.deepEqual(rounds, [[true, true], [true, true], [false, false]])
+    assert.equal(lists, 9)
+    assert.equal(reads, 150)
+  } finally { await ui.dispose(); await recovery.dispose() }
+})

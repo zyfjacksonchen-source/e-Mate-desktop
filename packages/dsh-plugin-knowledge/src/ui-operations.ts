@@ -42,13 +42,13 @@ function sourceVersion(source: any) {
 /** UI admission and projection only; execution remains native Jobs, Sessions and the existing workflow. */
 export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveSelection }: { workflow: any; read: KnowledgeUiRead; resolveSelection(exec?: Execution): Promise<Selection> }) {
   const identity = ctx.get('emateIdentity')
-  let lifetime = new AbortController(), disposed = false, owner = ownerOf(identity), cursor = 0
+  let lifetime = new AbortController(), disposed = false, owner = ownerOf(identity), cursor = 0, recoveryCursor = 0
   const handles = new Map<string, any>(), active = new Map<string, Entry>(), recent = new Map<string, UiImportStatus>()
   const loading = new Map<string, Promise<any>>(), scanned = new Map<string, string>()
   function changed() {
     const next = ownerOf(identity)
     if (next === owner) return
-    owner = next; lifetime.abort(); lifetime = new AbortController(); cursor = 0; recent.clear(); scanned.clear()
+    owner = next; lifetime.abort(); lifetime = new AbortController(); cursor = 0; recoveryCursor = 0; recent.clear(); scanned.clear()
     for (const entry of active.values()) { entry.shutdown = true; entry.controller.abort() }
   }
   function check(expected: string, signal?: AbortSignal) {
@@ -332,8 +332,12 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
     let candidate: Reference | undefined
     const snapshots = await ctx.sessionPersistence.listSnapshots(signal); check(expected, signal)
     snapshots.sort((a: any, b: any) => b.header.createdAt - a.header.createdAt)
-    if (cursor >= snapshots.length) cursor = 0
-    const batch = snapshots.slice(cursor, cursor + 24); cursor += batch.length
+    // Reading the recent-task panel must not advance background recovery.
+    let offset = forRecovery ? recoveryCursor : cursor
+    if (offset >= snapshots.length) offset = 0
+    const batch = snapshots.slice(offset, offset + 24); offset += batch.length
+    if (forRecovery) recoveryCursor = offset
+    else cursor = offset
     for (const item of batch) {
       if (item.header.parentSession || !forRecovery && scanned.get(item.header.id) === item.revision) continue
       const stored = await ctx.sessionPersistence.readFrom(item.header.id, 0, signal).catch(() => undefined); check(expected, signal)
@@ -351,7 +355,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         }
       } catch { /* Invalid local operation records never become successful UI rows. */ }
     }
-    return { list: { items: [...recent.values()].sort((a, b) => b.updated_at - a.updated_at).slice(0, 20), has_more: cursor < snapshots.length }, candidate }
+    return { list: { items: [...recent.values()].sort((a, b) => b.updated_at - a.updated_at).slice(0, 20), has_more: offset < snapshots.length }, candidate }
   }
   return {
     changed, selectionFor,
