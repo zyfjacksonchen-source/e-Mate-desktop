@@ -35,7 +35,11 @@ interface SkillProvider {
 
 interface AgentOwner { session?: { header?: { cwd?: string } } }
 interface ToolExecution { agent?: AgentOwner; signal: AbortSignal }
+interface SvgRenderer {
+  renderSvgPage(request: { svg: string; width: number; height: number; signal?: AbortSignal }): Promise<{ png: Uint8Array; width: number; height: number }>
+}
 interface OfficeContext {
+  inject(dependencies: string[], callback: (context: { desktopRuntime: Partial<SvgRenderer>; effect(effect: () => () => void): void }) => void): unknown
   skills: { registerProvider(create: () => SkillProvider): () => void }
   tools: { register(definition: unknown): () => void }
   jobs: {
@@ -50,7 +54,7 @@ interface OfficeContext {
 
 interface PublishedFile {
   bytes: number
-  format: OfficeFormat
+  format: OfficeFormat | 'png'
   name: string
   relative_path: string
 }
@@ -133,7 +137,7 @@ function format(value: unknown): OfficeFormat {
   return value as OfficeFormat
 }
 
-function filename(value: unknown, expected: OfficeFormat): string {
+function filename(value: unknown, expected: OfficeFormat | 'png'): string {
   if (typeof value !== 'string' || value !== value.normalize('NFC') || value !== value.trim()
     || value === '' || value.startsWith('.') || Buffer.byteLength(value, 'utf8') > 160
     || /[<>:"/\\|?*\u0000-\u001f]/u.test(value) || /[. ]$/u.test(value)
@@ -181,7 +185,7 @@ function collisionName(name: string, index: number): string {
   return `${name.slice(0, -extension.length)}-${index}${extension}`
 }
 
-async function publish(root: string, requestedName: string, data: Buffer, requestedFormat: OfficeFormat, signal: AbortSignal): Promise<PublishedFile> {
+async function publish(root: string, requestedName: string, data: Buffer, requestedFormat: OfficeFormat | 'png', signal: AbortSignal): Promise<PublishedFile> {
   if (data.byteLength < 1 || data.byteLength > MAX_FILE_BYTES) throw new Error('Office output exceeds the 32 MiB limit')
   const directory = await officeDirectory(root)
   const temporary = join(directory, `.office-${randomUUID()}.tmp`)
@@ -321,6 +325,13 @@ const readOutput = {
 
 /** Register bundled Skills and two real Tool/Job paths on target Harness seams. */
 export function apply(ctx: OfficeContext): void {
+  let svgRenderer: Partial<SvgRenderer> | undefined
+  // Native injection stays optional to the existing CLI Office workflows.
+  ctx.inject(['desktopRuntime'], host => {
+    const runtime = host.desktopRuntime
+    svgRenderer = runtime
+    host.effect(() => () => { if (svgRenderer === runtime) svgRenderer = undefined })
+  })
   ctx.skills.registerProvider((): SkillProvider => ({
     name: PROVIDER_NAME,
     async list(options) { options.signal?.throwIfAborted(); return SPECS.map(candidate) },
@@ -333,13 +344,13 @@ export function apply(ctx: OfficeContext): void {
   ctx.effect(() => ctx.jobs.attachController('emate-office'), 'emate.office: target Job controller')
   ctx.effect(() => ctx.tools.register({
     name: 'office_write',
-    description: 'Create a local Office file. DOCX also supports styled creation, template filling and text replacement as described in the documents Skill. Other formats use normalized JSON. Always writes a new file and preserves the source.',
+    description: 'Create a local Office file. DOCX supports styled creation, template filling and text replacement. PNG renders a standalone workspace SVG using the native Desktop renderer: document={source_svg,width,height}. Other formats use normalized JSON. Always writes a new file and preserves the source.',
     parameters: {
       type: 'object', additionalProperties: false, required: ['document', 'filename', 'format'],
       properties: {
         document: { type: 'object', description: 'Normalized format-specific content described by the Office Skill.' },
         filename: { type: 'string', description: 'Safe output filename with the matching extension.' },
-        format: { type: 'string', enum: ['docx', 'xlsx', 'pptx', 'pdf'] },
+        format: { type: 'string', enum: ['docx', 'xlsx', 'pptx', 'pdf', 'png'] },
       },
     },
     output: writeOutput,
@@ -348,12 +359,29 @@ export function apply(ctx: OfficeContext): void {
     async execute(args: unknown, exec: ToolExecution) {
       assertWorkspaceWrite(ctx, exec.agent)
       const input = args as Record<string, unknown>
-      const targetFormat = format(input.format)
+      const targetFormat = input.format === 'png' ? 'png' : format(input.format)
       const targetName = filename(input.filename, targetFormat)
       const root = await workspace(exec.agent)
       const started = startJob(ctx, exec.agent, exec.signal, `Write ${targetName}`, async jobSignal => {
         jobSignal.throwIfAborted()
-        const data = targetFormat === 'docx'
+        let data: Buffer
+        if (targetFormat === 'png') {
+          const renderer = svgRenderer
+          if (renderer?.renderSvgPage === undefined) throw new Error('Native Desktop SVG renderer is unavailable')
+          const document = input.document as Record<string, unknown> | null
+          if (document === null || typeof document !== 'object' || Array.isArray(document)
+            || Object.keys(document).some(key => !['source_svg', 'width', 'height'].includes(key))
+            || typeof document.width !== 'number' || typeof document.height !== 'number') {
+            throw new Error('SVG preview requires source_svg, width and height')
+          }
+          const source = await workspaceFile(root, document.source_svg)
+          if (extname(source.name).toLowerCase() !== '.svg') throw new Error('SVG preview source must be an SVG file')
+          const svg = new TextDecoder('utf-8', { fatal: true }).decode(source.buffer)
+          jobSignal.throwIfAborted()
+          const rendered = await renderer.renderSvgPage({ svg, width: document.width, height: document.height, signal: jobSignal })
+          if (rendered.width !== document.width || rendered.height !== document.height) throw new Error('SVG preview dimensions do not match the request')
+          data = Buffer.from(rendered.png)
+        } else data = targetFormat === 'docx'
           ? await writeWord(root, input.document, jobSignal)
           : await writeOfficeBuffer(targetFormat, input.document)
         jobSignal.throwIfAborted()

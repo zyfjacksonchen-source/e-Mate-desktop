@@ -22,6 +22,7 @@ test('registers five Skills with accurate runtime states and two target Tool/Job
   const tools = []
   assert.deepEqual(inject, ['skills', 'tools', 'jobs', 'sandboxPolicy', 'emateCapabilities'])
   apply({
+    inject() {},
     skills: { registerProvider(create) { provider = create(); return () => {} } },
     tools: { register(definition) { tools.push(definition); return () => {} } },
     jobs: { attachController() { return () => {} } },
@@ -248,7 +249,18 @@ test('Tools stay inside the current workspace and never overwrite output', async
   const tools = []
   let jobIndex = 0
   let sandboxMode = 'read-only'
+  const previewCalls = []
+  let clearNativeRenderer
+  const previewPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jKAAAAABJRU5ErkJggg==', 'base64')
   apply({
+    inject(dependencies, callback) {
+      assert.deepEqual(dependencies, ['desktopRuntime'])
+      callback({ desktopRuntime: { async renderSvgPage(request) {
+        request.signal.throwIfAborted()
+        previewCalls.push(request)
+        return { png: previewPng, width: request.width, height: request.height }
+      } }, effect(register) { clearNativeRenderer = register() } })
+    },
     skills: { registerProvider() { return () => {} } },
     tools: { register(definition) { tools.push(definition); return () => {} } },
     jobs: {
@@ -271,6 +283,22 @@ test('Tools stay inside the current workspace and never overwrite output', async
   )
   assert.equal(jobIndex, 0)
   sandboxMode = 'workspace-write'
+  await writeFile(join(root, 'preview.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>')
+  const previewArgs = { format: 'png', filename: '预览.png', document: { source_svg: 'preview.svg', width: 1, height: 1 } }
+  const preview = await write.execute(previewArgs, execution)
+  assert.equal(preview.format, 'png')
+  assert.deepEqual(await readFile(join(root, preview.relative_path)), previewPng)
+  assert.equal(previewCalls.length, 1)
+  assert.match(previewCalls[0].svg, /<rect/u)
+  await assert.rejects(write.execute({ ...previewArgs, document: { ...previewArgs.document, source_svg: '../outside.svg' } }, execution))
+  assert.equal(previewCalls.length, 1)
+  sandboxMode = 'read-only'
+  await assert.rejects(write.execute(previewArgs, execution), /read-only sandbox policy/u)
+  assert.equal(previewCalls.length, 1)
+  sandboxMode = 'workspace-write'
+  clearNativeRenderer()
+  await assert.rejects(write.execute(previewArgs, execution), /Native Desktop SVG renderer is unavailable/u)
+  assert.equal(previewCalls.length, 1)
   const cancelled = new AbortController()
   cancelled.abort(new Error('cancelled before start'))
   await assert.rejects(

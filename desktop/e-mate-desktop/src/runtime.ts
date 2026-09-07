@@ -149,6 +149,20 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   requestModeChange(mode: DesktopShellMode): Promise<void>
 }
 
+/** Standalone SVG content supplied by an authorized workspace owner. */
+export interface DesktopSvgRenderRequest {
+  svg: string
+  width: number
+  height: number
+  signal?: AbortSignal
+}
+
+export interface DesktopSvgRenderResult {
+  png: Uint8Array
+  width: number
+  height: number
+}
+
 /** Electron bootstrap capability supplied before the profile tree mounts. */
 export interface DesktopRuntime {
   /** Current Electron platform. */
@@ -180,6 +194,9 @@ export interface DesktopRuntime {
 
   /** Open the platform's native single-directory chooser. */
   pickDirectory(): Promise<string | null>
+
+  /** Render a bounded standalone SVG without showing or focusing a window. */
+  renderSvgPage?(request: DesktopSvgRenderRequest): Promise<DesktopSvgRenderResult>
 
   /**
    * Contribute one command to the native tray for the current Cordis lifetime.
