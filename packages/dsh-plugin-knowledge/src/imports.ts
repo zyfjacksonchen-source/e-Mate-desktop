@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { basename, isAbsolute, resolve } from 'node:path'
+import { basename, isAbsolute, relative, resolve, sep } from 'node:path'
 
 export const API_ROOT = 'https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1'
 export const MAX_ORIGINAL_BYTES = 20 * 1024 * 1024
@@ -7,6 +7,61 @@ export const HASH = /^[a-f0-9]{64}$/
 export const UUID = /^[a-f0-9-]{36}$/
 export const OPERATION = /^[A-Za-z0-9_-]{16,80}$/
 export type Scope = { kind: 'public' | 'uploader-private' } | { kind: 'project'; project_id: number }
+export type SourceRef = { source_id: string; source_version: string; parse_revision: string }
+export type GraphPath = { namespace_id: string; relative_path: string; layer: 'expert' | 'case' | 'source'; expected_binding: null | { binding_revision: string; source_id: string; source_version: string } }
+export type GraphFile = { path: string; graph_path: GraphPath; source_ref?: SourceRef }
+export type GraphOptions = { graph_files?: GraphFile[]; graph_root?: { path: string; namespace_id: string; layer: GraphPath['layer'] } }
+const CANONICAL_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
+function exactGraph(value: any, keys: string[]) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) fail('invalid-graph-path')
+}
+function graphLayer(value: unknown) { return ['expert', 'case', 'source'].includes(value as string) }
+export function validateGraphPath(value: any): asserts value is GraphPath {
+  exactGraph(value, ['namespace_id', 'relative_path', 'layer', 'expected_binding'])
+  if (!CANONICAL_UUID.test(value.namespace_id) || !graphLayer(value.layer) || typeof value.relative_path !== 'string'
+    || !value.relative_path || value.relative_path.length > 500 || !value.relative_path.endsWith('.md')
+    || /[\\:%?#\x00-\x1f\x7f]/u.test(value.relative_path) || value.relative_path.split('/').some((part: string) => !part || part === '.' || part === '..')) fail('invalid-graph-path')
+  if (value.expected_binding !== null) {
+    exactGraph(value.expected_binding, ['binding_revision', 'source_id', 'source_version'])
+    if (!HASH.test(value.expected_binding.binding_revision) || !CANONICAL_UUID.test(value.expected_binding.source_id) || !HASH.test(value.expected_binding.source_version)) fail('invalid-graph-path')
+  }
+}
+export function graphOptions(value: GraphOptions): GraphOptions {
+  if (value.graph_files !== undefined && value.graph_root !== undefined) fail('invalid-graph-path')
+  if (value.graph_root !== undefined) {
+    const root = value.graph_root; exactGraph(root, ['path', 'namespace_id', 'layer'])
+    if (typeof root.path !== 'string' || !root.path || root.path.length > 4096 || !CANONICAL_UUID.test(root.namespace_id) || !graphLayer(root.layer)) fail('invalid-graph-path')
+    return { graph_root: structuredClone(root) }
+  }
+  if (value.graph_files === undefined) return {}
+  if (!Array.isArray(value.graph_files) || !value.graph_files.length || value.graph_files.length > 100) fail('invalid-graph-path')
+  const paths = new Set<string>()
+  for (const file of value.graph_files) {
+    exactGraph(file, ['path', 'graph_path', 'source_ref']); validateGraphPath(file.graph_path)
+    if (typeof file.path !== 'string' || !file.path || file.path.length > 4096 || paths.has(file.path)) fail('invalid-graph-path')
+    paths.add(file.path)
+    if (file.source_ref !== undefined) {
+      exactGraph(file.source_ref, ['source_id', 'source_version', 'parse_revision'])
+      if (!CANONICAL_UUID.test(file.source_ref.source_id) || !HASH.test(file.source_ref.source_version) || !HASH.test(file.source_ref.parse_revision)) fail('invalid-graph-path')
+    }
+  }
+  return { graph_files: structuredClone(value.graph_files) }
+}
+/** A ready original can still have a replacement binding awaiting the existing compilation commit. */
+export function graphReceipt(receipt: any, graph: GraphPath, version: string) {
+  if (!['pending', 'active'].includes(receipt.graph_binding_status)) fail('invalid-response')
+  const binding = receipt.graph_binding
+  if (receipt.graph_binding_status === 'pending') {
+    if (binding !== null) fail('invalid-response')
+  } else {
+    exactGraph(binding, ['namespace_id', 'relative_path', 'layer', 'binding_revision', 'source_id', 'source_version', 'parse_revision'])
+    if (binding.namespace_id !== graph.namespace_id || binding.relative_path !== graph.relative_path || binding.layer !== graph.layer
+      || !HASH.test(binding.binding_revision) || !CANONICAL_UUID.test(binding.source_id) || binding.source_version !== version
+      || !HASH.test(binding.parse_revision) || receipt.source?.id !== binding.source_id || receipt.source?.file_hash !== version
+      || receipt.source?.parse_revision !== binding.parse_revision || receipt.source?.status !== 'ready') fail('invalid-response')
+  }
+  return { graph_binding_status: receipt.graph_binding_status as 'pending' | 'active', graph_binding: binding }
+}
 export type Execution = { agent: any; signal?: AbortSignal; rootCallId?: string; xinSubject?: string }
 export function fail(code: string, message = '知识任务未完成，请回查原任务。'): never { throw Object.assign(new Error(message), { code }) }
 export function digest(value: unknown): string {
@@ -128,14 +183,14 @@ export function decodeXinReply(raw: any): any {
 export type BindXin = (exec: Execution, expectedSubject?: string) => Promise<string>
 export type ProjectCall = (name: string, args: Record<string, unknown>, exec: Execution, signal?: AbortSignal) => Promise<any>
 export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, assertExecution: (exec: Execution, owner: string) => void, xinCall?: ProjectCall, bindXin?: BindXin) {
-  type ImportOptions = { paths: string[]; operationId: string; title?: string; publisher?: string; scope?: Scope; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }
+  type ImportOptions = GraphOptions & { paths: string[]; operationId: string; title?: string; publisher?: string; scope?: Scope; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }
   const activeBatches = new Map<string, { requestHash: string; promise: Promise<any> }>()
   const batchRequest = (options: ImportOptions) => {
     if (!OPERATION.test(options.operationId) || !Array.isArray(options.paths) || !options.paths.length || options.paths.length > 100 || options.paths.some(path => typeof path !== 'string' || !path || path.length > 4096)) fail('invalid-files')
     for (const text of [options.title, options.publisher]) if (text !== undefined && (typeof text !== 'string' || !text || text.length > 300)) fail('invalid-request')
     const scope = options.scope ?? { kind: 'uploader-private' }
     if (!['uploader-private', 'public', 'project'].includes(scope.kind) || (scope.kind === 'project' && (!Number.isSafeInteger(scope.project_id) || scope.project_id < 1))) fail('invalid-request')
-    return structuredClone({ paths: options.paths, scope, title: options.title ?? null, publisher: options.publisher ?? '本人上传', supersedes: options.supersedes ?? null })
+    return structuredClone({ paths: options.paths, scope, title: options.title ?? null, publisher: options.publisher ?? '本人上传', supersedes: options.supersedes ?? null, ...graphOptions(options) })
   }
   const readOriginal = async (fs: any, file: any, signal?: AbortSignal) => {
     const before = await fs.stat(file.target, signal)
@@ -158,12 +213,36 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
     let files
     try { files = await collectOriginals(fs, request.paths, exec.agent.session.header.cwd, exec.signal) }
     catch (error) { exec.signal?.throwIfAborted(); if (snapshot) fail('source-changed', '原批次的文件清单已变化，请查看原回执。'); throw error }
+    const graphByTarget = new Map<unknown, { graph_path: GraphPath; source_ref?: SourceRef }>()
+    if (request.graph_files) for (const item of request.graph_files as GraphFile[]) {
+      const target = await fs.resolve(item.path, { cwd: exec.agent.session.header.cwd, signal: exec.signal })
+      if (!files.some(file => file.target.targetKey === target.targetKey && file.filename.endsWith('.md')) || graphByTarget.has(target.targetKey)) fail('invalid-graph-path')
+      graphByTarget.set(target.targetKey, { graph_path: item.graph_path, ...(item.source_ref ? { source_ref: item.source_ref } : {}) })
+    }
+    if (request.graph_root) {
+      const root = await fs.resolve(request.graph_root.path, { cwd: exec.agent.session.header.cwd, signal: exec.signal })
+      if ((await fs.stat(root, exec.signal))?.type !== 'directory') fail('invalid-graph-path')
+      for (const file of files) {
+        if (!fs.contains(root, file.target)) fail('outside-source-folder')
+        if (!file.filename.endsWith('.md')) continue
+        const path = relative(fs.processPath(root), fs.processPath(file.target)).split(sep).join('/')
+        const graph_path = { namespace_id: request.graph_root.namespace_id, layer: request.graph_root.layer, relative_path: path, expected_binding: null }
+        validateGraphPath(graph_path); graphByTarget.set(file.target.targetKey, { graph_path })
+      }
+    }
+    const graphKeys = new Set<string>()
+    for (const { graph_path } of graphByTarget.values()) {
+      const key = digest([graph_path.namespace_id, graph_path.relative_path.normalize('NFC').toLowerCase()])
+      if (graphKeys.has(key)) fail('invalid-graph-path'); graphKeys.add(key)
+    }
     const manifest = []; const prepared = []
     for (const file of files) {
       assertExecution(exec, owner)
       const { bytes, sha256 } = await readOriginal(fs, file, exec.signal)
-      const entry = { target_key: file.target.targetKey, filename: file.filename, sha256, byte_length: bytes.length }
-      manifest.push(entry); prepared.push({ ...file, sha256, byte_length: bytes.length })
+      const graph: { graph_path?: GraphPath; source_ref?: SourceRef } = graphByTarget.get(file.target.targetKey) ?? {}
+      if ('source_ref' in graph && graph.source_ref && graph.source_ref.source_version !== sha256) fail('source-changed')
+      const entry = { target_key: file.target.targetKey, filename: file.filename, sha256, byte_length: bytes.length, ...graph }
+      manifest.push(entry); prepared.push({ ...file, sha256, byte_length: bytes.length, ...graph })
     }
     if (snapshot && digest(snapshot.files) !== digest(manifest)) fail('source-changed', '原批次的文件清单或内容已变化，未创建新的子操作；请查看原回执。')
     if (!snapshot) await persist(ctx, exec.agent, { kind: 'import-batch-files', owner, batchId: options.operationId, files: manifest })
@@ -196,10 +275,32 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
     const sources = []
     for (const file of files) {
       const { bytes, sha256 } = await readOriginal(fs, file, exec.signal)
-      const find = async () => call('find_imported_source', { project_id: options.scope.project_id, sha256, kind: 'knowledge' })
+      const find = async () => call('find_imported_source', { project_id: options.scope.project_id, sha256, kind: 'knowledge', ...(file.graph_path ? { graph_path: file.graph_path } : {}) })
       let result: any
       try { result = await find() } catch (error: any) { if (error.code !== 'not-found') throw error }
-      if (!result) {
+      if (file.graph_path) {
+        const old = events(exec.agent).find(event => event.kind === 'project-import-request' && event.owner === owner && event.batchId === options.operationId && event.target_key === file.target.targetKey)
+        const source = result?.source
+        const reused = file.source_ref ?? (source?.status === 'ready' && source.file_hash === sha256 && CANONICAL_UUID.test(source.id) && HASH.test(source.parse_revision)
+          ? { source_id: source.id, source_version: source.file_hash, parse_revision: source.parse_revision } : undefined)
+        const intent = old?.intent ?? { filename: file.filename, title: options.title ?? file.filename, publisher: options.publisher ?? '本人上传', kind: 'knowledge', project_id: options.scope.project_id, sha256, size: bytes.length, graph_path: file.graph_path, ...(reused ? { source_ref: reused } : {}) }
+        if (old && digest(old.intent.graph_path) !== digest(file.graph_path)) fail('idempotency-conflict')
+        if (!old) await persist(ctx, exec.agent, { kind: 'project-import-request', owner, batchId: options.operationId, projectId: options.scope.project_id, target_key: file.target.targetKey, sha256, filename: file.filename, intent })
+        try {
+          const prepared = await call('prepare_source_upload', { intent })
+          if (prepared.source) result = prepared
+          else {
+            if (intent.source_ref || prepared.method !== 'PUT' || prepared.sha256 !== sha256 || prepared.size !== bytes.length || typeof prepared.upload_url !== 'string') fail('invalid-upload-ticket')
+            result = await transport.uploadOriginal(owner, prepared.upload_url, bytes, exec.signal)
+          }
+        } catch (error: any) {
+          exec.signal?.throwIfAborted()
+          if (['conflict', 'idempotency-conflict', 'unauthorized', 'invalid-request', 'scope-changed'].includes(error.code)) throw error
+          result = await find()
+        }
+        graphReceipt(result, file.graph_path, sha256)
+        if (intent.source_ref && (result.source?.id !== intent.source_ref.source_id || result.source?.parse_revision !== intent.source_ref.parse_revision)) fail('source-changed')
+      } else if (!result) {
         await persist(ctx, exec.agent, { kind: 'project-import-request', owner, batchId: options.operationId, projectId: options.scope.project_id, sha256, filename: file.filename })
         let ticket: any
         try { ticket = await call('prepare_source_upload', { intent: { filename: file.filename, title: options.title ?? file.filename, publisher: options.publisher ?? '本人上传', kind: 'knowledge', project_id: options.scope.project_id, sha256, size: bytes.length } }) }
@@ -212,8 +313,8 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
       }
       const source = result?.source ?? result
       if (!UUID.test(source?.id) || source.file_hash !== sha256 || source.project_id !== options.scope.project_id) fail('invalid-response')
-      await persist(ctx, exec.agent, { kind: 'project-import-receipt', owner, batchId: options.operationId, projectId: options.scope.project_id, sourceId: source.id, sha256 })
-      sources.push(source)
+      await persist(ctx, exec.agent, { kind: 'project-import-receipt', owner, batchId: options.operationId, projectId: options.scope.project_id, sourceId: source.id, sha256, ...(file.graph_path ? { graph_path: file.graph_path, ...graphReceipt(result, file.graph_path, sha256) } : {}) })
+      sources.push(file.graph_path ? { ...source, ...graphReceipt(result, file.graph_path, sha256) } : source)
     }
     return { scope_key: owner, operation_id: options.operationId, scope: options.scope, sources }
   }
@@ -235,6 +336,11 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
         assertExecution(exec, owner)
       }
       const prepared = await prepareBatch(exec, options, owner, request)
+      if (prepared.files.some(file => file.graph_path)) {
+        const catalog = await transport.request(owner, 'GET', '/catalog', undefined, exec.signal)
+        if (!Array.isArray(catalog.capabilities) || !catalog.capabilities.includes('graph-path-v1')
+          || (scope.kind === 'project' || request.graph_files?.some((file: GraphFile) => file.source_ref)) && !catalog.capabilities.includes('import-source-ref-v1')) fail('graph-path-unavailable', '服务器尚未支持原目录知识关系，本批次未上传。')
+      }
       if (scope.kind === 'project') return importProject(exec, options, owner, prepared)
       const { fs, files } = prepared
       if (options.supersedes && (files.length !== 1 || !UUID.test(options.supersedes.source_id) || !HASH.test(options.supersedes.source_version))) fail('invalid-replacement')
@@ -243,7 +349,7 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
         assertExecution(exec, owner); transport.check(owner); exec.signal?.throwIfAborted()
         const { bytes, sha256 } = await readOriginal(fs, file, exec.signal)
         const operation_id = digest([options.operationId, file.target.targetKey, sha256])
-        const request = { operation_id, filename: file.filename, title: options.title ?? file.filename, publisher: options.publisher ?? '本人上传', kind: 'knowledge', sha256, byte_length: bytes.length, scope, ...(provenance ? { provenance } : {}), ...(options.supersedes ? { supersedes: options.supersedes } : {}) }
+        const request = { operation_id, filename: file.filename, title: options.title ?? file.filename, publisher: options.publisher ?? '本人上传', kind: 'knowledge', sha256, byte_length: bytes.length, scope, ...(provenance ? { provenance } : {}), ...(options.supersedes ? { supersedes: options.supersedes } : {}), ...(file.graph_path ? { graph_path: file.graph_path } : {}), ...(file.source_ref ? { source_ref: file.source_ref } : {}) }
         const previous = events(exec.agent).find(event => event.kind === 'import-request' && event.operationId === operation_id && event.owner === owner)
         if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict')
         if (!previous) await persist(ctx, exec.agent, { kind: 'import-request', owner, batchId: options.operationId, operationId: operation_id, request })
@@ -251,11 +357,14 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
         let receipt = await findOrCreate(transport, owner, 'imports', frozen, previous !== undefined, exec.signal)
         if (!UUID.test(receipt.import_id) || receipt.operation_id !== operation_id || receipt.scope?.kind !== scope.kind || receipt.request_hash !== digest({ ...request, provenance: provenance ?? null, supersedes: options.supersedes ?? null })) fail('invalid-response')
         await persist(ctx, exec.agent, { kind: 'import-receipt', owner, operationId: operation_id, importId: receipt.import_id })
+        if (file.graph_path) graphReceipt(receipt, file.graph_path, sha256)
+        if (file.source_ref && receipt.status !== 'ready') fail('invalid-response')
         if (receipt.status === 'awaiting_content') {
           try { receipt = await transport.request(owner, 'PUT', `/imports/${receipt.import_id}/content`, bytes, exec.signal) }
-          catch (error) { exec.signal?.throwIfAborted(); receipt = await transport.request(owner, 'GET', `/imports/${receipt.import_id}`, undefined, exec.signal) }
+          catch (error: any) { exec.signal?.throwIfAborted(); if (['conflict', 'idempotency-conflict', 'unauthorized'].includes(error.code)) throw error; receipt = await transport.request(owner, 'GET', `/imports/${receipt.import_id}`, undefined, exec.signal) }
         }
-        receipts.push({ import_id: receipt.import_id, operation_id, status: receipt.status, source: receipt.source })
+        if (file.source_ref && (receipt.source?.id !== file.source_ref.source_id || receipt.source?.file_hash !== file.source_ref.source_version || receipt.source?.parse_revision !== file.source_ref.parse_revision)) fail('source-changed')
+        receipts.push({ import_id: receipt.import_id, operation_id, status: receipt.status, source: receipt.source, ...(file.graph_path ? graphReceipt(receipt, file.graph_path, sha256) : {}) })
       }
       return { scope_key: owner, operation_id: options.operationId, scope, imports: receipts }
   }
@@ -272,11 +381,14 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
         exec = { ...exec, xinSubject: await bindXin(exec, batch.xin_subject) }
         const hashes = new Set(events(exec.agent).filter(event => ['project-import-request', 'project-import-receipt'].includes(event.kind) && event.batchId === operationId && event.owner === owner && event.projectId === scope.project_id).map(event => event.sha256))
         const sources = []
-        for (const sha256 of hashes) {
-          const value = decodeXinReply(await xinCall('find_imported_source', { project_id: scope.project_id, sha256, kind: 'knowledge' }, exec, exec.signal))
+        const manifest = events(exec.agent).find(event => event.kind === 'import-batch-files' && event.batchId === operationId && event.owner === owner)
+        const files = manifest?.files.some((file: any) => file.graph_path) ? manifest.files : [...hashes].map(sha256 => ({ sha256 }))
+        for (const file of files) {
+          const sha256 = file.sha256
+          const value = decodeXinReply(await xinCall('find_imported_source', { project_id: scope.project_id, sha256, kind: 'knowledge', ...(file.graph_path ? { graph_path: file.graph_path } : {}) }, exec, exec.signal))
           assertExecution(exec, owner)
           if (value.source?.file_hash !== sha256 || value.source?.project_id !== scope.project_id) fail('invalid-response')
-          sources.push(value.source)
+          sources.push(file.graph_path ? { ...value.source, ...graphReceipt(value, file.graph_path, sha256) } : value.source)
         }
         return { scope_key: owner, operation_id: operationId, scope, sources }
       }
@@ -285,7 +397,7 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
       for (const request of requests) {
         const value = await transport.request(owner, 'GET', '/imports?operation_id=' + request.operationId, undefined, exec.signal)
         if (value.operation_id !== request.operationId) fail('invalid-response')
-        imports.push({ import_id: value.import_id, operation_id: value.operation_id, status: value.status, source: value.source })
+        imports.push({ import_id: value.import_id, operation_id: value.operation_id, status: value.status, source: value.source, ...(request.request.graph_path ? graphReceipt(value, request.request.graph_path, request.request.sha256) : {}) })
       }
       return { scope_key: owner, operation_id: operationId, imports }
     },

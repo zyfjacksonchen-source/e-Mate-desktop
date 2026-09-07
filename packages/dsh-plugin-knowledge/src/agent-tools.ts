@@ -9,7 +9,7 @@ type Workflow = ReturnType<typeof createKnowledgeWorkflow> & {
 const READ_ENDPOINTS = ['catalog', 'graph', 'sources', 'source', 'node', 'search', 'benchmarks', 'benchmark', 'evidence', 'original', 'revisions', 'revision'] as const
 const fields: Record<string, readonly string[]> = {
   read: ['action', 'endpoint', 'request'],
-  import: ['action', 'paths', 'scope', 'title', 'publisher', 'supersedes'],
+  import: ['action', 'paths', 'scope', 'title', 'publisher', 'supersedes', 'graph_files', 'graph_root'],
   compile: ['action', 'source_versions', 'topics', 'scope', 'benchmark_query_ids', 'source_replacements'],
   'import-status': ['action', 'operation_id', 'scope'],
   status: ['action', 'operation_id', 'compilation_id', 'scope'],
@@ -25,6 +25,10 @@ const scopeSchema: JsonSchemaNode = { oneOf: [
 ] }
 const sourceVersion: JsonSchemaNode = { type: 'object', properties: { source_id: id, source_version: hash, parse_revision: hash }, required: ['source_id', 'source_version', 'parse_revision'], additionalProperties: false }
 const sourceReplacement: JsonSchemaNode = { type: 'object', properties: { source_id: id, source_version: hash, replacement_source_id: id }, required: ['source_id', 'source_version', 'replacement_source_id'], additionalProperties: false }
+const graphPath: JsonSchemaNode = { type: 'object', additionalProperties: false, properties: {
+  namespace_id: id, relative_path: string(500), layer: { type: 'string', enum: ['expert', 'case', 'source'] },
+  expected_binding: { oneOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, properties: { binding_revision: hash, source_id: id, source_version: hash }, required: ['binding_revision', 'source_id', 'source_version'] }] },
+}, required: ['namespace_id', 'relative_path', 'layer', 'expected_binding'] }
 const parameters: JsonSchemaNode = {
   type: 'object', required: ['action'], additionalProperties: false,
   properties: {
@@ -38,6 +42,8 @@ const parameters: JsonSchemaNode = {
     } },
     paths: { type: 'array', items: string(4096), description: '本次完整的 1 至 100 个文件或目录路径。' }, scope: scopeSchema,
     title: string(300), publisher: string(300),
+    graph_files: { type: 'array', description: '逐文件冻结的原目录关系，与graph_root互斥。source_ref只使用已核实ready原件，不能猜测版本。', items: { type: 'object', additionalProperties: false, properties: { path: string(4096), graph_path: graphPath, source_ref: sourceVersion }, required: ['path', 'graph_path'] } },
+    graph_root: { type: 'object', additionalProperties: false, description: '文件夹根及跨批次复用的命名空间；保留根内Markdown相对路径。初次绑定expected_binding为null，冲突须回查。', properties: { path: string(4096), namespace_id: id, layer: { type: 'string', enum: ['expert', 'case', 'source'] } }, required: ['path', 'namespace_id', 'layer'] },
     supersedes: { type: 'object', properties: { source_id: id, source_version: hash }, required: ['source_id', 'source_version'], additionalProperties: false },
     source_versions: { type: 'array', items: sourceVersion },
     topics: { type: 'array', items: { type: 'object', properties: { key: string(160), expected_revision_id: { oneOf: [id, { type: 'null' }] } }, required: ['key'], additionalProperties: false } },
@@ -109,6 +115,7 @@ export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { work
           const batch = operationId(exec, call, 'import', owner!)
           const publicIntentId = scope.kind === 'public' ? await checked(() => workflow.recordUserPublicIntent(exec, args.paths)) : undefined
           result = await checked(() => workflow.importFiles(exec, { paths: args.paths, operationId: batch, scope,
+            ...(args.graph_files !== undefined ? { graph_files: args.graph_files } : {}), ...(args.graph_root !== undefined ? { graph_root: args.graph_root } : {}),
             ...(args.title !== undefined ? { title: args.title } : {}), ...(args.publisher !== undefined ? { publisher: args.publisher } : {}),
             ...(args.supersedes !== undefined ? { supersedes: args.supersedes } : {}), ...(publicIntentId ? { publicIntentId } : {}) }))
           if (result.operation_id !== undefined && result.operation_id !== batch) fail('invalid-response')

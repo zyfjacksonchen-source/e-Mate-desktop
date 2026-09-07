@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import type { SessionPersistenceSnapshot } from '../../../upstream/deepseek-harness/packages/session/session-persistence'
-import { digest, events, fail, HASH, ownerOf, persist, UUID, type Execution, type Scope } from './imports.ts'
+import { digest, events, fail, graphOptions, graphReceipt, HASH, ownerOf, persist, UUID, type GraphOptions, type Execution, type Scope } from './imports.ts'
 
 type Selection = { provider: string; model: string; reasoningEffort?: string }
 export type ImportPhase = 'prepared' | 'importing' | 'parsing' | 'compiling' | 'complete' | 'partial' | 'paused' | 'stopping' | 'stopped' | 'unknown' | 'failed'
-export interface ImportSource { key: string; name: string; sha256: string; status: string; source_id?: string; parse_revision?: string }
+export interface ImportSource { key: string; name: string; sha256: string; status: string; source_id?: string; parse_revision?: string; graph_binding_status?: 'pending' | 'active' }
 export interface UiImportStatus { operation_id: string; session_id: string; title: string; scope: Scope; model: { id: string; reasoning_effort: string }; phase: ImportPhase; sources: ImportSource[]; file_count?: number; compiled_count: number; compilation_session_id?: string; job_id?: string; reason?: string; updated_at: number }
 type Reference = { operation_id: string; session_id: string }
-type Marker = { xin_subject?: string; kind: 'ui-import'; owner: string; operationId: string; batchId: string; paths: string[]; scope: Scope; title: string; selection: Selection; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }
+type Marker = GraphOptions & { xin_subject?: string; kind: 'ui-import'; owner: string; operationId: string; batchId: string; paths: string[]; scope: Scope; title: string; selection: Selection; publicIntentId?: string; supersedes?: { source_id: string; source_version: string } }
 type Plan = { operationId: string; sources: any[]; topics: any[]; replacements?: any[] }
 type Entry = { agent: any; marker: Marker; controller: AbortController; jobId: string; done?: Promise<any>; stopping?: Promise<void>; userStop: boolean; shutdown: boolean; automatic: boolean; currentCompilation?: string }
 export type KnowledgeUiRead = (request: { endpoint: string; payload: Record<string, unknown>; exec?: Execution; signal?: AbortSignal }) => Promise<{ scope_key: string; result: any }>
 export const UI_IMPORT_MESSAGES: Record<string, string> = {
+  'invalid-graph-path': '知识目录路径或绑定快照无效，未改变已有资料。',
+  'graph-path-unavailable': '服务器尚未支持原目录知识关系，本批次未上传。',
   'xin-binding-missing': '旧项目任务缺少原芯助手账号绑定，未继续上传。请保留回执并在确认账号后发起新任务。',
   'scope-changed': '任务绑定的账号已变化，未继续上传。请切回原账号继续。',
   'too-many-files': '当前一次最多处理100份原件。大库自动分批尚未完成，请拆分选择；本任务不会标记为已完成。',
@@ -64,6 +66,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
   const markerOf = (agent: any, expected: string, id?: string): Marker => {
     const marker = events(agent).find(event => event.kind === 'ui-import' && event.owner === expected && (!id || event.operationId === id))
     if (!marker || !UUID.test(marker.operationId) || !UUID.test(marker.batchId) || !Array.isArray(marker.paths) || !marker.selection?.provider || !marker.selection?.model) fail('invalid-recovery-session')
+    graphOptions(marker)
     return marker
   }
   function selectionFor(agent: any): Selection | undefined {
@@ -134,7 +137,8 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
       const key = digest([marker.batchId, file.target_key, file.sha256])
       const row: ImportSource = { key, name: file.filename, sha256: file.sha256, status: 'unknown' }
       try {
-        const result = await ownedRead(entry, 'import', marker.scope.kind === 'project' ? { sha256: file.sha256, scope: marker.scope } : { operation_id: key, scope: marker.scope })
+        const result = await ownedRead(entry, 'import', marker.scope.kind === 'project' ? { sha256: file.sha256, scope: marker.scope, ...(file.graph_path ? { graph_path: file.graph_path } : {}) } : { operation_id: key, scope: marker.scope })
+        if (file.graph_path) row.graph_binding_status = graphReceipt(result, file.graph_path, file.sha256).graph_binding_status
         const source = result.source
         if (source) {
           if (!UUID.test(source.id) || source.file_hash !== file.sha256) fail('source-changed')
@@ -144,7 +148,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         } else row.status = result.status === 'awaiting_content' ? 'awaiting_content' : 'unknown'
       } catch (error: any) {
         check(marker.owner, entry.controller.signal)
-        if (['unauthorized', 'scope-changed', 'source-changed'].includes(error.code)) throw error
+        if (['unauthorized', 'scope-changed', 'source-changed', 'invalid-response', 'invalid-graph-path'].includes(error.code)) throw error
       }
       rows.push(row)
     }
@@ -242,7 +246,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         await save(entry, { phase: 'importing', reason: '', sources: rows })
         check(marker.owner, controller.signal)
         if (entry.userStop) throw new DOMException('stopped', 'AbortError')
-        try { await workflow.importFiles(exec, { operationId: marker.batchId, paths: marker.paths, scope: marker.scope,
+        try { await workflow.importFiles(exec, { operationId: marker.batchId, paths: marker.paths, scope: marker.scope, ...graphOptions(marker),
           ...(marker.publicIntentId ? { publicIntentId: marker.publicIntentId } : {}), ...(marker.supersedes && marker.scope.kind !== 'project' ? { supersedes: marker.supersedes } : {}) }) }
         catch (error) { rows = await sourceRows(entry).catch(() => rows); await save(entry, { sources: rows }); throw error }
       }
@@ -289,7 +293,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
       for (const row of rows.filter(row => row.status === 'ready')) {
         if (!committedSources.has(digest({ source_id: row.source_id, source_version: row.sha256, parse_revision: row.parse_revision }))) fail('source-changed')
       }
-      const partial = rows.some(row => row.status !== 'ready')
+      const partial = rows.some(row => row.status !== 'ready' || row.graph_binding_status === 'pending')
       await save(entry, { phase: partial ? 'partial' : 'complete', reason: partial ? '可用来源已整理发布；仍有原件未完成，未标记为全部完成。' : '', sources: rows })
       return { status: partial ? 'failed' : 'completed', detail: partial ? '部分原件未完成。' : '原件已导入并整理发布。' }
     } catch (error: any) {
@@ -370,7 +374,8 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
     async call(endpoint: string, payload: any, signal?: AbortSignal) {
       const expected = await capture(signal)
       if (endpoint === 'ui.import.prepare') {
-        exact(payload, ['paths', 'scope', 'title', 'supersedes'])
+        exact(payload, ['paths', 'scope', 'title', 'supersedes', 'graph_files', 'graph_root'])
+        let graph = graphOptions(payload)
         if (Array.isArray(payload.paths) && payload.paths.length > 100) fail('too-many-files')
         if (!Array.isArray(payload.paths) || !payload.paths.length || payload.paths.some((path: any) => typeof path !== 'string' || !path || path.length > 4096)) fail('invalid-files')
         if (payload.title !== undefined && (typeof payload.title !== 'string' || payload.title.length > 300)) fail('invalid-request')
@@ -378,6 +383,15 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         if (payload.supersedes) { exact(payload.supersedes, ['source_id', 'source_version']); if (!UUID.test(payload.supersedes.source_id) || !HASH.test(payload.supersedes.source_version)) fail('invalid-replacement') }
         const selection = await resolveSelection(); check(expected, signal)
         const agent = await workflow.openOperation(selection, signal); check(expected, signal)
+        if (!graph.graph_files && !graph.graph_root && payload.paths.length === 1 && !payload.supersedes) {
+          const fs = agent.ctx.get('fs'); const target = await fs.resolve(payload.paths[0], { cwd: agent.session.header.cwd, signal })
+          if ((await fs.stat(target, signal))?.type === 'directory') {
+            // A folder keeps its namespace across later batches; the native account and scope are part of its identity.
+            const id = digest(['knowledge-folder', expected, scope, target.targetKey])
+            const namespace_id = `${id.slice(0, 8)}-${id.slice(8, 12)}-5${id.slice(13, 16)}-8${id.slice(17, 20)}-${id.slice(20, 32)}`
+            graph = { graph_root: { path: payload.paths[0], namespace_id, layer: 'source' } }
+          }
+        }
         if (payload.supersedes) {
           if (payload.paths.length !== 1) fail('invalid-replacement')
           const fs = agent.ctx.get('fs'); const target = await fs.resolve(payload.paths[0], { signal })
@@ -388,7 +402,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
         const operationId = randomUUID(), batchId = randomUUID()
         const publicIntentId = scope.kind === 'public' ? await workflow.recordPublicIntent(agent, payload.paths) : undefined
         check(expected, signal)
-        const marker: Marker = { kind: 'ui-import', owner: expected, operationId, batchId, paths: [...payload.paths], scope, title: payload.title?.trim() || '导入并整理知识', selection,
+        const marker: Marker = { kind: 'ui-import', owner: expected, operationId, batchId, paths: [...payload.paths], scope, ...graph, title: payload.title?.trim() || '导入并整理知识', selection,
           ...(xinSubject ? { xin_subject: xinSubject } : {}), ...(publicIntentId ? { publicIntentId } : {}), ...(payload.supersedes ? { supersedes: payload.supersedes } : {}) }
         await persist(ctx, agent, marker); check(expected, signal)
         return { scope_key: expected, result: project(agent, marker) }

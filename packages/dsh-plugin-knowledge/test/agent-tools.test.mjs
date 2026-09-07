@@ -149,3 +149,13 @@ test('workflow failures preserve the current contract codes and fixed safe messa
     assert(!JSON.stringify(result.events).includes('private service detail'))
   }
 })
+
+
+test('existing knowledge Tool passes frozen graph paths through without registering another Tool', async t => {
+  const f = await fixture(t)
+  const graph_path = { namespace_id: randomUUID(), relative_path: '资料/原文.md', layer: 'source', expected_binding: null }
+  const graph_files = [{ path: '/files/原文.md', graph_path, source_ref: source }]
+  const run = await f.run([{ action: 'import', paths: ['/files/原文.md'], graph_files }])
+  assert.equal(run.results[0].status, 'success'); assert.deepEqual(f.calls.find(call => call[0] === 'import')[1].graph_files, graph_files)
+  assert.equal(f.ctx.tools.schemas().filter(tool => tool.name === 'enterprise_knowledge').length, 1)
+})

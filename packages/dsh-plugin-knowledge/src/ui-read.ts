@@ -1,4 +1,4 @@
-import { decodeXinReply, fail, HASH, OPERATION, UUID, type Execution, type Scope } from './imports.ts'
+import { decodeXinReply, fail, validateGraphPath, HASH, OPERATION, UUID, type Execution, type Scope } from './imports.ts'
 import type { KnowledgeUiRead } from './ui-operations.ts'
 
 type Reply = { scope_key: string; result: any }
@@ -82,7 +82,7 @@ export function createKnowledgeUiRead({ host, workflow, xinCapture }: Dependenci
     }
     // Source reads belong to a validated native operation Agent, never a renderer identity.
     if (!exec || owner === undefined) fail('unauthorized')
-    exact(payload, endpoint === 'source' ? ['scope', 'source_id', 'version'] : endpoint === 'import' ? ['scope', 'operation_id', 'sha256'] : ['scope', 'question', 'limit', 'offset', 'corpus_revision'])
+    exact(payload, endpoint === 'source' ? ['scope', 'source_id', 'version'] : endpoint === 'import' ? ['scope', 'operation_id', 'sha256', 'graph_path'] : ['scope', 'question', 'limit', 'offset', 'corpus_revision'])
     const scope = readScope(payload.scope)
     const args: Record<string, unknown> = {}
     if (endpoint === 'source') {
@@ -91,9 +91,10 @@ export function createKnowledgeUiRead({ host, workflow, xinCapture }: Dependenci
     } else if (endpoint === 'import') {
       if (scope.kind === 'project') {
         if (payload.operation_id !== undefined || typeof payload.sha256 !== 'string' || !HASH.test(payload.sha256)) fail('invalid-request')
-        Object.assign(args, { project_id: scope.project_id, sha256: payload.sha256, kind: 'knowledge' })
+        if (payload.graph_path !== undefined) validateGraphPath(payload.graph_path)
+        Object.assign(args, { project_id: scope.project_id, sha256: payload.sha256, kind: 'knowledge', ...(payload.graph_path ? { graph_path: payload.graph_path } : {}) })
       } else {
-        if (payload.sha256 !== undefined || typeof payload.operation_id !== 'string' || !OPERATION.test(payload.operation_id)) fail('invalid-request')
+        if (payload.graph_path !== undefined || payload.sha256 !== undefined || typeof payload.operation_id !== 'string' || !OPERATION.test(payload.operation_id)) fail('invalid-request')
         args.operation_id = payload.operation_id
       }
     } else {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
@@ -35,16 +35,17 @@ class Adapter extends LlmAdapter {
 }
 function service() {
   const imports = new Map(), sources = new Map(), compilations = new Map(), revisions = new Map(), calls = []
-  let parseState = 'ready', failNextUpload = false, library = [], truncated = false; const failedNames = new Set()
+  let bindingActive = true, parseState = 'ready', failNextUpload = false, library = [], truncated = false; const failedNames = new Set()
   const reply = value => Response.json({ schema_version: 1, scope: { kind: 'enterprise-subject' }, ...structuredClone(value) })
   const missing = () => Response.json({ error: 'NOT_FOUND' }, { status: 404 })
-  return { imports, sources, compilations, revisions, calls, setParsing(value) { parseState = value; for (const source of sources.values()) source.status = value }, failUpload() { failNextUpload = true }, failParsing(name) { failedNames.add(name) }, setLibrary(items, partial = false) { library = items; truncated = partial },
+  return { imports, sources, compilations, revisions, calls, setBindingActive(value) { bindingActive = value }, setParsing(value) { parseState = value; for (const source of sources.values()) source.status = value }, failUpload() { failNextUpload = true }, failParsing(name) { failedNames.add(name) }, setLibrary(items, partial = false) { library = items; truncated = partial },
     async request(url, init) {
       const path = url.pathname.split('/knowledge/v1')[1], body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body
       calls.push({ path, method: init.method, body })
+      if (path === '/catalog') return reply({ capabilities: ['graph-path-v1', 'import-source-ref-v1'] })
       if (path === '/imports' && init.method === 'POST') {
         let entry = [...imports.values()].find(value => value.request.operation_id === body.operation_id)
-        if (!entry) { entry = { import_id: randomUUID(), request: body, operation_id: body.operation_id, request_hash: digest({ ...body, provenance: body.provenance ?? null, supersedes: body.supersedes ?? null }), scope: body.scope, status: 'awaiting_content', source: null }; imports.set(entry.import_id, entry) }
+        if (!entry) { entry = { import_id: randomUUID(), request: body, operation_id: body.operation_id, request_hash: digest({ ...body, provenance: body.provenance ?? null, supersedes: body.supersedes ?? null }), scope: body.scope, status: 'awaiting_content', source: null, ...(body.graph_path ? { graph_binding_status: 'pending', graph_binding: null } : {}) }; imports.set(entry.import_id, entry) }
         return reply(entry)
       }
       if (path.startsWith('/imports')) {
@@ -55,6 +56,10 @@ function service() {
           if (!entry.source) { const source = { id: randomUUID(), file_hash: hash(body), parse_revision: hash('parse:' + hash(body)), title: entry.request.title, filename: entry.request.filename, status: failedNames.has(entry.request.filename) ? 'error' : parseState, text: Buffer.from(body).toString('utf8') }; sources.set(source.id, source); entry.source = source }
         }
         if (entry.source) entry.status = entry.source.status
+        if (entry.request.graph_path && entry.source?.status === 'ready' && bindingActive) {
+          const { expected_binding, ...path } = entry.request.graph_path
+          entry.graph_binding_status = 'active'; entry.graph_binding = { ...path, source_id: entry.source.id, source_version: entry.source.file_hash, parse_revision: entry.source.parse_revision, binding_revision: digest(path) }
+        }
         return reply(entry)
       }
       if (path === '/compilations' && init.method === 'POST') {
@@ -79,7 +84,7 @@ function service() {
       throw Error('unexpected ' + path)
     },
     async read({ endpoint, payload }) {
-      if (endpoint === 'import') { const value = [...imports.values()].find(value => value.operation_id === payload.operation_id); if (!value) throw Object.assign(Error('missing'), { code: 'not-found' }); return { source: value.source, status: value.source?.status ?? value.status } }
+      if (endpoint === 'import') { const value = [...imports.values()].find(value => value.operation_id === payload.operation_id); if (!value) throw Object.assign(Error('missing'), { code: 'not-found' }); if (value.request.graph_path && value.source?.status === 'ready' && bindingActive) { const { expected_binding, ...path } = value.request.graph_path; value.graph_binding_status = 'active'; value.graph_binding = { ...path, source_id: value.source.id, source_version: value.source.file_hash, parse_revision: value.source.parse_revision, binding_revision: digest(path) } }; return { source: value.source, status: value.source?.status ?? value.status, ...(value.request.graph_path ? { graph_binding_status: value.graph_binding_status, graph_binding: value.graph_binding } : {}) } }
       if (endpoint === 'revisions') {
         const items = typeof library === 'function' ? library() : library, offset = payload.offset ?? 0
         return { schema_version: 1, scope: payload.scope, corpus_revision: digest(items), items: items.slice(offset, offset + payload.limit), truncated: truncated || items.length > offset + payload.limit, next_offset: items.length > offset + payload.limit ? offset + payload.limit : null }
@@ -407,4 +412,48 @@ test('UI recent scans cannot put background import and compilation recovery out 
     assert.equal(lists, 5, 'one directory snapshot per recovery reader; UI recent lists independently')
     assert.equal(reads, 150)
   } finally { await ui.dispose(); await recovery.dispose() }
+})
+
+
+test('folder UI preserves namespace across repeated selection and restart, isolates account, and resumes frozen graph files', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'emate-ui-graph-')); t.after(() => rm(directory, { recursive: true, force: true }))
+  const backend = service(); backend.setParsing('parsing')
+  const folder = join(directory, '知识'); await mkdir(folder); await writeFile(join(folder, '原文.md'), '# 真实原件。')
+  const first = await harness(t, backend, directory)
+  const prepared = (await first.ui.call('ui.import.prepare', { paths: [folder] })).result
+  const marker = events(first.ctx.agents.get(prepared.session_id)).find(event => event.kind === 'ui-import')
+  const again = (await first.ui.call('ui.import.prepare', { paths: [folder] })).result
+  assert.deepEqual(events(first.ctx.agents.get(again.session_id)).find(event => event.kind === 'ui-import').graph_root, marker.graph_root)
+  await first.ui.call('ui.import.start', ref(prepared)); await waitPhase(first, prepared, ['parsing'])
+  await first.dispose(); backend.setParsing('ready')
+  const second = await harness(t, backend, directory)
+  await second.ui.recover()
+  const complete = await waitPhase(second, prepared, ['complete', 'partial'])
+  assert.equal(complete.phase, 'complete'); assert.equal(complete.sources[0].graph_binding_status, 'active')
+  const restored = events(second.ctx.agents.get(prepared.session_id)).find(event => event.kind === 'ui-import')
+  assert.deepEqual(restored.graph_root, marker.graph_root)
+  assert.equal(backend.calls.filter(call => call.path === '/imports' && call.method === 'POST').length, 1)
+  const reselection = (await second.ui.call('ui.import.prepare', { paths: [folder] })).result
+  assert.deepEqual(events(second.ctx.agents.get(reselection.session_id)).find(event => event.kind === 'ui-import').graph_root, marker.graph_root)
+  const publicSelection = (await second.ui.call('ui.import.prepare', { paths: [folder], scope: { kind: 'public' } })).result
+  assert.notEqual(events(second.ctx.agents.get(publicSelection.session_id)).find(event => event.kind === 'ui-import').graph_root.namespace_id, marker.graph_root.namespace_id)
+  second.changeOwner()
+  const other = (await second.ui.call('ui.import.prepare', { paths: [folder] })).result
+  assert.notEqual(events(second.ctx.agents.get(other.session_id)).find(event => event.kind === 'ui-import').graph_root.namespace_id, marker.graph_root.namespace_id)
+  const request = backend.calls.find(call => call.path === '/imports' && call.method === 'POST').body
+  assert.equal(request.graph_path.relative_path, '原文.md'); assert(!JSON.stringify(request).includes(directory))
+})
+
+test('ready sources and committed Wiki remain partial while their graph binding is pending', async t => {
+  const backend = service(); backend.setBindingActive(false)
+  const run = await harness(t, backend), path = join(run.root, 'source.md'); await writeFile(path, '# 真实原文。')
+  const graph_path = { namespace_id: randomUUID(), relative_path: '资料/source.md', layer: 'source', expected_binding: null }
+  const prepared = (await run.ui.call('ui.import.prepare', { paths: [path], graph_files: [{ path, graph_path }] })).result
+  await run.ui.call('ui.import.start', ref(prepared))
+  const partial = await waitPhase(run, prepared, ['partial', 'complete'])
+  assert.equal(partial.phase, 'partial'); assert.equal(partial.sources[0].status, 'ready'); assert.equal(partial.sources[0].graph_binding_status, 'pending'); assert.equal(partial.compiled_count, 1)
+  backend.setBindingActive(true)
+  await run.ui.call('ui.import.resume', ref(prepared))
+  assert.equal((await waitPhase(run, prepared, ['complete'])).phase, 'complete')
+  assert.equal(backend.calls.filter(call => call.path === '/imports' && call.method === 'POST').length, 1)
 })

@@ -171,3 +171,14 @@ test('all revision scopes preserve bounded pagination and reject invalid continu
     }
   }
 })
+
+
+test('project import reads pass the frozen graph path through the existing Xin lookup and preserve pending state', async () => {
+  const { read, state, calls } = setup()
+  const graph_path = { namespace_id: id, relative_path: '客户/原件.md', layer: 'source', expected_binding: null }
+  state.response = { schema_version: 1, source: original(), graph_binding_status: 'pending', graph_binding: null }
+  const result = await read({ endpoint: 'import', payload: { scope: project, sha256: hash, graph_path }, exec })
+  assert.deepEqual(calls.at(-1), ['xin', 'find_imported_source', { project_id: 17, sha256: hash, kind: 'knowledge', graph_path }])
+  assert.equal(result.result.graph_binding_status, 'pending')
+  await assert.rejects(read({ endpoint: 'import', payload: { scope: privateScope, operation_id: 'original_operation_01', graph_path }, exec }), { code: 'invalid-request' })
+})

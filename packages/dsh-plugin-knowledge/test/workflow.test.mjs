@@ -17,7 +17,7 @@ import GoalService from '../../../upstream/deepseek-harness/packages/goal/goal/l
 import Persistence from '../../../upstream/deepseek-harness/packages/session/session-persistence-jsonl/lib/index.js'
 import LocalFs from '../../../upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'
 import { createKnowledgeWorkflow, recoverNativeClaims, normalizeCheckpoint, BENCHMARK_CLAIM_TEXT } from '../src/workflow.ts'
-import { collectOriginals, digest, events } from '../src/imports.ts'
+import { collectOriginals, digest, events, graphOptions, graphReceipt } from '../src/imports.ts'
 
 // Captured from B 92b50d9 KnowledgeCheckpointData.model_validate({}).model_dump(mode='json').
 const bCheckpointDefaults = { child_session_id: null, completed_units: [], message_id: null, session_id: null, unknown_submission: false }
@@ -859,4 +859,108 @@ test('cold project compilation verifies the canonical Xin fingerprint before lea
   assert.equal((await done(second, resumed)).status, 'completed')
   assert.equal(second.adapter.requests.length, 0)
   assert.equal(backend.compilation.state, 'committed')
+})
+
+
+test('graph imports preserve exact Unicode paths and frozen source references without uploading existing bytes', async t => {
+  const text = '# 中文目录\n[[相邻页面]]', hash = createHash('sha256').update(text).digest('hex')
+  const saved = new Map(), calls = []; let conflict = false
+  const graph_path = { namespace_id: randomUUID(), relative_path: '课程/原文.md', layer: 'source', expected_binding: null }
+  const source_ref = { source_id: randomUUID(), source_version: hash, parse_revision: 'b'.repeat(64) }
+  const backend = { async request(url, init) {
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
+    calls.push({ method: init.method, path: url.pathname, body })
+    const reply = value => Response.json({ schema_version: 1, scope: { kind: 'uploader-private' }, ...value })
+    if (url.pathname.endsWith('/catalog')) return reply({ capabilities: ['graph-path-v1', 'import-source-ref-v1'] })
+    if (init.method === 'POST') {
+      if (conflict) return Response.json({ error: 'REVISION_CONFLICT' }, { status: 409 })
+      const result = { import_id: randomUUID(), operation_id: body.operation_id, request_hash: digest({ ...body, provenance: null, supersedes: null }), status: 'ready',
+        source: { id: source_ref.source_id, file_hash: hash, parse_revision: source_ref.parse_revision, status: 'ready' },
+        graph_binding_status: 'active', graph_binding: { ...graph_path, expected_binding: undefined, binding_revision: 'c'.repeat(64), ...source_ref } }
+      delete result.graph_binding.expected_binding
+      saved.set(body.operation_id, result); return reply(result)
+    }
+    assert.equal(init.method, 'GET'); return reply(saved.get(url.searchParams.get('operation_id')))
+  } }
+  const run = await runtime(t, backend), path = join(run.root, '原文.md'); await writeFile(path, text)
+  const options = { operationId: randomUUID(), paths: [path], graph_files: [{ path, graph_path, source_ref }] }
+  const first = await run.workflow.importFiles({ agent: run.caller }, options)
+  assert.equal(first.imports[0].graph_binding_status, 'active')
+  await run.workflow.importFiles({ agent: run.caller }, options)
+  assert.equal(calls.filter(call => call.method === 'POST').length, 1); assert.equal(calls.filter(call => call.method === 'PUT').length, 0)
+  const original = calls.find(call => call.method === 'POST').body
+  assert.deepEqual(original.graph_path, graph_path); assert.deepEqual(original.source_ref, source_ref)
+  assert(!JSON.stringify(original).includes(run.root))
+  const frozen = events(run.caller).find(event => event.kind === 'import-batch-files').files[0]
+  assert.deepEqual(frozen.graph_path, graph_path); assert.deepEqual(frozen.source_ref, source_ref)
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, { ...options, graph_files: [{ path, graph_path: { ...graph_path, relative_path: '新.md' }, source_ref }] }), { code: 'idempotency-conflict' })
+  conflict = true
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, { ...options, operationId: randomUUID() }), { code: 'conflict' })
+  assert.equal(calls.filter(call => call.method === 'POST').length, 2)
+})
+
+test('graph folder paths bind real root-contained Markdown only and unsupported servers fail before upload', async t => {
+  const calls = []; let supported = false
+  const backend = { async request(url, init) {
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined; calls.push({ body, method: init.method })
+    if (url.pathname.endsWith('/catalog')) return Response.json({ schema_version: 1, scope: { kind: 'public' }, capabilities: supported ? ['graph-path-v1'] : [] })
+    if (init.method === 'POST') throw Object.assign(Error('capture request without mutation'), { code: 'invalid-request' })
+    throw Error('unexpected call')
+  } }
+  const run = await runtime(t, backend); await mkdir(join(run.root, '知识')); await mkdir(join(run.root, '知识', '子目录'))
+  await writeFile(join(run.root, '知识', '子目录', '源.md'), '# 原文'); await writeFile(join(run.root, '知识', 'image.png'), 'binary-fixture')
+  const options = { operationId: randomUUID(), paths: [join(run.root, '知识')], graph_root: { path: join(run.root, '知识'), namespace_id: randomUUID(), layer: 'expert' } }
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, options), { code: 'graph-path-unavailable' })
+  assert.equal(calls.length, 1)
+  supported = true
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, options), { code: 'invalid-request' })
+  const manifest = events(run.caller).find(event => event.kind === 'import-batch-files').files
+  assert.equal(manifest.length, 2)
+  assert.equal(manifest.find(file => file.filename === '源.md').graph_path.relative_path, '子目录/源.md')
+  assert.equal(manifest.find(file => file.filename === 'image.png').graph_path, undefined)
+  const beforeBinary = calls.length
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, { ...options, operationId: randomUUID(), paths: [join(run.root, '知识', 'image.png')] }), { code: 'invalid-request' })
+  assert.deepEqual(calls.slice(beforeBinary).map(call => call.method), ['POST'])
+  const path = join(run.root, 'outside.md'); await writeFile(path, 'outside')
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, { ...options, operationId: randomUUID(), paths: [path] }), { code: 'outside-source-folder' })
+})
+
+test('graph DTO rejects traversal, aliases, absent CAS and mixed mapping modes while pending is not active', () => {
+  const path = { namespace_id: randomUUID(), relative_path: '中文/页面.md', layer: 'case', expected_binding: null }
+  for (const relative_path of ['../a.md', '/a.md', 'a//b.md', 'a/./b.md', 'a\\b.md', 'a%2fb.md', 'a.md#heading', 'a.md?x', 'a\n.md', 'a.txt']) {
+    assert.throws(() => graphOptions({ graph_files: [{ path: '/local/a.md', graph_path: { ...path, relative_path } }] }), { code: 'invalid-graph-path' })
+  }
+  const missing = { ...path }; delete missing.expected_binding
+  assert.throws(() => graphOptions({ graph_files: [{ path: '/local/a.md', graph_path: missing }] }), { code: 'invalid-graph-path' })
+  assert.throws(() => graphOptions({ graph_files: [], graph_root: { path: '/local', namespace_id: path.namespace_id, layer: 'source' } }), { code: 'invalid-graph-path' })
+  assert.equal(graphReceipt({ graph_binding_status: 'pending', graph_binding: null }, path, 'a'.repeat(64)).graph_binding_status, 'pending')
+  assert.throws(() => graphReceipt({ graph_binding_status: 'active', graph_binding: null }, path, 'a'.repeat(64)))
+})
+
+
+test('project graph reuse still calls the same Xin upload owner and recovers lost preparation without reupload', async t => {
+  const text = '# 项目原件', sha256 = createHash('sha256').update(text).digest('hex')
+  const graph_path = { namespace_id: randomUUID(), relative_path: '客户/原件.md', layer: 'source', expected_binding: null }
+  const source_ref = { source_id: randomUUID(), source_version: sha256, parse_revision: 'b'.repeat(64) }
+  const source = { id: source_ref.source_id, file_hash: sha256, parse_revision: source_ref.parse_revision, project_id: 42, status: 'ready' }
+  const calls = []; let bound = false
+  const binding = { namespace_id: graph_path.namespace_id, relative_path: graph_path.relative_path, layer: graph_path.layer, ...source_ref, binding_revision: 'c'.repeat(64) }
+  const result = () => ({ schema_version: 1, source, graph_binding_status: bound ? 'active' : 'pending', graph_binding: bound ? binding : null })
+  const run = await runtime(t, { async request(url, init) { assert(url.pathname.endsWith('/catalog')); assert.equal(init.method, 'GET'); return Response.json({ schema_version: 1, scope: { kind: 'public' }, capabilities: ['graph-path-v1', 'import-source-ref-v1'] }) } }, undefined, {
+    async xinKnowledgeCall(name, args) {
+      calls.push({ name, args })
+      if (name === 'find_imported_source') { assert.deepEqual(args.graph_path, graph_path); return result() }
+      assert.equal(name, 'prepare_source_upload'); assert.deepEqual(args.intent.source_ref, source_ref); assert.deepEqual(args.intent.graph_path, graph_path)
+      bound = true; throw Error('lost reply after binding commit')
+    },
+  })
+  const path = join(run.root, '原件.md'); await writeFile(path, text)
+  const operationId = randomUUID()
+  const options = { paths: [path], operationId, scope: { kind: 'project', project_id: 42 }, graph_files: [{ path, graph_path, source_ref }] }
+  const first = await run.workflow.importFiles({ agent: run.caller }, options)
+  assert.equal(first.sources[0].graph_binding_status, 'active')
+  assert.equal(calls.filter(call => call.name === 'prepare_source_upload').length, 1)
+  assert.equal((await run.workflow.importsStatus({ agent: run.caller }, operationId, options.scope)).sources[0].graph_binding_status, 'active')
+  const record = events(run.caller).find(event => event.kind === 'project-import-request')
+  assert.deepEqual(record.intent.graph_path, graph_path); assert.deepEqual(record.intent.source_ref, source_ref)
 })
