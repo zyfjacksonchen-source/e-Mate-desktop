@@ -3993,8 +3993,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
         if (typeof cleanup === 'function') cleanups.push(cleanup)
         return cleanup
       },
+      reflect: { store: {} },
       on: (event, handler) => {
-        if (event === 'agent/request') requestPolicy = handler
+        if (event === 'internal/service') modelPolicyHandlers.set(event, handler)
+        else if (event === 'agent/request') requestPolicy = handler
         else if (event === 'llm/stream') streamPolicy = handler
         else if (event === 'agent/pre-step' || event === 'session/event' || event === 'session/flush') modelPolicyHandlers.set(event, handler)
         else if (event === 'credentials/updated') modelPolicyHandlers.set(event, handler)
