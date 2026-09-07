@@ -43,7 +43,7 @@ export function PetOverlaySlot({ projection, resources, settings, details }: Ove
   useEffect(() => () => resources.pause(), [resources])
   if (!selected.enabled || asset.pet === undefined) return null
   const scene = state.taskId === task.taskId ? state.scene : deriveScene(task)
-  return <PetOverlay pet={asset.pet} scene={scene} paused={paused} completed={task.tool?.status === 'completed' && task.tool.operation === scene}
+  return <PetOverlay pet={asset.pet} scene={scene} freeMotion paused={paused} completed={task.tool?.status === 'completed' && task.tool.operation === scene}
     movable={preferences.status === 'ready' && preferences.writable} position={selected.position} save={position => setPetSetting(settings, 'position', position)} taskId={task.taskId}
     close={() => setPetSetting(settings, 'enabled', false)} openSettings={details.openPetSettings}
     open={taskId => { if (projection.getSnapshot().taskId === taskId) details.openTaskDetails(taskId) }} />

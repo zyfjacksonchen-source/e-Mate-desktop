@@ -24,7 +24,7 @@ export function PetsSection({ settings, resources }: { settings: PetSettingsScop
   }
   return <section className={css.section} aria-labelledby="emate-pet-title">
     <h2 id="emate-pet-title">小芯智能伙伴</h2>
-    <label className={css.toggle}><span>启用小芯<span id="emate-pet-description" className={css.note}>跟随任务状态，支持拖动。关闭后可在这里重新开启。</span></span>
+    <label className={css.toggle}><span>启用小芯<span id="emate-pet-description" className={css.note}>自主切换动作，支持拖动和查看任务。关闭后可在这里重新开启。</span></span>
       <span className={css.controls}><span className={css.status}>{value.enabled ? '已开启' : '已关闭'}</span>
         <input type="checkbox" role="switch" aria-label="启用小芯智能伙伴" aria-describedby="emate-pet-description" checked={value.enabled} disabled={snapshot.status !== 'ready' || !snapshot.writable}
           onChange={event => saveEnabled(event.currentTarget.checked)} />

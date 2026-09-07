@@ -6,9 +6,10 @@ import { PetSprite, lookDirection } from './PetSprite.tsx'
 import type { LoadedPet } from './resource.ts'
 import css from './PetOverlay.module.css'
 const viewport = () => ({ width: window.innerWidth, height: window.innerHeight })
-export function PetOverlay({ pet, scene, paused, position: saved, save, open, taskId, movable = true, completed = false, close, openSettings }: {
+export function PetOverlay({ pet, scene, paused, position: saved, save, open, taskId, movable = true, completed = false, close, openSettings, freeMotion = false }: {
   pet: LoadedPet; scene: PetScene; paused: boolean; position: Position; save(position: Position): Promise<void>; open(taskId: string): void; taskId: string | null; movable?: boolean; completed?: boolean
   close?(): Promise<void>; openSettings?(): void
+  freeMotion?: boolean
 }) {
   const [position, setPosition] = useState(() => pixelPosition(saved, viewport()))
   const positionRef = useRef(position)
@@ -18,6 +19,33 @@ export function PetOverlay({ pet, scene, paused, position: saved, save, open, ta
   const [saveFailed, setSaveFailed] = useState(false)
   const [actionError, setActionError] = useState('')
   const [menu, setMenu] = useState<Position | null>(null)
+  const [motionScene, setMotionScene] = useState<PetScene>('idle')
+  const motionCurrent = useRef<PetScene>('idle')
+  const motionBag = useRef<PetScene[]>([])
+  const officeReady = pet.office !== undefined && pet.officeUrl !== undefined
+  useEffect(() => { motionBag.current = [] }, [officeReady])
+  useEffect(() => {
+    if (!freeMotion || paused || dragAnimation !== null || menu !== null) return
+    let timer: ReturnType<typeof setTimeout>
+    const schedule = () => {
+      timer = setTimeout(() => {
+        if (!motionBag.current.length) {
+          const choices: PetScene[] = officeReady
+            ? ['idle', ...OFFICE_SCENES.filter(([id]) => id !== 'error' && id !== 'waiting').map(([id]) => id)]
+            : ['idle', 'startup', 'delivery', 'document-read', 'running']
+          for (let i = choices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1)); [choices[i], choices[j]] = [choices[j]!, choices[i]!]
+          }
+          if (choices.at(-1) === motionCurrent.current) [choices[0], choices[choices.length - 1]] = [choices.at(-1)!, choices[0]!]
+          motionBag.current = choices
+        }
+        const next = motionBag.current.pop()!
+        motionCurrent.current = next; setMotionScene(next); schedule()
+      }, 8000 + Math.floor(Math.random() * 8000))
+    }
+    schedule()
+    return () => clearTimeout(timer)
+  }, [freeMotion, paused, dragAnimation !== null, menu !== null, officeReady])
   const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -155,6 +183,7 @@ export function PetOverlay({ pet, scene, paused, position: saved, save, open, ta
     }).finally(() => { closingRef.current = false; if (mounted.current) setClosing(false) })
   }
   const label = OFFICE_SCENES.find(row => row[0] === scene)?.[1] ?? (scene === 'running' ? '正在处理任务' : '待命')
+  const visualScene = freeMotion ? motionScene : scene
   return <div className={css.overlay} data-pet-overlay>
     <button ref={buttonRef} type="button" className={css.pet} style={{ width: PET_SIZE, left: position.x, top: position.y, right: 'auto', bottom: 'auto' }}
       title={completed ? `最近完成：${label}` : label}
@@ -163,7 +192,7 @@ export function PetOverlay({ pet, scene, paused, position: saved, save, open, ta
       onLostPointerCapture={event => { if (drag.current !== null) end(event, true) }} onPointerLeave={() => setLook(null)}
       onContextMenu={event => { event.preventDefault(); event.stopPropagation(); showMenu(event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined) }}
       onClick={() => { if (suppressClick.current) { suppressClick.current = false; return }; if (taskId !== null) open(taskId) }}>
-      <PetSprite pet={pet} scene={scene} drag={dragAnimation} look={scene === 'idle' ? look : null} paused={paused} />
+      <PetSprite pet={pet} scene={visualScene} drag={dragAnimation} look={visualScene === 'idle' ? look : null} paused={paused} />
       {saveFailed && <span role="status" className={css.saveError}>位置未保存</span>}
     </button>
     {menu && <div ref={menuRef} role="menu" aria-label="小芯菜单" className={css.menu} style={{ left: menu.x, top: menu.y }} onKeyDown={menuKeyboard} onContextMenu={event => event.preventDefault()}>

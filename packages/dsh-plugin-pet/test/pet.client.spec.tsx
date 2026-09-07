@@ -20,8 +20,27 @@ beforeEach(()=>{
   Object.defineProperty(HTMLElement.prototype,'hasPointerCapture',{configurable:true,value:()=>true})
   Object.defineProperty(HTMLElement.prototype,'releasePointerCapture',{configurable:true,value:vi.fn()})
 })
-afterEach(()=>{cleanup();vi.useRealTimers()})
+afterEach(()=>{cleanup();vi.useRealTimers();vi.restoreAllMocks()})
 describe('native sprite host',()=>{
+  it('free motion varies without changing the real task or repeating poses within a cycle',()=>{
+    vi.spyOn(Math,'random').mockReturnValue(0)
+    const props={pet:pet(),scene:'terminal' as const,paused:false,freeMotion:true,position:{x:.5,y:.5},save:async()=>{},open:vi.fn(),taskId:'task-a'}
+    const view=render(<PetOverlay {...props}/>), seen=new Set<string>()
+    for(let i=0;i<6;i++) {
+      act(()=>{vi.advanceTimersByTime(8000)})
+      const motion=view.container.querySelector('[data-pet-scene]')!.getAttribute('data-pet-scene')!
+      expect(seen.has(motion)).toBe(false);seen.add(motion)
+      expect(screen.getByRole('button').title).toBe('运行终端')
+    }
+    const previous=view.container.querySelector('[data-pet-scene]')!.getAttribute('data-pet-scene')
+    view.rerender(<PetOverlay {...props} scene="spreadsheet"/>)
+    expect(view.container.querySelector('[data-pet-scene]')!.getAttribute('data-pet-scene')).toBe(previous)
+    fireEvent.click(screen.getByRole('button'));expect(props.open).toHaveBeenCalledWith('task-a')
+    view.rerender(<PetOverlay {...props} paused/>)
+    expect(vi.getTimerCount()).toBe(0)
+    act(()=>{vi.advanceTimersByTime(60000)})
+    expect(view.container.querySelector('[data-pet-scene]')!.getAttribute('data-pet-scene')).toBe(previous)
+  })
   it('all look directions have their exact clockwise cells; neutral remains idle',()=>{
     expect(lookDirection(0,-40)).toBe(0);expect(lookDirection(40,0)).toBe(4);expect(lookDirection(0,40)).toBe(8);expect(lookDirection(-40,0)).toBe(12);expect(lookDirection(0,0)).toBeNull()
     const view=render(<PetSprite pet={pet()} scene="idle" drag={null} look={15} paused={false}/>)
