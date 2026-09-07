@@ -3,7 +3,7 @@ import { Excalidraw, MainMenu, exportToBlob } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI, BinaryFiles } from '@excalidraw/excalidraw/types'
 import { ASSET_PATH, emptyProject, type CanvasAsset, type CanvasIntent, type CanvasProject, type ProjectReceipt } from '../contract.ts'
 import type { CanvasBridge } from './bridge.ts'
-import { arrowImageTarget, base64, bytesOf, digest, insertAsset, pagesFromHtml, scenePage, selectedAnnotationElements } from './model.ts'
+import { arrowImageTarget, base64, bytesOf, digest, insertAsset, pagesFromHtml, scenePage, sameSceneElements, selectedAnnotationElements } from './model.ts'
 import css from './style.module.css'
 
 (window as any).EXCALIDRAW_ASSET_PATH = new URL(ASSET_PATH, location.origin).href
@@ -202,7 +202,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   useEffect(() => { if (project?.id && !switching) void syncOutputs() }, [project?.id, switching, syncOutputs])
   useEffect(() => {
     if (!page || !api.current) return
-    if (JSON.stringify(api.current.getSceneElementsIncludingDeleted()) !== JSON.stringify(page.elements)) {
+    if (!sameSceneElements(api.current.getSceneElementsIncludingDeleted(), page.elements)) {
       api.current.updateScene({ elements: page.elements as any })
     }
   }, [page])
@@ -349,7 +349,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
             const existing = current?.pages.find(item => item.id === page.id)
             if (!current || !existing || current.id !== project.id) return
             const next = scenePage(existing, elements as any, appState)
-            if (JSON.stringify(next) !== JSON.stringify(existing)) update({ ...current, pages: current.pages.map(item => item.id === page.id ? next : item) })
+            if (next !== existing) update({ ...current, pages: current.pages.map(item => item.id === page.id ? next : item) })
           }}><MainMenu /></Excalidraw>
       </div>
       <div className={css.ai}>

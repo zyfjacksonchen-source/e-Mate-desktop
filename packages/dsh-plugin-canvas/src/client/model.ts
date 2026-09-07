@@ -39,9 +39,28 @@ export function duplicatePage(project: CanvasProject, id: string, nextId: string
   next.pages.splice(from + 1, 0, { ...structuredClone(next.pages[from]!), id: nextId, title: `${next.pages[from]!.title} 副本`.slice(0, 120) })
   return validateProject(next)
 }
+/** Excalidraw 0.18.1 mutateElement/newElementWith/bumpVersion advance these
+ * fields even for in-place edits. Compare each ordered element, not a version sum
+ * (which misses reordering), and keep legacy unversioned imports readable. */
+export function sameSceneElements(left: readonly Record<string, any>[], right: readonly Record<string, any>[]): boolean {
+  return left.length === right.length && left.every((element, index) => {
+    const other = right[index]!
+    if (element.id !== other.id) return false
+    if (Number.isInteger(element.version) && element.version > 0 && Number.isInteger(element.versionNonce)
+      && Number.isInteger(other.version) && other.version > 0 && Number.isInteger(other.versionNonce)) {
+      return element.version === other.version && element.versionNonce === other.versionNonce && element.isDeleted === other.isDeleted
+    }
+    return JSON.stringify(element) === JSON.stringify(other)
+  })
+}
 export function scenePage(page: CanvasPage, elements: readonly Record<string, any>[], appState: any): CanvasPage {
-  return { ...page, elements: JSON.parse(JSON.stringify(elements)) as Record<string, Json>[],
-    view: { scrollX: appState.scrollX, scrollY: appState.scrollY, zoom: appState.zoom.value, background: appState.viewBackgroundColor } }
+  const unchanged = sameSceneElements(page.elements, elements)
+  const view = { scrollX: appState.scrollX, scrollY: appState.scrollY, zoom: appState.zoom.value, background: appState.viewBackgroundColor }
+  if (unchanged && page.view.scrollX === view.scrollX && page.view.scrollY === view.scrollY
+    && page.view.zoom === view.zoom && page.view.background === view.background) return page
+  // Persist an independent snapshot only for actual scene edits. View changes
+  // retain the last saved element snapshot; native selection/hover is transient.
+  return { ...page, elements: unchanged ? page.elements : JSON.parse(JSON.stringify(elements)) as Record<string, Json>[], view }
 }
 export function htmlDocument(html: string): string {
   const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';"

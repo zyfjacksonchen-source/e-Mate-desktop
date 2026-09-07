@@ -3,7 +3,7 @@ import { createHash, webcrypto } from 'node:crypto'
 import { fireEvent, render, screen, waitFor, cleanup, act } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { emptyPage, emptyProject, validateProject } from '../src/contract.ts'
-import { arrowImageTarget, htmlDocument, insertAsset, pagesFromHtml, selectedAnnotationElements } from '../src/client/model.ts'
+import { arrowImageTarget, htmlDocument, insertAsset, pagesFromHtml, sameSceneElements, scenePage, selectedAnnotationElements } from '../src/client/model.ts'
 import { createBridge } from '../src/client/bridge.ts'
 const native = vi.hoisted(() => ({ props: null as any, api: null as any, scroll: vi.fn() }))
 vi.mock('@excalidraw/excalidraw', () => {
@@ -277,4 +277,59 @@ it('Escape cancels the pending arrow-to-instruction focus transition', async () 
   act(() => { native.props.onPointerUp(); native.props.onChange([...project.pages[0].elements, arrow], { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#fff', selectedElementIds: {}, newElement: null, multiElement: null }) })
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
   expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
+})
+
+it('selection and hover preserve the page, while view changes reuse the saved scene', () => {
+  const page = insertAsset(emptyProject('main'), 'page-1', imageAsset).pages[0]
+  const live = structuredClone(page.elements)
+  const state = { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom }, viewBackgroundColor: page.view.background }
+  const stringify = vi.spyOn(JSON, 'stringify')
+  expect(scenePage(page, live, { ...state, selectedElementIds: { [live[0].id as string]: true } })).toBe(page)
+  expect(scenePage(page, live, { ...state, hoveredElementIds: { [live[0].id as string]: true } })).toBe(page)
+  const moved = scenePage(page, live, { ...state, scrollX: 50, zoom: { value: .7 } })
+  expect(moved).not.toBe(page); expect(moved.elements).toBe(page.elements)
+  expect(moved.view).toEqual({ ...page.view, scrollX: 50, zoom: .7 })
+  expect(sameSceneElements(live, moved.elements)).toBe(true)
+  expect(stringify).not.toHaveBeenCalled()
+})
+it('scene snapshots retain in-place native edits, deletion, undo, replacement and ordering', () => {
+  const original = insertAsset(emptyProject('main'), 'page-1', imageAsset).pages[0]
+  const live = structuredClone(original.elements)
+  const state = { scrollX: original.view.scrollX, scrollY: original.view.scrollY, zoom: { value: original.view.zoom }, viewBackgroundColor: original.view.background }
+  const first = live[0]
+  first.x = 123; first.version = 2; first.versionNonce = 10
+  const edited = scenePage(original, live, state)
+  expect(edited.elements[0].x).toBe(123); expect(edited.elements).not.toBe(live)
+  expect(original.elements[0].x).toBe(0)
+  first.isDeleted = true; first.version = 3; first.versionNonce = 11
+  const deleted = scenePage(edited, live, state)
+  expect(deleted.elements[0].isDeleted).toBe(true); expect(edited.elements[0].isDeleted).toBe(false)
+  first.isDeleted = false; first.x = 0; first.version = 4; first.versionNonce = 12
+  const undone = scenePage(deleted, live, state)
+  expect(undone.elements[0]).toMatchObject({ isDeleted: false, x: 0, version: 4 })
+  const inserted = scenePage(undone, [...live, { ...first, id: 'image-second', version: 1, versionNonce: 13 }], state)
+  expect(inserted.elements).toHaveLength(2)
+  const reordered = scenePage(inserted, [...inserted.elements].reverse(), state)
+  expect(reordered.elements[0].id).toBe('image-second')
+  expect(sameSceneElements(inserted.elements, reordered.elements)).toBe(false)
+  const replaced = scenePage(undone, [{ ...first, versionNonce: 14, x: 42 }], state)
+  expect(replaced.elements[0].x).toBe(42)
+  const legacy = { ...original, elements: [{ id: 'legacy', type: 'text', text: 'before' }] }
+  expect(scenePage(legacy, [{ ...legacy.elements[0], text: 'after' }], state).elements[0].text).toBe('after')
+})
+it('selection causes no save and the latest pan/zoom persists on leaving', async () => {
+  const h = harness(insertAsset(emptyProject('main'), 'page-1', imageAsset))
+  render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  fireEvent.click(screen.getByText('Select image'))
+  await act(async () => { await h.leave() })
+  expect(h.calls.filter(([name]) => name === 'save')).toHaveLength(0)
+  const elements = structuredClone(native.api.getSceneElementsIncludingDeleted())
+  await act(async () => {
+    for (let index = 1; index <= 30; index++) native.props.onChange(elements, { scrollX: index, scrollY: -index, zoom: { value: .5 + index / 100 }, viewBackgroundColor: '#ffffff', selectedElementIds: {} })
+    await h.leave()
+  })
+  expect(h.calls.filter(([name]) => name === 'save')).toHaveLength(1)
+  expect(h.read().pages[0].view).toEqual({ scrollX: 30, scrollY: -30, zoom: .8, background: '#ffffff' })
+  expect(h.read().pages[0].elements).toEqual(elements)
 })
