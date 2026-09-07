@@ -9,6 +9,7 @@ import { LlmAdapter, createUserMessage } from '../../../upstream/deepseek-harnes
 import { registerKnowledgeAgentTools } from '../src/agent-tools.ts'
 import { createKnowledgeWorkflow } from '../src/workflow.ts'
 import { digest } from '../src/imports.ts'
+import { knowledgeFailure } from '../src/contract.ts'
 const source={source_id:'11111111-1111-4111-8111-111111111111',source_version:'a'.repeat(64),parse_revision:'b'.repeat(64)}
 const compilation='22222222-2222-4222-8222-222222222222'
 class Adapter extends LlmAdapter {
@@ -38,10 +39,11 @@ async function fixture(t){
     async resume(exec,id,scope){calls.push(['resume',id,scope,exec]);return {compilation_id:id,state:'running'}},
     async stop(exec,id,scope){calls.push(['stop',id,scope,exec]);return {compilation_id:id,state:'paused'}},
   }
-  ctx.reflect.provide('emateKnowledgeSelection',async exec=>{calls.push(['selection',exec]);return {provider:'mock',model:'native-effective',reasoningEffort:'medium'}})
+  const selection={provider:'mock',model:'native-effective',reasoningEffort:'medium'}
+  ctx.reflect.provide('emateKnowledgeSelection',async exec=>{calls.push(['selection',exec]);return {...selection}})
   const unregister=registerKnowledgeAgentTools(ctx,{workflow,read:(...args)=>read(...args)})
   t.after(async()=>{unregister();await authority.dispose();await ctx.fiber.dispose()})
-  return {ctx,agent,calls,workflow,owner,setRead(fn){read=fn},change(){identity={...identity,userId:'user-b'};authority.changed()},
+  return {ctx,agent,calls,workflow,selection,owner,setRead(fn){read=fn},change(){identity={...identity,userId:'user-b'};authority.changed()},
     async run(actions,text='请整理本次指定资料'){
       const before=agent.session.events.length;adapter.script.push(...actions)
       const message=createUserMessage({content:[{type:'text',text}],source:{kind:'user'}});agent.followup(message);await agent.whenIdle()
@@ -65,7 +67,7 @@ test('one native user message keeps one import ID; different bodies conflict in 
   assert.equal(imports.length,3)
   const expected=digest(['enterprise_knowledge',f.owner(),f.agent.session.header.id,run.message.id,'import'])
   assert(imports.every(c=>c[1].operationId===expected));assert.equal(run.results[0].value.result.operation_id,expected);assert.deepEqual(imports[0][1].paths,first.paths);assert.deepEqual(imports[0][1].scope,{kind:'uploader-private'})
-  assert.deepEqual(run.results.map(r=>r.status),['success','success','failure']);assert.equal(run.results[2].error.code,'revision-conflict')
+  assert.deepEqual(run.results.map(r=>r.status),['success','success','failure']);assert.equal(run.results[2].error.code,'idempotency-conflict')
   await f.run([first]);assert.notEqual(f.calls.filter(c=>c[0]==='import').at(-1)[1].operationId,expected)
 })
 test('public imports obtain native intent first; project imports preserve explicit scope',async t=>{
@@ -79,7 +81,7 @@ test('compile takes the native effective model and stable operation; model param
   const f=await fixture(t),input={action:'compile',source_versions:[source],topics:[{key:'method'}],scope:{kind:'public'},benchmark_query_ids:[]}
   const run=await f.run([input,input,{...input,topics:[{key:'changed'}]}]),calls=f.calls.filter(c=>c[0]==='compile')
   assert.equal(calls.length,3);assert(calls.every(c=>c[1].operationId===digest(['enterprise_knowledge',f.owner(),f.agent.session.header.id,run.message.id,'compile'])))
-  assert.deepEqual(calls[0][1].model,{id:'native-effective',reasoning_effort:'medium'});assert.equal(run.results[2].error.code,'revision-conflict')
+  assert.deepEqual(calls[0][1].model,{id:'native-effective',reasoning_effort:'medium'});assert.equal(run.results[2].error.code,'idempotency-conflict')
   const before=f.calls.length,bad=await f.run([{...input,model:{id:'model-supplied'}}])
   assert.equal(bad.results[0].error.code,'invalid-request');assert.equal(f.calls.length,before)
 })
@@ -127,4 +129,23 @@ test('account change during public intent validation prevents the import action 
   const run=await f.run([{action:'import',paths:['/files/public.pdf'],scope:{kind:'public'}}])
   assert.equal(run.results[0].error.code,'scope-changed')
   assert.deepEqual(f.calls,[])
+})
+
+
+test('Host-resolved max effort reaches the workflow unchanged without a duplicate model directory',async t=>{
+  const f=await fixture(t);f.selection.model='gpt-5.6-luna';f.selection.reasoningEffort='max'
+  const result=await f.run([{action:'compile',source_versions:[source],topics:[{key:'method'}]}])
+  assert.equal(result.results[0].status,'success')
+  assert.deepEqual(f.calls.find(c=>c[0]==='compile')[1].model,{id:'gpt-5.6-luna',reasoning_effort:'max'})
+})
+
+test('workflow failures preserve the current contract codes and fixed safe messages',async t=>{
+  const f=await fixture(t)
+  for(const code of ['public-intent-required','conflict','idempotency-conflict','source-changed']){
+    f.workflow.status=async()=>{throw Object.assign(Error('private service detail must not escape'),{code})}
+    const result=await f.run([{action:'status',compilation_id:compilation}])
+    assert.equal(result.results[0].error.code,code)
+    assert.deepEqual(result.results[0],knowledgeFailure({code}))
+    assert(!JSON.stringify(result.events).includes('private service detail'))
+  }
 })

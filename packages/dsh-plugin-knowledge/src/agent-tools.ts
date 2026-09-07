@@ -70,12 +70,6 @@ function publicValue(value: unknown, depth = 0): void {
     publicValue(child, depth + 1)
   }
 }
-function failure(error: any) {
-  if (['conflict', 'idempotency-conflict', 'source-changed'].includes(error?.code)) return knowledgeFailure({ code: 'revision-conflict' })
-  if (['public-intent-required', 'invalid-files', 'invalid-model-output', 'invalid-replacement'].includes(error?.code)) return knowledgeFailure({ code: 'invalid-request' })
-  return knowledgeFailure(error)
-}
-
 /** One native Tool; the injected owners retain transport, operation persistence and execution. */
 export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { workflow: Workflow; read: CallKnowledge }) {
   return ctx.tools.register({
@@ -122,9 +116,10 @@ export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { work
         } else if (args.action === 'compile') {
           if (!Array.isArray(args.source_versions) || !args.source_versions.length || !Array.isArray(args.topics) || !args.topics.length || typeof ctx.emateKnowledgeSelection !== 'function') fail('invalid-request')
           const selected = await checked(() => Promise.resolve(ctx.emateKnowledgeSelection(exec)))
-          if (typeof selected?.provider !== 'string' || !selected.provider || typeof selected.model !== 'string' || !selected.model || !['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(selected.reasoningEffort ?? 'none')) fail('invalid-response')
+          const effort = selected?.reasoningEffort ?? 'none'
+          if (typeof selected?.provider !== 'string' || !selected.provider || selected.provider.length > 128 || typeof selected.model !== 'string' || !selected.model || selected.model.length > 128 || typeof effort !== 'string' || !effort || effort.length > 64) fail('invalid-response')
           result = await checked(() => workflow.start(exec, { operationId: operationId(exec, call, 'compile', owner!), sourceVersions: args.source_versions, topics: args.topics, scope,
-            model: { id: selected.model, reasoning_effort: selected.reasoningEffort ?? 'none' }, benchmarkQueryIds: args.benchmark_query_ids ?? [],
+            model: { id: selected.model, reasoning_effort: effort }, benchmarkQueryIds: args.benchmark_query_ids ?? [],
             ...(args.source_replacements !== undefined ? { sourceReplacements: args.source_replacements } : {}) }))
         } else if (args.action === 'import-status') {
           if (!OPERATION.test(args.operation_id ?? '')) fail('invalid-request')
@@ -142,7 +137,7 @@ export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { work
         if (result.scope_key !== undefined && result.scope_key !== owner) fail('scope-changed')
         publicValue(result)
         return { schema_version: 1, status: 'success', value: { scope_key: owner, result } }
-      } catch (error) { return failure(error) }
+      } catch (error) { return knowledgeFailure(error) }
     },
   })
 }
