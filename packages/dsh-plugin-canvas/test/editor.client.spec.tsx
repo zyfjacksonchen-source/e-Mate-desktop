@@ -5,16 +5,24 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { emptyPage, emptyProject, validateProject } from '../src/contract.ts'
 import { arrowImageTarget, htmlDocument, insertAsset, pagesFromHtml, sameSceneElements, scenePage, selectedAnnotationElements } from '../src/client/model.ts'
 import { createBridge } from '../src/client/bridge.ts'
-const native = vi.hoisted(() => ({ props: null as any, api: null as any, scroll: vi.fn() }))
+const native = vi.hoisted(() => ({ props: null as any, api: null as any, scroll: vi.fn(), deferReady: false, emit: null as any }))
 vi.mock('@excalidraw/excalidraw', () => {
   const MainMenu: any = ({ children }: any) => <div>{children}</div>
   MainMenu.DefaultItems = { ClearCanvas: () => null, ToggleTheme: () => null }
   return { MainMenu, exportToBlob: vi.fn(async () => new Blob(['png'])), Excalidraw: (props: any) => {
     native.props = props
     const elements = useRef(props.initialData.elements); const [, refresh] = useState(0)
-    useEffect(() => { props.excalidrawAPI(native.api = { getSceneElementsIncludingDeleted: () => elements.current,
+    const view = useRef({ ...props.initialData.appState, width: 1280, height: 800, isLoading: true, selectedElementIds: {}, activeTool: { type: 'selection' } })
+    useEffect(() => {
+      native.emit = (next: any, nextElements = elements.current) => {
+        view.current = { ...view.current, ...next }; elements.current = nextElements
+        if (!view.current.isLoading) props.onChange(elements.current, view.current)
+      }
+      props.excalidrawAPI(native.api = { getAppState: () => view.current, getSceneElementsIncludingDeleted: () => elements.current,
       updateScene: ({ elements: next }: any) => { if (next) elements.current = next; refresh(value => value + 1) }, addFiles: vi.fn(), scrollToContent: native.scroll, setActiveTool: ({ type }: any) => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {}, activeTool: { type } }),
-    }) }, [])
+      })
+      if (!native.deferReady) native.emit({ isLoading: false })
+    }, [])
     return <div data-testid="scene" data-theme={props.theme}><span>{elements.current.length} elements</span><button onClick={() => {
       elements.current = [...elements.current, { id: 'mark', type: 'arrow', x: 1, y: 1, points: [[0, 0], [10, 10]] }]
       props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {} })
@@ -22,7 +30,7 @@ vi.mock('@excalidraw/excalidraw', () => {
   } }
 })
 import { CanvasPanel } from '../src/client/editor.tsx'
-beforeEach(() => { vi.stubGlobal('crypto', webcrypto); native.scroll.mockClear() })
+beforeEach(() => { vi.stubGlobal('crypto', webcrypto); native.scroll.mockClear(); native.deferReady = false })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const imageAsset = { ownerSessionId: 'parent', ref: { attachmentId: `sha256:${createHash('sha256').update(imageBytes).digest('hex')}`, mediaType: 'image/png', bytes: imageBytes.length, width: 100, height: 100 } }
@@ -218,11 +226,11 @@ it('marked edits stage a preview then submit originals and annotation with expli
 
 it('fits the initial viewport once without changing pixels or resetting later user zoom', async () => {
   const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
-  project.pages[0].view.zoom = 0.4
+  project.pages[0].view.zoom = 0.1
   const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene')
   await waitFor(() => expect(native.scroll).toHaveBeenCalledOnce())
-  expect(native.scroll).toHaveBeenCalledWith(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: 0.4, animate: false })
+  expect(native.scroll).toHaveBeenCalledWith(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: 1, animate: false })
   expect(native.props.initialData.appState.currentItemStrokeColor).toBe('#eb5b16')
   fireEvent.click(screen.getByText('Draw mark'))
   await act(async () => { await h.leave() })
@@ -444,4 +452,92 @@ it('discards late hydration on unmount and reads all assets again after remount'
   h.reads.length = 0; h.bridge.call.mockImplementation(fallback)
   render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene'); expect(h.reads).toHaveLength(2)
+})
+
+
+it('waits for native scene initialization and nonzero viewport before fitting a restored 10 percent view', async () => {
+  native.deferReady = true
+  const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  project.pages[0].view.zoom = 0.1
+  project.pages[0].elements[0] = { ...project.pages[0].elements[0], width: 1000, height: 1000 }
+  const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  await act(async () => { await new Promise(requestAnimationFrame) })
+  expect(native.scroll).not.toHaveBeenCalled()
+  act(() => native.emit({ isLoading: false, width: 0, height: 0 }))
+  await act(async () => { await new Promise(requestAnimationFrame) })
+  expect(native.scroll).not.toHaveBeenCalled()
+  act(() => native.emit({ width: 1000, height: 800 }))
+  await waitFor(() => expect(native.scroll).toHaveBeenCalledOnce())
+  expect(native.api.getAppState()).toMatchObject({ isLoading: false, width: 1000, height: 800 })
+  expect(native.api.getSceneElementsIncludingDeleted()).toEqual(project.pages[0].elements)
+  const options = native.scroll.mock.calls[0][1]
+  expect(options).toMatchObject({ viewportZoomFactor: 0.68, maxZoom: 1, fitToViewport: true })
+  // This viewport can fit a 1000px square above 50%; a saved 10% must not cap it.
+  expect(Math.min(1000 / 1000, 800 / 1000) * options.viewportZoomFactor).toBeGreaterThan(0.5)
+  act(() => native.emit({ zoom: { value: 0.3 }, scrollX: 15, scrollY: 20 }))
+  await act(async () => { await new Promise(requestAnimationFrame) })
+  expect(native.scroll).toHaveBeenCalledOnce()
+  await act(async () => { await h.leave() })
+  expect(h.read().pages[0].view.zoom).toBe(0.3)
+})
+
+it('does not fit a ready scene after its identity was invalidated', async () => {
+  native.deferReady = true
+  const h = harness(insertAsset(emptyProject('main'), 'page-1', imageAsset))
+  const view = render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  act(() => { native.emit({ isLoading: false }); window.dispatchEvent(new Event('emate:identity-changed')) })
+  await act(async () => { await new Promise(requestAnimationFrame) })
+  expect(native.scroll).not.toHaveBeenCalled()
+  view.unmount()
+})
+
+
+it('focuses the edit input for a new arrow dragged from the top overlapping image without selecting it first', async () => {
+  const secondBytes = Buffer.concat([imageBytes, Buffer.from([0])])
+  const secondAsset = { ...imageAsset, ref: { ...imageAsset.ref, bytes: secondBytes.length, attachmentId: `sha256:${createHash('sha256').update(secondBytes).digest('hex')}` } }
+  const project = insertAsset(insertAsset(emptyProject('main'), 'page-1', imageAsset), 'page-1', secondAsset)
+  // Both rendered image bounds cover (70,70), as native 40px insertion offsets do.
+  const h = harness(project)
+  const originalCall = h.bridge.call.getMockImplementation()!
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => endpoint === 'image' && payload.attachment_id === secondAsset.ref.attachmentId
+    ? { bytes_base64: secondBytes.toString('base64'), ref: secondAsset.ref } as any : originalCall(endpoint, payload))
+  render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  const input = screen.getByLabelText('图片修改需求')
+  screen.getByTestId('scene').setAttribute('tabindex', '0'); screen.getByTestId('scene').focus()
+  const arrow = { id: 'overlap-arrow', type: 'arrow', x: 70, y: 70, width: 150, height: -40, points: [[0, 0], [150, -40]] }
+  const elements = [...project.pages[0].elements, arrow]
+  const state = { scrollX: 0, scrollY: 0, zoom: { value: 0.3 }, viewBackgroundColor: '#ffffff', selectedElementIds: { 'overlap-arrow': true }, activeTool: { type: 'arrow' }, newElement: arrow, multiElement: null }
+  act(() => {
+    native.props.onPointerDown({ type: 'arrow' }, { originalElements: new Map(project.pages[0].elements.map(item => [item.id, item])), hit: { element: null } })
+    native.api.updateScene({ elements }); native.props.onChange(elements, state)
+    native.props.onPointerUp({ type: 'arrow' })
+    native.props.onChange(elements, { ...state, activeTool: { type: 'selection' }, newElement: null })
+  })
+  await waitFor(() => expect(document.activeElement).toBe(input))
+  fireEvent.change(input, { target: { value: '修改上层图片的文字' } })
+  const preview = { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: `sha256:${'c'.repeat(64)}` } }
+  h.bridge.stageImages.mockResolvedValue([preview] as never)
+  fireEvent.click(screen.getByRole('button', { name: '修改图片', exact: true }))
+  await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
+  expect(h.read().intents[0].sourceIds).toEqual([secondAsset.ref.attachmentId, preview.ref.attachmentId])
+})
+
+it('does not focus or choose either overlapping image for a new arrow entirely in blank space', async () => {
+  const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  project.pages[0].elements.push({ ...project.pages[0].elements[0], id: 'overlapping-copy', x: 40, y: 40 })
+  const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  const arrow = { id: 'blank-arrow', type: 'arrow', x: 500, y: 500, points: [[0, 0], [100, 100]] }
+  const elements = [...project.pages[0].elements, arrow]
+  act(() => {
+    native.props.onPointerDown({ type: 'arrow' }, { originalElements: new Map(project.pages[0].elements.map(item => [item.id, item])), hit: { element: null } })
+    native.props.onPointerUp()
+    native.props.onChange(elements, { scrollX: 0, scrollY: 0, zoom: { value: 0.3 }, viewBackgroundColor: '#ffffff', selectedElementIds: { 'blank-arrow': true }, activeTool: { type: 'selection' }, newElement: null, multiElement: null })
+  })
+  await act(async () => { await new Promise(requestAnimationFrame) })
+  expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
+  expect((screen.getByRole('button', { name: '修改图片', exact: true }) as HTMLButtonElement).disabled).toBe(true)
 })

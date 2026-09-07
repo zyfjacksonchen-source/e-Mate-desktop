@@ -59,19 +59,38 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   const syncLane = useRef(false)
   const hydrated = useRef<{ bridge: CanvasBridge; projectId: string; generation: number; entries: Map<string, BinaryFiles[string]> } | undefined>(undefined)
   const instructionInput = useRef<HTMLTextAreaElement>(null)
-  const arrowGesture = useRef<{ previous: Set<string>; released: boolean } | null>(null)
+  const arrowGesture = useRef<{ previous: Set<string>; released: boolean; imageOrder: string[]; preferredImageId: string | undefined } | null>(null)
   const focusFrame = useRef<number | undefined>(undefined)
   const fitFrame = useRef<number | undefined>(undefined)
+  const pendingFit = useRef<{ api: ExcalidrawImperativeAPI; generation: number } | null>(null)
   const imageInput = useRef<HTMLInputElement>(null)
   const importInput = useRef<HTMLInputElement>(null)
   const page = project?.pages.find(item => item.id === pageId)
 
-  // Leave space for the floating tools and footer; never upscale small images.
-  const fitScene = (value: ExcalidrawImperativeAPI, maxZoom = 1) => {
-    if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current)
+  const scheduleFit = () => {
+    const pending = pendingFit.current
+    if (!pending || fitFrame.current !== undefined) return
+    const ready = () => {
+      const view = pending.api.getAppState()
+      return alive.current && api.current === pending.api && generation.current === pending.generation
+        && view.isLoading === false && view.width > 0 && view.height > 0
+    }
+    if (!ready()) return
     fitFrame.current = requestAnimationFrame(() => {
-      if (alive.current && api.current === value) value.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: Math.min(1, maxZoom), animate: false })
+      fitFrame.current = undefined
+      if (pendingFit.current !== pending || !ready()) return
+      pendingFit.current = null
+      // Fit the current viewport, not a previous (possibly broken) saved zoom cap.
+      pending.api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: 1, animate: false })
     })
+  }
+  const fitScene = (value: ExcalidrawImperativeAPI, waitForInitialChange = false) => {
+    if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current)
+    fitFrame.current = undefined
+    pendingFit.current = { api: value, generation: generation.current }
+    // 0.18.1 exposes its API in the constructor, before updateDOMRect/initializeScene.
+    // Its first non-loading onChange is the native initial scene readiness signal.
+    if (!waitForInitialChange) scheduleFit()
   }
   const refreshList = useCallback(async () => { const value = await bridge.call('list'); if (alive.current) setProjects(value) }, [bridge])
   const flush = useCallback(async () => {
@@ -171,9 +190,9 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     alive.current = true
     void openProject(initialProjectId, initialAsset).catch(error => { if (alive.current) setError(error.message) })
     const unload = (event: BeforeUnloadEvent) => { if (state.current.dirty) { event.preventDefault(); event.returnValue = '' } }
-    const identity = () => { hydrated.current = undefined; generation.current += 1 }
+    const identity = () => { hydrated.current = undefined; pendingFit.current = null; arrowGesture.current = null; generation.current += 1 }
     addEventListener('beforeunload', unload); addEventListener('emate:identity-changed', identity)
-    return () => { alive.current = false; hydrated.current = undefined; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current); if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current); generation.current += 1; if (timer.current) clearTimeout(timer.current); removeEventListener('beforeunload', unload); removeEventListener('emate:identity-changed', identity); void flush().catch(() => {}) }
+    return () => { alive.current = false; hydrated.current = undefined; pendingFit.current = null; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current); if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current); generation.current += 1; if (timer.current) clearTimeout(timer.current); removeEventListener('beforeunload', unload); removeEventListener('emate:identity-changed', identity); void flush().catch(() => {}) }
   }, [initialProjectId, initialAsset, openProject, flush])
 
   const syncOutputs = useCallback(async () => {
@@ -337,7 +356,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
         </div>
         {page.elements.every(item => item.isDeleted) && <div className={css.stageHint}>添加图片，或从画廊加入图片</div>}
         <Excalidraw key={`${project.id}:${page.id}:${sceneLoad}`} theme={theme}
-          excalidrawAPI={value => { api.current = value; fitScene(value, page.view.zoom) }}
+          excalidrawAPI={value => { api.current = value; fitScene(value, true) }}
           initialData={{ elements: page.elements as any, files, appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as any }, viewBackgroundColor: page.view.background, currentItemFontFamily: 2, currentItemFontSize: 16, currentItemRoughness: 0, currentItemStrokeColor: '#eb5b16' } }}
           viewModeEnabled={switching || busy} langCode="zh-CN" validateEmbeddable={() => false}
           UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false, changeViewBackgroundColor: false }, tools: { image: false } }}
@@ -345,12 +364,18 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
           onPaste={() => false}
           onPointerDown={(tool, pointer) => {
             if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current)
-            if (tool.type === 'arrow' && !arrowGesture.current) arrowGesture.current = { previous: new Set(pointer.originalElements.keys()), released: false }
+            if (tool.type === 'arrow' && !arrowGesture.current) arrowGesture.current = {
+              previous: new Set(pointer.originalElements.keys()), released: false,
+              imageOrder: [...pointer.originalElements.values()].filter(item => item.type === 'image' && !item.isDeleted).map(item => item.id).reverse(),
+              preferredImageId: pointer.hit?.element?.type === 'image' ? pointer.hit.element.id
+                : selectedElements.current.length === 1 ? selectedElements.current[0] : undefined,
+            }
             else if (tool.type !== 'arrow') arrowGesture.current = null
             if (arrowGesture.current) arrowGesture.current.released = false
           }}
           onPointerUp={() => { if (arrowGesture.current) arrowGesture.current.released = true }}
           onChange={(elements, appState) => {
+            scheduleFit()
             const chosen = elements.filter(item => item.type === 'image' && !item.isDeleted && appState.selectedElementIds[item.id])
             selectedElements.current = chosen.map(item => item.id)
             selected.current = chosen.map(item => `sha256:${(item as any).fileId}`)
@@ -362,11 +387,21 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
               arrowGesture.current = null
               const arrows = elements.filter(item => item.type === 'arrow' && !item.isDeleted && !gesture.previous.has(item.id))
               const arrow = arrows.length === 1 ? arrows[0] : undefined
-              const image = arrow && arrowImageTarget(elements as any, arrow as any)
+              let image = arrow && arrowImageTarget(elements as any, arrow as any)
+              if (arrow && !image) {
+                // Overlapping imported images are drawn in scene order. Resolve only
+                // endpoint hits, preferring the gesture's explicit image then its topmost layer.
+                const candidates = [gesture.preferredImageId, ...gesture.imageOrder]
+                for (const id of candidates) {
+                  const candidate = elements.find(item => item.id === id && item.type === 'image' && !item.isDeleted)
+                  if (candidate && arrowImageTarget([candidate] as any, arrow as any)) { image = candidate as any; break }
+                }
+              }
               if (image && arrow) {
                 const value = api.current
+                const epoch = generation.current
                 focusFrame.current = requestAnimationFrame(() => {
-                  if (!alive.current || transitioning.current || api.current !== value || !value) return
+                  if (!alive.current || transitioning.current || generation.current !== epoch || api.current !== value || !value) return
                   value.updateScene({ appState: { selectedElementIds: { [String(image.id)]: true, [arrow.id]: true } } })
                   selectedElements.current = [String(image.id)]; selected.current = [`sha256:${image.fileId}`]; setSelectionCount(1)
                   instructionInput.current?.focus({ preventScroll: true })
