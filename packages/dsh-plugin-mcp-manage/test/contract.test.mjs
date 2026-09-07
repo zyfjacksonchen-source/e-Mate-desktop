@@ -461,6 +461,7 @@ async function nativeXinHarness(t) {
   await h.owner.dispose() // Keep only the native runtime coordinator below.
   const nativeEntries = new Map()
   const writes = []
+  const knowledgeCalls = []
   const capability = { tenant_id: 'xin', user_id: 1, principal_id: 2, project_ids: [], knowledge_project_ids: [], writable_project_ids: [], project_scope_revisions: {}, tools: ['mutate_project'], scope_revision: 'r' }
   const context = {
     ...h.ctx,
@@ -473,6 +474,7 @@ async function nativeXinHarness(t) {
         const registrations = [
           runtime.tools.register(defineTool({ name: `mcp__${XIN_SERVICE}__get_capabilities`, description: 'read capability', parameters: {}, output: { schema: { type: 'object', additionalProperties: true }, render: () => [] }, execute: async () => ({ content: [], structuredContent: capability }) })),
           runtime.tools.register(defineTool({ name: `mcp__${XIN_SERVICE}__mutate_project`, description: 'synthetic write', parameters: {}, output: { schema: { type: 'object', additionalProperties: true }, render: () => [] }, execute: async () => { writes.push(current.userId); return { status: 'changed' } } })),
+          runtime.tools.register(defineTool({ name: `mcp__${XIN_SERVICE}__get_knowledge_compilation`, description: 'synthetic knowledge receipt', parameters: {}, output: { schema: { type: 'object', additionalProperties: true }, render: () => [] }, execute: async () => { knowledgeCalls.push(current.userId); return { structuredContent: { id: 'fixture-compilation', lease_token: 'host-only-fixture' } } } })),
         ]
         nativeEntries.set(value.id, registrations)
         return value.id
@@ -484,7 +486,7 @@ async function nativeXinHarness(t) {
     async token() { return 'synthetic-native-token' }, async authorize() {}, async confirm() { return true }, configured: () => true, async install() {},
   })
   t.after(async () => { await owner.dispose(); await runtime.fiber.dispose() })
-  return { ...h, owner, runtime, writes, async agent(id) {
+  return { ...h, owner, runtime, writes, knowledgeCalls, async agent(id) {
     const agent = { id, session: { events: [] } }
     let scope
     await runtime.plugin(Object.assign(inner => { scope = createScope(inner, agent) }, { inject: ['tools','systemPrompt'] }))
@@ -524,6 +526,59 @@ test('native Host capabilities proof works before Tool Search disclosure without
   assert.deepEqual(h.writes, [])
 })
 
+
+test('captured knowledge Host operation keeps native execution and lease results outside Agent events across turns', async t => {
+  const h = await nativeXinHarness(t)
+  const { agent, exec } = await h.agent('knowledge')
+  const operation = h.owner.captureKnowledge(exec)
+  const before = structuredClone(agent.session.events)
+  assert.deepEqual(await operation.call('get_knowledge_compilation', {}), { structuredContent: { id: 'fixture-compilation', lease_token: 'host-only-fixture' } })
+  assert.deepEqual(agent.session.events, before)
+  const direct = await h.runtime.tools.execute({ callId: exec.callId, name: `mcp__${XIN_SERVICE}__get_knowledge_compilation`, arguments: {}, agent, signal: new AbortController().signal })
+  assert.equal(direct.isError, true)
+  assert.equal(h.knowledgeCalls.length, 1)
+  await assert.rejects(operation.call('mutate_project', {}), /不属于企业知识/)
+  assert.deepEqual(h.writes, [])
+  await h.runtime.waterfall(agent, 'agent/pre-step', { agent, turn: 2, step: 1, messages: [], signal: new AbortController().signal }, async () => ({ kind: 'accept' }))
+  assert.throws(() => h.owner.captureKnowledge(exec), /未绑定/)
+  assert.equal((await operation.call('get_knowledge_compilation', {})).structuredContent.id, 'fixture-compilation')
+  assert.equal(h.knowledgeCalls.length, 2)
+  assert.deepEqual(agent.session.events, before)
+})
+
+test('knowledge Host operations expire on account change, explicit disconnect and request cancellation', async t => {
+  const h = await nativeXinHarness(t)
+  const operation = h.owner.captureKnowledge()
+  await operation.call('get_knowledge_compilation', {})
+  const cancel = new AbortController(); cancel.abort()
+  await assert.rejects(operation.call('get_knowledge_compilation', {}, cancel.signal))
+  assert.equal(h.knowledgeCalls.length, 1)
+  h.principal({ tenantId: 'another-tenant', userId: 'another-user' }); h.owner.changed()
+  await assert.rejects(operation.call('get_knowledge_compilation', {}))
+  const next = h.owner.captureKnowledge()
+  await next.call('get_knowledge_compilation', {})
+  await h.owner.disconnect()
+  await assert.rejects(next.call('get_knowledge_compilation', {}))
+  assert.equal(h.knowledgeCalls.length, 2)
+})
+
+test('a delayed native knowledge dispatch cannot execute under a replacement account', async t => {
+  const h = await nativeXinHarness(t)
+  const operation = h.owner.captureKnowledge()
+  let entered, release
+  const started = new Promise(resolve => { entered = resolve })
+  const waiting = new Promise(resolve => { release = resolve })
+  h.runtime.on('tools/execute', async (exec, next) => {
+    if (exec.name.endsWith('__get_knowledge_compilation')) { entered(); await waiting }
+    return next()
+  })
+  const pending = operation.call('get_knowledge_compilation', {})
+  await started
+  h.principal({ tenantId: 'next-tenant', userId: 'next-user' }); h.owner.changed()
+  release()
+  await assert.rejects(pending)
+  assert.deepEqual(h.knowledgeCalls, [])
+})
 
 test('cancelled reauthorization never restores tokens cleared by invalid_grant during refresh', async t => {
   const h = xinHarness(); t.after(() => h.owner.dispose())

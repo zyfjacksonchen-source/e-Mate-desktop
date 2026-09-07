@@ -37,3 +37,19 @@ secrets. Local stopped/forgotten and remote revoked/unknown/not-required remain
 separate. Roll out the issuer's lineage migration and all related readers before
 claiming production revocation completeness. Keep native Credentials state when
 rolling back the application; dropping it would lose unresolved server outcomes.
+
+## Native knowledge Host access
+
+The existing connection also provides `emateXinKnowledge.capture(exec)` to the
+trusted knowledge plugin. Capture verifies the current enterprise owner and, for
+an Agent request, its original native tool call. The resulting Host-only closure
+can continue that knowledge operation across later turns; account changes,
+disconnect, disposal and cancellation invalidate it. It only admits the fixed
+knowledge/import methods and uses the same ensure, Loader, ToolRuntime and MCP
+client. It is not exposed as a renderer RPC or a generic MCP Tool.
+
+Lease-bearing compilation methods and upload-ticket creation are Host-only. Their
+native Tool execution has no Agent/parent, so the workflow can retain the private
+receipt without writing it into a user Session. Other model-facing MCP calls keep
+their existing Agent authorization and Tool Search restrictions. The server still
+checks current project read/write permissions on every call.

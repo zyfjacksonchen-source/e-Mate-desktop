@@ -680,6 +680,24 @@ export interface XinConnectionResult {
 }
 type XinExecution = Partial<Parameters<Context['tools']['execute']>[0]> & { token?: Parameters<Context['tools']['execute']>[0]['parent'] }
 
+const KNOWLEDGE_METHODS = new Set([
+  'prepare_source_upload', 'find_imported_source', 'create_knowledge_compilation',
+  'find_knowledge_compilation', 'get_knowledge_compilation', 'claim_knowledge_compilation',
+  'checkpoint_knowledge_compilation', 'prepare_knowledge_revision', 'commit_knowledge_compilation',
+  'get_knowledge_revision', 'list_knowledge_revisions', 'read_project_knowledge_graph', 'read_knowledge_chunks',
+])
+const HOST_KNOWLEDGE_METHODS = new Set([
+  'prepare_source_upload', 'create_knowledge_compilation', 'find_knowledge_compilation',
+  'get_knowledge_compilation', 'claim_knowledge_compilation', 'checkpoint_knowledge_compilation',
+  'prepare_knowledge_revision', 'commit_knowledge_compilation',
+])
+export interface XinKnowledgeOperation {
+  call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>
+}
+declare module '@deepseek-ai/cordis' {
+  interface Context { emateXinKnowledge: { capture(exec?: XinExecution): XinKnowledgeOperation } }
+}
+
 /** One account-bound adapter over the existing native owners, shared by UI and Agent. */
 export function createXinConnection(ctx: Context, operations: {
   authorize(lease: OAuthLease, agent?: UserQuestionAgent): Promise<void>
@@ -693,6 +711,7 @@ export function createXinConnection(ctx: Context, operations: {
   const capabilityTool = `${prefix}get_capabilities`
   const principals = new WeakMap<object, { turn: number; owner: string | undefined }>()
   const probes = new Set<string>()
+  const knowledgeCalls = new Map<string, { name: string; key: string; epoch: number; signal: AbortSignal }>()
   const executions = new WeakMap<object, { key: string; epoch: number; signal: AbortSignal }>()
   let epoch = 0
   let disposed = false
@@ -759,6 +778,11 @@ export function createXinConnection(ctx: Context, operations: {
     if (!scope || disposed || entry?.key !== scope.key) return '芯助手连接不属于当前登录账号，请先确保连接。'
     if (probes.has(String(exec.callId)) && exec.name === capabilityTool) { executions.set(exec, { key: scope.key, epoch, signal: controller.signal }); return undefined }
     if (verified !== scope.key || !isMcpServerActive(ctx.loader, ctx.tools, entry.id, XIN_SERVICE)) return '芯助手尚未验证当前授权，请先确保连接。'
+    const knowledge = knowledgeCalls.get(String(exec.callId))
+    if (!exec.agent && knowledge?.name === exec.name && knowledge.key === scope.key && knowledge.epoch === epoch && !knowledge.signal.aborted) {
+      executions.set(exec, knowledge); return undefined
+    }
+    if (HOST_KNOWLEDGE_METHODS.has(exec.name.slice(prefix.length))) return '知识导入与整理请使用企业知识工具；运行租约和上传凭据仅由宿主处理。'
     if (!exec.agent || executionOwner(exec) !== scope.key) return '请在当前任务中先调用 mcp_manage ensure 验证芯助手账号。'
     executions.set(exec, { key: scope.key, epoch, signal: controller.signal })
     return undefined
@@ -1002,8 +1026,41 @@ export function createXinConnection(ctx: Context, operations: {
     epoch++; controller.abort(); controller = new AbortController(); verified = undefined
     void serial(removeEntry).catch(() => {})
   }
-  return { status, ensure, disconnect, changed, async dispose() {
+  const captureKnowledge = (exec: XinExecution = {}): XinKnowledgeOperation => {
+    changed()
+    const scope = owner(), generation = epoch, capturedSignal = controller.signal
+    if (!scope || disposed || exec.agent && executionOwner(exec) !== scope.key) throw Error('当前任务未绑定有效的芯助手账号。')
+    const check = () => {
+      capturedSignal.throwIfAborted(); exec.signal?.throwIfAborted()
+      if (disposed || epoch !== generation || owner()?.key !== scope.key) throw Error('芯助手账号或连接已变化。')
+    }
+    check()
+    // This closure stays inside the trusted knowledge Host. It carries neither
+    // OAuth credentials nor a generic MCP invocation surface into an Agent/RPC.
+    return { async call(name, args, signal) {
+      check()
+      if (!KNOWLEDGE_METHODS.has(name)) throw Error('该方法不属于企业知识流程。')
+      const combined = AbortSignal.any([capturedSignal, ...(exec.signal ? [exec.signal] : []), ...(signal ? [signal] : [])])
+      combined.throwIfAborted()
+      const ready = await ensure({ signal: combined })
+      check(); combined.throwIfAborted()
+      if (ready.state !== 'ready') throw Error('芯助手尚未完成本人授权。')
+      const callId = `xin-knowledge-${randomBytes(24).toString('hex')}`
+      const tool = prefix + name
+      knowledgeCalls.set(callId, { name: tool, key: scope.key, epoch: generation, signal: combined })
+      try {
+        // Native ToolRuntime validates arguments and executes the existing MCP
+        // client. No Agent/parent means lease-bearing results cannot enter JSONL.
+        const response = await ctx.tools.execute({ callId, name: tool, arguments: args, signal: combined } as never)
+        check(); combined.throwIfAborted()
+        if (response.isError) throw Error('芯助手知识调用失败，请回查原操作。')
+        return response.value
+      } finally { knowledgeCalls.delete(callId) }
+    } }
+  }
+  return { status, ensure, disconnect, changed, captureKnowledge, async dispose() {
     disposed = true; epoch++; controller.abort(); verified = undefined
+    knowledgeCalls.clear()
     await serial(removeEntry)
     guard(); stopDispatch(); stopPost(); stopTurn(); stopAgent()
   } }
@@ -1029,6 +1086,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
     configured: () => current().servers.some(spec => spec.name === XIN_SERVICE && supportedServer(spec)),
     install: () => ctx.settings.update(SETTINGS_NAMESPACE, { servers: [...current().servers.filter(spec => spec.name !== XIN_SERVICE), MCP_CATALOG.get(XIN_SERVICE)!] }),
   })
+  ctx.provide('emateXinKnowledge', { capture: xin.captureKnowledge })
   ctx.on('credentials/updated', ref => {
     if (String(ref) === 'E_MATE_ENTERPRISE_SESSION') {
       xin.changed()
