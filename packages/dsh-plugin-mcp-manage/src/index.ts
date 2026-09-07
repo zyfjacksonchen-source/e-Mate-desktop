@@ -709,7 +709,7 @@ export function createXinConnection(ctx: Context, operations: {
   const spec = MCP_CATALOG.get(XIN_SERVICE)!
   const prefix = `mcp__${XIN_SERVICE}__`
   const capabilityTool = `${prefix}get_capabilities`
-  const principals = new WeakMap<object, { turn: number; owner: string | undefined }>()
+  const principals = new WeakMap<object, { turn: number; owner: string | undefined; subjectSignal?: AbortSignal }>()
   const probes = new Set<string>()
   const knowledgeCalls = new Map<string, { name: string; key: string; epoch: number; signal: AbortSignal; subject: string }>()
   const executions = new WeakMap<object, { key: string; epoch: number; signal: AbortSignal; subject?: string }>()
@@ -746,14 +746,17 @@ export function createXinConnection(ctx: Context, operations: {
   // Bind authorization before the model starts a turn, not when its first
   // late ensure happens to arrive. A new turn may reuse the same local task.
   const stopTurn = ctx.on('agent/pre-step', ({ agent, turn }, next) => {
-    if (principals.get(agent)?.turn !== turn) principals.set(agent, { turn, owner: owner()?.key })
+    if (principals.get(agent)?.turn !== turn) {
+      const key = owner()?.key
+      principals.set(agent, { turn, owner: key, ...(key && proof?.owner === key && verified === key ? { subjectSignal: subjectController.signal } : {}) })
+    }
     return next()
   })
   const stopAgent = ctx.on('agent/disposed', ({ agent }) => { principals.delete(agent) })
   const executionOwner = (exec: XinExecution): string | undefined => {
     if (!exec.agent) return undefined
     const binding = principals.get(exec.agent)
-    if (!binding) return undefined
+    if (!binding || binding.subjectSignal?.aborted) return undefined
     const callId = exec.rootCallId ?? exec.callId
     if (callId === undefined) return undefined
     const events = exec.agent.session.events
@@ -786,7 +789,7 @@ export function createXinConnection(ctx: Context, operations: {
       executions.set(exec, { ...knowledge, signal: AbortSignal.any([knowledge.signal, subjectController.signal]) }); return undefined
     }
     if (HOST_KNOWLEDGE_METHODS.has(exec.name.slice(prefix.length))) return '知识导入与整理请使用企业知识工具；运行租约和上传凭据仅由宿主处理。'
-    if (!exec.agent || executionOwner(exec) !== scope.key) return '请在当前任务中先调用 mcp_manage ensure 验证芯助手账号。'
+    if (!exec.agent || executionOwner(exec) !== scope.key || !principals.get(exec.agent)?.subjectSignal) return '请在当前任务中先调用 mcp_manage ensure 验证芯助手账号。'
     executions.set(exec, { key: scope.key, epoch, signal: AbortSignal.any([controller.signal, subjectController.signal]), subject: proofSubject() })
     return undefined
   })
@@ -846,7 +849,12 @@ export function createXinConnection(ctx: Context, operations: {
       if (saved.disconnected) disconnected.set(scope.key, saved.disconnected)
       if (saved.disconnected?.local_forgotten && options.interactive !== false) await ledger(scope).reconnect()
       if (generation !== epoch || owner()?.key !== scope.key || exec.signal?.aborted) return result('cancelled', scope.key)
-      return ensureCurrent(exec, options)
+      const ready = await ensureCurrent(exec, options)
+      if (ready.state === 'ready' && exec.agent) {
+        if (executionOwner(exec) !== scope.key) return result('unavailable', scope.key)
+        principals.get(exec.agent)!.subjectSignal ??= subjectController.signal
+      }
+      return ready
     } catch { return result('unavailable', scope.key) }
   }
   const ensureCurrent = (exec: XinExecution = {}, options: { interactive?: boolean; reauthorize?: boolean } = {}): Promise<XinConnectionResult> => {
@@ -1037,9 +1045,13 @@ export function createXinConnection(ctx: Context, operations: {
     changed()
     const scope = owner(), generation = epoch, capturedSignal = controller.signal
     let subject = proof?.owner === scope?.key ? proofSubject() : undefined
+    let capturedSubjectSignal = subject === undefined ? undefined : subjectController.signal
     if (!scope || disposed || exec.agent && executionOwner(exec) !== scope.key) throw Error('当前任务未绑定有效的芯助手账号。')
+    const turnBinding = exec.agent ? principals.get(exec.agent) : undefined
+    if (turnBinding && capturedSubjectSignal) turnBinding.subjectSignal ??= capturedSubjectSignal
     const check = () => {
       capturedSignal.throwIfAborted(); exec.signal?.throwIfAborted()
+      capturedSubjectSignal?.throwIfAborted()
       if (disposed || epoch !== generation || owner()?.key !== scope.key) throw Error('芯助手账号或连接已变化。')
       if (subject !== undefined && subject !== proofSubject()) throw Error('芯助手本人授权账号已变化，请重新开始知识操作。')
     }
@@ -1056,6 +1068,8 @@ export function createXinConnection(ctx: Context, operations: {
       if (ready.state !== 'ready') throw Error('芯助手尚未完成本人授权。')
       subject ??= proofSubject()
       if (subject === undefined) throw Error('芯助手本人授权尚未核验。')
+      capturedSubjectSignal ??= subjectController.signal
+      if (turnBinding) turnBinding.subjectSignal ??= capturedSubjectSignal
       const callId = `xin-knowledge-${randomBytes(24).toString('hex')}`
       const tool = prefix + name
       knowledgeCalls.set(callId, { name: tool, key: scope.key, epoch: generation, signal: combined, subject })
