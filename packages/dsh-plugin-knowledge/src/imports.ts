@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { basename } from 'node:path'
+import { basename, isAbsolute, resolve } from 'node:path'
 
 export const API_ROOT = 'https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1'
 export const MAX_ORIGINAL_BYTES = 20 * 1024 * 1024
@@ -42,7 +42,7 @@ export function createKnowledgeTransport(identity: any) {
       finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
       combined.throwIfAborted(); check(expected)
       let value: any; try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { fail('invalid-response') }
-      if (!response.ok) fail(value.error === 'INVALID_CITATION' ? 'invalid-citation' : value.error === 'IDEMPOTENCY_CONFLICT' ? 'idempotency-conflict' : response.status === 404 ? 'not-found' : response.status === 409 ? 'conflict' : response.status === 403 || response.status === 401 ? 'unauthorized' : 'unavailable')
+      if (!response.ok) fail(value.error === 'INVALID_CITATION' ? 'invalid-citation' : value.error === 'IDEMPOTENCY_CONFLICT' ? 'idempotency-conflict' : response.status === 400 || response.status === 413 ? 'invalid-request' : response.status === 404 ? 'not-found' : response.status === 409 ? 'conflict' : response.status === 403 || response.status === 401 ? 'unauthorized' : 'unavailable')
       if (verifyScope && (value.schema_version !== 1 || !['enterprise-subject', 'public', 'uploader-private'].includes(value.scope?.kind))) fail('invalid-response')
       return value
   }
@@ -66,6 +66,26 @@ export function createKnowledgeTransport(identity: any) {
 }
 
 export type KnowledgeTransport = ReturnType<typeof createKnowledgeTransport>
+
+/** A proven lookup miss may retry only the same durable idempotent request, never a new ID. */
+export async function findOrCreate(transport: KnowledgeTransport, owner: string, collection: 'imports' | 'compilations', request: any, existed: boolean, signal?: AbortSignal) {
+  const lookup = async () => {
+    try { return await transport.request(owner, 'GET', `/${collection}?operation_id=${request.operation_id}`, undefined, signal) }
+    catch (error: any) { signal?.throwIfAborted(); if (error.code !== 'not-found') throw error; return undefined }
+  }
+  if (existed) { const found = await lookup(); if (found !== undefined) return found }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { return await transport.request(owner, 'POST', `/${collection}`, request, signal) }
+    catch (error: any) {
+      signal?.throwIfAborted()
+      if (['conflict', 'idempotency-conflict', 'unauthorized', 'scope-changed', 'disposed', 'invalid-request'].includes(error.code)) throw error
+      const found = await lookup()
+      if (found !== undefined) return found
+      if (attempt === 1) throw error
+    }
+  }
+  fail('unavailable')
+}
 
 export async function collectOriginals(fs: any, paths: string[], cwd: string | undefined, signal?: AbortSignal) {
   if (!Array.isArray(paths) || paths.length < 1 || paths.length > 100 || paths.some(path => typeof path !== 'string' || !path || path.length > 4096)) fail('invalid-files')
@@ -101,7 +121,7 @@ export function decodeXinReply(raw: any): any {
     if (raw.content.length !== 1 || raw.content[0]?.type !== 'text' || typeof raw.content[0].text !== 'string') fail('invalid-response')
     try { value = JSON.parse(raw.content[0].text) } catch { fail('invalid-response') }
   }
-  if (value?.error || value?.status === 'failed') fail(value.error === 'INVALID_CITATION' ? 'invalid-citation' : value.error === 'IDEMPOTENCY_CONFLICT' ? 'idempotency-conflict' : value.error === 'NOT_FOUND' ? 'not-found' : ['REVISION_CONFLICT', 'LEASE_CONFLICT', 'SCOPE_CHANGED'].includes(value.error) ? 'conflict' : 'project-unavailable')
+  if (value?.error || value?.status === 'failed') fail(value.error === 'INVALID_CITATION' ? 'invalid-citation' : value.error === 'IDEMPOTENCY_CONFLICT' ? 'idempotency-conflict' : value.error === 'INVALID_QUERY' ? 'invalid-request' : value.error === 'FORBIDDEN' ? 'unauthorized' : value.error === 'NOT_FOUND' ? 'not-found' : ['REVISION_CONFLICT', 'LEASE_CONFLICT', 'SCOPE_CHANGED'].includes(value.error) ? 'conflict' : 'project-unavailable')
   return value
 }
 export type ProjectCall = (name: string, args: Record<string, unknown>, exec: Execution, signal?: AbortSignal) => Promise<any>
@@ -113,8 +133,14 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
     const start = call && log.find((event: any) => event.type === 'turn/start' && event.data.turn === call.data.turn)
     const message = start && log.findLast((event: any) => event.seq > start.seq && event.seq < call.seq && event.type === 'user/message' && event.data.source.kind === 'user')
     const text = message?.data.content.filter((block: any) => block.type === 'text').map((block: any) => block.text).join('\n') ?? ''
-    const explicit = /^(?:请)?(?:把|将|导入|整理|加入|上传)[^\n]{0,200}(?:公共知识库|公开知识库)/u.test(text.trim())
-    if (!explicit || /^(?:请)?(?:不要|别|不能|不允许)/u.test(text.trim()) || !paths.every(path => text.includes(path) || text.includes(basename(path)))) fail('public-intent-required', '公共导入需要明确指定本次文件及公共知识库用途。')
+    const instruction = text.trim()
+    const ambiguous = /不要|不能|不得|不许|不可|禁止|别(?:传|导入|上传|公开)|排除|除外|除了|不包括|不含|例外|但是|除.{0,120}外|\b(?:not|except|excluding|exclude)\b/iu.test(instruction)
+    const match = /^(?:请)?(?:把|将)\s*(.+?)\s*(?:导入|上传|加入|整理)(?:到|至|进)?\s*(?:公司)?(?:公共|公开)知识库[。.!！]?$/u.exec(instruction)
+      ?? /^(?:请)?(?:导入|上传|加入)\s*(.+?)\s*(?:到|至|进)\s*(?:公司)?(?:公共|公开)知识库[。.!！]?$/u.exec(instruction)
+    const names = match?.[1]?.split(/[,，、]|\s+(?:和|及|以及)\s+/u).map(name => name.trim().replace(/^(?:"([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`)$/u, (_match, double, single, tick) => double ?? single ?? tick)) ?? []
+    const cwd = exec.agent.session.header.cwd
+    const bound = Array.isArray(paths) && paths.length > 0 && paths.every(path => typeof path === 'string' && names.some(name => name === path || (typeof cwd === 'string' && !isAbsolute(name) && resolve(cwd, name) === resolve(cwd, path))))
+    if (ambiguous || !match || !bound) fail('public-intent-required', '无法将本次文件绑定到明确的公共导入指令；未执行导入，原件仍保留在本机私有范围。')
     const id = message.data.id
     if (typeof id !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(id)) fail('public-intent-required')
     await persist(ctx, exec.agent, { kind: 'public-intent', id, owner, paths, origin: 'user_message' })
@@ -209,14 +235,10 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
         const operation_id = digest([options.operationId, file.target.targetKey, sha256])
         const request = { operation_id, filename: file.filename, title: options.title ?? file.filename, publisher: options.publisher ?? '本人上传', kind: 'knowledge', sha256, byte_length: bytes.length, scope, ...(provenance ? { provenance } : {}), ...(options.supersedes ? { supersedes: options.supersedes } : {}) }
         const previous = events(exec.agent).find(event => event.kind === 'import-request' && event.operationId === operation_id && event.owner === owner)
-        let receipt: any
         if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict')
-        if (previous) receipt = await transport.request(owner, 'GET', '/imports?operation_id=' + operation_id, undefined, exec.signal)
-        else {
-          await persist(ctx, exec.agent, { kind: 'import-request', owner, batchId: options.operationId, operationId: operation_id, request })
-          try { receipt = await transport.request(owner, 'POST', '/imports', request, exec.signal) }
-          catch (error) { exec.signal?.throwIfAborted(); receipt = await transport.request(owner, 'GET', '/imports?operation_id=' + operation_id, undefined, exec.signal) }
-        }
+        if (!previous) await persist(ctx, exec.agent, { kind: 'import-request', owner, batchId: options.operationId, operationId: operation_id, request })
+        const frozen = previous?.request ?? events(exec.agent).findLast(event => event.kind === 'import-request' && event.operationId === operation_id && event.owner === owner).request
+        let receipt = await findOrCreate(transport, owner, 'imports', frozen, previous !== undefined, exec.signal)
         if (!UUID.test(receipt.import_id) || receipt.operation_id !== operation_id || receipt.scope?.kind !== scope.kind || receipt.request_hash !== digest({ ...request, provenance: provenance ?? null, supersedes: options.supersedes ?? null })) fail('invalid-response')
         await persist(ctx, exec.agent, { kind: 'import-receipt', owner, operationId: operation_id, importId: receipt.import_id })
         if (receipt.status === 'awaiting_content') {

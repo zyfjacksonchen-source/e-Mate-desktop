@@ -16,9 +16,11 @@ import LocalJobs from '../../../upstream/deepseek-harness/packages/jobs/jobs-loc
 import GoalService from '../../../upstream/deepseek-harness/packages/goal/goal/lib/index.js'
 import Persistence from '../../../upstream/deepseek-harness/packages/session/session-persistence-jsonl/lib/index.js'
 import LocalFs from '../../../upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'
-import { createKnowledgeWorkflow, recoverNativeClaims } from '../src/workflow.ts'
+import { createKnowledgeWorkflow, recoverNativeClaims, normalizeCheckpoint } from '../src/workflow.ts'
 import { collectOriginals, digest, events } from '../src/imports.ts'
 
+// Captured from B 92b50d9 KnowledgeCheckpointData.model_validate({}).model_dump(mode='json').
+const bCheckpointDefaults = { child_session_id: null, completed_units: [], message_id: null, session_id: null, unknown_submission: false }
 const source = { source_id: '11111111-1111-4111-8111-111111111111', source_version: 'a'.repeat(64), parse_revision: 'b'.repeat(64) }
 const claim = { kind: 'original_fact', text: '公开原文', citations: [{ ...source, chunk_id: 0, quote: '公开原文', quote_sha256: createHash('sha256').update('公开原文').digest('hex') }], benchmark_query_ids: [] }
 const output = { claims: [{ ...claim, citations: claim.citations.map(({ quote_sha256, ...citation }) => citation) }] }
@@ -40,13 +42,14 @@ class Adapter extends LlmAdapter {
   }
 }
 function server() {
-  let compilation; const revisions = new Map(); const calls = []; let lostCreate = false, lostCommit = false, lostClaim = false, lostCheckpoint = false, conflict = false, rejectedCitations = 0
+  let compilation; const revisions = new Map(); const calls = []; let lostCreate = false, lostCommit = false, lostClaim = false, lostCheckpoint = false, conflict = false, rejectedCitations = 0, unreachableCreates = 0
   const response = value => Response.json({ schema_version: 1, scope: { kind: 'enterprise-subject' }, ...structuredClone(value) })
-  return { calls, revisions, get compilation() { return compilation }, loseCreate() { lostCreate = true }, loseCommit() { lostCommit = true }, loseLeaseReplies() { lostClaim = true; lostCheckpoint = true }, conflict() { conflict = true }, clearConflict() { conflict = false }, rejectCitationOnce() { rejectedCitations = 1 },
+  return { calls, revisions, get compilation() { return compilation }, loseCreate() { lostCreate = true }, loseCommit() { lostCommit = true }, loseLeaseReplies() { lostClaim = true; lostCheckpoint = true }, conflict() { conflict = true }, clearConflict() { conflict = false }, rejectCitationOnce() { rejectedCitations = 1 }, failCreates(count) { unreachableCreates = count },
     async request(url, init) {
       const path = url.pathname.split('/knowledge/v1')[1]; const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
       calls.push({ method: init.method, path, query: url.search, body })
       if (init.method === 'POST' && path === '/compilations') {
+        if (unreachableCreates > 0) { unreachableCreates--; throw Error('POST never reached the service') }
         compilation = { id: randomUUID(), operation_id: body.operation_id, request: body, state: 'pending', version: 1, checkpoint: {}, revision_ids: Object.fromEntries(body.topics.map(topic => [topic.key, randomUUID()])), benchmark_evidence: [] }
         if (lostCreate) { lostCreate = false; throw Error('lost create response') }
         return response(compilation)
@@ -55,7 +58,7 @@ function server() {
       if (path.endsWith('/claim')) { assert.equal(body.expected_version, compilation.version); compilation.version++; compilation.state = 'running'; compilation.lease_token = 'c'.repeat(64); compilation.runner_id = body.runner_id; if (lostClaim) { lostClaim = false; throw Error('claim response lost') }; return response(compilation) }
       if (init.method === 'PATCH') {
         if (body.expected_version !== compilation.version) return Response.json({ error: 'LEASE_CONFLICT' }, { status: 409 })
-        compilation.version++; compilation.state = body.state; compilation.checkpoint = body.checkpoint; if (lostCheckpoint) { lostCheckpoint = false; throw Error('checkpoint response lost') }; return response(compilation)
+        compilation.version++; compilation.state = body.state; compilation.checkpoint = { ...bCheckpointDefaults, ...body.checkpoint }; if (lostCheckpoint) { lostCheckpoint = false; throw Error('checkpoint response lost') }; return response(compilation)
       }
       if (path.endsWith('/chunks')) return response({ version: source, chunks: [{ chunk_id: 0, content: '公开原文', quote_sha256: claim.citations[0].quote_sha256 }], next_offset: null })
       if (path.startsWith('/revisions/')) {
@@ -312,7 +315,7 @@ test('natural-language public purpose is backed by the real current user message
     async execute(_args, exec) { intent = await run.workflow.recordUserPublicIntent(exec, ['/files/source.pdf']); exec.concludeTurn(); return { id: intent } },
   })
   run.adapter.script.push(toolChunks('record', 'record_public_import', {}))
-  const message = createUserMessage({ content: [{ type: 'text', text: '请把 source.pdf 导入公共知识库' }], source: { kind: 'user' } })
+  const message = createUserMessage({ content: [{ type: 'text', text: '请把 /files/source.pdf 导入公共知识库' }], source: { kind: 'user' } })
   parent.followup(message); await parent.whenIdle()
   assert.equal(intent, message.id)
   assert.equal(events(parent).find(event => event.kind === 'public-intent').origin, 'user_message')
@@ -366,4 +369,86 @@ test('Host computes quote digests and corrects only a known rejected candidate o
   assert.equal(puts[0].body.claims[0].citations[0].quote_sha256, claim.citations[0].quote_sha256)
   assert.equal(backend.calls.filter(call => call.path === '/compilations' && call.method === 'POST').length, 1)
   assert.equal(run.adapter.requests.length, 2)
+})
+
+
+test('checkpoint normalization matches the actual B Pydantic defaults and preserves populated native fields', () => {
+  assert.deepEqual(normalizeCheckpoint({}), bCheckpointDefaults)
+  assert.deepEqual(normalizeCheckpoint({ session_id: 'session', completed_units: [] }), { ...bCheckpointDefaults, session_id: 'session' })
+  assert.deepEqual(normalizeCheckpoint({ session_id: 'session', child_session_id: 'child', completed_units: ['topic'], unknown_submission: true }), { ...bCheckpointDefaults, session_id: 'session', child_session_id: 'child', completed_units: ['topic'], unknown_submission: true })
+})
+
+test('negative/excluded files and ambiguous basenames never obtain public intent or trigger upload', async t => {
+  const run = await runtime(t)
+  const parent = run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
+  const rejected = []
+  run.ctx.tools.register({ name: 'attempt_public_import', description: 'Attempt this file import.', parameters: { type: 'object', properties: { path: { type: 'string' } } }, output: { schema: { type: 'object', properties: { blocked: { type: 'boolean' } } }, render: () => [] },
+    async execute(args, exec) {
+      try { await run.workflow.importFiles(exec, { operationId: randomUUID(), paths: [args.path], scope: { kind: 'public' } }) }
+      catch (error) { rejected.push(error); exec.concludeTurn(); return { blocked: true } }
+      throw Error('must not authorize excluded file')
+    },
+  })
+  for (const [text, path] of [
+    ['请把public.pdf导入公共知识库，不要上传private.pdf', '/files/private.pdf'],
+    ['请把public.pdf导入公共知识库，除了private.pdf', '/files/private.pdf'],
+    ['请把/public/report.pdf导入公共知识库', '/private/report.pdf'],
+    ['请把report.pdf导入公共知识库', '/ambiguous/report.pdf'],
+  ]) {
+    run.adapter.script.push(toolChunks(randomUUID(), 'attempt_public_import', { path }))
+    parent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await parent.whenIdle()
+  }
+  assert.equal(rejected.length, 4)
+  assert(rejected.every(error => error.code === 'public-intent-required' && error.message.includes('未执行导入')))
+  assert.equal(events(parent).filter(event => event.kind === 'public-intent').length, 0)
+  assert.equal(run.backend.calls.length, 0)
+})
+
+test('a persisted compilation intent recovers after POST never arrives and lookup returns a real 404', async t => {
+  const backend = server(); backend.failCreates(2)
+  const run = await runtime(t, backend); const input = request()
+  await assert.rejects(run.workflow.start({ agent: run.caller }, input))
+  assert.equal(run.adapter.requests.length, 0)
+  assert.equal(backend.compilation, undefined)
+  run.adapter.script.push(toolChunks('result', 'structured_output', output))
+  const recovered = await run.workflow.start({ agent: run.caller }, input)
+  assert.equal((await done(run, recovered)).status, 'completed')
+  const creates = backend.calls.filter(call => call.method === 'POST' && call.path === '/compilations')
+  assert.equal(creates.length, 3)
+  assert(creates.every(call => digest(call.body) === digest(creates[0].body)))
+  assert.equal(backend.calls[4].method, 'GET')
+  assert.equal(run.adapter.requests.length, 1)
+})
+
+test('a persisted import intent retries only the same body after a real lookup miss and never treats 403/409/network lookup failures as missing', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'emate-import-recover-')); t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'original.pdf'); await writeFile(path, 'raw original')
+  const calls = []; let remaining = 2, imported, denyLookup
+  const backend = { async request(url, init) {
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body
+    calls.push({ method: init.method, path: url.pathname, body })
+    if (init.method === 'GET') {
+      if (denyLookup === 'network') throw Error('lookup connection unavailable')
+      if (denyLookup) return Response.json({ error: 'FORBIDDEN' }, { status: denyLookup })
+      return imported ? Response.json({ schema_version: 1, ...imported }) : Response.json({ error: 'NOT_FOUND' }, { status: 404 })
+    }
+    if (init.method === 'POST') {
+      if (remaining-- > 0) throw Error('POST never reached server')
+      imported = { import_id: randomUUID(), operation_id: body.operation_id, scope: body.scope, status: 'awaiting_content', request_hash: digest({ ...body, provenance: null, supersedes: null }), source: null }
+    } else { imported.status = 'parsing'; imported.source = { id: source.source_id } }
+    return Response.json({ schema_version: 1, ...imported })
+  } }
+  const run = await runtime(t, backend, root)
+  const options = { paths: [path], operationId: randomUUID() }
+  await assert.rejects(run.workflow.importFiles({ agent: run.caller }, options))
+  for (const denied of [403, 409, 'network']) {
+    denyLookup = denied; const before = calls.filter(call => call.method === 'POST').length
+    await assert.rejects(run.workflow.importFiles({ agent: run.caller }, options))
+    assert.equal(calls.filter(call => call.method === 'POST').length, before)
+  }
+  denyLookup = undefined
+  assert.equal((await run.workflow.importFiles({ agent: run.caller }, options)).imports[0].status, 'parsing')
+  const creates = calls.filter(call => call.method === 'POST')
+  assert.equal(creates.length, 3)
+  assert(creates.every(call => digest(call.body) === digest(creates[0].body)))
 })

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createKnowledgeImports, createKnowledgeTransport, decodeXinReply, digest, events, fail, HASH, OPERATION, ownerOf, persist, UUID, type Execution, type Scope, type KnowledgeTransport } from './imports.ts'
+import { createKnowledgeImports, createKnowledgeTransport, decodeXinReply, findOrCreate, digest, events, fail, HASH, OPERATION, ownerOf, persist, UUID, type Execution, type Scope, type KnowledgeTransport } from './imports.ts'
 
 const EVENT = 'knowledge/workflow'
 const READ_TOOL = 'knowledge_frozen_source'
@@ -14,6 +14,12 @@ function receipt(value: any): Compilation {
   for (const topic of value.request.topics) if (!UUID.test(value.revision_ids[topic.key])) fail('invalid-response')
   return value
 }
+/** B KnowledgeCheckpointData defaults, applied before both transmission and CAS readback. */
+export function normalizeCheckpoint(value: any) {
+  return { session_id: value.session_id ?? null, child_session_id: value.child_session_id ?? null, message_id: value.message_id ?? null,
+    completed_units: [...(value.completed_units ?? [])], unknown_submission: value.unknown_submission ?? false }
+}
+
 function publicReceipt(value: Compilation) {
   return { compilation_id: value.id, operation_id: value.operation_id, version: value.version, state: value.state, scope: value.request.scope,
     source_versions: value.request.source_versions, topics: value.request.topics, model: value.request.model, checkpoint: value.checkpoint, revision_ids: value.revision_ids }
@@ -169,19 +175,19 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
   const runCompilation = async (agent: any, initial: Compilation, owner: string, signal: AbortSignal, io: KnowledgeTransport) => {
     let value = initial
     const runnerId = randomUUID()
-    let checkpoint = { ...value.checkpoint, session_id: agent.id, completed_units: [...(value.checkpoint.completed_units ?? [])] }
+    let checkpoint = normalizeCheckpoint({ ...value.checkpoint, session_id: agent.id })
     let chain = Promise.resolve()
     const mutate = <T,>(task: () => Promise<T>): Promise<T> => {
       const next = chain.then(task); chain = next.then(() => {}, () => {}); return next
     }
     const patch = (state = 'running') => mutate(async () => {
       signal.throwIfAborted(); transport.check(owner)
-      const expected = { expected_version: value.version, lease_token: value.lease_token, state, checkpoint: structuredClone(checkpoint) }
+      const expected = { expected_version: value.version, lease_token: value.lease_token, state, checkpoint: normalizeCheckpoint(checkpoint) }
       try { value = receipt(await io.request(owner, 'PATCH', `/compilations/${value.id}`, expected, signal)) }
       catch (error) {
         signal.throwIfAborted()
         const observed = receipt(await io.request(owner, 'GET', `/compilations/${value.id}`, undefined, signal))
-        if (observed.version !== expected.expected_version + 1 || observed.lease_token !== expected.lease_token || observed.state !== state || digest(observed.checkpoint) !== digest(expected.checkpoint)) throw error
+        if (observed.version !== expected.expected_version + 1 || observed.lease_token !== expected.lease_token || observed.state !== state || digest(normalizeCheckpoint(observed.checkpoint)) !== digest(expected.checkpoint)) throw error
         value = observed
       }
     })
@@ -320,14 +326,11 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { xinKnowledgeCa
       if (!OPERATION.test(options.operationId) || !Array.isArray(options.topics) || options.topics.length < 1 || options.topics.length > 30 || (options.sourceReplacements && options.scope?.kind !== 'project')) fail('invalid-request')
       const io = selectedTransport(exec, options.scope)
       const request = { operation_id: options.operationId, source_versions: options.sourceVersions, topics: options.topics.map(topic => ({ ...topic, expected_revision_id: topic.expected_revision_id ?? null })), model: options.model, scope: options.scope ?? { kind: 'uploader-private' }, benchmark_query_ids: options.benchmarkQueryIds ?? [], ...(options.sourceReplacements ? { source_replacements: options.sourceReplacements } : {}) }
-      let value: Compilation
       const previous = events(exec.agent).find(event => event.kind === 'compilation-request' && event.operationId === options.operationId && event.owner === owner)
-      if (previous) { if (digest(previous.request) !== digest(request)) fail('idempotency-conflict'); value = receipt(await io.request(owner, 'GET', '/compilations?operation_id=' + options.operationId, undefined, exec.signal)) }
-      else {
-        await persist(ctx, exec.agent, { kind: 'compilation-request', owner, operationId: options.operationId, request })
-        try { value = receipt(await io.request(owner, 'POST', '/compilations', request, exec.signal)) }
-        catch (error) { exec.signal?.throwIfAborted(); value = receipt(await io.request(owner, 'GET', '/compilations?operation_id=' + options.operationId, undefined, exec.signal)) }
-      }
+      if (previous && digest(previous.request) !== digest(request)) fail('idempotency-conflict')
+      if (!previous) await persist(ctx, exec.agent, { kind: 'compilation-request', owner, operationId: options.operationId, request })
+      const frozen = previous?.request ?? events(exec.agent).findLast(event => event.kind === 'compilation-request' && event.operationId === options.operationId && event.owner === owner).request
+      const value = receipt(await findOrCreate(io, owner, 'compilations', frozen, previous !== undefined, exec.signal))
       if (digest({ ...value.request, source_replacements: value.request.source_replacements ?? [] }) !== digest({ ...request, source_replacements: request.source_replacements ?? [] })) fail('idempotency-conflict')
       await persist(ctx, exec.agent, { kind: 'compilation-receipt', owner, compilationId: value.id, operationId: value.operation_id })
       return launch(exec, value, owner)
