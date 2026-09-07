@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SlotCore } from '../../../../../../upstream/deepseek-harness/packages/client/ui-slots/src/index.ts'
+import { createSlotRenderer, SessionProvider, SlotAssemblyError } from '../../../../../../upstream/deepseek-harness/packages/client/web-react/src/index.ts'
 import { activityFoldSummary, registerActivityFold } from '../src/client/activity-fold.tsx'
+
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 const cssSource = readFileSync(resolve('src/client/activity-fold.module.css'), 'utf8')
 
@@ -100,6 +104,7 @@ describe('Codex-like process fold', () => {
         },
         entries: () => entries,
         entriesOfSlot: () => toolViews,
+        subscribe: () => () => {}, getVersion: () => 0,
       },
     }
     registerActivityFold(ctx, modeScope() as never)
@@ -238,4 +243,130 @@ describe('Codex-like process fold', () => {
     expect(cssSource).toContain('.header + *')
     expect(cssSource).toContain('margin-top: 8px')
   })
+})
+
+function streamingFoldHarness(register = registerActivityFold) {
+  const first = { key: 'think', kind: 'assistant-step', location: location(1), data: { status: 'running', blocks: [{ kind: 'reasoning', text: 'first thought' }] } }
+  let snapshot = { chat: { order: ['think'], nodes: new Map<string, any>([['think', first]]) } }
+  const entries: any[] = ['assistant-step', 'tool-call', 'context'].map(key => ({ options: { key, priority: 0 },
+    component: ({ node }: any) => <div>{node.data.blocks?.map((block: any) => block.text).join('') ?? node.key}</div> }))
+  register({ slots: {
+    inject: (_name: string, callback: () => unknown) => callback(),
+    register: (options: any, component: any) => { const entry = { options, component }; entries.push(entry); return () => { entries.splice(entries.indexOf(entry), 1) } },
+    entries: () => entries, entriesOfSlot: () => [],
+  } }, modeScope() as never)
+  return {
+    update(nodes: any[]) { snapshot = { chat: { order: nodes.map(node => node.key), nodes: new Map(nodes.map(node => [node.key, node])) } } },
+    rows(sessionId: string) { return <>{snapshot.chat.order.map(key => {
+      const node = snapshot.chat.nodes.get(key)!
+      const Component = entries.find(entry => entry.options.key === node.kind && entry.options.priority === -1).component
+      return <Component key={key} node={node} sessionId={sessionId} useSession={(selector: any) => selector(snapshot)} />
+    })}</> }, first,
+  }
+}
+it('keeps manual running collapse through streaming, new steps, completion, turns and same-runtime remount', () => {
+  const h = streamingFoldHarness(), id = 'stream-fold-lifecycle'
+  let view = render(h.rows(id))
+  let header = screen.getByRole('button', { name: /正在运行 · 1 条思考/ })
+  fireEvent.click(header); expect(screen.getByText('first thought')).toBeTruthy()
+  fireEvent.click(header); expect(header.getAttribute('aria-expanded')).toBe('false')
+  expect(screen.queryByText('first thought')).toBeNull()
+  const streamed = { ...h.first, data: { ...h.first.data, blocks: [{ kind: 'reasoning', text: 'updated thought' }] } }
+  const tool = { key: 'tool-first', kind: 'tool-call', location: location(1), data: { root: { callId: 'call-first' } } }
+  h.update([streamed, tool]); view.rerender(h.rows(id))
+  header = screen.getByRole('button', { name: /正在运行 · 1 次工具调用，1 条思考/ })
+  expect(header.getAttribute('aria-expanded')).toBe('false'); expect(screen.queryByText('updated thought')).toBeNull(); expect(screen.queryByText('tool-first')).toBeNull()
+  const finished = { ...streamed, data: { ...streamed.data, status: 'complete' } }
+  const result = { ...tool, data: { root: { kind: 'tool-result' } } }
+  h.update([finished, result]); view.rerender(h.rows(id))
+  header = screen.getByRole('button', { name: /运行过程 · 1 次工具调用，1 条思考/ })
+  expect(header.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.keyDown(header, { key: 'Enter' }); expect(screen.getByText('updated thought')).toBeTruthy()
+  fireEvent.keyDown(header, { key: ' ' }); expect(screen.queryByText('updated thought')).toBeNull()
+  view.unmount(); view = render(h.rows(id)); expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(screen.getByRole('button')); view.unmount(); view = render(h.rows(id))
+  expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+  h.update([finished, result, { ...h.first, key: 'next-think', location: location(2) }]); view.rerender(h.rows(id))
+  expect(screen.getByRole('button', { name: /正在运行 · 1 条思考/ }).getAttribute('aria-expanded')).toBe('false')
+  expect(screen.getByRole('button', { name: /运行过程 · 1 次工具调用/ }).getAttribute('aria-expanded')).toBe('true')
+  view.unmount()
+})
+it('starts process folds collapsed after a fresh module runtime without rewriting restored nodes', async () => {
+  const id = 'fold-fresh-runtime', old = streamingFoldHarness()
+  const first = render(old.rows(id)); fireEvent.click(screen.getByRole('button')); expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('true'); first.unmount()
+  vi.resetModules()
+  const { registerActivityFold: restoredRegister } = await import('../src/client/activity-fold.tsx')
+  const restored = streamingFoldHarness(restoredRegister)
+  const view = render(restored.rows(id))
+  expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+  expect(restored.first.data.blocks[0].text).toBe('first thought')
+  view.unmount()
+})
+
+it.each(['fallback', 'dry', 'assembly'] as const)('keeps the process fold elected after a faulty atomic ToolView: %s', async (mode) => {
+  const core = new SlotCore(), errors: { key: string; error: unknown }[] = []
+  const crash = mode === 'assembly' ? new SlotAssemblyError('missing native provider') : new Error('atomic view failed'), reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const nodes = new Map<string, any>([
+    ['reasoning', { key: 'reasoning', kind: 'assistant-step', location: location(61), data: { status: 'running', blocks: [{ kind: 'reasoning', text: 'live reasoning' }, { kind: 'text', text: 'PPTX 已成功导出，五页预览也已逐页检查。现在做最后文件核验。' }] } }],
+    ['tool-one', { key: 'tool-one', kind: 'tool-call', location: location(61), data: { root: { callId: 'one', name: 'broken' } } }],
+    ['tool-two', { key: 'tool-two', kind: 'tool-call', location: location(61), data: { root: { callId: 'two', name: 'working' } } }],
+    ['progress', { key: 'progress', kind: 'assistant-step', location: location(61), data: { status: 'complete', blocks: [{ kind: 'text', text: '文件已完成，请查看最终结果。' }] } }],
+  ])
+  const snapshot = { chat: { order: [...nodes.keys()], nodes } }, info = { sessionId: `real-fold-crash-${mode}`, hooks: {}, props: {} }, localeSnapshot = { revision: 0 }
+  const host: any = {
+    subscribe: (key: string, fn: () => void) => core.subscribe(key, fn), getVersion: (key: string) => core.getVersion(key),
+    entriesOf: (key: string) => core.entries(key), entriesOfSlot: (key: string) => core.entriesOfSlot(key),
+    reportEntryError: (key: string, entry: any, error: unknown, value: any) => { errors.push({ key, error }); core.reportEntryError(key, entry, error, value) },
+    specOf: (key: string) => core.specDynamic(key), isLive: (entry: any) => core.isLive(entry), storeOf: () => undefined,
+    locale: { getSnapshot: () => localeSnapshot, subscribe: () => () => {}, bind: () => (key: string) => key },
+    sessions: { list: { getSnapshot: () => ({}), subscribe: () => () => {} }, provideInfo: { getSnapshot: () => info, subscribe: () => () => {} } },
+    workspaces: { list: { getSnapshot: () => ({}), subscribe: () => () => {} } },
+  }
+  core.register({ name: 'root', children: { 'conversation.chat.node': { kind: 'keyed', scope: 'session' } } } as any,
+    (({ renderSlot }: any) => <SessionProvider>{() => <>{snapshot.chat.order.map(key => <div key={key}>{renderSlot('conversation.chat.node', {
+      node: nodes.get(key), useSession: (selector: any) => selector(snapshot),
+    }, { entryKey: nodes.get(key).kind })}</div>)}</>}</SessionProvider>) as any)
+  core.register({ name: 'conversation.chat.node', key: 'assistant-step', locale: 'conversation' } as any,
+    (({ node }: any) => <p>{node.data.blocks[0].text}</p>) as any)
+  core.register({ name: 'conversation.chat.node', key: 'context' } as any, (() => null) as any)
+  core.register({ name: 'conversation.chat.node', key: 'tool-call', locale: 'conversation', children: { 'tool.call.toolview': { kind: 'keyed', scope: 'session' } } } as any,
+    (({ node, renderSlot }: any) => <div>{renderSlot('tool.call.toolview', { callId: node.data.root.callId }, { entryKey: node.data.root.name, fallback: <span>native generic fallback</span> })}</div>) as any)
+  const bad = core.register({ name: 'tool.call.toolview', key: 'broken', priority: -1 } as any, (() => { throw crash }) as any)
+  if (mode === 'fallback') core.register({ name: 'tool.call.toolview', key: 'broken' } as any, (() => <span>native broken fallback</span>) as any)
+  core.register({ name: 'tool.call.toolview', key: 'working' } as any, (() => <span>working tool</span>) as any)
+  registerActivityFold({ slots: {
+    register: (options: any, component: any) => core.register(options, component), entries: (key: string) => core.entries(key),
+    entriesOfSlot: host.entriesOfSlot, subscribe: host.subscribe, getVersion: host.getVersion, reportEntryError: host.reportEntryError,
+    inject: (_key: string, callback: () => void) => callback(),
+  } }, modeScope() as never)
+  const mount = () => render(<>{createSlotRenderer().renderRoot(host, {})}</>)
+  let view = mount()
+  expect(screen.getByText('PPTX 已成功导出，五页预览也已逐页检查。现在做最后文件核验。')).toBeTruthy()
+  expect(screen.getByText('文件已完成，请查看最终结果。')).toBeTruthy()
+  if (mode === 'assembly') {
+    await expect(act(async () => fireEvent.click(screen.getByRole('button', { name: /正在运行 · 2 次工具调用/ })))).rejects.toBe(crash)
+    expect(errors).toEqual([])
+    return
+  }
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: /正在运行 · 2 次工具调用/ })))
+  expect(core.entriesOfSlot('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.options.priority).toBe(-1)
+  expect(errors).toEqual([{ key: 'tool.call.toolview', error: crash }])
+  if (mode === 'fallback') expect(screen.getByText('native broken fallback')).toBeTruthy()
+  else {
+    expect(view.container.querySelector('[data-slot-error="tool.call.toolview"]')).not.toBeNull()
+    expect(screen.queryByText('native generic fallback')).toBeNull()
+  }
+  expect(screen.getByText('working tool')).toBeTruthy()
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: /正在运行 · 2 次工具调用/ })))
+  expect(screen.queryByText('native broken fallback')).toBeNull(); expect(screen.queryByText('working tool')).toBeNull()
+  expect(screen.getByText('PPTX 已成功导出，五页预览也已逐页检查。现在做最后文件核验。')).toBeTruthy()
+  expect(screen.getByText('文件已完成，请查看最终结果。')).toBeTruthy()
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: /正在运行 · 2 次工具调用/ })))
+  if (mode === 'fallback') expect(screen.getByText('native broken fallback')).toBeTruthy()
+  else expect(view.container.querySelector('[data-slot-error="tool.call.toolview"]')).not.toBeNull()
+  expect(errors).toHaveLength(1)
+  view.unmount(); await act(async () => bad())
+  const replacement = core.register({ name: 'tool.call.toolview', key: 'broken', priority: -1 } as any, (() => <span>reinstalled view</span>) as any)
+  view = mount(); expect(screen.getByText('reinstalled view')).toBeTruthy()
+  view.unmount(); replacement(); reported.mockRestore()
 })

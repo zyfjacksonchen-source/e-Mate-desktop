@@ -1,4 +1,5 @@
-import { createElement, Fragment, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import { Component, createElement, Fragment, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import { SlotAssemblyError } from '@deepseek-ai/dsh-client-web-react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import { DisclosureRow } from '@deepseek-ai/dsh-client-ui-primitives'
 import { currentMessageFlowMode, type MessageFlowSettings } from './message-mode-settings.tsx'
@@ -170,24 +171,67 @@ function nativeComponent(ctx: any, kind: string): any {
   return entry.component
 }
 
-function renderNative(ctx: any, kind: string, props: any): ReactNode {
-  const Component = nativeComponent(ctx, kind)
-  if (kind !== 'tool-call') return createElement(Component, props)
-  const renderSlot = (key: string, owner: Record<string, unknown>, options: { entryKey?: string; fallback?: ReactNode }) => {
-    if (key !== 'tool.call.toolview') return options.fallback ?? null
-    const entry = ctx.slots.entriesOfSlot(key)
-      .find((candidate: any) => candidate.options?.key === options.entryKey)
-    if (entry?.component === undefined) return options.fallback ?? null
-    // Current rc.7 atomic Tool views and accepted GenUI use only the standard
-    // session kit plus owner props. If that native contract grows, abdicate to
-    // the unwrapped DSH renderer instead of silently dropping an injected face.
-    if (entry.inject !== undefined || entry.store !== undefined || entry.children !== undefined
-      || (entry.locale !== undefined && entry.locale !== 'conversation')) {
-      throw new Error(`tool view "${options.entryKey ?? ''}" requires an unsupported injected face`)
-    }
-    return createElement(entry.component, { ...props, ...owner })
+// Native SlotCore owns election and retirement; this boundary isolates only
+// the atomic view invoked by the existing conversation renderer bridge.
+class ToolViewBoundary extends Component<{
+  entry: any
+  report: (error: unknown) => void
+  children: ReactNode
+}, { entry: any; failed: boolean }> {
+  override state = { entry: this.props.entry, failed: false }
+  static getDerivedStateFromProps(props: { entry: any }, state: { entry: any; failed: boolean }) {
+    return props.entry === state.entry ? null : { entry: props.entry, failed: false }
   }
-  return createElement(Component, { ...props, renderSlot })
+  static getDerivedStateFromError(error: unknown) {
+    if (error instanceof SlotAssemblyError) throw error
+    return { failed: true }
+  }
+  override componentDidCatch(error: unknown) {
+    console.error("slot entry crashed in 'tool.call.toolview':", error)
+    this.props.report(error)
+  }
+  override render() {
+    return this.state.failed ? <div data-slot-error="tool.call.toolview" /> : this.props.children
+  }
+}
+
+function AtomicToolView({ ctx, props, owner, options }: {
+  ctx: any
+  props: any
+  owner: Record<string, unknown>
+  options: { entryKey?: string; fallback?: ReactNode }
+}) {
+  const key = 'tool.call.toolview'
+  useSyncExternalStore(
+    listener => ctx.slots.subscribe(key, listener),
+    () => ctx.slots.getVersion(key),
+  )
+  const entry = ctx.slots.entriesOfSlot(key)
+    .find((candidate: any) => candidate.options?.key === options.entryKey)
+  if (entry?.component === undefined) {
+    // A retired cell keeps the native crash face, rather than implying the
+    // failed renderer never existed. Unregistered cells use the native fallback.
+    return ctx.slots.entries(key).some((candidate: any) => candidate.options?.key === options.entryKey)
+      ? <div data-slot-error={key} /> : options.fallback ?? null
+  }
+  // Assembly errors stay outside the entry boundary. The rc.7 atomic bridge
+  // accepts only the standard session kit and the native owner's props.
+  if (entry.inject !== undefined || entry.store !== undefined || entry.children !== undefined
+    || (entry.locale !== undefined && entry.locale !== 'conversation')) {
+    throw new Error(`tool view "${options.entryKey ?? ''}" requires an unsupported injected face`)
+  }
+  return <ToolViewBoundary entry={entry}
+    report={error => ctx.slots.reportEntryError(key, entry, error, { abdicate: true })}>
+    {createElement(entry.component, { ...props, ...owner })}
+  </ToolViewBoundary>
+}
+
+function renderNative(ctx: any, kind: string, props: any): ReactNode {
+  const Native = nativeComponent(ctx, kind)
+  if (kind !== 'tool-call') return createElement(Native, props)
+  const renderSlot = (key: string, owner: Record<string, unknown>, options: { entryKey?: string; fallback?: ReactNode }) =>
+    key === 'tool.call.toolview' ? <AtomicToolView ctx={ctx} props={props} owner={owner} options={options} /> : options.fallback ?? null
+  return createElement(Native, { ...props, renderSlot })
 }
 
 function hiddenMarker(): ReactNode {

@@ -32,6 +32,7 @@ export default {
       '@deepseek-ai/dsh-client-ui-primitives': upstreamPrimitives,
       '@deepseek-ai/dsh-client-ui-attachment': upstreamAttachment,
       '@deepseek-ai/dsh-client-runtime/client': upstreamRuntime,
+      '@deepseek-ai/dsh-client-web-react': fileURLToPath(new URL('../../../../../upstream/deepseek-harness/packages/client/web-react/src/index.ts', import.meta.url)),
       '@deepseek-ai/cordis': upstreamCordis,
     },
   },
