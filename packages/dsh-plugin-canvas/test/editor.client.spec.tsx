@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createHash, webcrypto } from 'node:crypto'
 import { fireEvent, render, screen, waitFor, cleanup, act } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { emptyPage, emptyProject, validateProject } from '../src/contract.ts'
 import { arrowImageTarget, htmlDocument, insertAsset, pagesFromHtml, sameSceneElements, scenePage, selectedAnnotationElements } from '../src/client/model.ts'
 import { createBridge } from '../src/client/bridge.ts'
-const native = vi.hoisted(() => ({ props: null as any, api: null as any, scroll: vi.fn(), deferReady: false, emit: null as any }))
+const native = vi.hoisted(() => ({ props: null as any, api: null as any, scroll: vi.fn(), deferReady: false, reportCommits: false, commits: 0, emit: null as any }))
 vi.mock('@excalidraw/excalidraw', () => {
   const MainMenu: any = ({ children }: any) => <div>{children}</div>
   MainMenu.DefaultItems = { ClearCanvas: () => null, ToggleTheme: () => null }
@@ -23,6 +23,14 @@ vi.mock('@excalidraw/excalidraw', () => {
       })
       if (!native.deferReady) native.emit({ isLoading: false })
     }, [])
+    useLayoutEffect(() => {
+      if (native.reportCommits && !view.current.isLoading) {
+        native.commits += 1
+        // 0.18.1 componentDidUpdate reports the imperative scene, not initialData.
+        if (native.commits > 60) throw new Error('native scene commit loop')
+        props.onChange(elements.current, view.current)
+      }
+    })
     return <div data-testid="scene" data-theme={props.theme}><span>{elements.current.length} elements</span><button onClick={() => {
       elements.current = [...elements.current, { id: 'mark', type: 'arrow', x: 1, y: 1, points: [[0, 0], [10, 10]] }]
       props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {} })
@@ -30,7 +38,7 @@ vi.mock('@excalidraw/excalidraw', () => {
   } }
 })
 import { CanvasPanel } from '../src/client/editor.tsx'
-beforeEach(() => { vi.stubGlobal('crypto', webcrypto); native.scroll.mockClear(); native.deferReady = false })
+beforeEach(() => { vi.stubGlobal('crypto', webcrypto); native.scroll.mockClear(); native.deferReady = false; native.reportCommits = false; native.commits = 0 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const imageAsset = { ownerSessionId: 'parent', ref: { attachmentId: `sha256:${createHash('sha256').update(imageBytes).digest('hex')}`, mediaType: 'image/png', bytes: imageBytes.length, width: 100, height: 100 } }
@@ -540,4 +548,50 @@ it('does not focus or choose either overlapping image for a new arrow entirely i
   await act(async () => { await new Promise(requestAnimationFrame) })
   expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
   expect((screen.getByRole('button', { name: '修改图片', exact: true }) as HTMLButtonElement).disabled).toBe(true)
+})
+
+it.each(['page-1', 'other'])('keeps native commit callbacks and imported output consistent while viewing %s', async (viewedPage) => {
+  native.reportCommits = true
+  const h = hydrationHarness(1), fallback = h.bridge.call.getMockImplementation()!
+  let resolveOutput!: (value: any) => void
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'outputs') return await new Promise(resolve => { resolveOutput = resolve })
+    return fallback(endpoint, payload)
+  })
+  h.read().pages.push(emptyPage('other', 'Other page'))
+  h.read().intents.push({ id: 'pending', pageId: 'page-1', kind: 'edit', sessionId: 'parent', sourceIds: [h.fixtures[0].asset.ref.attachmentId], imported: [] })
+  render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  await waitFor(() => expect(resolveOutput).toBeTypeOf('function'))
+  if (viewedPage === 'other') fireEvent.change(screen.getByLabelText('选择画布页'), { target: { value: 'other' } })
+  await act(async () => { resolveOutput({ kind: 'images', assets: [h.fixtures[1].asset] }) })
+  await waitFor(() => expect(native.api.addFiles).toHaveBeenCalledOnce())
+  await act(async () => { await h.leave() })
+  expect(screen.getByRole('toolbar', { name: '图片标注工具' })).toBeTruthy()
+  expect(native.api.getSceneElementsIncludingDeleted()).toHaveLength(viewedPage === 'page-1' ? 2 : 0)
+  expect(h.read().pages[0].elements).toHaveLength(2)
+  expect(h.read().pages[1].elements).toHaveLength(0)
+  expect(h.read().intents[0].imported).toEqual([h.fixtures[1].asset.ref.attachmentId.slice(7)])
+  expect(native.commits).toBeLessThan(15)
+})
+it('does not announce an output when only the viewport changes while outputs are pending', async () => {
+  const h = hydrationHarness(1), fallback = h.bridge.call.getMockImplementation()!
+  let resolveOutput!: (value: any) => void
+  h.bridge.call.mockImplementation(async (endpoint, payload = {}) => {
+    if (endpoint === 'outputs') return await new Promise(resolve => { resolveOutput = resolve })
+    return fallback(endpoint, payload)
+  })
+  h.read().intents.push({ id: 'pending', pageId: 'page-1', kind: 'edit', sessionId: 'parent', sourceIds: [], imported: [] })
+  render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  await waitFor(() => expect(resolveOutput).toBeTypeOf('function'))
+  await act(async () => {
+    native.emit({ scrollX: 30, zoom: { value: .5 } })
+    resolveOutput({ kind: 'images', assets: [] })
+  })
+  await act(async () => { await h.leave() })
+  expect(screen.queryByText('原生任务的成功产物已插入，已有素材已去重。')).toBeNull()
+  expect(native.api.addFiles).not.toHaveBeenCalled()
+  expect(h.read().pages[0].view).toMatchObject({ scrollX: 30, zoom: .5 })
+  expect(h.read().intents[0].imported).toEqual([])
 })

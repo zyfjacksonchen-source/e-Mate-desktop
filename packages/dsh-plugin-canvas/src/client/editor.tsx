@@ -33,6 +33,8 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   consumed.current = onInitialAssetConsumed
   const [project, setProject] = useState<CanvasProject | null>(null)
   const [pageId, setPageId] = useState('page-1')
+  const visiblePageId = useRef(pageId)
+  visiblePageId.current = pageId
   const [projects, setProjects] = useState<any[]>([])
   const [files, setFiles] = useState<BinaryFiles>({})
   const [notice, setNotice] = useState('正在恢复项目…')
@@ -49,6 +51,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   const [selectionCount, setSelectionCount] = useState(0)
   const submitting = useRef(false)
   const api = useRef<ExcalidrawImperativeAPI | null>(null)
+  const applyingScene = useRef(false)
   const state = useRef<{ project: CanvasProject | null; revision: string | null; dirty: boolean; blocked: boolean }>({ project: null, revision: null, dirty: false, blocked: false })
   const lane = useRef(Promise.resolve())
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -118,6 +121,15 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   useEffect(() => bridge.beforeLeave(flush), [bridge, flush])
   const update = useCallback((next: CanvasProject) => {
     if (transitioning.current) return
+    const incoming = next.pages.find(item => item.id === visiblePageId.current)
+    // Native componentDidUpdate reports its imperative scene before parent effects.
+    // Publish external inserts to that scene first, so an old callback cannot undo
+    // the insert and start an old/new scene feedback loop on the next commit.
+    if (incoming && api.current && !sameSceneElements(api.current.getSceneElementsIncludingDeleted(), incoming.elements)) {
+      applyingScene.current = true
+      try { api.current.updateScene({ elements: incoming.elements as any }) }
+      finally { applyingScene.current = false }
+    }
     state.current.project = next; state.current.dirty = true; setProject(next); setNotice('尚未保存')
     if (timer.current) clearTimeout(timer.current)
     timer.current = setTimeout(() => { if (!state.current.blocked) void flush().catch(() => {}) }, 400)
@@ -201,6 +213,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     try {
       await flush()
       const original = state.current.project
+      let imported = false
       for (const pending of original.intents.filter(intent => intent.sessionId === bridge.sessionId)) {
         const result = await bridge.call('outputs', { project_id: original.id, intent_id: pending.id })
         let next = state.current.project
@@ -213,7 +226,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
             if (intent.imported.includes(hash)) continue
             next = insertAsset(next, intent.pageId, asset)
             next.intents.find(item => item.id === intent.id)!.imported.push(hash)
-            update(next)
+            update(next); imported = true
           }
         } else if (typeof result.html === 'string' && typeof result.sha256 === 'string' && !intent.imported.includes(result.sha256)) {
           next = structuredClone(next)
@@ -227,10 +240,10 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
             next.pages.splice(index, 1, ...incoming)
           } else target.html = result.html
           next.intents.find(item => item.id === intent.id)!.imported.push(result.sha256)
-          update(next)
+          update(next); imported = true
         }
       }
-      if (state.current.dirty && state.current.project) {
+      if (imported && state.current.project) {
         await flush(); const token = generation.current; const loaded = await imageFiles(state.current.project)
         if (alive.current && generation.current === token && state.current.project?.id === original.id) { setFiles(loaded); api.current?.addFiles(Object.values(loaded)); setNotice('原生任务的成功产物已插入，已有素材已去重。') }
       }
@@ -244,12 +257,6 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     return () => { off(); if (syncTimer) clearTimeout(syncTimer) }
   }, [bridge, syncOutputs])
   useEffect(() => { if (project?.id && !switching) void syncOutputs() }, [project?.id, switching, syncOutputs])
-  useEffect(() => {
-    if (!page || !api.current) return
-    if (!sameSceneElements(api.current.getSceneElementsIncludingDeleted(), page.elements)) {
-      api.current.updateScene({ elements: page.elements as any })
-    }
-  }, [page])
 
   const submit = async () => {
     const current = state.current.project
@@ -375,6 +382,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
           }}
           onPointerUp={() => { if (arrowGesture.current) arrowGesture.current.released = true }}
           onChange={(elements, appState) => {
+            if (applyingScene.current) return
             scheduleFit()
             const chosen = elements.filter(item => item.type === 'image' && !item.isDeleted && appState.selectedElementIds[item.id])
             selectedElements.current = chosen.map(item => item.id)
