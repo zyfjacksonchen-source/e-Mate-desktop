@@ -1,8 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { installModelSelection } from '@deepseek-ai/dsh-agent'
+import { createKnowledgeWorkflow } from './workflow.ts'
+import { resolveKnowledgeSelection } from './model-selection.ts'
 import { API_ROOT, CHANNEL, GRAPH_ASSET, HASH, SOURCE_ID, knowledgeFailure } from './contract.ts'
 export const name = 'emate-knowledge'
-export const inject = ['emateIdentity', 'connection', 'webServer', 'timer']
+export const inject = ['emateIdentity', 'connection', 'webServer', 'timer', 'agents', 'sessions', 'sessionPersistence', 'subagents', 'jobs', 'goals', 'tools', 'emateXinKnowledge', 'apiProxy', 'agentDefaultModel', 'emateModelPolicy', 'llm']
 const MAX_BYTES = 20 * 1024 * 1024
 const DOWNLOAD_ROOT = '/emate-knowledge-downloads/'
 const allowed: Record<string, { method: string; path: string; keys: string[] }> = {
@@ -128,9 +131,26 @@ export function createKnowledgeHost(identity: any, schedule = (callback: () => v
 }
 export function apply(ctx: any): void {
   const host = createKnowledgeHost(ctx.get('emateIdentity'), (callback, delay) => ctx.timeout(callback, delay))
-  ctx.on('credentials/updated', (ref: string) => { if (String(ref) === 'E_MATE_ENTERPRISE_SESSION') { host.changed(); ctx.timeout(() => host.changed(), 0) } })
+  const xinOperations = new WeakMap<object, { call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> }>()
+  const workflow = createKnowledgeWorkflow(ctx, { installModelSelection,
+    resolveSelection: exec => resolveKnowledgeSelection(ctx, exec),
+    xinKnowledgeCall(name, args, exec, signal) {
+      let operation = xinOperations.get(exec)
+      if (!operation) {
+        // The workflow validates a Host-created operation Agent before reaching
+        // this seam; model-initiated operations must also bind their root call.
+        operation = ctx.emateXinKnowledge.capture(exec.rootCallId ? exec : { signal: exec.signal })
+        xinOperations.set(exec, operation!)
+      }
+      return operation!.call(name, args, signal)
+    },
+  })
+  ctx.provide('emateKnowledgeWorkflow', workflow)
+  ctx.provide('emateKnowledgeSelection', (exec: any) => resolveKnowledgeSelection(ctx, exec))
+  ctx.on('credentials/updated', (ref: string) => { if (String(ref) === 'E_MATE_ENTERPRISE_SESSION') { host.changed(); workflow.changed(); ctx.timeout(() => { host.changed(); workflow.changed() }, 0) } })
   ctx.effect(() => ctx.connection.rpc.handle(CHANNEL, (endpoint: string, payload: unknown, signal: AbortSignal) => knowledgeRpc(host, endpoint, payload, signal), { authority: 'loopback' }), 'emate.knowledge: account-bound native RPC')
   ctx.effect(() => () => host.dispose(), 'emate.knowledge: release pending reads')
+  ctx.effect(() => () => workflow.dispose(), 'emate.knowledge: pause native compilation and preserve checkpoints')
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: GRAPH_ASSET, async handler(req: any, res: any) {
     if (req.method !== 'GET') { res.writeHead(405); res.end(); return }
     try { const body = await readFile(new URL('./assets/graph.js', import.meta.url)); res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin' }); res.end(body) }

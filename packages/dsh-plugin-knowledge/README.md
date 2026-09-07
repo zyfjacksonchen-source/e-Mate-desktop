@@ -1,12 +1,12 @@
-# 企业知识图谱：原生公共读取页面
+# 企业知识图谱与原生整理
 
 `/knowledge` uses the pinned Profile/Slot owner. `KnowledgeEntry` registers in `sidebar.primary.action` at order 30, after the existing capability entry at 20; `KnowledgePage` occupies `shell.overlay` at -9, using the Desktop sidebar-width variable. It creates no router, user identity system, Agent loop, or parallel knowledge database.
 
 ## Root-owned integration
 
-- Add `@e-mate/dsh-plugin-knowledge` to `packages/dsh/profile/component-inventory.json` and the existing Profile packaging/roster paths through the established owner.
-- Add `/knowledge` to Shell `STANDALONE_PRODUCT_ROUTES` and its known standalone-route list so the conversation body/header/composer do not remain behind this page. Keep the existing canvas navigation save guard and auth-forced `/login`/`agreement` precedence.
-- Host requires `emateIdentity`, `connection`, `webServer`, `timer`; client requires the native slots, connection and modules services. No direct Shell modification is part of this package.
+- The native component inventory now includes this package, and the existing managed Profile installer/packager carries it through the shared roster.
+- Shell recognizes `/knowledge` as a standalone product page. Conversation body/header/composer are hidden through the existing seats; canvas save guards and authentication routes keep their normal precedence.
+- Host reads use `emateIdentity`, `connection`, `webServer`, `timer`. The workflow uses native Agents, Sessions, persistence, subagents, Jobs, Goals and Tools. Xin project calls use `emateXinKnowledge.capture`, never a separate MCP client. Client rendering uses the native slots, connection and modules services.
 - Prerequisite identity commit: root `d44ea15` (this worktree cherry-pick `2348401`). Only the exact enterprise knowledge prefix receives the enterprise **access** token. Model and Skill Hub transports retain their original model token. An expired model lease does not invalidate an otherwise active access subject.
 - Runtime `three@0.185.1` and dev-only `@types/three@0.185.4` are exact pins. Root installed and owns locks. Native `clientBundle` builds a ~33KB entry and a separate local `/emate-knowledge-assets/graph.js` closure factory. Three is not loaded for an empty corpus or reduced-motion list. Its MIT notice is copied into `lib/licenses` during build.
 
@@ -41,7 +41,15 @@ The list contains every item in the current result collection, including when We
 
 Reading pins the selected source version. Returned Markdown is shown as exact selectable text, not evaluated HTML or automatic external image requests. Source metadata/excerpts remain labeled, and full originals use the verified download path. Route departure and the existing `emate:identity-changed` event cancel requests and clear page data; stale results cannot restore an old account or route.
 
-This is the public read-only first page. `imports`, `compilations`, `revisions`, uploader-private scopes, and Agent/compiler write chains are separate work. There are no fake import/compile buttons or success receipts. Backend graph maximum must support 500 (root's backend reviewer owns that adjustment); `truncated` remains visible when only part of a corpus is returned.
+The current page exposes public reading. The Host workflow supports public, uploader-private and Xin project imports/compilations through the existing service receipts. UI actions and Agent Tool registration are still integration work; this source does not claim their installed or production acceptance. `truncated` remains visible when only part of a corpus is returned.
+
+## Native workflow
+
+`createKnowledgeWorkflow` reuses real AgentLoop, Session JSONL, Subagent, Job and Goal owners. It freezes source versions and model selection, writes durable intent before submission, and recovers by the original operation/revision identity. A confirmed missing creation receipt may resend the same frozen request; unknown model submissions are never replayed. Checkpoints use the backend's canonical defaults.
+
+Public compilation runs in a fresh isolated native Agent with only frozen-source reads and structured output. The Host hashes actual quotes and retains leases privately. A known citation rejection permits one bounded correction. Benchmark references select frozen query IDs; the Host supplies a fixed explanation and the service renders each metric/value/unit/period/sample field. Model prose cannot replace those numbers.
+
+`resolveKnowledgeSelection` reads the native session model endpoint, including an unsent composer selection, or the native default for a standalone operation. Enterprise policy validates the model and the existing LLM owner resolves effective thinking effort. `@deepseek-ai/dsh-agent` is an exact rc.7 Base import for `installModelSelection`; no new model configuration store is added.
 
 ## Checks
 

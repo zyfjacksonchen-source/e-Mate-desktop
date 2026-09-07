@@ -12,6 +12,7 @@
   "harness_commit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
   "runtime_imports": {
     "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-attachment": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.7",

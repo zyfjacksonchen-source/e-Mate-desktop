@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
-    "test": "node --experimental-strip-types --test test/host.test.mjs",
+    "test": "node --experimental-strip-types --test test/*.test.mjs",
     "test:client": "node ../../upstream/deepseek-harness/node_modules/vitest/vitest.mjs run --config vitest.config.ts",
     "check": "../../upstream/deepseek-harness/node_modules/.bin/tsc --noEmit -p tsconfig.json"
   },
@@ -48,7 +48,9 @@
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
     "baseImports": [
+      "@deepseek-ai/dsh-agent",
       "@deepseek-ai/dsh-client-ui-primitives",
+      "@deepseek-ai/dsh-tools",
       "react"
     ]
   },
