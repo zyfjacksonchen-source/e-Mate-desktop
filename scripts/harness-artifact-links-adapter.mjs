@@ -86,7 +86,6 @@ export function artifactLinksVitePlugin(rendererPath) {
 }
 
 export const ARTIFACT_DELIVERABLES_PACKAGE = '@deepseek-ai/dsh-client-ui-deliverables'
-export const ARTIFACT_DELIVERABLES_SOURCE_PATH = 'packages/client/ui-deliverables/src/client/turn-deliverables.ts'
 
 // Extend the native Turn accumulator with persisted, successful Office receipts.
 // A read proves existence, not creation: it joins the file vocabulary only when
@@ -152,27 +151,7 @@ function emateOfficeDeliverables(native, isAppend) {
   }
 }
 
-export function adaptHarnessArtifactDeliverablesSource(source, sourceModule = false) {
-  if (sourceModule) {
-    source = replaceOnce(source, 'export const deliverablesDefinition: ConversationNodeDefinition<DeliverablesState> = {',
-      `${emateOfficeDeliverables.toString()}\nexport const deliverablesDefinition: ConversationNodeDefinition<DeliverablesState> = emateOfficeDeliverables({`, 'deliverables/source-definition')
-    return replaceOnce(source, "      value: { produced: context.state.produced },\n    },\n}", "      value: { produced: context.state.produced },\n    },\n}, isAppendSurfaceEvent)", 'deliverables/source-close')
-  }
+export function adaptHarnessArtifactDeliverablesSource(source) {
   source = replaceOnce(source, 'const deliverablesDefinition = {', `${emateOfficeDeliverables.toString()}\nconst deliverablesDefinition = emateOfficeDeliverables({`, 'deliverables/library-definition')
   return replaceOnce(source, '\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t};', '\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t}, _deepseek_ai_dsh_client_runtime_client.isAppendSurfaceEvent);', 'deliverables/library-close')
-}
-
-export function artifactDeliverablesVitePlugin(sourcePath) {
-  const target = sourcePath.replaceAll('\\', '/')
-  let seen = false
-  return {
-    name: 'e-mate-native-office-deliverables', apply: 'build', enforce: 'pre',
-    buildStart() { seen = false },
-    transform(source, id) {
-      if (id.replaceAll('\\', '/') !== target) return null
-      seen = true
-      return { code: adaptHarnessArtifactDeliverablesSource(source, true), map: null }
-    },
-    generateBundle() { if (!seen) throw Error('Native deliverables source was not consumed by Vite; Office receipt adaptation is missing') },
-  }
 }

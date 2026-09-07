@@ -230,14 +230,13 @@ test('Vite consumes the native source adapter and the emitted browser library op
 
 test('native deliverables adopts only successful Office receipts explicitly named by latest closing prose', async () => {
   const { adaptHarnessArtifactDeliverablesSource } = await import('./harness-artifact-links-adapter.mjs')
-  const nativeSource = await readFile(join(harness, 'packages/client/ui-deliverables/src/client/turn-deliverables.ts'), 'utf8')
-  const adapted = adaptHarnessArtifactDeliverablesSource(nativeSource, true)
-  const source = adapted.replace(/^import[\s\S]*?from '[^']+'\n/gmu, '').replace(/declare module [\s\S]*?\n\}\n/u, '')
-  const code = stripTypeScriptTypes(source).replace(/export /gu, '')
-  const definition = new Function('isAppendSurfaceEvent', code + '\nreturn deliverablesDefinition')((event) => event.surfaceOp !== 'replace')
-  assert.throws(() => adaptHarnessArtifactDeliverablesSource(adapted, true), /expected one/)
   const library = await readFile(join(harness, 'packages/client/ui-deliverables/lib/client.js'), 'utf8')
-  assert.ok(adaptHarnessArtifactDeliverablesSource(library).includes('emateOfficeDeliverables'))
+  const adapted = adaptHarnessArtifactDeliverablesSource(library)
+  // Execute the emitted native accumulator from its module factory. The actual
+  // boot serves this client.js; it does not import the source through Vite.
+  const code = adapted.slice(adapted.indexOf('function producedPaths('), adapted.indexOf('function basename('))
+  const definition = new Function('_deepseek_ai_dsh_client_runtime_client', code + '\nreturn deliverablesDefinition')({ isAppendSurfaceEvent: (event) => event.surfaceOp !== 'replace' })
+  assert.throws(() => adaptHarnessArtifactDeliverablesSource(adapted), /expected one/)
   let seq = 1
   const start = { type: 'turn/start', seq: seq++, data: { turn: 3 } }
   let state = definition.start({}, { event: start })
