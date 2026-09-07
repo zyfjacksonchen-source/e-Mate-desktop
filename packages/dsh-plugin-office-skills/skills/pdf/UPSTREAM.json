@@ -1,0 +1,34 @@
+{
+  "source": "Codex primary runtime PDF plugin",
+  "version": "26.905.11957",
+  "author": "OpenAI",
+  "license_basis": {
+    "file": "UPSTREAM_PLUGIN_MANIFEST.json",
+    "declared_license": "MIT",
+    "sha256": "8cf6f5d8067c166fa4000e9b3a0ad3f600f453d7d2f8601ac48c8f6be7c4f97b",
+    "additional_skill_license_found": false
+  },
+  "skill_files": [
+    {
+      "path": "SKILL.md",
+      "bytes": 7119,
+      "sha256": "afc4472ec4d625f703e9f414fe6814ce3cfa0ec51c7a07887fe587264c8b561e"
+    },
+    {
+      "path": "agents/openai.yaml",
+      "bytes": 295,
+      "sha256": "74623eb0387951f4c6d0d02e6daf1c8a2dd449599c92a0edcafd12a2049c1a00"
+    },
+    {
+      "path": "assets/file-document.png",
+      "bytes": 1550,
+      "sha256": "bbb3c29874cb3bc706eef9ba4436c7ef8ef33462a173c4c3d4deeec774e4da79"
+    },
+    {
+      "path": "container_tools/mark_artifact_operation_started.mjs",
+      "bytes": 713,
+      "sha256": "e0578762dc2a8f44a26323062c8afcf6c72ef197649f349c8b40e9f2a03c8942"
+    }
+  ],
+  "adaptation": "Original Skill files unchanged. HOST.md supplies e-Mate execution and delivery context separately; it does not implement rendering or install dependencies."
+}
