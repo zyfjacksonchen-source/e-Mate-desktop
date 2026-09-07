@@ -1,5 +1,6 @@
 import { cp, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,6 +24,13 @@ const ecosystemPlugins = [
   'dsh-file-viewer',
   'dsh-visualize',
 ]
+
+// Materialize the current product source before copying its generated Profile.
+// A previous nonempty client.js can otherwise silently retain stale UI/CSS.
+execFileSync('corepack', ['pnpm', '--filter', '@e-mate/dsh', 'build'], {
+  cwd: repositoryRoot,
+  stdio: 'inherit',
+})
 
 for (const path of [
   join(source, 'cordis.patch.yml'),
