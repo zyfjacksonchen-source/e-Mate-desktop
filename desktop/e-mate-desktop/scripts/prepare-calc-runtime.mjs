@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import path, { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
@@ -25,6 +25,14 @@ export async function verifyArchive(path, expected) {
   }
 }
 
+/** Check a link using the same platform's resolution and separator rules. */
+export function verifyLinkTarget(root, link, target, paths = path) {
+  const outside = paths.relative(root, paths.resolve(paths.dirname(link), target))
+  if (paths.isAbsolute(target) || outside === '..' || outside.startsWith(`..${paths.sep}`) || paths.isAbsolute(outside)) {
+    throw new Error('Calc asset link escapes its app')
+  }
+}
+
 /** Inventory all bytes/modes/links; reject links escaping the retained app. */
 export async function inventory(root) {
   const entries = []
@@ -34,8 +42,7 @@ export async function inventory(root) {
       const item = { path: relative(root, path).split('\\').join('/'), mode: stat.mode & 0o777 }
       if (stat.isSymbolicLink()) {
         const target = await readlink(path)
-        const outside = relative(root, resolve(dirname(path), target))
-        if (isAbsolute(target) || outside === '..' || outside.startsWith('../') || isAbsolute(outside)) throw new Error('Calc asset link escapes its app')
+        verifyLinkTarget(root, path, target)
         entries.push({ ...item, kind: 'link', target })
       } else if (stat.isDirectory()) {
         entries.push({ ...item, kind: 'directory' }); await walk(path)

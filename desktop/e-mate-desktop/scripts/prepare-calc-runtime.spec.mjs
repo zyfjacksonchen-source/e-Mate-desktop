@@ -2,9 +2,23 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import test from 'node:test'
-import { inventory, prepareTarget, verifyArchive, verifyPreparedTarget } from './prepare-calc-runtime.mjs'
+import { inventory, prepareTarget, verifyArchive, verifyPreparedTarget, verifyLinkTarget } from './prepare-calc-runtime.mjs'
+
+test('link containment uses Windows and POSIX path semantics', () => {
+  for (const [paths, root] of [[win32, 'C:\\assets\\LibreOffice'], [posix, '/assets/LibreOffice']]) {
+    const link = paths.join(root, 'program', 'link')
+    for (const target of [paths.join('..', '..', 'outside'), '../..', paths.join(root, 'LICENSE')]) {
+      assert.throws(() => verifyLinkTarget(root, link, target, paths), /escapes/)
+    }
+    for (const target of [paths.join('..', 'LICENSE'), paths.join('..', '..cache', 'LICENSE'), '..']) {
+      assert.doesNotThrow(() => verifyLinkTarget(root, link, target, paths))
+    }
+  }
+  assert.throws(() => verifyLinkTarget('C:\\assets\\LibreOffice', 'C:\\assets\\LibreOffice\\link', 'D:\\outside', win32), /escapes/)
+  assert.throws(() => verifyLinkTarget('C:\\assets\\LibreOffice', 'C:\\assets\\LibreOffice\\link', '\\\\server\\share\\outside', win32), /escapes/)
+})
 
 test('archive validation checks size and full digest', async t => {
   const root = await mkdtemp(join(tmpdir(), 'calc-archive-test-'))
