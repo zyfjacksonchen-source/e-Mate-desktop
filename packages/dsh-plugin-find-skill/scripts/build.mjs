@@ -13,6 +13,7 @@ const bundledConnectorSkills = [
   'connect-dingtalk',
   'connect-wechat-bot',
   'xin-assistant',
+  'enterprise-knowledge',
 ]
 const runNode = (cwd, entry, ...args) => {
   const result = spawnSync(process.execPath, [entry, ...args], { cwd, encoding: 'utf8', stdio: 'pipe' })

@@ -12,6 +12,7 @@ export const BUNDLED_CONNECTOR_SKILLS = [
   'connect-dingtalk',
   'connect-wechat-bot',
   'xin-assistant',
+  'enterprise-knowledge',
 ]
 
 export function validateManagedSkillName(value) {

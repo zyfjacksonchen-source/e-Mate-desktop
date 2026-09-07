@@ -85,7 +85,8 @@ test('find-skill is pinned and limits persistent installation to connector sourc
     'lark-base', 'lark-calendar', 'lark-task', 'lark-mail',
   ])
   assert.equal(catalogSources.filter(source => source === 'e-mate-bundled:xin-assistant').length, 1)
-  assert.equal(catalogSources.filter(source => source !== 'e-mate-bundled:xin-assistant').every(source => source.includes(
+  assert.equal(catalogSources.filter(source => source === 'e-mate-bundled:enterprise-knowledge').length, 1)
+  assert.equal(catalogSources.filter(source => !['e-mate-bundled:xin-assistant', 'e-mate-bundled:enterprise-knowledge'].includes(source)).every(source => source.includes(
     '/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-',
   )), true)
 })
@@ -515,7 +516,7 @@ test('signed connector instructions replace only recognized predecessors and pre
   const config = connectorConfig()
   const result = reconcileBundledConnectorSkills(config, roots)
   assert.deepEqual(result.updated, ['connect-feishu-cli'])
-  assert.deepEqual(result.installed, ['connect-tencent-docs', 'connect-dingtalk', 'connect-wechat-bot', 'xin-assistant'])
+  assert.deepEqual(result.installed, ['connect-tencent-docs', 'connect-dingtalk', 'connect-wechat-bot', 'xin-assistant', 'enterprise-knowledge'])
   const installed = await readFile(join(roots.globalSkillDir, 'connect-feishu-cli', 'SKILL.md'), 'utf8')
   assert.match(installed, /auth status --json --verify/u)
   assert.doesNotMatch(installed, /always run config init/u)
@@ -682,7 +683,7 @@ function fakeRuntime(scratch) {
 function connectorConfig() {
   return {
     catalogSkills: BUNDLED_CONNECTOR_SKILLS.map(name => {
-      const source = `https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/${name}`
+      const source = ['xin-assistant', 'enterprise-knowledge'].includes(name) ? `e-mate-bundled:${name}` : `https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/${name}`
       return { id: name, name, source, url: source, keywords: [name] }
     }),
   }
@@ -739,6 +740,26 @@ async function writeManagedSkill(root, name, scope, source = 'test/source', cont
   return target
 }
 
+
+test('enterprise knowledge is preinstalled through the managed provider and stays distinct from Xin business access', async t => {
+  const { ManagedSkillProvider } = await import('../lib/provider.js')
+  const { searchCatalogSkills } = await import('../lib/search.js')
+  const config = parse(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'))[0].insert[0].config
+  assert.deepEqual(searchCatalogSkills(config.catalogSkills, 'enterprise-knowledge').map(item => item.id), ['enterprise-knowledge'])
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-bundled-knowledge-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const roots = { globalSkillDir: join(scratch, 'global'), tempSkillDir: join(scratch, 'temp') }
+  assert(reconcileBundledConnectorSkills(config, roots).installed.includes('enterprise-knowledge'))
+  const provider = new ManagedSkillProvider({ globalSkillRoot: roots.globalSkillDir, tempSkillRoot: roots.tempSkillDir }, () => {})
+  const candidates = await provider.list({ cwd: scratch })
+  const knowledge = candidates.filter(item => item.name === 'enterprise-knowledge')
+  assert.equal(knowledge.length, 1)
+  const loaded = await provider.get(knowledge[0], {})
+  assert(loaded.content.includes('enterprise_knowledge'))
+  const receipt = JSON.parse(await readFile(join(roots.globalSkillDir, 'enterprise-knowledge', '.dsh-find-skill.json'), 'utf8'))
+  assert.equal(receipt.source, 'e-mate-bundled:enterprise-knowledge')
+  assert(reconcileBundledConnectorSkills(config, roots).unchanged.includes('enterprise-knowledge'))
+})
 
 test('one bundled Xin Skill uses the existing managed provider and old names remain search synonyms', async t => {
   const { ManagedSkillProvider } = await import('../lib/provider.js')

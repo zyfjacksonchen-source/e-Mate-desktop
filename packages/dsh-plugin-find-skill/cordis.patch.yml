@@ -65,6 +65,11 @@
           - google
           - github
         catalogSkills:
+          - id: enterprise-knowledge
+            name: 企业知识
+            source: e-mate-bundled:enterprise-knowledge
+            url: https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1/catalog
+            keywords: [企业知识, 知识图谱, 公共知识库, 私有资料, Wiki, enterprise-knowledge]
           - id: xin-assistant
             name: 芯助手
             source: e-mate-bundled:xin-assistant
