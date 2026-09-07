@@ -142,8 +142,8 @@
   opacity: 1;
   pointer-events: auto;
 }
-.canvasAction button { min-height: 44px; padding: 0 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; cursor: pointer; }
-.canvasAction button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.canvasAction button { min-height: 44px; padding: 0 12px; border: 1px solid rgb(255 255 255 / 32%); border-radius: 6px; background: rgb(24 24 27 / 88%); color: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / 20%); font: inherit; font-size: 13px; cursor: pointer; }
+.canvasAction button:hover:not(:disabled) { background: rgb(24 24 27 / 96%); }
 .canvasAction button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
 .canvasAction button:disabled { opacity: .55; cursor: default; }
 
