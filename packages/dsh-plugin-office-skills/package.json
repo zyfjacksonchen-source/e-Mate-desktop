@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-office-skills",
   "version": "2.0.18",
-  "description": "Bundled document, PDF, spreadsheet, PPT Master and meeting Skills for e-Mate",
+  "description": "Bundled document, PDF, spreadsheet, PPT Master, meeting and Lieflat Charts Skills for e-Mate",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

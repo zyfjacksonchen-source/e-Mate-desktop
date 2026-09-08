@@ -96,6 +96,7 @@ const SPECS: readonly SkillSpec[] = [
   { name: 'spreadsheets', description: '电子表格：创建、编辑、分析和检查工作簿，保留公式与格式。', whenToUse: '用于 XLSX/CSV 数据、公式、图表和排版；按预置指南检查真实运行依赖。', directory: `${skillRoot}spreadsheets`, format: 'xlsx', hostGuide: 'HOST.md', runtimePending: true },
   { name: 'ppt-master', description: 'PPT Master：演示文稿设计、模板制作、图表编排和可编辑 PPTX 交付。', whenToUse: '用于创建、修改与审阅 PPT 演示文稿；按预置流程核验运行依赖、真实渲染和可编辑性。', directory: `${skillRoot}ppt-master`, format: 'pptx', hostGuide: 'HOST.md', runtimePending: true },
   { name: 'meeting-summary', description: '会议总结：从本地转录文本整理会议纪要、决策与行动项，保留事实来源。', whenToUse: '用于会议转录文本、VTT、SRT 的总结和行动项整理；不负责录音或音频转录。', directory: `${skillRoot}meeting-summary`, hostGuide: 'HOST.md' },
+  { name: 'lieflat-charts', description: 'Lieflat Charts：模板驱动的数据图表、交互可视化与中英文报告。', whenToUse: '用于将真实数据制作成 HTML 图表、交互地图或明确要求的整页报告，沿用预置模板与来源核验。', directory: `${skillRoot}lieflat-charts`, hostGuide: 'HOST.md' },
 ]
 
 function candidate(spec: SkillSpec): SkillCandidate {

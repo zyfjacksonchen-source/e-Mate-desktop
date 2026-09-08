@@ -52,3 +52,9 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - The complete Skill resources, necessary external document references, original attribution guard, MIT license and separately licensed assets are preserved. Exact original and adapted file identities are recorded in `skills/ppt-master/UPSTREAM.json` and `SOURCE.md`.
 - The export owner is adapted to preserve file permissions and Windows DACLs. Successful publication remains successful if backup cleanup fails, with a warning identifying the retained backup. Regression evidence does not replace Windows installed acceptance.
 - Python dependency distribution, native preview integration, final PPTX rendering and installed Skill discovery remain acceptance gates. No PyMuPDF or proprietary artifact-tool runtime is included.
+
+## Lieflat Charts preset
+
+- Fixed source: `larashero3-dotcom/lieflat-charts@eace082a317b696c5570c25826a53a7fa113e984`; complete unchanged upstream resources and file hashes are retained under `skills/lieflat-charts`.
+- Distribution basis: user-confirmed enterprise authorization on 2026-09-08 for e-Mate bundling. Original PolyForm Noncommercial license and upstream third-party notices are preserved; this is not an MIT relicensing or a fabricated contract. See the preset SOURCE.md and UPSTREAM.json.
+- Existing provider and Host guidance only; no new Tool or runtime. Browser-dependent templates retain their network requirements.

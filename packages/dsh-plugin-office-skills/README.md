@@ -2,7 +2,7 @@
 
 Office support for e-Mate 2.0.18 on the pinned Harness rc.7 Profile.
 
-The native Skill provider exposes `documents`, `pdf`, `spreadsheets`, `ppt-master`, and `meeting-summary`. Each upstream preset retains its source and license records under its Skill directory; e-Mate's `HOST.md` supplies the actual resource path and native task integration. The old `presentations` preset has been removed.
+The native Skill provider exposes `documents`, `pdf`, `spreadsheets`, `ppt-master`, `meeting-summary`, and `lieflat-charts`. Each upstream preset retains its source and license records under its Skill directory; e-Mate's `HOST.md` supplies the actual resource path and native task integration. The old `presentations` preset has been removed.
 
 - `office_read` reads a workspace-relative DOCX, XLSX, PPTX, or PDF into bounded normalized JSON.
 - `office_write` creates a new real DOCX, XLSX, PPTX, or PDF under `.e-mate/office/`.

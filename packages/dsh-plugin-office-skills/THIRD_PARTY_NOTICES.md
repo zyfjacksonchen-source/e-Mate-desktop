@@ -29,3 +29,5 @@ The PDF Skill includes a static weight-400 instance of the official Noto Sans SC
 PPT Master retains its original license and attribution guard under `skills/ppt-master`. Its icon, audio and geometry assets retain their upstream notices; see `skills/ppt-master/SOURCE.md` for the source manifest and adapted document references. No PyMuPDF runtime is distributed.
 
 The OpenAI Spreadsheets Skill 26.905.11957 retains its original MIT plugin manifest at `skills/spreadsheets/UPSTREAM_PLUGIN_MANIFEST.json`. No artifact-tool runtime is included.
+
+Lieflat Charts (`larashero3-dotcom/lieflat-charts@eace082a317b696c5570c25826a53a7fa113e984`) is bundled under the user's confirmed enterprise authorization. Its original PolyForm Noncommercial License 1.0.0 remains at `skills/lieflat-charts/LICENSE`; its separate third-party notices remain alongside it. The package's MIT declaration applies to e-Mate code, not this upstream content. See `skills/lieflat-charts/SOURCE.md` for the recorded distribution basis.

@@ -16,7 +16,7 @@ import {
   writeOfficeBuffer,
 } from '../lib/index.js'
 
-test('registers five Skills with accurate runtime states and two target Tool/Job paths', async () => {
+test('registers six Skills with accurate runtime states and two target Tool/Job paths', async () => {
   let provider
   const capabilities = []
   const tools = []
@@ -32,7 +32,7 @@ test('registers five Skills with accurate runtime states and two target Tool/Job
   })
   assert.equal(provider.name, 'emate-office-skills')
   const skills = await provider.list({})
-  assert.deepEqual(skills.map(skill => skill.name), ['documents', 'pdf', 'spreadsheets', 'ppt-master', 'meeting-summary'])
+  assert.deepEqual(skills.map(skill => skill.name), ['documents', 'pdf', 'spreadsheets', 'ppt-master', 'meeting-summary', 'lieflat-charts'])
   for (const skill of skills) {
     assert.equal(skill.rank, 600)
     assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
@@ -74,6 +74,30 @@ test('registers five Skills with accurate runtime states and two target Tool/Job
       assert.equal(font.length, fontSource.bytes)
       assert.equal(createHash('sha256').update(font).digest('hex'), fontSource.sha256)
       assert.match(await readFile(join(fontRoot, 'OFL.txt'), 'utf8'), /SIL OPEN FONT LICENSE/u)
+    }
+    if (skill.name === 'lieflat-charts') {
+      assert.equal(skill.metadata.adapter, 'upstream')
+      assert.ok(loaded.content.includes(loaded.resourceBase.path))
+      assert.doesNotMatch(loaded.content, /\{\{SKILL_DIR\}\}/u)
+      assert.match(loaded.content, /office_read/u)
+      assert.match(loaded.content, /现有浏览器能力/u)
+      const root = loaded.resourceBase.path
+      const manifest = JSON.parse(await readFile(join(root, 'UPSTREAM.json'), 'utf8'))
+      assert.equal(manifest.commit, 'eace082a317b696c5570c25826a53a7fa113e984')
+      assert.equal(manifest.files.length, 125)
+      assert.equal(manifest.distribution_basis.kind, 'user-confirmed-enterprise-authorization')
+      assert.equal(manifest.distribution_basis.contract_document_in_repository, false)
+      for (const file of manifest.files) {
+        const bytes = await readFile(join(root, file.path))
+        assert.equal(bytes.length, file.bytes, file.path)
+        assert.equal(createHash('sha256').update(bytes).digest('hex'), file.sha256, file.path)
+      }
+      assert.equal(createHash('sha256').update(await readFile(join(root, 'SKILL.md'))).digest('hex'), '1d58a31343b0f38fed16a44a65fd2fac0588ca98ffc9e43b20263d886f3ee9ce')
+      assert.match(await readFile(join(root, 'LICENSE'), 'utf8'), /PolyForm Noncommercial License 1.0.0/u)
+      const validation = spawnSync(process.execPath, [join(root, 'scripts/validate.mjs')], { encoding: 'utf8', timeout: 30_000 })
+      assert.equal(validation.status, 0, validation.error?.message ?? validation.stderr + validation.stdout)
+      const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+      assert.ok(pkg.files.includes('skills'))
     }
     if (skill.name === 'meeting-summary') {
       assert.match(skill.description, /^会议总结/u)
