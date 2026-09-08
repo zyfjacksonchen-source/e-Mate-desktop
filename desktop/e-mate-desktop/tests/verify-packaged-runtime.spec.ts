@@ -164,8 +164,9 @@ describe('packaged desktop runtime verification', () => {
       return spawnSync(process.execPath, actual, options)
     }
     // Test host Node is deliberate here: packaged Electron cold startup is a
-    // separate candidate gate; this checks the exact generated JS and real PTY.
-    verifyPackagedNodePty(context('/build', process.platform), run)
+    // separate candidate gate; Unix test hosts use Mac-shaped probe arguments,
+    // not a claim of Mac startup acceptance or Linux product support.
+    verifyPackagedNodePty(context('/build', process.platform === 'win32' ? 'win32' : 'darwin'), run)
   })
 
   it('fails a hard timeout without retrying or accepting a success receipt', () => {
