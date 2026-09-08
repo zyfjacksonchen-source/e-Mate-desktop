@@ -335,7 +335,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (catalog.size === 0 || [...catalog.keys()].every(name => matchesAlwaysVisible(name, resolved))) return
       state.removeSearchTool = mutateRegistry(() => agent.ctx.tools.register(defineTool({
         name: TOOL_SEARCH_NAME,
-        description: 'Search currently deferred tools by capability or exact name. Matching tools become available on the next model step.',
+        description: 'Discover installed tools by capability or exact name. Some installed tool schemas are exposed on demand; when a task needs a capability with no suitable visible tool, search here before rebuilding it with shell commands or installing another dependency. Matching original tools become available on the next model step.',
         parameters: {
           query: {
             type: 'string',

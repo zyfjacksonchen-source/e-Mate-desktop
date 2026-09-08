@@ -38,6 +38,15 @@ export interface PdfDocumentInput {
 
 export type OfficeDocument = TextDocument | WorkbookDocument | SlidesDocument | PdfDocumentInput
 
+// Model-facing examples belong beside the format validators, and are exercised
+// by the existing real-byte round-trip tests.
+export const OFFICE_CREATE_EXAMPLES: Readonly<Record<OfficeFormat, OfficeDocument>> = {
+  docx: { title: 'e-Mate 文档', paragraphs: [{ text: '第一节', heading: 1 }, '正文内容'] },
+  xlsx: { sheets: [{ name: '数据', rows: [['项目', '数量'], ['e-Mate', 207]] }] },
+  pptx: { slides: [{ title: 'e-Mate 演示', bullets: ['第一点', '第二点'] }] },
+  pdf: { title: 'e-Mate PDF', pages: [{ lines: ['中文 PDF 内容', '第二行'] }] },
+}
+
 const MAX_TEXT_BYTES = 1_000_000
 const MAX_ROWS = 10_000
 const MAX_COLUMNS = 256

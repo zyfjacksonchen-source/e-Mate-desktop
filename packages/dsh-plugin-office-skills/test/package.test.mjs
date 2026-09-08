@@ -12,6 +12,7 @@ import {
   apply,
   inject,
   OFFICE_ADAPTER_STATUS,
+  OFFICE_CREATE_EXAMPLES,
   readOfficeBuffer,
   writeOfficeBuffer,
 } from '../lib/index.js'
@@ -128,6 +129,14 @@ test('registers six Skills with accurate runtime states and two target Tool/Job 
     locations: [{ path: '.e-mate/office/交付.docx' }],
   })
   assert.equal(tools[0].parameters.properties.document.type, 'object')
+  const contract = tools[0].parameters.properties.document.description
+  for (const [format, example] of Object.entries(OFFICE_CREATE_EXAMPLES)) {
+    assert.ok(contract.includes(`${format}: ${JSON.stringify(example)}`))
+  }
+  assert.match(contract, /operation:"create"/u)
+  assert.match(contract, /type:"table"/u)
+  assert.match(contract, /literal text, NOT formulas/u)
+  assert.match(contract, /PPTX basic creation supports title and bullets only/u)
   assert.equal(tools[1].output.schema.properties.document.type, 'object')
   assert.deepEqual(capabilities.map(capability => capability.id), ['office-skills'])
   assert.deepEqual(await capabilities[0].status(), {
@@ -163,19 +172,19 @@ test('meeting transcript helper preserves Chinese speakers and standalone numeri
 
 test('round-trips real DOCX, XLSX, PPTX, and Chinese PDF bytes', async () => {
   const fixtures = [
-    ['docx', { title: 'e-Mate 文档', paragraphs: [{ text: '第一节', heading: 1 }, '正文内容'] }, value => {
+    ['docx', OFFICE_CREATE_EXAMPLES.docx, value => {
       assert.deepEqual(value.paragraphs, ['e-Mate 文档', '第一节', '正文内容'])
     }],
-    ['xlsx', { sheets: [{ name: '数据', rows: [['项目', '数量'], ['e-Mate', 207]] }] }, value => {
+    ['xlsx', OFFICE_CREATE_EXAMPLES.xlsx, value => {
       assert.equal(value.sheets[0].name, '数据')
       assert.deepEqual(value.sheets[0].rows.slice(0, 2), [['项目', '数量'], ['e-Mate', 207]])
     }],
-    ['pptx', { slides: [{ title: 'e-Mate 演示', bullets: ['第一点', '第二点'] }] }, value => {
+    ['pptx', OFFICE_CREATE_EXAMPLES.pptx, value => {
       assert.equal(value.slides.length, 1)
       assert.match(value.slides[0].bullets.join(' '), /e-Mate 演示/u)
       assert.match(value.slides[0].bullets.join(' '), /第一点/u)
     }],
-    ['pdf', { title: 'e-Mate PDF', pages: [{ lines: ['中文 PDF 内容', '第二行'] }] }, value => {
+    ['pdf', OFFICE_CREATE_EXAMPLES.pdf, value => {
       assert.equal(value.pages.length, 1)
       assert.deepEqual(value.pages[0].lines, ['中文 PDF 内容', '第二行'])
     }],

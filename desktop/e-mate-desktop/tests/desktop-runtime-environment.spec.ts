@@ -13,6 +13,12 @@ import { tmpdir } from 'node:os'
 import { delimiter as pathDelimiter, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
+import * as ShellEnv from '@deepseek-ai/dsh-shell-env'
+import type { ToolExecution } from '@deepseek-ai/dsh-tools'
+
 import {
   installDesktopDshRuntime,
   installDesktopPnpmRuntime,
@@ -53,6 +59,48 @@ afterEach(() => {
 })
 
 describe('desktop Host pnpm runtime', () => {
+  it.skipIf(process.platform === 'win32')('executes the published managed Node command through the native shell environment', async () => {
+    const directory = temporaryDirectory()
+    const installation = installDesktopPnpmRuntime({
+      ...options(join(directory, 'runtime state'), process.platform, { PATH: '/usr/bin:/bin' }),
+      appExecutable: process.env.EMATE_TEST_NODE_EXECUTABLE ?? process.execPath,
+    })
+    const ctx = new Context()
+    const fibers = [await ctx.plugin(LocalSubprocessRuntime)]
+    ;(ctx.subprocess as LocalSubprocessRuntime).internals = { spillDir: directory }
+    fibers.push(await ctx.plugin(ShellEnv))
+    fibers.push(await ctx.plugin(LocalBashExecutor, { timeoutMs: 5_000 }))
+    // Exercise the launcher-owned declaration without importing Electron main or duplicating its contract.
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8')
+    const declaration = main.match(/ctx\.shellEnv\.register\(\{\s+name: 'emate-bundled-node',[\s\S]*?\n\s+\}\)/u)?.[0]
+    expect(declaration).toBeDefined()
+    new Function('ctx', 'pnpmRuntime', declaration!)(ctx, installation)
+    const scriptPath = join(directory, "test script's file.mjs")
+    writeFileSync(scriptPath, 'console.log(JSON.stringify({value: process.argv[2], node: process.versions.node, runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null}))')
+    const oldAmbient = process.env.DSH_EMATE_NODE
+    process.env.DSH_EMATE_NODE = '/not-the-managed-launcher'
+    try {
+      const execution = { signal: new AbortController().signal } as ToolExecution
+      const env = ctx.shellEnv.collect(execution)
+      expect(env.DSH_EMATE_NODE).toBe(installation.nodeShimPath)
+      const shell = ctx.shell as LocalBashExecutor
+      const result = await shell.run(shell.resolve({
+        command: '"$DSH_EMATE_NODE" "$TEST_SCRIPT" "中文 argument"',
+        workdir: directory,
+        env: { PATH: '/usr/bin:/bin', TEST_SCRIPT: scriptPath },
+        dshEnv: env,
+      }))
+      expect(result.exitCode, result.stderr.text).toBe(0)
+      expect(JSON.parse(result.stdout.text)).toEqual({ value: '中文 argument', node: expect.any(String), runAsNode: null })
+      expect(readdirSync(installation.pathDir)).toEqual(['pnpm'])
+    } finally {
+      if (oldAmbient === undefined) delete process.env.DSH_EMATE_NODE
+      else process.env.DSH_EMATE_NODE = oldAmbient
+      for (const fiber of fibers.reverse()) await fiber.dispose()
+      installation.dispose()
+    }
+  })
+
   it.each(['darwin', 'linux'] as const)('creates a pnpm-only public PATH on %s', (platform) => {
     const stateDir = join(temporaryDirectory(), 'runtime state')
     const environment: NodeJS.ProcessEnv = {

@@ -359,6 +359,11 @@ async function start(): Promise<void> {
       async (hostCtx) => {
         hostCtx.inject(['shellEnv'], (ctx) => {
           ctx.shellEnv.register({
+            name: 'emate-bundled-node',
+            variables: { DSH_EMATE_NODE: { description: 'Absolute path of the e-Mate managed Node command. Run local JavaScript scripts with "$DSH_EMATE_NODE" script.mjs in Bash or & $env:DSH_EMATE_NODE script.mjs in PowerShell. This existing launcher handles the Electron environment; no package.json, package install, or system Node is required.' } },
+            resolve: () => ({ DSH_EMATE_NODE: pnpmRuntime.nodeShimPath }),
+          })
+          ctx.shellEnv.register({
             name: 'emate-bundled-python',
             variables: { DSH_EMATE_PYTHON: { description: 'Absolute path of the e-Mate bundled Python interpreter. Quote this path when executing local Skill scripts.' } },
             resolve: () => ({ DSH_EMATE_PYTHON: visionPythonPath }),

@@ -7,6 +7,7 @@ import type {
   ConversationNodeDefinition,
   ConversationSnapshot,
   SessionListState,
+  ToolCallBlock,
   UseProjection,
   UseConversationSession,
 } from '@deepseek-ai/dsh-client-runtime/client'
@@ -299,9 +300,10 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
     ? []
     : [{ parentCallId: call.callId, tasks: call.retryTasks }])
   const candidates = (imageData?.calls ?? []).filter(call => call.seq <= owner.seq)
-  const callIds = [...new Set(candidates
-    .sort((left, right) => left.seq - right.seq)
-    .map(call => call.callId))]
+  const callIds = [...new Set([
+    ...candidates.sort((left, right) => left.seq - right.seq).map(call => call.callId),
+    ...nativeToolImageItems(owner.nodes ?? [], owner.turn.turn, owner.seq).map(item => item.callId),
+  ])]
   if (owner.turn.status !== 'closed') {
     return callIds.length === 0 && batchCallIds.length === 0
       ? null
@@ -378,7 +380,30 @@ function settledChildSessions(nodes: Iterable<ChatConversationViewNode>): Readon
     : []))
 }
 
-/** Read only hidden receipts named by the current Turn, latest revision wins. */
+/** Read native typed output, never infer images from tool names or prose. */
+function nativeToolImageItems(
+  nodes: Iterable<ChatConversationViewNode>, turn: number, throughSeq = Infinity,
+): Array<ImageGalleryItem & { attachment: ImageAttachmentRef }> {
+  const images: Array<ImageGalleryItem & { attachment: ImageAttachmentRef }> = []
+  const visit = (block: ToolCallBlock): void => {
+    if ('kind' in block && !block.isError && block.seq <= throughSeq) {
+      for (const part of block.content) {
+        if (part.type !== 'image') continue
+        images.push({ callId: block.callId, revision: 0, status: 'completed', operation: 'unknown',
+          createdAt: block.time, attachment: part.attachment })
+      }
+    }
+    for (const child of block.subCalls ?? []) visit(child)
+  }
+  for (const node of nodes) {
+    if (node.kind !== 'tool-call' || (node.location.kind !== 'turn' && node.location.kind !== 'step')
+      || node.location.turn.turn !== turn) continue
+    visit((node.data as { root: ToolCallBlock }).root)
+  }
+  return images
+}
+
+/** Merge native image outputs with authoritative receipts inside this Session's Turn. */
 export function terminalImageItems(
   nodes: Iterable<ChatConversationViewNode>,
   callIds: readonly string[],
@@ -398,7 +423,15 @@ export function terminalImageItems(
     if (!allowed.has(item.callId) || (latest.get(item.callId)?.revision ?? -1) > item.revision) continue
     latest.set(item.callId, named?.get(item.callId) ?? item)
   }
-  return callIds.flatMap(callId => latest.get(callId) ?? [])
+  const receipts = callIds.flatMap(callId => latest.get(callId) ?? [])
+  const seen = new Set(receipts.flatMap(item => item.attachment?.attachmentId ?? []))
+  const native = nativeToolImageItems(allNodes, turn).filter(item => {
+    if (!allowed.has(item.callId) || latest.has(item.callId) || seen.has(item.attachment.attachmentId)) return false
+    seen.add(item.attachment.attachmentId)
+    return true
+  })
+  // A strict failed/review receipt must never become a generic completed image.
+  return [...receipts, ...title === undefined ? native : namedGalleryImageItems(native, title)]
 }
 
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu
@@ -716,7 +749,7 @@ const galleryOperation = {
 const GALLERY_PAGE_SIZE = 24
 
 function galleryItemIdentity(item: ImageGalleryItem): string {
-  return `${item.source?.sessionId ?? 'self'}:${item.callId}`
+  return `${item.source?.sessionId ?? 'self'}:${item.callId}:${item.attachment?.attachmentId ?? ''}`
 }
 
 /** Native conversation.view reader over the same durable receipts used by the Turn tail. */

@@ -164,13 +164,15 @@ describe('image batch native projection client', () => {
     expect(screen.getByRole('status').textContent).toBe('1:completed:|2:failed:task-failed')
   })
 
-  it('integrates the reader only for batch tails and preserves legacy imagegen closure', () => {
+  it('integrates the batch reader while direct imagegen keeps its live tail', () => {
     const owner = (status: 'open' | 'closed', data: unknown) => ({
       turn: { turn: 1, status, start: undefined, end: undefined, steps: [], data: { get: () => data } },
       nodes: [], seq: 10, openFile: () => {},
     })
     const imagegen = { calls: [{ callId: 'single-image', seq: 2 }], foregroundSubagents: [] }
-    expect(selectArtifactTerminal(owner('open', imagegen) as never)).toBeNull()
+    expect(selectArtifactTerminal(owner('open', imagegen) as never)).toEqual({
+      callIds: ['single-image'], paths: [], childSessionIds: [],
+    })
     expect(selectArtifactTerminal(owner('closed', imagegen) as never)).toEqual({
       callIds: ['single-image'], paths: [], childSessionIds: [],
     })

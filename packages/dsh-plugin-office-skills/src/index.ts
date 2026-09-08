@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import {
   type OfficeFormat,
+  OFFICE_CREATE_EXAMPLES,
   readOfficeBuffer,
   writeOfficeBuffer,
 } from './office-runtime.ts'
@@ -367,11 +368,19 @@ export function apply(ctx: OfficeContext): void {
   ctx.effect(() => ctx.jobs.attachController('emate-office'), 'emate.office: target Job controller')
   ctx.effect(() => ctx.tools.register({
     name: 'office_write',
-    description: 'Create a local Office file. DOCX supports styled creation, template filling and text replacement. PNG renders a standalone workspace SVG using the native Desktop renderer: document={source_svg,width,height}. XLSX/PDF also accept document={operation:"recalculate",source_path:"workspace.xlsx"} using managed Calc; other formats use normalized JSON. Always writes a new file and preserves the source.',
+    description: 'Create a local Office file. DOCX supports styled creation, template filling and text replacement. PNG renders a standalone workspace SVG using the native Desktop renderer: document={source_svg,width,height}. XLSX/PDF also accept document={operation:"recalculate",source_path:"workspace.xlsx"} using managed Calc; Basic creation shapes and their limits are inline in the document parameter; loaded Skill workflows and quality requirements still apply. Always writes a new file and preserves the source.',
     parameters: {
       type: 'object', additionalProperties: false, required: ['document', 'filename', 'format'],
       properties: {
-        document: { type: 'object', description: 'Normalized format-specific content described by the Office Skill.' },
+        document: { type: 'object', description: [
+          'Use the shape matching format. Do not discover schemas by reading application source. Examples of basic creation documents:',
+          ...Object.entries(OFFICE_CREATE_EXAMPLES).map(([format, example]) => `${format}: ${JSON.stringify(example)}`),
+          'DOCX basic paragraphs accepts strings or {text,heading?:1|2|3}. For styled DOCX, tables and images, use {operation:"create",spec:{blocks:[...]}}. Table block: {type:"table",headers:["项目","数量"],rows:[["样例","40"]]}. Other blocks: heading {text,level?}, paragraph {text} or {runs:[{text,bold?,italic?}]}, image {path,width,height,caption?}, page-break. spec also accepts title,subtitle,header,footer,font,accent. Full Word input guidance remains in documents/references/tool-input.md.',
+          'DOCX existing template: {operation:"template",source_path:"template.docx",values:{placeholder:"value"}}. Targeted replacement: {operation:"replace",source_path:"source.docx",replacements:[{find:"old",replace:"new"}]}. All source paths are workspace-relative; no inline image bytes.',
+          'XLSX basic rows accept string, finite number, boolean or null only. Strings beginning with = are literal text, NOT formulas. For formulas/styles, use the Spreadsheets Skill with managed Python/openpyxl, then this Tool with {operation:"recalculate",source_path:"workbook.xlsx"}, format xlsx or pdf. Read back real cached results; never invent formula values.',
+          'PPTX basic creation supports title and bullets only, not table/layout/SVG authoring. A selected PPT Master workflow keeps its own authoring/export and integrity checks; this basic shape does not replace it.',
+          'PDF basic creation accepts optional title and pages of lines only, not forms, arbitrary layouts or existing-PDF edits. PNG uses {source_svg:"slide.svg",width:1280,height:720} with a self-contained workspace SVG and native Desktop rendering.',
+        ].join('\n') },
         filename: { type: 'string', description: 'Safe output filename with the matching extension.' },
         format: { type: 'string', enum: ['docx', 'xlsx', 'pptx', 'pdf', 'png'] },
       },
@@ -491,4 +500,4 @@ export function apply(ctx: OfficeContext): void {
   }), 'emate.office-skills: capability metadata')
 }
 
-export { readOfficeBuffer, writeOfficeBuffer } from './office-runtime.ts'
+export { OFFICE_CREATE_EXAMPLES, readOfficeBuffer, writeOfficeBuffer } from './office-runtime.ts'

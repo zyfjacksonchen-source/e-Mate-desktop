@@ -1371,3 +1371,64 @@ describe('indexed terminal projection', () => {
     expect(screen.queryByRole('button', {name: /查看原图/})).toBeNull()
   })
 })
+
+
+describe('native typed tool image outputs', () => {
+  const native = (callId: string, parts: any[], options: { turn?: number; error?: boolean; subCalls?: any[] } = {}) => ({
+    key: callId, kind: 'tool-call', target: 'chat', anchorSeq: 2, visibility: 'visible',
+    location: { kind: 'step', turn: turn({}, options.turn ?? 1, 'open') },
+    data: { root: { kind: 'tool-result', callId, call: { name: 'arbitrary-plugin-tool', argsRaw: '{}' },
+      content: parts, isError: options.error === true, seq: 3, time: 3000, subCalls: options.subCalls ?? [] } },
+  } as any)
+  const image = (id: string) => ({ type: 'image', attachment: { ...attachment, attachmentId: `sha256:${id.repeat(64)}`, name: `${id}.png` } })
+
+  it('selects typed multi-image outputs across tools and native nested calls, never prose or other turns', () => {
+    const nested = native('nested', [image('a'), image('c')]).data.root
+    const nodes = [native('one', [image('a'), image('b')]), native('two', [image('a')], { subCalls: [nested] }),
+      native('prose', [{ type: 'text', text: JSON.stringify(image('d')) }]),
+      native('failed', [image('e')], { error: true }), native('other-turn', [image('f')], { turn: 2 })]
+    const matched = selectArtifactTerminal({ turn: turn({}, 1, 'open'), seq: 4, nodes, openFile: vi.fn() } as any)!
+    expect(matched.callIds).toEqual(['one', 'two', 'nested'])
+    const items = terminalImageItems(nodes, matched.callIds, 1)
+    expect(items.map(item => item.attachment?.name)).toEqual(['a.png', 'b.png', 'c.png'])
+    expect(selectArtifactTerminal({ turn: turn({}, 1, 'open'), seq: 2, nodes, openFile: vi.fn() } as any)).toBeNull()
+  })
+
+  it('preserves strict receipts over duplicate native outputs and cannot promote failed or review-required calls', () => {
+    const review = parseImageOutputReceipt(receipt({ call_id: 'review', status: 'needs-review', content: [image('a')] }))!
+    const failed = parseImageOutputReceipt(receipt({ call_id: 'failed', status: 'failed', content: [], failure_code: 'failed' }))!
+    const nodes = [hidden(review, 'review'), hidden(failed, 'failed'), native('review', [image('a')]),
+      native('failed', [image('b')]), native('job-output', [image('a')]), native('unrelated', [image('c')])]
+    const items = terminalImageItems(nodes, ['review', 'failed', 'job-output', 'unrelated'], 1)
+    expect(items.map(item => [item.callId, item.status])).toEqual([
+      ['review', 'review-required'], ['failed', 'failed'], ['unrelated', 'completed'],
+    ])
+    expect(items.filter(item => item.attachment)).toHaveLength(2)
+    const completed = parseImageOutputReceipt(receipt({ call_id: 'generated', revision: 2 }))!
+    const merged = terminalImageItems([hidden({ ...completed, revision: 1 }, 'old'), hidden(completed, 'new'),
+      native('generated', [{ type: 'image', attachment }]), native('nested-owner', [], { subCalls: [native('repeat', [{ type: 'image', attachment }]).data.root] }),
+    ], ['generated', 'repeat'], 1)
+    expect(merged).toEqual([completed])
+  })
+
+  it('displays native images immediately through MessageImage and retains them across retries, cancellation and session changes', async () => {
+    nativeImageRendering.enabled = true
+    const nodes = [native('native-call', [image('a'), image('b')])]
+    const loadImage = vi.fn(async (ref: any) => `blob:first-${ref.name}`)
+    const match = selectArtifactTerminal({ turn: turn({}, 1, 'open'), seq: 4, nodes, openFile: vi.fn() } as any)!
+    const props = terminalProps(nodes, match, { turn: turn({}, 1, 'open'), loadImage })
+    const view = render(<ArtifactTerminal {...props as any} />)
+    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2))
+    expect(loadImage.mock.calls.map(call => call[0].attachmentId)).toEqual([image('a').attachment.attachmentId, image('b').attachment.attachmentId])
+    view.rerender(<ArtifactTerminal {...props as any} seq={8} />)
+    expect(screen.getAllByRole('img')).toHaveLength(2)
+    view.rerender(<ArtifactTerminal {...props as any} turn={{ ...turn({}), end: { data: { reason: { kind: 'interrupted' } } } } as any} />)
+    expect(screen.getAllByRole('img')).toHaveLength(2)
+    const otherNodes = [native('native-call', [image('c')])]
+    const otherLoad = vi.fn(async () => 'blob:other-session')
+    const otherProps = terminalProps(otherNodes, match, { sessionId: 'other-session', loadImage: otherLoad })
+    view.rerender(<ArtifactTerminal {...otherProps as any} />)
+    await waitFor(() => expect(screen.getAllByRole('img').map(img => img.getAttribute('src'))).toEqual(['blob:other-session']))
+    expect(otherLoad.mock.calls[0]?.[0]).toMatchObject({ attachmentId: image('c').attachment.attachmentId })
+  })
+})
