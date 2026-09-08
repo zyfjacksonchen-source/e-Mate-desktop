@@ -1,7 +1,7 @@
 /** Fail-loud verification of the runtime entries sealed into Electron's app.asar. */
 
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
@@ -156,8 +156,8 @@ export type PackageResolver = (specifier: string) => string
 export type PtyProbeRunner = (
   command: string,
   args: readonly string[],
-  options: { readonly encoding: 'utf8'; readonly env: NodeJS.ProcessEnv; readonly timeout: number },
-) => { readonly error?: Error; readonly status: number | null; readonly stderr?: string }
+  options: { readonly encoding: 'utf8'; readonly env: NodeJS.ProcessEnv; readonly timeout: number; readonly killSignal?: NodeJS.Signals },
+) => { readonly error?: Error; readonly status: number | null; readonly stderr?: string; readonly stdout?: string }
 
 /**
  * Resolve the platform-specific archive produced by Electron Builder.
@@ -200,6 +200,7 @@ export function resolvePackagedResourcesRoot(context: PackagedRuntimeContext): s
 export function verifyPackagedNodePty(
   context: PackagedRuntimeContext,
   run: PtyProbeRunner = (command, args, options) => spawnSync(command, args, options),
+  now: () => number = () => performance.now(),
 ): void {
   // electron-builder creates temporary single-architecture slices before the
   // final universal app. Run the live probe on that final app so an arm64 host
@@ -216,19 +217,39 @@ export function verifyPackagedNodePty(
     : '/bin/sh'
   const commandArgs = context.electronPlatformName === 'win32'
     ? ['/d', '/s', '/c', 'echo e-mate-pty-ready']
-    : ['-lc', 'printf e-mate-pty-ready']
+    : ['-c', 'printf e-mate-pty-ready']
+  const receiptId = randomBytes(16).toString('hex')
+  const ptyBudgetMs = 60_000
+  const totalBudgetMs = context.electronPlatformName === 'darwin' ? 180_000 : 60_000
+  // Start before either require. Recheck monotonic elapsed at completion: a
+  // blocked event loop must not turn a late PTY result into watchdog success.
+  // This fixed non-login shell runs only a builtin; closing the probe's PTY
+  // descriptors cannot leave user startup-script jobs behind.
   const probe = [
-    'const p=require(process.argv[1]);',
-    'const t=p.spawn(process.argv[2],JSON.parse(process.argv[3]),{cwd:process.cwd(),env:process.env});',
+    'const started=process.hrtime.bigint();',
+    `const receiptId=${JSON.stringify(receiptId)};`,
+    'let t,finished=false;',
+    'function finish(ok){if(finished)return;finished=true;clearTimeout(watchdog);',
+    'const elapsedMs=Number(process.hrtime.bigint()-started)/1e6;',
+    `if(!ok||elapsedMs>${ptyBudgetMs}){try{t?.kill("SIGKILL")}catch{}process.exit(1);return;}`,
+    'fs.writeSync(1,JSON.stringify({schema:1,receiptId,elapsedMs})+"\\n");process.exit(0)}',
+    `const watchdog=setTimeout(()=>finish(false),${ptyBudgetMs});`,
+    'const fs=require("node:fs");const p=require(process.argv[1]);',
+    // A synchronous require timeout must not start another process afterward.
+    `if(Number(process.hrtime.bigint()-started)/1e6>${ptyBudgetMs})finish(false);`,
+    't=p.spawn(process.argv[2],JSON.parse(process.argv[3]),{cwd:process.cwd(),env:process.env});',
     'let out="";',
     't.onData(d=>{out+=d});',
-    't.onExit(e=>{if(e.exitCode!==0||!out.includes("e-mate-pty-ready"))process.exit(1);process.exit(0)});',
+    't.onExit(e=>finish(e.exitCode===0&&out.includes("e-mate-pty-ready")));',
   ].join('')
+  const started = now()
   const result = run(executable, ['-e', probe, nodePtyRoot, command, JSON.stringify(commandArgs)], {
     encoding: 'utf8',
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-    timeout: 60_000,
+    timeout: totalBudgetMs,
+    killSignal: 'SIGKILL',
   })
+  const totalMs = now() - started
   if (result.error !== undefined || result.status !== 0) {
     const detail = [result.error?.message, String(result.stderr ?? '').trim()]
       .filter(value => value !== undefined && value !== '')
@@ -238,6 +259,23 @@ export function verifyPackagedNodePty(
       result.error === undefined ? undefined : { cause: result.error },
     )
   }
+  let receipt: unknown
+  try { receipt = JSON.parse(result.stdout ?? '') } catch { /* Missing, duplicate or malformed receipts fail below. */ }
+  const value = receipt as { schema?: unknown; receiptId?: unknown; elapsedMs?: unknown } | null
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).sort().join(',') !== 'elapsedMs,receiptId,schema'
+    || value.schema !== 1 || value.receiptId !== receiptId
+    || typeof value.elapsedMs !== 'number' || !Number.isFinite(value.elapsedMs) || value.elapsedMs < 0
+    || !Number.isFinite(totalMs) || totalMs < value.elapsedMs) {
+    throw new Error('@e-mate/desktop: packaged node-pty smoke failed: missing or invalid timing receipt')
+  }
+  const startupMs = totalMs - value.elapsedMs // includes process launch, receipt flush and exit overhead
+  const timing = `startup_ms=${startupMs.toFixed(1)} pty_ms=${value.elapsedMs.toFixed(1)} total_ms=${totalMs.toFixed(1)}`
+  if (value.elapsedMs > ptyBudgetMs || totalMs > totalBudgetMs
+    || context.electronPlatformName === 'darwin' && startupMs > 120_000) {
+    throw new Error(`@e-mate/desktop: packaged node-pty smoke failed: timing budget exceeded (${timing})`)
+  }
+  console.log(`@e-mate/desktop: packaged node-pty smoke passed (${timing})`)
 }
 
 function requiredPythonEntries(context: PackagedRuntimeContext): readonly string[] {

@@ -1,5 +1,7 @@
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { runInNewContext } from 'node:vm'
+import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -52,6 +54,11 @@ function retiredXinPath(unpackedRoot: string): string {
   return join(unpackedRoot, 'node_modules/@e-mate/dsh-plugin-xin-assistant')
 }
 
+function ptyReceipt(args: readonly string[], elapsedMs = 0): string {
+  const receiptId = JSON.parse(/const receiptId=("[a-f0-9]+");/u.exec(args[1]!)![1]!) as string
+  return JSON.stringify({ schema: 1, receiptId, elapsedMs }) + '\n'
+}
+
 describe('packaged desktop runtime verification', () => {
   it('tracks the Windows prebuilds shipped by the installed node-pty', () => {
     for (const entry of REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES) {
@@ -63,7 +70,7 @@ describe('packaged desktop runtime verification', () => {
     ['darwin', join('/build', 'e-Mate.app', 'Contents', 'MacOS', 'e-Mate'), '/bin/sh'],
     ['win32', join('/build', 'e-Mate.exe'), 'C:\\Windows\\System32\\cmd.exe'],
   ])('runs the packaged node-pty smoke on %s', (platform, expectedExecutable, expectedCommand) => {
-    const run = vi.fn<PtyProbeRunner>(() => ({ status: 0, stderr: '' } as never))
+    const run = vi.fn<PtyProbeRunner>((_command, args) => ({ status: 0, stderr: '', stdout: ptyReceipt(args) }))
 
     verifyPackagedNodePty(context('/build', platform), run)
 
@@ -75,7 +82,8 @@ describe('packaged desktop runtime verification', () => {
       join(resolvePackagedUnpackedRoot(context('/build', platform)), 'node_modules', 'node-pty'),
       expectedCommand,
     ].map(argument => platform === 'win32' ? argument.toLowerCase() : argument)))
-    expect(options).toMatchObject({ timeout: 60_000, env: { ELECTRON_RUN_AS_NODE: '1' } })
+    expect(options).toMatchObject({ timeout: platform === 'darwin' ? 180_000 : 60_000, killSignal: 'SIGKILL', env: { ELECTRON_RUN_AS_NODE: '1' } })
+    if (platform === 'darwin') expect(args.at(-1)).toBe(JSON.stringify(['-c', 'printf e-mate-pty-ready']))
   })
 
   it('fails packaging when the native PTY cannot start', () => {
@@ -83,6 +91,88 @@ describe('packaged desktop runtime verification', () => {
 
     expect(() => verifyPackagedNodePty(context('/build', 'darwin'), run))
       .toThrow('packaged node-pty smoke failed: posix_spawnp failed.')
+  })
+
+  it.each([
+    ['darwin', 180_000, 60_000, true], ['darwin', 120_011, 10, false],
+    ['darwin', 180_001, 60_000, false], ['darwin', 60_002, 60_001, false],
+    ['win32', 60_000, 10, true], ['win32', 60_001, 10, false],
+  ] as const)('enforces %s total=%d and PTY=%d budgets', (platform, total, elapsed, accepted) => {
+    const run = vi.fn<PtyProbeRunner>((_command, args) => ({ status: 0, stdout: ptyReceipt(args, elapsed) }))
+    const now = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(total)
+    const execute = () => verifyPackagedNodePty(context('/build', platform), run, now)
+    if (accepted) expect(execute).not.toThrow()
+    else expect(execute).toThrow('timing budget exceeded')
+    expect(run).toHaveBeenCalledOnce()
+  })
+
+  it('rejects missing, contradictory, nonfinite, negative, foreign and duplicate receipts', () => {
+    const corruptions: Array<(args: readonly string[]) => string | undefined> = [
+      () => undefined, () => '', () => '{}', () => 'null', () => '[]',
+      args => ptyReceipt(args, -1), args => ptyReceipt(args, 101),
+      args => ptyReceipt(args).replace('"elapsedMs":0', '"elapsedMs":1e309'),
+      args => ptyReceipt(args).replace('"receiptId":"', '"receiptId":"different-'),
+      args => ptyReceipt(args).trim() + ptyReceipt(args),
+      args => ptyReceipt(args).replace('"schema":1', '"schema":1,"extra":true'),
+    ]
+    for (const corrupt of corruptions) {
+      const run: PtyProbeRunner = (_command, args) => {
+        const stdout = corrupt(args)
+        return { status: 0, ...(stdout === undefined ? {} : { stdout }) }
+      }
+      expect(() => verifyPackagedNodePty(context('/build', 'darwin'), run, vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(100)))
+        .toThrow('missing or invalid timing receipt')
+    }
+  })
+
+  it('measures the emitted child from require through completion and watchdog cleanup', () => {
+    const capture = vi.fn<PtyProbeRunner>((_command, args) => ({ status: 0, stdout: ptyReceipt(args) }))
+    verifyPackagedNodePty(context('/build', 'darwin'), capture)
+    const script = capture.mock.calls[0]![1][1]!
+    for (const scenario of ['normal', 'blocked-require', 'blocked-completion', 'watchdog'] as const) {
+      let elapsed = 0, timer: (() => void) | undefined, receive: ((data: string) => void) | undefined
+      let complete: ((event: { exitCode: number }) => void) | undefined
+      const writes: string[] = [], exits: number[] = []
+      const exit = new Error('synthetic process.exit')
+      const terminal = { kill: vi.fn(), onData: (fn: typeof receive) => { receive = fn }, onExit: (fn: typeof complete) => { complete = fn } }
+      const spawn = vi.fn(() => terminal), clear = vi.fn()
+      const execute = () => runInNewContext(script, {
+        process: { hrtime: { bigint: () => BigInt(elapsed * 1_000_000) }, argv: ['electron', 'node-pty', '/bin/sh', '["-c","printf e-mate-pty-ready"]'],
+          cwd: () => '/synthetic', env: {}, exit: (code: number) => { exits.push(code); throw exit } },
+        require: (name: string) => name === 'node:fs' ? { writeSync: (_fd: number, data: string) => writes.push(data) }
+          : (elapsed = scenario === 'blocked-require' ? 60_001 : 500, { spawn }),
+        setTimeout: (fn: () => void, delay: number) => { timer = fn; expect(delay).toBe(60_000); return 1 }, clearTimeout: clear,
+      })
+      if (scenario === 'blocked-require') {
+        expect(execute).toThrow(exit); expect(spawn).not.toHaveBeenCalled(); expect(exits).toEqual([1]); continue
+      }
+      execute(); receive!('e-mate-pty-ready')
+      elapsed = scenario === 'normal' ? 700 : 60_001
+      expect(() => scenario === 'watchdog' ? timer!() : complete!({ exitCode: 0 })).toThrow(exit)
+      expect(exits).toEqual([scenario === 'normal' ? 0 : 1]); expect(clear).toHaveBeenCalledOnce()
+      if (scenario === 'normal') {
+        expect(JSON.parse(writes[0]!).elapsedMs).toBe(700); expect(terminal.kill).not.toHaveBeenCalled()
+      } else { expect(writes).toEqual([]); expect(terminal.kill).toHaveBeenCalledWith('SIGKILL') }
+      complete!({ exitCode: 0 }); expect(exits).toHaveLength(1)
+    }
+  })
+
+  it('executes the exact emitted probe with real node-pty and parses its newline-terminated receipt', () => {
+    const run: PtyProbeRunner = (_executable, args, options) => {
+      const actual = [...args]
+      actual[2] = join(import.meta.dirname, '../node_modules/node-pty')
+      return spawnSync(process.execPath, actual, options)
+    }
+    // Test host Node is deliberate here: packaged Electron cold startup is a
+    // separate candidate gate; this checks the exact generated JS and real PTY.
+    verifyPackagedNodePty(context('/build', process.platform), run)
+  })
+
+  it('fails a hard timeout without retrying or accepting a success receipt', () => {
+    const run = vi.fn<PtyProbeRunner>((_command, args) => ({ status: null, error: new Error('ETIMEDOUT'), stdout: ptyReceipt(args) }))
+    expect(() => verifyPackagedNodePty(context('/build', 'darwin'), run)).toThrow('ETIMEDOUT')
+    expect(run).toHaveBeenCalledOnce()
+    expect(run.mock.calls[0]![2]).toMatchObject({ timeout: 180_000, killSignal: 'SIGKILL' })
   })
 
   it('verifies both complete Calc payloads without allowing package-time downloads', () => {
