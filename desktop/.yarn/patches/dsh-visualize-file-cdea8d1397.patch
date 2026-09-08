@@ -1,0 +1,43 @@
+diff --git a/lib/index.mjs b/lib/index.mjs
+index 064e32f9ab8d45367928ac7aaae06ca6819ed20d..cf50c44d986f11c7aed9e1336fbcaa3472c4142b 100644
+--- a/lib/index.mjs
++++ b/lib/index.mjs
+@@ -46,11 +46,16 @@ function sessionCwd(exec, requestedPath) {
+ 	if (cwd === void 0 || !PARENT_PATH_SEGMENT.test(cwd) && !PARENT_PATH_SEGMENT.test(requestedPath)) return cwd;
+ 	return cwd;
+ }
+-/** Cut at `n` code units without splitting a surrogate pair. */
+-function cutAtCodePointBoundary(s, n) {
+-	let end = n;
+-	const code = s.charCodeAt(end - 1);
+-	if (code >= 55296 && code <= 56319) end -= 1;
++/** Cut at a UTF-8 byte ceiling without splitting a code point. */
++function cutAtByteBoundary(s, n) {
++	let end = 0;
++	let bytes = 0;
++	for (const character of s) {
++		const size = Buffer.byteLength(character, "utf8");
++		if (bytes + size > n) break;
++		bytes += size;
++		end += character.length;
++	}
+ 	return s.slice(0, end);
+ }
+ /** Drop a lone trailing high surrogate left by a provider chunk boundary. */
+@@ -70,12 +75,13 @@ async function readPreview(fs, target, signal, cap) {
+ 			truncated = true;
+ 			break;
+ 		}
+-		if (chunk.length <= need) {
++		const bytes = Buffer.byteLength(chunk, "utf8");
++		if (bytes <= need) {
+ 			parts.push(chunk);
+-			total += chunk.length;
++			total += bytes;
+ 			continue;
+ 		}
+-		parts.push(cutAtCodePointBoundary(chunk, need));
++		parts.push(cutAtByteBoundary(chunk, need));
+ 		total += need;
+ 		truncated = true;
+ 		break;

@@ -1,6 +1,6 @@
 # Plugin quality and Agent integration review — 2026-09-08
 
-This review extends the image audit to the 17 packaged plugin adapters plus the product Profile. It is source/contract evidence, not installed acceptance or proof that a real model picks the best tool. Preserve the pinned Harness owners and the 2.0.18 release gates.
+This review extends the image audit to the 17 packaged plugin adapters, four pinned ecosystem plugins and the product Profile. It is source/contract evidence, not installed acceptance or proof that a real model picks the best tool. Preserve the pinned Harness owners and the 2.0.18 release gates.
 
 ## Method
 
@@ -13,6 +13,10 @@ Do not impose an image workflow on every plugin: a structured data tool should r
 `dsh-plugin-memory-evolve`: remember/search returned public records internally, but output.render discarded memory_id, tags, timestamp and scope. Delete requires an exact memory_id. Automatic recall sometimes carried an ID, but its bounded recall window does not guarantee that every explicitly searched result appears there. The explicit tool chain therefore depended on incidental context.
 
 Remember/search now return the existing public record as model-visible structured JSON. No private scope key/store path is added. The regression takes memory_id from rendered search content, then exercises delete rejection/confirmation and project isolation through existing tools. It does not read the internal execute result to supply the ID. No new memory store, semantic router or approval flow was introduced.
+
+`dsh-file-viewer`: the existing cross-platform opener patch used `await platform === "win32" ? ... : ...`. Operator precedence awaited the platform value, leaving the spawn Promise unawaited on both platforms. The public operation could report `opened` before process creation and fail to convert asynchronous startup errors to `open-failed`. Parenthesizing the existing expression restores the original completion/error contract. The fix lives in the Yarn patch and its regenerated checksum, not only node_modules. Four tests invoke the package's actual exported function, control native spawn events and verify both platforms; all four fail before the correction. `opened` still means successful process creation, not proof that the target application rendered the file.
+
+`dsh-visualize`: the pinned preview reader counted UTF-16 code units against `maxPreviewBytes`, so Chinese/emoji content could exceed the promised UTF-8 ceiling. The pinned package patch now measures UTF-8 bytes and truncates at a whole code point. Five actual tool-execution cases cover multilingual content, chunk boundaries, a character larger than the remaining budget, exact limits and ASCII. Three exposed the defect before correction. No dependency version, iframe permissions or model-context projection changed.
 
 ## Inventory and findings
 
@@ -35,6 +39,10 @@ Remember/search now return the existing public record as model-visible structure
 | better-sidebar | Workspace isolation and session switching | Presentation/navigation adapter; no semantic routing or extra Agent work required. |
 | glass-composer | Native composer slots/settings | Presentation-only effects; do not use animation as evidence of Agent work. |
 | pet | Native overlay/settings and event projection | Presentation-only status; must not invent reasoning, tools or task completion. |
+| navigation-bar | Native conversation navigation and message projection | Presentation-only; no Agent planner or task-completion inference. |
+| at-file | Workspace-relative reference validation and cancellation | Injects path/kind, not file bytes. Agent must read the file with existing tools before claiming content understanding. |
+| file-viewer | Workspace FS authority, native system opener and sandboxed preview | Fixed premature success/error loss in the existing opener patch. Opening is separate from reviewing document quality. |
+| visualize | Native FS/Tool and isolated `allow-scripts` iframe; corrected UTF-8 byte ceiling | Returns path/size/truncation, not observed browser state. A rendered card does not prove interaction correctness. |
 
 Profile image tools were reviewed separately. QR already returns a native image block. Share, artifact-open, authentication/model policy and update remain existing Profile/Desktop owners; they require their own operational/installed receipts rather than a generic plugin-success flag.
 
@@ -43,6 +51,7 @@ Profile image tools were reviewed separately. QR already returns a native image 
 - Seven core capability groups: 131 tests passed, no failures/skips. Covers tool disclosure, MCP contracts, knowledge Agent/recovery, file import, schedule projection and DOCX preservation.
 - Eight platform/discovery/presentation groups: 107 tests passed, no failures/skips. Covers CDP, GenUI, find-skill, composer/sidebar/pet, Skill Hub and Computer Use source contracts.
 - Memory correction: 6 tests passed, no failures/skips; initial regression failed against old rendered output before rebuilding the fix.
+- Ecosystem corrections: 32 checks passed (four file-viewer, five visualize, 23 existing package checks); test TypeScript checks passed. The nine regressions invoke actual package entry points. Simulated process events do not replace installed opener acceptance.
 - Canvas/image/Vision checks are recorded in the image audit and local receipts. These are not an all-platform installed plugin certificate.
 
 Raw local logs: `work/2.0.18/plugin-loop-owner-audit.log`, `plugin-platform-owner-audit.log`, `plugin-memory-loop-fix.log` (before), `plugin-memory-loop-fixed.log` (after).
@@ -50,3 +59,5 @@ Raw local logs: `work/2.0.18/plugin-loop-owner-audit.log`, `plugin-platform-owne
 ## Required follow-through
 
 Use the existing installed capability matrix for actual dependencies and real tool calls. For Agent evaluation capture actual model-selected tools, arguments, observations and outcomes: import→read→edit→render; search→source→answer; discover→connect→invoke; remember→search→confirmed delete; schedule→status→actual occurrence; observe→act→verify. Include unavailable capability, empty result, scope change, cancellation and ambiguous timeout. Do not count scripted tool sequences as successful model reasoning. Measure task completion and unnecessary tool/LLM calls alongside latency; no new benchmark runtime is required.
+
+Do not weaken the iframe sandbox or insert preview HTML into the model context as a substitute for actual observation. The preview byte limit is an output bound, not proof that generated HTML renders or behaves correctly.

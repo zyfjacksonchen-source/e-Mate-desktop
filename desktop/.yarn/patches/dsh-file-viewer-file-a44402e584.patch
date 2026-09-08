@@ -36,7 +36,7 @@ index 7438ac600ca3a553f1c77348e8274b6c0c4fea92..c90ee96c8a1de183f52750cb7abb9e4f
  		const processPath = fs.processPath(target);
  		try {
 -			await spawnDetached(command, [processPath]);
-+			await platform === "win32" ? spawnDetached(command, [
++			await (platform === "win32" ? spawnDetached(command, [
 +				"-NoLogo",
 +				"-NoProfile",
 +				"-NonInteractive",
@@ -47,7 +47,7 @@ index 7438ac600ca3a553f1c77348e8274b6c0c4fea92..c90ee96c8a1de183f52750cb7abb9e4f
 +				TEMP: process.env.TEMP ?? "",
 +				TMP: process.env.TMP ?? "",
 +				E_MATE_OPEN_PATH: processPath
-+			}) : spawnDetached(command, [processPath]);
++			}) : spawnDetached(command, [processPath]));
  		} catch {
  			return rejected("open-failed");
  		}

@@ -4139,7 +4139,7 @@ __metadata:
     "@types/react": "npm:^18"
     dsh-at-file: "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz"
     dsh-file-viewer: "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch"
-    dsh-visualize: "file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz"
+    dsh-visualize: "patch:dsh-visualize@file%3Avendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%23vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%3A%3Ahash=4f6f85&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-visualize-file-cdea8d1397.patch"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.7"
     fflate: "npm:0.8.3"
@@ -7101,7 +7101,7 @@ __metadata:
 
 "dsh-file-viewer@patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch":
   version: 0.1.0
-  resolution: "dsh-file-viewer@patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch::version=0.1.0&hash=ecaebc"
+  resolution: "dsh-file-viewer@patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch::version=0.1.0&hash=d67cc9"
   dependencies:
     "@deepseek-ai/schemastery": "npm:3.18.1"
     lucide-react: "npm:0.468.0"
@@ -7120,11 +7120,11 @@ __metadata:
     "@deepseek-ai/dsh-session": ^0.1.0-rc.6
     "@deepseek-ai/dsh-typert-protocol": ^0.1.0-rc.6
     react: ^18.2.0
-  checksum: 10c0/33822310c6441bc373600241c3ac0cb5472c5db8b80404fa0b91a4ea3fc3cf5bac0ee7aeea106c8826b2c14b8d47c33bf1ef56950b475d0e4171e491de85cd32
+  checksum: 10c0/11377c5bc319446793954f9923b93e166fdad25a69a6a3bf781cdb1d747ac8be22d8e75413177a93df5416ff76ae27d962bbdbb21a0f9a53ed2a7cb6aefa11ac
   languageName: node
   linkType: hard
 
-"dsh-visualize@file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz::locator=%40e-mate%2Fdesktop%40workspace%3Ae-mate-desktop":
+"dsh-visualize@file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz#vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz::hash=4f6f85&locator=%40e-mate%2Fdesktop%40workspace%3Ae-mate-desktop":
   version: 0.1.0
   resolution: "dsh-visualize@file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz#vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz::hash=4f6f85&locator=%40e-mate%2Fdesktop%40workspace%3Ae-mate-desktop"
   peerDependencies:
@@ -7157,6 +7157,42 @@ __metadata:
     react:
       optional: true
   checksum: 10c0/dcb426ffad4dbeb453d8b434c15c64166c3b8ed98137b7bd9b9dc23ac565c079e3cc5c875705de44f674ddb1122f65b2b9fcf0533a38827b68ba68ec122aa8df
+  languageName: node
+  linkType: hard
+
+"dsh-visualize@patch:dsh-visualize@file%3Avendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%23vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%3A%3Ahash=4f6f85&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-visualize-file-cdea8d1397.patch":
+  version: 0.1.0
+  resolution: "dsh-visualize@patch:dsh-visualize@file%3Avendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%23vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%3A%3Ahash=4f6f85&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-visualize-file-cdea8d1397.patch::version=0.1.0&hash=ab273d"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-ui-tool": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-fs": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-tools": ^0.1.0-rc.6
+    react: ^18.2.0
+  peerDependenciesMeta:
+    "@deepseek-ai/cordis":
+      optional: true
+    "@deepseek-ai/dsh-client-locale":
+      optional: true
+    "@deepseek-ai/dsh-client-runtime":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-slots":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-tool":
+      optional: true
+    "@deepseek-ai/dsh-fs":
+      optional: true
+    "@deepseek-ai/dsh-system-prompt":
+      optional: true
+    "@deepseek-ai/dsh-tools":
+      optional: true
+    react:
+      optional: true
+  checksum: 10c0/cb26fe3924d0c3a0f7ad2dac83eaf68e1e5abb1e05b5dd6ed58e4ca3076e53f37e10d8b2073f1ae595cf7e3b80268a812a09a67be2ef14ebe3c10a87a771022b
   languageName: node
   linkType: hard
 
