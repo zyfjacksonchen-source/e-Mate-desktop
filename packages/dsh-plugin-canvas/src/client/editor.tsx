@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Excalidraw, MainMenu, exportToBlob } from '@excalidraw/excalidraw'
+import { Excalidraw, MainMenu, exportToBlob, convertToExcalidrawElements, newElementWith, sceneCoordsToViewportCoords, CaptureUpdateAction } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI, BinaryFiles } from '@excalidraw/excalidraw/types'
 import { ASSET_PATH, emptyProject, type CanvasAsset, type CanvasIntent, type CanvasProject, type ProjectReceipt } from '../contract.ts'
 import type { CanvasBridge } from './bridge.ts'
@@ -64,6 +64,11 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   const pendingHydration = useRef(false)
   const hydrated = useRef<{ bridge: CanvasBridge; projectId: string; generation: number; entries: Map<string, BinaryFiles[string]> } | undefined>(undefined)
   const instructionInput = useRef<HTMLTextAreaElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
+  const [annotation, setAnnotation] = useState<{ arrowId: string; textId: string; x: number; y: number; left: number; top: number; value: string } | null>(null)
+  const annotationInput = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => { if (annotation) annotationInput.current?.focus({ preventScroll: true }) }, [annotation?.arrowId])
+  useEffect(() => { setAnnotation(null) }, [pageId, project?.id])
   const arrowGesture = useRef<{ previous: Set<string>; released: boolean; imageOrder: string[]; preferredImageId: string | undefined } | null>(null)
   const focusFrame = useRef<number | undefined>(undefined)
   const fitFrame = useRef<number | undefined>(undefined)
@@ -227,7 +232,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
           for (const asset of result.assets as CanvasAsset[]) {
             const hash = asset.ref.attachmentId.slice(7)
             if (intent.imported.includes(hash)) continue
-            next = insertAsset(next, intent.pageId, asset)
+            next = insertAsset(next, intent.pageId, asset, intent.kind === 'edit' ? intent.sourceIds[0] : undefined)
             next.intents.find(item => item.id === intent.id)!.imported.push(hash)
             update(next); imported = true; pendingHydration.current = true
           }
@@ -263,10 +268,15 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
 
   const submit = async () => {
     const current = state.current.project
-    if (submitting.current || transitioning.current || !current || !instruction.trim()) return
+    if (submitting.current || transitioning.current || !current) return
     const target = current.pages.find(item => item.id === pageId)
     const selectedIds = [...selected.current]
     if (!target || selectedIds.length !== 1) { setError('请只选中一张要修改的图片。'); return }
+    const marks = selectedAnnotationElements(target.elements, selectedElements.current)
+    const labelText = marks.filter(item => item.type === 'text' && typeof item.text === 'string').map(item => item.text).join('\n').trim()
+    const request = instruction.trim() || labelText
+    if (!request) { setNotice('请在箭头旁填写修改要求，或补充文字说明。'); return }
+    setAnnotation(null)
     submitting.current = true; setBusy(true); setError(null)
     try {
       let next = structuredClone(current)
@@ -287,7 +297,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
       const roles = annotated
         ? `前 ${selectedIds.length} 张为待修改原图；最后一张为这些原图的箭头和文字标注参考。标注仅用于说明修改位置和要求，不要把标注添加到成品。未选中的图片不属于本次修改。\n`
         : '所附图片为待修改原图。\n'
-      await bridge.submit(next, intent, roles + instruction.trim())
+      await bridge.submit(next, intent, roles + request)
       setInstruction(''); setNotice('修改已提交')
     } catch (error) { setError((error as Error).message) }
     finally { submitting.current = false; setBusy(false) }
@@ -314,10 +324,26 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     const blob = await exportToBlob({ elements: item.elements as any, appState: { viewBackgroundColor: item.view.background, exportBackground: true }, files, mimeType: 'image/png' })
     download(`${state.current.project.id}-${item.id}.png`, blob)
   }
+  const writeAnnotation = (value: string) => {
+    if (!annotation || !api.current || !state.current.project || transitioning.current) return
+    const current = state.current.project
+    const target = current.pages.find(item => item.id === pageId)
+    if (!target) return
+    const existing = target.elements.find(item => item.id === annotation.textId)
+    const [text] = convertToExcalidrawElements([{ type: 'text', id: annotation.textId, x: annotation.x, y: annotation.y,
+      text: value || ' ', fontSize: 16, fontFamily: 2, strokeColor: '#e03131',
+      customData: { emateAnnotationArrowId: annotation.arrowId } }], { regenerateIds: false })
+    const label = existing ? newElementWith(existing as any, { ...text, isDeleted: !value.trim() } as any) : { ...text, isDeleted: !value.trim() }
+    const elements = existing ? target.elements.map(item => item.id === annotation.textId ? label : item) : [...target.elements, label]
+    update({ ...current, pages: current.pages.map(item => item.id === pageId ? { ...item, elements: elements as any } : item) })
+    api.current.updateScene({ elements: elements as any, captureUpdate: CaptureUpdateAction.EVENTUALLY })
+    setAnnotation({ ...annotation, value })
+  }
   const chooseTool = (tool: 'selection' | 'hand' | 'arrow' | 'text') => {
     if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current)
     arrowGesture.current = null
-    if (tool === 'arrow') api.current?.updateScene({ appState: { currentItemStrokeColor: '#eb5b16' } })
+    setAnnotation(null)
+    if (tool === 'arrow') api.current?.updateScene({ appState: { currentItemStrokeColor: '#e03131' } })
     api.current?.setActiveTool({ type: tool }); setActiveTool(tool)
   }
   const act = (action: () => Promise<void> | void) => { void Promise.resolve().then(action).catch(error => { if (alive.current) setError(error.message) }) }
@@ -352,9 +378,9 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
         if (incoming.length) act(() => addImages(incoming))
       }} />
       <input hidden ref={importInput} type="file" accept=".zip" onChange={event => { const file = event.target.files?.[0]; if (!file) return; act(async () => { if (file.size > 100 * 1024 * 1024) throw new Error('项目压缩包超过 100 MiB。'); await flush(); const id = fresh(); const result = await bridge.call('import', { project_id: id, archive_base64: base64(new Uint8Array(await file.arrayBuffer())) }); await openProject(result.project.id) }); event.target.value = '' }} />
-      <div className={css.stage} onPointerCancelCapture={() => { arrowGesture.current = null; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current) }} onContextMenuCapture={event => { event.preventDefault(); event.stopPropagation() }}
+      <div ref={stageRef} className={css.stage} onPointerCancelCapture={() => { arrowGesture.current = null; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current) }} onContextMenuCapture={event => { event.preventDefault(); event.stopPropagation() }}
         onKeyDownCapture={event => {
-          if (event.key === 'Escape') { arrowGesture.current = null; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current) }
+          if (event.key === 'Escape') { setAnnotation(null); arrowGesture.current = null; if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current) }
           if ((event.target as HTMLElement).closest('input,textarea,[contenteditable=true]') || event.ctrlKey || event.metaKey || event.altKey) return
           if (['r', 'd', 'o', 'l', 'p', 'f', 'e', '2', '3', '4', '6', '7', '9', '0'].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation() }
         }}
@@ -364,10 +390,15 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
         <div className={css.tools} role="toolbar" aria-label="图片标注工具">
           {([['selection', '选择'], ['hand', '平移'], ['arrow', '箭头'], ['text', '文字']] as const).map(([tool, title]) => <button key={tool} aria-pressed={activeTool === tool} onClick={() => chooseTool(tool)}>{title}</button>)}
         </div>
+        {annotation && <textarea ref={annotationInput} className={css.annotation} aria-label="箭头标注要求" placeholder="输入修改要求…" maxLength={2000}
+          style={{ left: annotation.left, top: annotation.top }} value={annotation.value}
+          onChange={event => writeAnnotation(event.target.value)}
+          onBlur={() => setAnnotation(null)}
+          onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); setAnnotation(null) } }} />}
         {page.elements.every(item => item.isDeleted) && <div className={css.stageHint}>添加图片，或从画廊加入图片</div>}
         <Excalidraw key={`${project.id}:${page.id}:${sceneLoad}`} theme={theme}
           excalidrawAPI={value => { api.current = value; fitScene(value, true) }}
-          initialData={{ elements: page.elements as any, files, appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as any }, viewBackgroundColor: page.view.background, currentItemFontFamily: 2, currentItemFontSize: 16, currentItemRoughness: 0, currentItemStrokeColor: '#eb5b16' } }}
+          initialData={{ elements: page.elements as any, files, appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as any }, viewBackgroundColor: page.view.background, currentItemFontFamily: 2, currentItemFontSize: 16, currentItemRoughness: 0, currentItemStrokeColor: '#e03131' } }}
           viewModeEnabled={switching || busy} langCode="zh-CN" validateEmbeddable={() => false}
           UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false, changeViewBackgroundColor: false }, tools: { image: false } }}
           onLinkOpen={(element, event) => { event.preventDefault(); if (element.link && /^https?:\/\//u.test(element.link)) window.open(element.link, '_blank', 'noopener,noreferrer') }}
@@ -415,7 +446,17 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
                   if (!alive.current || transitioning.current || generation.current !== epoch || api.current !== value || !value) return
                   value.updateScene({ appState: { selectedElementIds: { [String(image.id)]: true, [arrow.id]: true } } })
                   selectedElements.current = [String(image.id)]; selected.current = [`sha256:${image.fileId}`]; setSelectionCount(1)
-                  instructionInput.current?.focus({ preventScroll: true })
+                  const points = (arrow as any).points as number[][]
+                  const first = points[0]!, last = points.at(-1)!
+                  const dx = last[0]! - first[0]!, dy = last[1]! - first[1]!, length = Math.hypot(dx, dy)
+                  if (length * appState.zoom.value < 8) return
+                  const bend = Math.min(48, Math.max(16, length * .12))
+                  const curved = newElementWith(arrow as any, { points: [first, [(first[0]! + last[0]!) / 2 - dy / length * bend, (first[1]! + last[1]!) / 2 + dx / length * bend], last], roundness: { type: 2 }, strokeColor: '#e03131' } as any)
+                  value.updateScene({ elements: value.getSceneElementsIncludingDeleted().map(item => item.id === arrow.id ? curved : item), captureUpdate: CaptureUpdateAction.IMMEDIATELY })
+                  const x = arrow.x + first[0]!, y = arrow.y + first[1]! - 32
+                  const point = sceneCoordsToViewportCoords({ sceneX: x, sceneY: y }, value.getAppState())
+                  const rect = stageRef.current?.getBoundingClientRect()
+                  setAnnotation({ arrowId: arrow.id, textId: fresh(), x, y, left: Math.max(8, Math.min(point.x - (rect?.left ?? 0), (rect?.width ?? 400) - 248)), top: Math.max(8, point.y - (rect?.top ?? 0)), value: '' })
                 })
               }
             }
@@ -427,8 +468,8 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
           }}><MainMenu /></Excalidraw>
       </div>
       <div className={css.ai}>
-        <textarea ref={instructionInput} aria-label="图片修改需求" placeholder={selectionCount === 1 ? '描述如何修改选中的图片…' : '选中一张图片后，描述修改要求…'} value={instruction} maxLength={18000} onChange={event => setInstruction(event.target.value)} />
-        <button disabled={busy || selectionCount !== 1 || !instruction.trim() || !!error} onClick={() => act(submit)}>{busy ? '提交中…' : '修改图片'}</button>
+        <textarea ref={instructionInput} aria-label="图片修改需求" placeholder={selectionCount === 1 ? '补充修改要求（已有标注时可不填）…' : '选中一张图片后，描述修改要求…'} value={instruction} maxLength={18000} onChange={event => setInstruction(event.target.value)} />
+        <button disabled={busy || selectionCount !== 1 || (!instruction.trim() && !selectedAnnotationElements(page.elements, selectedElements.current).some(item => item.type === 'text' && String(item.text ?? '').trim())) || !!error} onClick={() => act(submit)}>{busy ? '提交中…' : '按标注修改'}</button>
       </div>
     </fieldset>}
   </div>

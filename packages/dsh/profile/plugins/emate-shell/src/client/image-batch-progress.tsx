@@ -1,5 +1,6 @@
 import { memo, useCallback, useRef, useState } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import { IconEditOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { ImageBatchClientBatch, ImageBatchClientTask, ImageBatchClientTaskState } from './image-batch-client.ts'
@@ -166,7 +167,7 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
       <button type="button" aria-label={`加入画布：图片 ${task.ordinal}`}
         disabled={!preview || task.receipt.status !== 'completed' || addingToCanvas}
         title={!preview ? '正在核对图片附件' : task.receipt.status !== 'completed' ? '图片仍待确认' : '加入画布'}
-        onClick={addToCanvas}>{addingToCanvas ? '正在加入…' : '加入画布'}</button>
+        onClick={addToCanvas}><IconEditOutline16 /><span>{addingToCanvas ? '正在加入…' : '画布'}</span></button>
     </div>}
     {canvasError && <p role="status" className={css.reason}>{canvasError}</p>}
     {task.state === 'unknown' && <p className={css.reason}>结果不确定，未自动重复生成</p>}
@@ -205,6 +206,7 @@ export function ImageBatchProgress({
         aria-label={batchLabel}
         aria-busy={!batch.terminal}
         data-batch-id={batch.batchId}
+        data-terminal={batch.terminal || undefined}
       >
         <p className={css.liveSummary} aria-live="polite" aria-atomic="true">
           {batchLiveSummary(batch.tasks)}

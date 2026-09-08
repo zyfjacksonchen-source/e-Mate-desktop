@@ -1,6 +1,6 @@
 import { emptyPage, validateProject, type CanvasAsset, type CanvasPage, type CanvasProject, type Json } from '../contract.ts'
 
-export function insertAsset(project: CanvasProject, pageId: string, asset: CanvasAsset): CanvasProject {
+export function insertAsset(project: CanvasProject, pageId: string, asset: CanvasAsset, besideAttachmentId?: string): CanvasProject {
   const next = validateProject(project)
   const page = next.pages.find(item => item.id === pageId)
   if (!page) throw new Error('目标页面已不存在。')
@@ -18,7 +18,11 @@ export function insertAsset(project: CanvasProject, pageId: string, asset: Canva
   }
   const width = Math.min(800, asset.ref.width)
   const count = page.elements.filter(item => item.type === 'image' && !item.isDeleted).length
-  page.elements.push({ id: `image-${fileId.slice(0, 40)}`, type: 'image', fileId, x: count * 40, y: count * 40,
+  const anchor = page.elements.find(item => item.type === 'image' && !item.isDeleted && `sha256:${item.fileId}` === besideAttachmentId)
+  // Edited outputs occupy new space; the original and its annotations retain their coordinates.
+  const x = anchor ? Math.max(...page.elements.filter(item => !item.isDeleted).map(item => Number(item.x) + Math.max(Number(item.width) || 0, Number(item.height) || 0))) + 48 : count * 40
+  const y = anchor ? Number(anchor.y) : count * 40
+  page.elements.push({ id: `image-${fileId.slice(0, 40)}`, type: 'image', fileId, x, y,
     width, height: width * asset.ref.height / asset.ref.width, angle: 0, strokeColor: 'transparent', backgroundColor: 'transparent',
     fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null,
     roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: Date.now(),
@@ -158,9 +162,10 @@ export function selectedAnnotationElements(elements: CanvasPage['elements'], sel
     return [item.points[0], item.points.at(-1)].some(point => Array.isArray(point) && images.some(image => imageContains(image, ...arrowPoint(item, point))))
   })
   const included = new Set([...images, ...arrows].map(item => item.id))
-  const texts = elements.filter(item => item.type === 'text' && !item.isDeleted && (item.containerId
+  const annotationArrowId = (item: CanvasPage['elements'][number]) => item.customData && typeof item.customData === 'object' && !Array.isArray(item.customData) ? item.customData.emateAnnotationArrowId : undefined
+  const texts = elements.filter(item => item.type === 'text' && !item.isDeleted && (included.has(annotationArrowId(item) as Json) || (item.containerId
     ? included.has(item.containerId)
-    : images.some(image => imageContains(image, Number(item.x) + Number(item.width) / 2, Number(item.y) + Number(item.height) / 2))))
+    : images.some(image => imageContains(image, Number(item.x) + Number(item.width) / 2, Number(item.y) + Number(item.height) / 2)))))
   for (const text of texts) included.add(text.id)
   return elements.filter(item => included.has(item.id)).map(item => {
     const copy = structuredClone(item)

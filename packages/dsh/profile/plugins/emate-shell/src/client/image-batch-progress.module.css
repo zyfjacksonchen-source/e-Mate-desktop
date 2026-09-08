@@ -130,7 +130,7 @@
 
 .canvasAction {
   position: absolute;
-  top: 10px;
+  bottom: 10px;
   right: 10px;
   z-index: 2;
   opacity: 0;
@@ -142,7 +142,7 @@
   opacity: 1;
   pointer-events: auto;
 }
-.canvasAction button { min-height: 44px; padding: 0 12px; border: 1px solid rgb(255 255 255 / 32%); border-radius: 6px; background: rgb(24 24 27 / 88%); color: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / 20%); font: inherit; font-size: 13px; cursor: pointer; }
+.canvasAction button { display:flex; align-items:center; gap:5px; min-height:28px; padding:0 10px; border: 1px solid rgb(255 255 255 / 32%); border-radius:999px; background:rgb(103 81 60 / 86%); color: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / 20%); font: inherit; font-size: 13px; cursor: pointer; }
 .canvasAction button:hover:not(:disabled) { background: rgb(24 24 27 / 96%); }
 .canvasAction button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
 .canvasAction button:disabled { opacity: .55; cursor: default; }
@@ -185,3 +185,11 @@
     animation: none;
   }
 }
+
+/* Settled images use the 2.0.16 result rail; failures retain their truthful status. */
+.batch[data-terminal=true] .grid { display:flex; gap:12px; overflow-x:auto; scroll-snap-type:x mandatory; }
+.batch[data-terminal=true] .grid > div { flex:0 0 calc((100% - 36px) / 4); min-width:132px; scroll-snap-align:start; }
+.batch[data-terminal=true] .card[data-state=completed] { border-radius:24px; }
+.batch[data-terminal=true] .card[data-state=completed] .meta { display:none; }
+.canvasAction svg { width:16px; height:16px; }
+.batch[data-terminal=true] .liveSummary { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }

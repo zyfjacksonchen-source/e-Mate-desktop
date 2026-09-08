@@ -12,7 +12,7 @@ const browserPath = process.env.EMATE_CANVAS_BROWSER ?? '/Applications/Google Ch
 test('real compiled native factory lazily loads offline, renders the focused annotation page, follows native theme and preserves legacy project data', { skip: !existsSync(browserPath) }, async t => {
   assert(existsSync(root + 'lib/assets/editor.js'), 'run the authorized module build before browser verification')
   const nativeModules = fileURLToPath(new URL('../../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/', import.meta.url))
-  const bootstrap = await build({ entryPoints: [root + 'test/browser-entry.tsx'], bundle: true, write: false, format: 'esm', platform: 'browser',
+  const bootstrap = await build({ entryPoints: [root + 'test/browser-entry.tsx'], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'esnext',
     alias: { react: nativeModules + 'react', 'react-dom': nativeModules + 'react-dom' }, define: { 'process.env.NODE_ENV': '"production"' } })
   const server = createServer(async (req, res) => {
     try {
@@ -43,10 +43,26 @@ test('real compiled native factory lazily loads offline, renders the focused ann
   const canvas = page.locator('.excalidraw canvas').last()
   const box = await canvas.boundingBox()
   assert(box)
+  await page.waitForFunction(() => window.readCanvasFixture().pages[0].view.zoom > 0)
+  // Native fit/scroll is persisted by the existing scene owner; use that transform for a real pointer gesture.
+  await page.waitForTimeout(500)
+  const view = await page.evaluate(() => window.readCanvasFixture().pages[0].view)
+  const point = (x, y) => ({ x: box.x + (x + view.scrollX) * view.zoom, y: box.y + (y + view.scrollY) * view.zoom })
+  const start = point(-80, 90), end = point(160, 150)
   await page.getByRole('button', { name: '箭头', exact: true }).click()
-  await page.mouse.move(box.x + 250, box.y + 200); await page.mouse.down(); await page.mouse.move(box.x + 500, box.y + 320, { steps: 10 }); await page.mouse.up()
-  await page.getByRole('button', { name: '文字', exact: true }).click()
-  await page.mouse.click(box.x + 300, box.y + 350); await page.keyboard.type('Change this area'); await page.keyboard.press('Escape')
+  await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(end.x, end.y, { steps: 10 }); await page.mouse.up()
+  await page.getByLabel('箭头标注要求').fill('Change only this area')
+  assert.equal(await page.getByLabel('图片修改需求').inputValue(), '')
+  await page.getByRole('button', { name: '按标注修改', exact: true }).click()
+  await page.waitForFunction(() => window.canvasSubmissions.length === 1)
+  const submission = await page.evaluate(() => window.canvasSubmissions[0])
+  assert.equal(submission.intent.sourceIds.length, 2)
+  assert(submission.instruction.includes('Change only this area'))
+  const saved = await page.evaluate(() => window.readCanvasFixture().pages[0].elements)
+  assert.equal(saved.find(item => item.type === 'arrow').points.length, 3)
+  assert(saved.some(item => item.type === 'text' && item.customData?.emateAnnotationArrowId))
+  await mkdir(root + '.test-artifacts', { recursive: true })
+  await page.screenshot({ path: root + '.test-artifacts/canvas-annotation-submit.png' })
   await page.getByLabel('更多画布操作').click()
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await page.waitForFunction(() => window.readCanvasFixture().pages[0].elements.some(element => element.type === 'arrow') && window.readCanvasFixture().pages[0].elements.some(element => element.type === 'text'))
@@ -73,7 +89,9 @@ test('real compiled native factory lazily loads offline, renders the focused ann
   await page.setViewportSize({ width: 460, height: 900 })
   assert.deepEqual(outside, [])
   assert.deepEqual(errors, [])
-  assert.deepEqual(await page.evaluate(() => window.readCanvasFixture().pages[1]), legacy)
+  // Opening the legacy page fits its viewport; its saved content must remain exact.
+  const reopenedLegacy = await page.evaluate(() => window.readCanvasFixture().pages[1])
+  assert.deepEqual({ ...reopenedLegacy, view: legacy.view }, legacy)
   await mkdir(root + '.test-artifacts', { recursive: true })
   await page.screenshot({ path: root + '.test-artifacts/canvas-browser.png', fullPage: true })
   console.log(JSON.stringify({ claim: 'local-real-browser-component-not-installed-app', external_requests: outside.length, editor_loaded_after_gesture: true, page_errors: errors, hidden_legacy_pages_preserved: true, theme: 'native-dark' }))

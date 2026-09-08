@@ -9,7 +9,12 @@ const native = vi.hoisted(() => ({ props: null as any, api: null as any, scroll:
 vi.mock('@excalidraw/excalidraw', () => {
   const MainMenu: any = ({ children }: any) => <div>{children}</div>
   MainMenu.DefaultItems = { ClearCanvas: () => null, ToggleTheme: () => null }
-  return { MainMenu, exportToBlob: vi.fn(async () => new Blob(['png'])), Excalidraw: (props: any) => {
+  return { MainMenu,
+    CaptureUpdateAction: { IMMEDIATELY: 'IMMEDIATELY', EVENTUALLY: 'EVENTUALLY' },
+    newElementWith: (element: any, changes: any) => ({ ...element, ...changes, version: (element.version ?? 0) + 1, versionNonce: Math.random() * 100000 | 0 }),
+    convertToExcalidrawElements: (items: any[]) => items.map(item => ({ width: 180, height: 24, version: 1, versionNonce: 1, ...item })),
+    sceneCoordsToViewportCoords: ({ sceneX, sceneY }: any, view: any) => ({ x: (sceneX + view.scrollX) * view.zoom.value, y: (sceneY + view.scrollY) * view.zoom.value }),
+    exportToBlob: vi.fn(async () => new Blob(['png'])), Excalidraw: (props: any) => {
     native.props = props
     const elements = useRef(props.initialData.elements); const [, refresh] = useState(0)
     const view = useRef({ ...props.initialData.appState, width: 1280, height: 800, isLoading: true, selectedElementIds: {}, activeTool: { type: 'selection' } })
@@ -92,7 +97,7 @@ it('image modification saves the exact source binding then submits once', async 
   render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene'); fireEvent.click(screen.getByText('Select image'))
   fireEvent.change(screen.getByLabelText('图片修改需求'), { target: { value: '换成蓝色背景' } })
-  fireEvent.click(screen.getByRole('button', { name: '修改图片' }))
+  fireEvent.click(screen.getByRole('button', { name: '按标注修改' }))
   await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
   expect(h.read().intents[0]).toMatchObject({ kind: 'edit', sourceIds: [imageAsset.ref.attachmentId], sessionId: 'parent', imported: [] })
   expect(h.read().intents[0]).not.toHaveProperty('status')
@@ -220,7 +225,7 @@ it('marked edits stage a preview then submit originals and annotation with expli
   render(<CanvasPanel sessionId="parent" bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene'); fireEvent.click(screen.getByText('Select image'))
   fireEvent.change(screen.getByLabelText('图片修改需求'), { target: { value: '把箭头位置改为蓝色' } })
-  const submit = screen.getByRole('button', { name: '修改图片', exact: true })
+  const submit = screen.getByRole('button', { name: '按标注修改', exact: true })
   fireEvent.click(submit); fireEvent.click(submit)
   await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
   expect(h.bridge.stageImages).toHaveBeenCalledOnce()
@@ -239,13 +244,13 @@ it('fits the initial viewport once without changing pixels or resetting later us
   await screen.findByTestId('scene')
   await waitFor(() => expect(native.scroll).toHaveBeenCalledOnce())
   expect(native.scroll).toHaveBeenCalledWith(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: 1, animate: false })
-  expect(native.props.initialData.appState.currentItemStrokeColor).toBe('#eb5b16')
+  expect(native.props.initialData.appState.currentItemStrokeColor).toBe('#e03131')
   fireEvent.click(screen.getByText('Draw mark'))
   await act(async () => { await h.leave() })
   expect(native.scroll).toHaveBeenCalledOnce()
   expect(h.read().pages[0].elements[0]).toEqual(project.pages[0].elements[0])
 })
-it('finishing one new arrow selects its exact image and focuses the existing edit input once', async () => {
+it('finishing one new arrow opens a tail label and submits annotations without repeating the instruction', async () => {
   const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
   const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene')
@@ -257,12 +262,13 @@ it('finishing one new arrow selects its exact image and focuses the existing edi
   act(() => native.props.onChange(scene, { ...state, newElement: null, multiElement: arrow }))
   expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
   act(() => native.props.onChange(scene, { ...state, newElement: null }))
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('图片修改需求')))
-  fireEvent.change(screen.getByLabelText('图片修改需求'), { target: { value: '改成橙色' } })
-  expect((screen.getByRole('button', { name: '修改图片', exact: true }) as HTMLButtonElement).disabled).toBe(false)
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('箭头标注要求')))
+  fireEvent.change(screen.getByLabelText('箭头标注要求'), { target: { value: '改成橙色' } })
+  expect((screen.getByLabelText('图片修改需求') as HTMLTextAreaElement).value).toBe('')
+  expect((screen.getByRole('button', { name: '按标注修改', exact: true }) as HTMLButtonElement).disabled).toBe(false)
   const preview = { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: `sha256:${'c'.repeat(64)}` } }
   h.bridge.stageImages.mockResolvedValue([preview] as never)
-  fireEvent.click(screen.getByRole('button', { name: '修改图片', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '按标注修改', exact: true }))
   await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
   expect(h.read().intents[0].sourceIds).toEqual([imageAsset.ref.attachmentId, preview.ref.attachmentId])
   screen.getByRole('button', { name: '选择', exact: true }).focus()
@@ -524,11 +530,11 @@ it('focuses the edit input for a new arrow dragged from the top overlapping imag
     native.props.onPointerUp({ type: 'arrow' })
     native.props.onChange(elements, { ...state, activeTool: { type: 'selection' }, newElement: null })
   })
-  await waitFor(() => expect(document.activeElement).toBe(input))
-  fireEvent.change(input, { target: { value: '修改上层图片的文字' } })
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('箭头标注要求')))
+  fireEvent.change(screen.getByLabelText('箭头标注要求'), { target: { value: '修改上层图片的文字' } })
   const preview = { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: `sha256:${'c'.repeat(64)}` } }
   h.bridge.stageImages.mockResolvedValue([preview] as never)
-  fireEvent.click(screen.getByRole('button', { name: '修改图片', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '按标注修改', exact: true }))
   await waitFor(() => expect(h.bridge.submit).toHaveBeenCalledOnce())
   expect(h.read().intents[0].sourceIds).toEqual([secondAsset.ref.attachmentId, preview.ref.attachmentId])
 })
@@ -547,7 +553,7 @@ it('does not focus or choose either overlapping image for a new arrow entirely i
   })
   await act(async () => { await new Promise(requestAnimationFrame) })
   expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
-  expect((screen.getByRole('button', { name: '修改图片', exact: true }) as HTMLButtonElement).disabled).toBe(true)
+  expect((screen.getByRole('button', { name: '按标注修改', exact: true }) as HTMLButtonElement).disabled).toBe(true)
 })
 
 it.each(['page-1', 'other'])('keeps native commit callbacks and imported output consistent while viewing %s', async (viewedPage) => {
@@ -623,4 +629,19 @@ it('retries hydration of already persisted output after transient image failure'
   expect(reads).toBe(2)
   expect(native.api.addFiles).toHaveBeenCalledOnce()
   expect(h.read().intents[0].imported).toHaveLength(1)
+})
+
+it('edited output is placed beside existing content without changing original or annotations', () => {
+  const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  project.pages[0].elements.push({ id: 'note', type: 'text', x: -200, y: -40, width: 100, height: 24, text: 'keep me' })
+  const result = insertAsset(project, 'page-1', { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: 'sha256:' + 'd'.repeat(64) } }, imageAsset.ref.attachmentId)
+  expect(result.pages[0].elements.slice(0, 2)).toEqual(project.pages[0].elements)
+  expect(Number(result.pages[0].elements[2].x)).toBeGreaterThan(100)
+})
+it('tail labels outside the original follow only their associated arrow in edit previews', () => {
+  const image = { id: 'image', type: 'image', x: 0, y: 0, width: 100, height: 100 }
+  const arrow = { id: 'arrow', type: 'arrow', x: -100, y: 50, points: [[0, 0], [120, 0]] }
+  const label = { id: 'label', type: 'text', text: '去字', x: -100, y: 20, width: 50, height: 20, customData: { emateAnnotationArrowId: 'arrow' } }
+  const unrelated = { ...label, id: 'unrelated', customData: { emateAnnotationArrowId: 'elsewhere' } }
+  expect(selectedAnnotationElements([image, arrow, label, unrelated], ['image']).map(item => item.id)).toEqual(['image', 'arrow', 'label'])
 })

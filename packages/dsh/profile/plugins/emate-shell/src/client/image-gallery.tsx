@@ -17,6 +17,7 @@ import {
   IconChevronLeftOutline14,
   IconChevronRightOutline14,
   IconCopyOutline16,
+  IconEditOutline16,
   IconDownloadOutline16,
   IconEllipsisOutline16,
   IconPlusOutline16,
@@ -971,7 +972,7 @@ function ImageTerminal({ items, loadImage, openMenu, addToCanvas }: {
           {item.status === 'review-required' && <span className={css.status}>待确认</span>}
           {addToCanvas && <button type="button" className={`${css.imageAction} ${css.imageCanvasAction}`}
             disabled={item.status === 'review-required'} aria-label={`加入画布：${galleryAttachmentName(item.attachment)}`}
-            onClick={() => { addToCanvas(item) }}>加入画布</button>}
+            onClick={() => { addToCanvas(item) }}><IconEditOutline16 /><span>画布</span></button>}
           <button
             type="button"
             className={css.imageAction}
