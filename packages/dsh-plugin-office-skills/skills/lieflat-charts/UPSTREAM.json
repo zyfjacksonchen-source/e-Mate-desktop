@@ -761,5 +761,13 @@
       "sha256": "b857265d9479ddbaea09b4f3072b110bbc20ff4b6aea4ff020170cb06a8d4cbe",
       "git_blob": "014c33f82966beb576293ad6ccf343fa90eb9bdc"
     }
+  ],
+  "local_modifications": [
+    {
+      "path": "SKILL.md",
+      "bytes": 37237,
+      "sha256": "958618cb6e4f9b85a3ecde082b42816378f79600bfb8e4b699dd34eb4c726b2f",
+      "reason": "Remove the optional attribution reminder from agent instructions at the collaborating user request; retain source and license records."
+    }
   ]
 }

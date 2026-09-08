@@ -167,3 +167,8 @@
 :global([data-chat-flow-kind='tool-call'] [data-chat-call-id] [data-sample='bash'] + div > button:has(> svg[aria-hidden][width='12'][height='12'])) {
   display: none;
 }
+
+/* Context stays in native session and model input; omit internal rows from the product transcript. */
+:global([data-chat-flow-kind='context']) {
+  display: none;
+}

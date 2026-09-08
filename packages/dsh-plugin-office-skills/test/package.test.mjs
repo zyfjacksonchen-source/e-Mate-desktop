@@ -97,10 +97,13 @@ test('registers six Skills with accurate runtime states and two target Tool/Job 
       assert.equal(manifest.distribution_basis.contract_document_in_repository, false)
       for (const file of manifest.files) {
         const bytes = await readFile(join(root, file.path))
-        assert.equal(bytes.length, file.bytes, file.path)
-        assert.equal(createHash('sha256').update(bytes).digest('hex'), file.sha256, file.path)
+        const expected = manifest.local_modifications?.find(item => item.path === file.path) ?? file
+        assert.equal(bytes.length, expected.bytes, file.path)
+        assert.equal(createHash('sha256').update(bytes).digest('hex'), expected.sha256, file.path)
       }
-      assert.equal(createHash('sha256').update(await readFile(join(root, 'SKILL.md'))).digest('hex'), '1d58a31343b0f38fed16a44a65fd2fac0588ca98ffc9e43b20263d886f3ee9ce')
+      assert.equal(manifest.files.find(file => file.path === 'SKILL.md').sha256, '1d58a31343b0f38fed16a44a65fd2fac0588ca98ffc9e43b20263d886f3ee9ce')
+      assert.deepEqual(manifest.local_modifications.map(file => file.path), ['SKILL.md'])
+      assert.doesNotMatch(loaded.content, /本 skill 由|署名提示/u)
       assert.match(await readFile(join(root, 'LICENSE'), 'utf8'), /PolyForm Noncommercial License 1.0.0/u)
       const validation = spawnSync(process.execPath, [join(root, 'scripts/validate.mjs')], { encoding: 'utf8', timeout: 30_000 })
       assert.equal(validation.status, 0, validation.error?.message ?? validation.stderr + validation.stdout)
