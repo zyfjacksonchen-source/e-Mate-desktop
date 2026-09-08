@@ -59,18 +59,22 @@ function command(file, args) {
   if (result.error || result.status !== 0) throw new Error(`Calc extraction ${basename(file)} failed: ${result.error?.message ?? result.stderr}`)
 }
 
-function verifyInventory(entries, expected) {
+export function verifyInventory(entries, expected) {
   const files = entries.filter(item => item.kind === 'file')
   if (files.length !== expected.fileCount || files.reduce((sum, item) => sum + item.bytes, 0) !== expected.logicalBytes
     || entries.filter(item => item.kind === 'link').length !== expected.symlinkCount) throw new Error('Incomplete Calc app extraction')
-  for (const name of ['Contents/Resources/LICENSE', 'Contents/Resources/NOTICE', 'Contents/Resources/readmes/README_en-US', expected.executable.replace('LibreOffice.app/', '')]) {
+  const appRoot = expected.executable.split('/')[0]
+  const notices = appRoot === 'LibreOffice'
+    ? ['LICENSE.html', 'license.txt', 'NOTICE', 'readmes/readme_en-US.txt']
+    : ['Contents/Resources/LICENSE', 'Contents/Resources/NOTICE', 'Contents/Resources/readmes/README_en-US']
+  for (const name of [...notices, expected.executable.slice(appRoot.length + 1)]) {
     if (!files.some(item => item.path === name)) throw new Error(`Calc required asset missing: ${name}`)
   }
 }
 
 export async function prepareTarget(target, archiveDirectory, outputRoot) {
   const expected = manifest.targets[target]
-  if (!expected || process.platform !== 'darwin' || !target.startsWith('darwin-')) throw new Error(`Native Calc extraction is not verified for ${target}`)
+  if (!expected || !target.startsWith(`${process.platform}-`) || (process.platform !== 'darwin' && target !== 'win32-x64')) throw new Error(`Native Calc extraction is not verified for ${target}`)
   const destination = join(outputRoot, target)
   let cached = false
   try { await lstat(destination); cached = true } catch (error) { if (error.code !== 'ENOENT') throw error }
@@ -89,15 +93,23 @@ export async function prepareTarget(target, archiveDirectory, outputRoot) {
   await verifyArchive(archive, expected.archive)
   await mkdir(outputRoot, { recursive: true })
   const staging = await mkdtemp(join(outputRoot, `${target}.staging-`))
-  const mount = await mkdtemp(join(tmpdir(), 'emate-calc-mount-'))
+  const mount = process.platform === 'darwin' ? await mkdtemp(join(tmpdir(), 'emate-calc-mount-')) : undefined
+  const appRoot = expected.executable.split('/')[0]
   let mounted = false
   try {
-    // An interrupted attach may have mounted the image before returning an error.
-    mounted = true
-    command('/usr/bin/hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mount, archive])
-    command('/usr/bin/ditto', [join(mount, 'LibreOffice.app'), join(staging, 'LibreOffice.app')])
-    command('/usr/bin/hdiutil', ['detach', mount]); mounted = false
-    const entries = await inventory(join(staging, 'LibreOffice.app'))
+    if (mount !== undefined) {
+      // An interrupted attach may have mounted the image before returning an error.
+      mounted = true
+      command('/usr/bin/hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mount, archive])
+      command('/usr/bin/ditto', [join(mount, appRoot), join(staging, appRoot)])
+      command('/usr/bin/hdiutil', ['detach', mount]); mounted = false
+    } else {
+      const extracted = join(staging, appRoot)
+      await mkdir(extracted)
+      command(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'msiexec.exe'),
+        ['/a', archive, `TARGETDIR=${extracted}`, '/qn', '/norestart', '/L*v', join(staging, 'msiexec-admin-extract.log')])
+    }
+    const entries = await inventory(join(staging, appRoot))
     verifyInventory(entries, expected)
     const receipt = { schema: 1, target, version: manifest.version, archiveSha256: expected.archive.sha256, entries }
     await writeFile(join(staging, 'receipt.json'), JSON.stringify(receipt) + '\n', { flag: 'wx' })
@@ -105,7 +117,7 @@ export async function prepareTarget(target, archiveDirectory, outputRoot) {
     return receipt
   } finally {
     if (mounted) command('/usr/bin/hdiutil', ['detach', mount])
-    await rm(mount, { recursive: true, force: true })
+    if (mount !== undefined) await rm(mount, { recursive: true, force: true })
     await rm(staging, { recursive: true, force: true })
   }
 }
@@ -116,7 +128,7 @@ export async function verifyPreparedTarget(target, outputRoot) {
   const destination = join(outputRoot, target)
   const receipt = JSON.parse(await readFile(join(destination, 'receipt.json'), 'utf8'))
   if (receipt.schema !== 1 || receipt.target !== target || receipt.version !== manifest.version || receipt.archiveSha256 !== expected.archive.sha256) throw new Error('Calc cache archive identity mismatch')
-  const current = await inventory(join(destination, 'LibreOffice.app'))
+  const current = await inventory(join(destination, expected.executable.split('/')[0]))
   verifyInventory(current, expected)
   if (JSON.stringify(current) !== JSON.stringify(receipt.entries)) throw new Error('Calc cache contents changed')
   return receipt
