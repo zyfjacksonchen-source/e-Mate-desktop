@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { imageBatchEventId, imageBatchId, imageBatchPromptSha256, imageBatchTaskId } from '../src/profile/image-batch.ts'
 import { classifyImageBatchCrash, foldImageBatchRecovery, readDurableImageBatchResult, recoverImageBatchSession } from '../src/profile/image-batch-recovery.ts'
+import { resolveBatchSources } from '../profile/plugins/image-generation.js'
 
 const SESSION = 'parent'
 const CALL = 'batch-call'
@@ -135,6 +136,19 @@ test('exact existing child terminal and Job finalize parent without spawn or pro
   assert.deepEqual(result.images, [{ task_id: state.tasks[0].task_id, ordinal: 1, child_session_id: 'child-1',
     receipt: state.tasks[0].receipt, attachment: ref }])
   assert.deepEqual(result.failures, publicBatch.failures)
+  // A restarted parent has only native batch events, not copied child image-output events.
+  const restoredParent = { id: SESSION, session: {
+    header: { ...parent.header }, events: structuredClone(parent.events), deriveMessages: () => [],
+  } }
+  assert.equal(restoredParent.session.events.some(event => event.type === 'emate/image-output'), false)
+  const countsBeforeLookup = restoredParent.session.events.length
+  assert.deepEqual(await resolveBatchSources(ctx, restoredParent, [ref.attachmentId], new AbortController().signal), [ref])
+  assert.equal(restoredParent.session.events.length, countsBeforeLookup)
+  await assert.rejects(resolveBatchSources(ctx, restoredParent, ['sha256:' + 'f'.repeat(64)], new AbortController().signal),
+    /not a successful current-session image output/)
+  const foreignParent = { id: 'foreign-parent', session: { ...restoredParent.session, header: { id: 'foreign-parent' } } }
+  await assert.rejects(resolveBatchSources(ctx, foreignParent, [ref.attachmentId], new AbortController().signal),
+    /invalid image batch event|durable/)
   for (const mutate of [
     batch => { batch.image_evidence = [] },
     batch => { batch.image_evidence.push(structuredClone(batch.image_evidence[0])) },
@@ -149,6 +163,8 @@ test('exact existing child terminal and Job finalize parent without spawn or pro
     ctx.sessionProjections = { snapshot: () => ({ values: { eMateImageBatches: [invalid] } }) }
     await assert.rejects(readDurableImageBatchResult(ctx, { id: SESSION, session: parent }, state.batch_id,
       new AbortController().signal), /durable image batch/)
+    await assert.rejects(resolveBatchSources(ctx, restoredParent, [ref.attachmentId], new AbortController().signal),
+      /durable image batch/)
   }
 })
 

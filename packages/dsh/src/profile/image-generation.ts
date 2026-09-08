@@ -9,7 +9,7 @@ import { loadTargetLlm, loadTargetStorageDomain, loadTargetTools } from './targe
 import { imageBatchParameters, imageBatchResultSchema } from './image-batch.ts'
 import { imageBatchProjectionDefinition } from './image-batch-events.ts'
 import { createNativeImageTaskRuntime } from './native-image-task-runner.ts'
-import { installImageBatchRecovery, readDurableImageBatchResult } from './image-batch-recovery.ts'
+import { foldImageBatchRecovery, installImageBatchRecovery, readDurableImageBatchResult } from './image-batch-recovery.ts'
 
 export const name = 'emate-image-generation'
 export const inject = [
@@ -573,10 +573,14 @@ function messageImages(messages, generatedOnly = false) {
   return images
 }
 
-function eventImages(events) {
+function eventImages(events, batchImages = new Map()) {
   if (!Array.isArray(events)) return []
   const images = []
   for (const event of events) {
+    if (event?.type === 'emate/image-batch' && event.data?.kind === 'terminal') {
+      images.push(...batchImages.get(event.data.batch_id) ?? [])
+      continue
+    }
     if (event?.type === 'emate/image-output') {
       const content = event.data?.content
       if (Array.isArray(content)) {
@@ -592,6 +596,20 @@ function eventImages(events) {
     }
   }
   return images
+}
+
+// Batch outputs remain owned by native child receipts; resolve their exact parent pointers
+// before exposing them to the model catalog or accepting them for another image operation.
+async function resolvedEventImages(ctx, agent, signal) {
+  const events = agent?.session?.events ?? []
+  const batches = foldImageBatchRecovery(events, sessionIdentity(agent))
+  const images = new Map()
+  for (const batch of batches) {
+    if (batch.terminal_event_id === undefined || !batch.tasks.some(task => task.state === 'completed')) continue
+    const result = await readDurableImageBatchResult(ctx, agent, batch.batch_id, signal)
+    images.set(batch.batch_id, result.images.map(item => item.attachment))
+  }
+  return { history: eventImages(events, images), batchImages: [...images.values()].flat() }
 }
 
 function uniqueImages(images, newestFirst = false) {
@@ -610,10 +628,10 @@ function sessionMessages(agent) {
   return messages
 }
 
-function sessionImage(agent, attachmentId) {
+function sessionImage(agent, attachmentId, history = eventImages(agent?.session?.events)) {
   const image = uniqueImages([
     ...messageImages(sessionMessages(agent)),
-    ...eventImages(agent?.session?.events),
+    ...history,
   ], true)
     .find(candidate => candidate.attachmentId === attachmentId)
   if (image !== undefined) return image
@@ -629,7 +647,7 @@ function validCompletedParentReceipt(value, parentSessionId) {
     && validReceiptV2({ ...value, revision: 1 }, value.sources, parentSessionId, value.child_session_id)
 }
 
-function successfulSessionImage(agent, attachmentId) {
+function successfulSessionImage(agent, attachmentId, batchHistory = []) {
   const uploaded = uniqueImages(messageImages(sessionMessages(agent)
     .filter(message => message?.source?.kind === 'user')), true)
     .find(candidate => candidate.attachmentId === attachmentId)
@@ -641,12 +659,15 @@ function successfulSessionImage(agent, attachmentId) {
     .map(event => event.data.output), true)
     .find(candidate => candidate.attachmentId === attachmentId)
   if (image !== undefined) return image
+  const batchImage = batchHistory.find(candidate => candidate.attachmentId === attachmentId)
+  if (batchImage !== undefined) return batchImage
   throw new Error(`image attachment ${attachmentId} is not a successful current-session image output`)
 }
 
 /** Resolve one normalized source list through the parent catalog and Attachment CAS exactly once per ID. */
 export async function resolveBatchSources(ctx, parent, attachmentIds, signal) {
-  const refs = attachmentIds.map(id => successfulSessionImage(parent, id))
+  const { batchImages } = await resolvedEventImages(ctx, parent, signal)
+  const refs = attachmentIds.map(id => successfulSessionImage(parent, id, batchImages))
   const resolved = []
   for (const ref of refs) {
     signal.throwIfAborted()
@@ -670,9 +691,8 @@ function latestUserMessage(messages) {
   return undefined
 }
 
-function imageCatalogContext(agent, messages) {
+function imageCatalogContext(agent, messages, eventHistory = eventImages(agent?.session?.events)) {
   const current = uniqueImages(messageImages(latestUserMessage(messages) === undefined ? [] : [latestUserMessage(messages)]))
-  const eventHistory = eventImages(agent?.session?.events)
   const recent = uniqueImages(eventHistory.length === 0 ? messageImages(messages) : eventHistory, true)
     .filter(image => !current.some(selected => selected.attachmentId === image.attachmentId))
     .slice(0, 32)
@@ -691,7 +711,7 @@ const SESSION_IMAGE_EDIT_LOCATOR = /(?:(?:^|[把将这那请，。；：\s])(?:�
 // A later affirmative edit and explicit attachment IDs still require their source.
 const NEGATED_SESSION_IMAGE_REFERENCE = /(?<!不是|并非|不要|无需|不需要)(?:并非|不是|无需|不需要|不要|不)(?:在|对|基于|使用|参考)?\s*(?:修改|编辑|重绘|调整|使用|参考)?\s*(?:上图|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图)|\b(?:not|never|without|do\s+not|don't)\s+(?:(?:edit(?:ing)?|modify(?:ing)?|modifying|use|using|reference|referencing)\s+|based\s+on\s+)(?:the\s+)?(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b/giu
 
-function implicitEditImages(agent, task) {
+function implicitEditImages(agent, task, eventHistory = eventImages(agent?.session?.events)) {
   if (task.attachmentIds.length > 0) return task.attachmentIds
   const messages = sessionMessages(agent)
   const current = uniqueImages(messageImages(latestUserMessage(messages) === undefined ? [] : [latestUserMessage(messages)]))
@@ -704,7 +724,7 @@ function implicitEditImages(agent, task) {
     .map(block => block.text).join('\n') ?? ''
   const request = `${text}\n${task.prompt}`.replace(NEGATED_SESSION_IMAGE_REFERENCE, '')
   if (!SESSION_IMAGE_REFERENCE.test(request) && !SESSION_IMAGE_EDIT_LOCATOR.test(request)) return []
-  const history = eventImages(agent?.session?.events)
+  const history = eventHistory
   const newest = uniqueImages(history.length === 0 ? messageImages(messages) : history, true)[0]
   if (newest === undefined) {
     throw new Error('image editing needs a source image in the current conversation; upload one image once and retry')
@@ -860,7 +880,8 @@ async function publishImagePack(root, relativePath, data, signal) {
 
 async function createImagePack(ctx, agent, args, signal) {
   const pack = normalizePack(args)
-  const refs = pack.attachmentIds.map(id => successfulSessionImage(agent, id))
+  const { batchImages } = await resolvedEventImages(ctx, agent, signal)
+  const refs = pack.attachmentIds.map(id => successfulSessionImage(agent, id, batchImages))
   const entries = {}
   let total = 0
   for (const [index, ref] of refs.entries()) {
@@ -1218,10 +1239,11 @@ export async function apply(ctx, config = {}) {
   })
   await hydrateImageReceiptProjections(ctx)
   await installImageBatchRecovery(ctx)
-  ctx.on('agent/pre-step', async ({ agent }, next) => {
+  ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
-    const context = imageCatalogContext(agent, decision.messages)
+    const { history } = await resolvedEventImages(ctx, agent, signal)
+    const context = imageCatalogContext(agent, decision.messages, history)
     return context === undefined ? decision : {
       ...decision,
       messages: [...decision.messages, createUserMessage({
@@ -1262,9 +1284,10 @@ export async function apply(ctx, config = {}) {
         }
         exec.signal.throwIfAborted()
         task = normalizeTask(args)
-        task.attachmentIds = batchClaim === undefined ? implicitEditImages(exec.agent, task) : task.attachmentIds
+        const { history } = await resolvedEventImages(ctx, exec.agent, exec.signal)
+        task.attachmentIds = batchClaim === undefined ? implicitEditImages(exec.agent, task, history) : task.attachmentIds
         operation = imageOperation(task.attachmentIds)
-        refs = task.attachmentIds.map(id => sessionImage(exec.agent, id))
+        refs = task.attachmentIds.map(id => sessionImage(exec.agent, id, history))
       } catch (error) {
         appendImageReceipt(exec.agent, failedReceipt(
           exec.callId,
