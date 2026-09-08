@@ -32,15 +32,28 @@ test('archive validation checks size and full digest', async t => {
   await assert.rejects(verifyArchive(path, expected), /integrity/)
 })
 
-test('inventory detects altered bytes and preserves internal links while rejecting escapes', async t => {
+test('inventory detects altered file bytes', async t => {
   const root = await mkdtemp(join(tmpdir(), 'calc-tree-test-'))
   t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(join(root, 'LICENSE'), 'original')
+  const first = await inventory(root)
+  await writeFile(join(root, 'LICENSE'), 'modified')
+  assert.notDeepEqual(await inventory(root), first)
+})
+
+test('inventory preserves internal links while rejecting escapes', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'calc-link-test-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
   await mkdir(join(root, 'Resources')); await writeFile(join(root, 'Resources', 'LICENSE'), 'original')
-  await symlink('Resources/LICENSE', join(root, 'license'))
+  try {
+    await symlink('Resources/LICENSE', join(root, 'license'))
+  } catch (error) {
+    if (process.platform !== 'win32' || error.code !== 'EPERM') throw error
+    t.skip('Windows account lacks permission to create symbolic links')
+    return
+  }
   const first = await inventory(root)
   assert.equal(first.find(item => item.path === 'license').target, 'Resources/LICENSE')
-  await writeFile(join(root, 'Resources', 'LICENSE'), 'modified')
-  assert.notDeepEqual(await inventory(root), first)
   await symlink('../outside', join(root, 'escape'))
   await assert.rejects(inventory(root), /escapes/)
 })
