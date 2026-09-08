@@ -8,7 +8,7 @@ import css from './activity-fold.module.css'
 type ChatNode = {
   key: string
   kind: string
-  location?: { kind?: string; turn?: { turn?: number } }
+  location?: { kind?: string; turn?: { turn?: number; status?: string } }
   data?: {
     status?: string
     blocks?: readonly { kind?: string; text?: string }[]
@@ -22,6 +22,10 @@ export interface ActivityFoldSummary {
   toolCount: number
   reasoningCount: number
   running: boolean
+  state: 'running' | 'completed' | 'interrupted' | 'failed'
+  progress: string
+  processKeys: readonly string[]
+  finalKey?: string
 }
 
 const expandedTurns = new Set<string>()
@@ -69,19 +73,30 @@ export function activityFoldSummary(
 ): ActivityFoldSummary | null {
   const turn = turnOf(node)
   if (turn === undefined) return null
-  const process = order
-    .map(key => nodes.get(key))
-    .filter((candidate): candidate is ChatNode => candidate !== undefined
-      && turnOf(candidate) === turn
-      && isProcessNode(candidate))
+  const turnNodes = order.map(key => nodes.get(key)).filter((candidate): candidate is ChatNode =>
+    candidate !== undefined && turnOf(candidate) === turn)
+  const assistants = turnNodes.filter(candidate => candidate.kind === 'assistant-step')
+  const closed = node.location?.turn?.status === 'closed'
+  // Codex keeps the trailing assistant answer outside the activity group even
+  // while streaming; an ensuing tool moves that prose into the disclosure.
+  const lastProcess = turnNodes.filter(candidate => candidate.kind === 'assistant-step' || candidate.kind === 'tool-call').at(-1)
+  const final = lastProcess?.kind === 'assistant-step' && hasNaturalMessage(lastProcess) ? lastProcess : undefined
+  const process = turnNodes.filter(candidate => isProcessNode(candidate)
+    || candidate.kind === 'assistant-step' && candidate !== final)
   const header = process[0]
   if (header === undefined) return null
+  const interrupted = closed && process.some(isRunning) || turnNodes.some(candidate => candidate.data?.status === 'interrupted'
+    || candidate.data?.root?.interrupted === true)
+  const failed = turnNodes.some(candidate => candidate.kind === 'turn-error')
+  const running = !closed && !failed && !interrupted && (node.location?.turn?.status === 'open' || process.some(isRunning))
+  const progress = assistants.filter(candidate => candidate !== final).flatMap(candidate =>
+    candidate.data?.blocks?.filter(block => block.kind === 'text' && block.text?.trim()) ?? []).at(-1)?.text?.trim() ?? ''
   return {
-    turn,
-    headerKey: header.key,
+    turn, headerKey: header.key,
     toolCount: process.filter(candidate => candidate.kind === 'tool-call').length,
     reasoningCount: process.reduce((count, candidate) => count + reasoningBlocks(candidate), 0),
-    running: process.some(isRunning),
+    running, state: failed ? 'failed' : interrupted ? 'interrupted' : running ? 'running' : 'completed',
+    progress, processKeys: process.map(candidate => candidate.key), finalKey: final?.key,
   }
 }
 
@@ -108,34 +123,7 @@ function useExpanded(sessionId: string, turn: number | undefined): boolean {
 }
 
 function label(summary: ActivityFoldSummary): string {
-  const counts: string[] = []
-  if (summary.toolCount > 0) counts.push(`${summary.toolCount} 次工具调用`)
-  if (summary.reasoningCount > 0) counts.push(`${summary.reasoningCount} 条思考`)
-  return `${summary.running ? '正在运行' : '运行过程'}${counts.length > 0 ? ` · ${counts.join('，')}` : ''}`
-}
-
-function BrainIcon() {
-  return (
-    <svg
-      data-emate-brain-icon
-      aria-hidden
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
-      <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
-      <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
-      <path d="M17.599 6.5a3 3 0 0 0 .399-1.375M6.003 5.125A3 3 0 0 0 6.401 6.5" />
-      <path d="M3.477 10.896a4 4 0 0 1 .585-.396M19.938 10.5a4 4 0 0 1 .585.396" />
-      <path d="M6 18a4 4 0 0 1-1.967-.516M19.967 17.484A4 4 0 0 1 18 18" />
-    </svg>
-  )
+  return summary.progress || ({ running: '正在处理', completed: '已完成', interrupted: '已停止', failed: '执行失败' })[summary.state]
 }
 
 function ActivityHeader({ summary, sessionId, expanded, children }: {
@@ -145,14 +133,17 @@ function ActivityHeader({ summary, sessionId, expanded, children }: {
   children?: ReactNode
 }) {
   return (
-    <div className={css.group} data-emate-activity-fold data-running={summary.running || undefined}>
+    <div className={css.group} data-emate-activity-fold data-running={summary.running || undefined} data-state={summary.state}>
       <DisclosureRow
         rowClassName={css.header}
         leadingClassName={css.leading}
-        titleClassName={css.title}
+        titleClassName={`${css.title} ${summary.running ? css.shimmer : ''}`}
         chevronClassName={css.chevron}
-        icon={<BrainIcon />}
+        icon={summary.state === 'completed' ? <span aria-label="已完成">✓</span> : undefined}
         title={label(summary)}
+        keepContentWhenOpen
+        collapsedContent={summary.state === 'failed' || summary.state === 'interrupted'
+          ? <span className={css.state}>{summary.state === 'failed' ? '执行失败' : '已停止'}</span> : undefined}
         open={expanded}
         expandable
         expandOnRowClick
@@ -251,30 +242,28 @@ function createProcessRenderer(ctx: any, kind: 'assistant-step' | 'tool-call' | 
     const expanded = useExpanded(sessionId, summary?.turn)
 
     if (kind === 'context') return hiddenMarker()
-    if (summary === null || !isProcessNode(node)) return renderNative(ctx, kind, props)
-    const header = node.key === summary.headerKey
-    if (kind === 'assistant-step' && hasNaturalMessage(node)) {
-      const naturalProps = {
-        ...props,
-        node: assistantNodeWith(node, block => block.kind !== 'reasoning' && block.kind !== 'tool-call'),
-      }
-      const processProps = { ...props, node: assistantNodeWith(node, block => block.kind === 'reasoning') }
-      return createElement(Fragment, null,
-        header
-          ? <ActivityHeader summary={summary} sessionId={sessionId} expanded={expanded}>
-              {expanded ? renderNative(ctx, kind, processProps) : null}
-            </ActivityHeader>
-          : expanded ? renderNative(ctx, kind, processProps) : null,
-        renderNative(ctx, kind, naturalProps),
-      )
-    }
-
-    if (!header) return expanded ? renderNative(ctx, kind, props) : hiddenMarker()
-    return (
+    if (summary === null) return renderNative(ctx, kind, props)
+    const final = node.key === summary.finalKey
+    if (!summary.processKeys.includes(node.key)) return renderNative(ctx, kind, props)
+    const finalProse = final ? renderNative(ctx, kind, {
+      ...props, node: assistantNodeWith(node, block => block.kind !== 'reasoning' && block.kind !== 'tool-call'),
+    }) : null
+    if (node.key !== summary.headerKey) return finalProse ?? hiddenMarker()
+    return <Fragment>
       <ActivityHeader summary={summary} sessionId={sessionId} expanded={expanded}>
-        {expanded ? renderNative(ctx, kind, props) : null}
+        {expanded && <div className={css.details} data-emate-activity-details>
+          {summary.processKeys.map(key => {
+            const child = nodes.get(key)!
+            const projected = child.key === summary.finalKey
+              ? assistantNodeWith(child, block => block.kind === 'reasoning') : child
+            return <div key={key} className={css.entry} data-activity-kind={child.kind}>
+              {renderNative(ctx, child.kind, { ...props, node: projected })}
+            </div>
+          })}
+        </div>}
       </ActivityHeader>
-    )
+      {finalProse}
+    </Fragment>
   }
 }
 

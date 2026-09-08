@@ -1,33 +1,24 @@
-.group {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 10px;
+.group { display: flex; flex-direction: column; margin-bottom: 10px; }
+.header { min-height: 24px; font-size: 14px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
+.leading, .chevron { color: var(--dsw-alias-label-secondary); }
+.title { min-width: 0; overflow: hidden; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.details { margin: 8px 0 0 7px; padding-left: 16px; border-left: 1px solid var(--dsw-alias-border-standard, #8883); }
+.entry + .entry { margin-top: 8px; }
+.shimmer, .details :global([data-state="running"][data-variant] [data-disclosure-row]) {
+  --progress-base: color-mix(in srgb, var(--dsw-alias-label-secondary) 55%, transparent);
+  --progress-highlight: #ffffffbf;
+  background: var(--progress-base) linear-gradient(to right, transparent 0%, var(--progress-highlight) 40%, var(--progress-highlight) 60%, transparent 100%);
+  background-position: -100% 0; background-repeat: no-repeat; background-size: 50% 200%;
+  background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  animation: emate-progress-shimmer 2s steps(48, end) infinite; display: inline-block;
 }
+:global(body[data-ds-dark-theme]) .shimmer, :global(body[data-ds-dark-theme]) .details :global([data-state="running"][data-variant] [data-disclosure-row]) { --progress-highlight: #0009; --progress-base: color-mix(in srgb, var(--dsw-alias-label-secondary) 45%, transparent); }
+.header:hover .shimmer { background: none; -webkit-text-fill-color: var(--dsw-alias-label-secondary); animation: none; }
+@keyframes emate-progress-shimmer { from { background-position: -100% 0; } to { background-position: 250% 0; } }
+@media (prefers-reduced-motion: reduce), (forced-colors: active) { .shimmer, .details :global([data-state="running"][data-variant] [data-disclosure-row]) { animation: none; background: none; -webkit-text-fill-color: currentColor; } }
+:global([data-chat-flow-kind]:has([data-emate-process-hidden])) { display: none; }
 
-.header {
-  min-height: 24px;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-secondary);
-}
+.details :global([data-state="running"][data-variant] [data-disclosure-row])::after { animation: none; content: none; }
 
-.header + * {
-  margin-top: 8px;
-}
-
-.leading,
-.chevron {
-  color: var(--dsw-alias-label-secondary);
-}
-
-.title {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:global([data-chat-flow-kind]:has([data-emate-process-hidden])) {
-  display: none;
-}
+.state { margin-left: 8px; flex: none; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.header .title { flex: 1; }

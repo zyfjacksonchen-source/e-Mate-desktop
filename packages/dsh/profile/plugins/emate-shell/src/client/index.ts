@@ -29,6 +29,7 @@ import {
   Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
+import { registerChatContext } from './chat-context.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
 import './theme-tokens.module.css'
 import './chat-chrome.module.css'
@@ -475,6 +476,7 @@ export function apply(ctx: any): void {
   registerPetTaskDetails(ctx, createTransientGalleryNotice(ctx))
   const messageMode = registerMessageModeSettings(ctx)
   registerActivityFold(ctx, messageMode)
+  registerChatContext(ctx)
   registerComputerUseTrigger(ctx)
   registerMentionSources(ctx)
   registerManagedPresetSurfaces(ctx)
