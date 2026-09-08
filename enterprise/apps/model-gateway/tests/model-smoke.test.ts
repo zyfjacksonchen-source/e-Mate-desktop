@@ -29,12 +29,6 @@ const routes = [
     'gpt-image-2-pro',
     'https://image-provider.ecorex.internal:18443/v1'
   ),
-  route(
-    'doubao-seed-2-0-pro-260215',
-    'chat-completions',
-    'doubao-seed-2-0-pro-260215',
-    'https://doubao-provider.ecorex.internal:18443/v1'
-  ),
 ];
 
 test('Astra extends the existing GPT catalog and probes Responses medium with the same credential', async () => {
@@ -42,7 +36,7 @@ test('Astra extends the existing GPT catalog and probes Responses medium with th
   const astra = route('gpt-6-astra', 'responses', 'gpt-6-astra', 'https://main-provider.ecorex.internal:18443/v1');
   const result = await runModelSmoke({ routes: [...routes, astra], catalogSha256: 'a'.repeat(64), operator: 'fixture-admin',
     timeoutMs: 1000, fetchImplementation: mock.fetchImplementation });
-  assert.equal(result.results.length, 6);
+  assert.equal(result.results.length, 5);
   const request = mock.requests.find(({ body }) => body.model === 'gpt-6-astra');
   assert(request);
   assert.equal(request.url.endsWith('/responses'), true);
@@ -146,7 +140,6 @@ test('writes only catalog-bound redacted evidence after all five live routes pas
       ['gpt-5.6-sol', 'live-inference'],
       ['deepseek', 'live-inference'],
       ['gpt-image-2-pro', 'live-image-generation'],
-      ['doubao-seed-2-0-pro-260215', 'live-inference'],
     ]
   );
   assert.equal(serialized.includes(secret) || serialized.includes('sensitive-response-text'), false);
@@ -173,8 +166,8 @@ test('accepts only the official search credential route without proxying it as a
     randomId: randomId(),
   });
 
-  assert.equal(approval.results.length, 5);
-  assert.equal(requests.length, 5);
+  assert.equal(approval.results.length, 4);
+  assert.equal(requests.length, 4);
   assert.equal(requests.some(({ url }) => url.includes('/anthropic/v1')), false);
 
   for (const invalid of [
@@ -207,9 +200,9 @@ test('does not label an adapter-generated chat id as provider evidence', async (
     randomId: randomId(),
   });
   assert.deepEqual(
-    approval.results.filter(({ routeId }) => routeId === 'deepseek' || routeId === 'doubao-seed-2-0-pro-260215')
+    approval.results.filter(({ routeId }) => routeId === 'deepseek')
       .map(({ evidenceId }) => evidenceId.startsWith('local:')),
-    [true, true]
+    [true]
   );
 });
 
@@ -306,18 +299,16 @@ test('requires an explicit route-local opt-in before smoking a pinned HTTP upstr
     fetchImplementation,
     randomId: randomId(),
   });
-  assert.equal(approval.results.length, 5);
+  assert.equal(approval.results.length, 4);
   assert.equal(requests[0]?.url, 'http://127.0.0.1:18080/v1/responses');
 });
 
-test('accepts the pinned official DeepSeek and Doubao HTTPS bases', async () => {
+test('accepts the pinned official DeepSeek HTTPS base', async () => {
   const { fetchImplementation, requests } = mockFetch();
   const officialRoutes = structuredClone(routes);
   const deepseek = officialRoutes.find(({ id }) => id === 'deepseek');
-  const doubao = officialRoutes.find(({ id }) => id === 'doubao-seed-2-0-pro-260215');
-  assert(deepseek && doubao);
+  assert(deepseek);
   deepseek.upstreamBaseUrl = 'https://api.deepseek.com';
-  doubao.upstreamBaseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
 
   const approval = await runModelSmoke({
     routes: officialRoutes,
@@ -328,9 +319,8 @@ test('accepts the pinned official DeepSeek and Doubao HTTPS bases', async () => 
     randomId: randomId(),
   });
 
-  assert.equal(approval.results.length, 5);
+  assert.equal(approval.results.length, 4);
   assert.equal(requests[2]?.url, 'https://api.deepseek.com/chat/completions');
-  assert.equal(requests[4]?.url, 'https://ark.cn-beijing.volces.com/api/v3/chat/completions');
 });
 
 test('rejects credential-bearing and malformed opted-in HTTP URLs before smoke requests', async () => {

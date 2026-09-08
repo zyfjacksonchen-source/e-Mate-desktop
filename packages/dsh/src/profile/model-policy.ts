@@ -13,7 +13,6 @@ const CHAT_MODELS = new Map([
   ['gpt-5.6-sol', { reasoning_effort: 'medium' }],
   ['gpt-6-astra', { reasoning_effort: 'medium' }],
   ['deepseek', { reasoning_effort: 'max' }],
-  ['doubao-seed-2-0-pro-260215', { reasoning_effort: 'medium' }],
 ])
 const IMAGE_MODELS = new Set(['gpt-image-2-pro'])
 const MANAGED_MODELS = new Set([...CHAT_MODELS.keys(), ...IMAGE_MODELS])
@@ -416,13 +415,13 @@ function policyModelId(model) {
 }
 
 function allowed(policy, model) {
-  return policy.allowed_model_ids.includes(policyModelId(model))
+  return MANAGED_MODELS.has(policyModelId(model)) && policy.allowed_model_ids.includes(policyModelId(model))
 }
 
 // Product display order is independent of policy defaults and session selection.
 const MODEL_DISPLAY_ORDER = [
   'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
-  'doubao-seed-2-0-pro-260215', 'gpt-image-2-pro',
+  'gpt-image-2-pro',
 ]
 function modelDisplayRank(id) {
   const index = MODEL_DISPLAY_ORDER.indexOf(policyModelId(id))
@@ -457,7 +456,6 @@ const RUNTIME_REASONING = new Map([
   ['gpt-5.6-sol', { medium: 'medium' }],
   ['gpt-6-astra', { medium: 'medium' }],
   ['deepseek', { max: 'max' }],
-  ['doubao-seed-2-0-pro-260215', { medium: 'medium' }],
 ])
 const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
 const SEARCH_CREDENTIAL_REF = 'E_MATE_SEARCH_KEY_DEEPSEEK'
@@ -1068,8 +1066,8 @@ export async function apply(ctx, config = {}) {
   const policyRecord = z.object(policyShape).strict()
   const legacyPolicyRecord = z.object({
     ...policyShape,
-    allowed_model_ids: z.array(z.enum([...MANAGED_MODELS, 'gpt-image-2']))
-      .min(1).max(MANAGED_MODELS.size + 1),
+    allowed_model_ids: z.array(z.enum([...MANAGED_MODELS, 'doubao-seed-2-0-pro-260215', 'gpt-image-2']))
+      .min(1).max(MANAGED_MODELS.size + 2),
     image_fallback_upstream_model_id: z.literal('gpt-image-2'),
   }).strict().transform(value => {
     const { policy_sha256: expected, ...legacy } = value

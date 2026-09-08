@@ -4112,11 +4112,13 @@ test('enterprise model switch keeps native history and survives a cached-policy 
 
     const migratedPolicy = parsePolicyWith213Schema(records.get('active'))
     assert.deepEqual(migratedPolicy.allowed_model_ids, [
-      'deepseek', 'doubao-seed-2-0-pro-260215', 'gpt-5.6-luna',
+      'deepseek', 'gpt-5.6-luna',
       'gpt-5.6-sol', 'gpt-image-2', 'gpt-image-2-pro',
     ])
     assert.equal(migratedPolicy.image_fallback_upstream_model_id, 'gpt-image-2')
-    assert.equal(migratedPolicy.policy_sha256, legacyPolicySha256)
+    assert.notEqual(migratedPolicy.policy_sha256, legacyPolicySha256)
+    const { policy_sha256: migratedHash, ...migratedPayload } = migratedPolicy
+    assert.equal(migratedHash, storedLegacyPolicy(migratedPayload).policy_sha256)
     assert.throws(
       () => policyStorageSchema.parse({ ...legacyPolicy, policy_sha256: '0'.repeat(64) }),
       /legacy model policy is invalid/,
@@ -5885,4 +5887,12 @@ test('model catalog ranks Astra first across providers without mutating policy o
   assert.deepEqual({ groups, policy }, before)
   assert.deepEqual(filterGroups(groups, { ...policy, allowed_model_ids: ['gpt-5.6-luna', 'deepseek'] })
     .flatMap(group => group.models.map(model => model.id)), ['gpt-5.6-luna', 'deepseek-v4-flash'])
+})
+
+
+test('model catalog excludes retired Doubao even when a stale policy allows it', () => {
+  const groups = [{ id: 'legacy', models: [{ id: 'doubao-seed-2-0-pro-260215' }, { id: 'deepseek' }] }]
+  const policy = { allowed_model_ids: ['doubao-seed-2-0-pro-260215', 'deepseek'] }
+  assert.deepEqual(filterGroups(groups, policy)[0].models.map(model => model.id), ['deepseek'])
+  assert.equal(groups[0].models.length, 2)
 })

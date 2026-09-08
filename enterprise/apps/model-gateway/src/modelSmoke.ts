@@ -74,15 +74,6 @@ const routeContracts: readonly SmokeRouteContract[] = [
     httpsBaseUrls: ['https://image-provider.ecorex.internal:18443/v1'],
     httpPathname: '/v1',
   },
-  {
-    id: 'doubao-seed-2-0-pro-260215',
-    apiMode: 'chat-completions',
-    upstreamModelId: 'doubao-seed-2-0-pro-260215',
-    httpsBaseUrls: [
-      'https://doubao-provider.ecorex.internal:18443/v1',
-      'https://ark.cn-beijing.volces.com/api/v3',
-    ],
-  },
 ];
 
 const evidencePattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,100}$/;

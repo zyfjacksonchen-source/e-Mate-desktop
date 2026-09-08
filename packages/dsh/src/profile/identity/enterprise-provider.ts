@@ -25,7 +25,6 @@ const CHAT_MODELS = [
   'gpt-5.6-luna',
   'gpt-5.6-sol',
   'deepseek',
-  'doubao-seed-2-0-pro-260215',
   'gpt-6-astra',
 ]
 const RUNTIME_MODEL_CONTRACT = new Map([
@@ -33,12 +32,6 @@ const RUNTIME_MODEL_CONTRACT = new Map([
   ['gpt-5.6-sol', { upstreamModelId: 'gpt-5.6-sol', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
   ['gpt-6-astra', { upstreamModelId: 'gpt-6-astra', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
   ['deepseek', { upstreamModelId: 'deepseek-v4-flash', apiMode: 'chat-completions', provider: 'e-mate-enterprise-deepseek', credentialRef: MODEL_SESSION_REF }],
-  ['doubao-seed-2-0-pro-260215', {
-    upstreamModelId: 'doubao-seed-2-0-pro-260215',
-    apiMode: 'chat-completions',
-    provider: 'e-mate-enterprise-doubao',
-    credentialRef: MODEL_SESSION_REF,
-  }],
 ])
 export const RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze([MODEL_SESSION_REF])
 const OBSOLETE_RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze([
