@@ -496,7 +496,11 @@ it.each([['darwin', 1, 'x64'], ['darwin', 3, 'arm64'], ['win32', 1, 'x64']] as c
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@larksuite/cli', version: '1.0.88', license: 'MIT' }))
   for (const file of ['LICENSE', 'checksums.txt', 'scripts/install.js']) writeFileSync(join(root, file), 'official fixture')
   const calls: string[][] = []
-  const runner: PtyProbeRunner = (command, args) => {
+  const versionBudgets: number[] = []
+  const lipoBudgets: number[] = []
+  const runner: PtyProbeRunner = (command, args, options) => {
+    if (args[0] === '--version') versionBudgets.push(Number(options.timeout))
+    if (command === '/usr/bin/lipo') lipoBudgets.push(Number(options.timeout))
     calls.push([command, ...args])
     if (args[0] === '-p') return { status: 0, stdout: `${platform}:${cpu}` } as never
     if (args[0]?.endsWith('install.js')) writeFileSync(join(root, 'bin', platform === 'win32' ? 'lark-cli.exe' : 'lark-cli'), 'binary')
@@ -504,7 +508,15 @@ it.each([['darwin', 1, 'x64'], ['darwin', 3, 'arm64'], ['win32', 1, 'x64']] as c
   }
   try {
     preparePackagedFeishu(packaged, runner)
-    expect(calls.filter(call => call[1]?.endsWith('install.js'))).toHaveLength(1)
+    expect(versionBudgets).toEqual([platform === 'darwin' ? 180_000 : 30_000])
+    expect(lipoBudgets).toEqual(platform === 'darwin' ? [30_000] : [])
+    expect(() => preparePackagedFeishu(packaged, (command, args, options) => args[0] === '--version'
+      ? { status: null, error: Object.assign(new Error('spawnSync ETIMEDOUT'), { code: 'ETIMEDOUT' }) } as never
+      : runner(command, args, options))).toThrow('ETIMEDOUT')
+    expect(() => preparePackagedFeishu(packaged, (command, args, options) => args[0] === '--version'
+      ? { status: 0, stdout: 'lark-cli 0.0.0' } as never
+      : runner(command, args, options))).toThrow('version mismatch')
+    expect(calls.filter(call => call[1]?.endsWith('install.js'))).toHaveLength(3)
     expect(calls[0]?.[0]).toContain(platform === 'win32' ? '.exe' : '.app/Contents/MacOS/')
     expect(() => preparePackagedFeishu(packaged, () => ({ status: 0, stdout: 'darwin:wrong' }) as never)).toThrow('target mismatch')
     if (platform === 'darwin') {
@@ -512,6 +524,8 @@ it.each([['darwin', 1, 'x64'], ['darwin', 3, 'arm64'], ['win32', 1, 'x64']] as c
       preparePackagedFeishu({ ...packaged, arch: 4 }, runner)
       expect(calls.some(call => call[1]?.endsWith('install.js'))).toBe(false)
       expect(calls[0]?.slice(1)).toEqual([join(root, 'bin/lark-cli'), '-verify_arch', 'x86_64', 'arm64'])
+      expect(versionBudgets.at(-1)).toBe(180_000)
+      expect(lipoBudgets.at(-1)).toBe(30_000)
     }
   } finally { rmSync(temporary, { recursive: true, force: true }) }
 })
