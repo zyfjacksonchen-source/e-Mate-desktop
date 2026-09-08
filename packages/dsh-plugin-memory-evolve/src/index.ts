@@ -313,7 +313,7 @@ export async function apply(ctx: MemoryPluginContext, config: MemoryConfig = {})
     },
     output: {
       schema: publicRecordSchema,
-      render: (_args: unknown, value: { scope: string; content: string }) => [{ type: 'text', text: `Remembered for this ${value.scope}: ${value.content}` }],
+      render: (_args: unknown, value: MemoryPublicRecord) => [{ type: 'text', text: JSON.stringify(value) }],
     },
     execute: async (args: unknown, execution: MemoryExecution) => {
       const input = rememberInput(args)
@@ -343,11 +343,11 @@ export async function apply(ctx: MemoryPluginContext, config: MemoryConfig = {})
         required: ['items'],
         properties: { items: { type: 'array', items: publicRecordSchema } },
       },
-      render: (_args: unknown, value: { items: readonly { content: string }[] }) => [{
+      render: (_args: unknown, value: { items: readonly MemoryPublicRecord[] }) => [{
         type: 'text',
         text: value.items.length === 0
           ? 'No memory matched in this project or session.'
-          : value.items.map(item => `- ${item.content}`).join('\n'),
+          : JSON.stringify(value),
       }],
     },
     execute: async (args: unknown, execution: MemoryExecution) => ({ items: await memory.search(searchInput(args), execution) }),

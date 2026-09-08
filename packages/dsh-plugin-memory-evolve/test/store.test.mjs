@@ -135,7 +135,8 @@ test('Cordis adapter registers only Harness prompt and Tool seams', async () => 
   const sibling = { ...projectExecution('a-2', '/work/a'), signal: new AbortController().signal }
   const projectB = { ...projectExecution('b-1', '/work/b'), signal: new AbortController().signal }
   const general = { ...projectExecution('g-1', '/work/general'), signal: new AbortController().signal }
-  await tools[0].execute({ content: 'tool memory' }, exec)
+  const remembered = await tools[0].execute({ content: 'tool memory' }, exec)
+  assert.deepEqual(JSON.parse(tools[0].output.render({}, remembered)[0].text), remembered)
   assert.equal(questions.length, 1)
   assert.equal(questions[0].agent, exec.agent)
   assert.equal(questions[0].signal, exec.signal)
@@ -143,7 +144,11 @@ test('Cordis adapter registers only Harness prompt and Tool seams', async () => 
   assert.deepEqual((await tools[1].execute({}, sibling)).items.map(item => item.content), ['tool memory'])
   assert.deepEqual((await tools[1].execute({}, projectB)).items, [])
   assert.deepEqual((await tools[1].execute({}, general)).items, [])
-  const memoryId = (await tools[1].execute({}, sibling)).items[0].memory_id
+  const searchResult = await tools[1].execute({}, sibling)
+  // Feed the next Tool only what the Agent actually receives, not internal value.
+  const visibleResult = JSON.parse(tools[1].output.render({}, searchResult)[0].text)
+  assert.deepEqual(visibleResult, searchResult)
+  const memoryId = visibleResult.items[0].memory_id
   const restarted = new MemoryStore(
     table,
     execution => resolveMemoryScope(ctx.workspaceRegistry, execution, { sessionOnlyWorkspacePath: '/work/general' }),
