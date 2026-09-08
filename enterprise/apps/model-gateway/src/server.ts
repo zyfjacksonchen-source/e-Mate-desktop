@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import {
   isDefaultEnabledModelRoute,
+  isRetiredModelRoute,
   modelSupportsClient,
   parseConsentAcceptanceInput,
   type ConsentAcceptanceInput,
@@ -80,7 +81,6 @@ const managedCodexModelIds = new Set([
   'gpt-5.6-sol',
   'gpt-6-astra',
   'deepseek',
-  'doubao-seed-2-0-pro-260215',
 ]);
 const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17', '2.0.18']);
 const modelSessionJwtPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
@@ -1913,6 +1913,7 @@ async function modelRouteEnabled(
   tenantId: string,
   routeId: string
 ): Promise<boolean> {
+  if (isRetiredModelRoute(routeId)) return false;
   if (!policy) return isDefaultEnabledModelRoute(routeId);
   try {
     return await policy.isEnabled(tenantId, routeId);
@@ -2361,7 +2362,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             ? 'high'
             : route.id === 'deepseek'
               ? 'max'
-              : ['gpt-5.6-sol', 'gpt-6-astra', 'doubao-seed-2-0-pro-260215'].includes(route.id)
+              : ['gpt-5.6-sol', 'gpt-6-astra'].includes(route.id)
                 ? 'medium'
                 : undefined;
         const remoteCompaction = isRemoteCompactionRequest(body);

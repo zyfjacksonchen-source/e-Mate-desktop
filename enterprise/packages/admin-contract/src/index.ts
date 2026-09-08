@@ -1,7 +1,10 @@
 export const ADMIN_USER_ROLES = ['TENANT_ADMIN', 'AUDIT_ADMIN', 'MEMBER'] as const;
+export function isRetiredModelRoute(modelId: string): boolean {
+  return modelId === 'doubao-seed-2-0-pro-260215';
+}
 export const ASTRA_MODEL_ID = 'gpt-6-astra';
 export function modelSupportsClient(modelId: string, clientVersion?: string): boolean {
-  return modelId !== ASTRA_MODEL_ID || clientVersion === '2.0.18';
+  return !isRetiredModelRoute(modelId) && (modelId !== ASTRA_MODEL_ID || clientVersion === '2.0.18');
 }
 export const ADMIN_USER_STATUSES = ['PENDING_APPROVAL', 'ACTIVE', 'SUSPENDED', 'DELETED'] as const;
 export const ADMIN_API_KEY_SCOPES = ['task-events:write', 'models:invoke'] as const;
@@ -10,7 +13,6 @@ export const DEFAULT_ENABLED_MODEL_ROUTE_IDS = [
   'gpt-5.6-luna',
   'gpt-5.6-sol',
   'deepseek',
-  'doubao-seed-2-0-pro-260215',
   'gpt-image-2-pro',
 ] as const;
 

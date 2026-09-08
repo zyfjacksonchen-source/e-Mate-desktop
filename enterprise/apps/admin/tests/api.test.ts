@@ -49,7 +49,7 @@ test('model routes display Astra first and preserve unknown order and route poli
     },
   });
   const expectedIds = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
-    'doubao-seed-2-0-pro-260215', 'gpt-image-2-pro', 'custom-z', 'custom-a'];
+    'gpt-image-2-pro', 'custom-z', 'custom-a'];
   assert.deepEqual(result, {
     schemaVersion: 1,
     routes: expectedIds.map(id => original.find(route => route.routeId === id)),

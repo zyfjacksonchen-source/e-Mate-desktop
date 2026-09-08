@@ -253,3 +253,16 @@ test('credential migration revokes every legacy task scope before validating the
   assert.match(schema, /revoked_at IS NOT NULL[\s\S]*ARRAY\['task-events:write', 'models:invoke'\]::text\[\]/u);
   assert.doesNotMatch(schema, /NOT VALID/u);
 });
+
+
+test('retired Doubao cannot be listed, enabled or republished from a stale deployed catalog', async () => {
+  const routeId = 'doubao-seed-2-0-pro-260215';
+  const store = new InMemoryAdminManagementStore([
+    { routeId, label: 'Doubao', provider: 'legacy' },
+    { routeId: 'deepseek', label: 'DeepSeek', provider: 'Enterprise gateway' },
+  ]);
+  const principal = tenantAdmin('tenant-a');
+  assert.deepEqual((await store.listModelRoutes(principal)).routes.map(route => route.routeId), ['deepseek']);
+  assert.equal(await store.updateModelRoute(principal, routeId, { schemaVersion: 1, enabled: true }), null);
+  assert.equal(await store.publishModelRoute(principal, routeId, { schemaVersion: 1, published: true }), null);
+});

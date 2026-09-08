@@ -1,6 +1,6 @@
 import { createDecipheriv, createHash } from 'node:crypto';
 import { Pool } from 'pg';
-import { DEFAULT_ENABLED_MODEL_ROUTE_IDS, isDefaultEnabledModelRoute } from '@e-mate/admin-contract';
+import { DEFAULT_ENABLED_MODEL_ROUTE_IDS, isDefaultEnabledModelRoute, isRetiredModelRoute } from '@e-mate/admin-contract';
 import type { ModelGatewayPrincipal, TenantModelRoutePolicy } from './server.ts';
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -26,6 +26,7 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
   async isEnabled(tenantIdInput: string, routeIdInput: string): Promise<boolean> {
     const tenantId = identifier(tenantIdInput, 'tenant id');
     const routeId = identifier(routeIdInput, 'route id');
+    if (isRetiredModelRoute(routeId)) return false;
     const result = await this.#pool.query<{ enabled: boolean }>(
       `
       SELECT enabled AND published AS enabled

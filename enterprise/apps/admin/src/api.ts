@@ -3,6 +3,7 @@ import {
   parseAdminConsentList,
   parseAdminApiKeyList,
   parseAdminModelRouteList,
+  isRetiredModelRoute,
   parseAdminModelFastMode,
   type AdminModelFastMode,
   type AdminModelFastModeUpdate,
@@ -510,7 +511,6 @@ const MODEL_DISPLAY_ORDER = new Map([
   'gpt-5.6-sol',
   'gpt-5.6-luna',
   'deepseek',
-  'doubao-seed-2-0-pro-260215',
   'gpt-image-2-pro',
 ].map((id, index) => [id, index]));
 
@@ -520,6 +520,7 @@ export async function loadModelRoutes(
   options: StatusRequestOptions
 ): Promise<AdminModelRouteList> {
   const result = parseAdminModelRouteList(await requestAdmin(token, signal, options, '/v1/admin/model-routes'));
+  result.routes = result.routes.filter(route => !isRetiredModelRoute(route.routeId));
   result.routes.sort((left, right) =>
     (MODEL_DISPLAY_ORDER.get(left.routeId) ?? MODEL_DISPLAY_ORDER.size)
     - (MODEL_DISPLAY_ORDER.get(right.routeId) ?? MODEL_DISPLAY_ORDER.size));

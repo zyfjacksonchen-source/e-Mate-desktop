@@ -15,6 +15,7 @@ import {
   parseTenantUserList,
   parseTenantUserUpdate,
   isDefaultEnabledModelRoute,
+  isRetiredModelRoute,
   type AdminApiKeyCreate,
   type AdminApiKeyCreationResult,
   type AdminApiKeyList,
@@ -177,7 +178,7 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
   readonly #now: () => number;
 
   constructor(catalog: AdminModelRouteDefinition[], now: () => number = Date.now) {
-    this.#catalog = normalizeCatalog(catalog);
+    this.#catalog = normalizeCatalog(catalog).filter(route => !isRetiredModelRoute(route.routeId));
     this.#now = now;
   }
 
@@ -518,7 +519,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
 
   constructor(pool: Pool, catalog: AdminModelRouteDefinition[], routeKeyEncryptionKey?: Buffer) {
     this.#pool = pool;
-    this.#catalog = normalizeCatalog(catalog);
+    this.#catalog = normalizeCatalog(catalog).filter(route => !isRetiredModelRoute(route.routeId));
     this.#routeKeyEncryptionKey = routeKeyEncryptionKey ? Buffer.from(routeKeyEncryptionKey) : undefined;
     if (this.#routeKeyEncryptionKey && this.#routeKeyEncryptionKey.byteLength !== 32) {
       throw new Error('Invalid model route key encryption key');

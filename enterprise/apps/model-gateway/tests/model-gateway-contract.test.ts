@@ -108,7 +108,7 @@ test('uses default route policy only when a tenant has no explicit route row', a
   assert.equal(await policy.isEnabled('tenant-a', 'gpt-5.6-sol'), true);
   assert.equal(await policy.isEnabled('tenant-a', 'gemini-3.1-pro-high'), false);
   assert.equal(await policy.isEnabled('tenant-a', 'deepseek'), true);
-  assert.equal(await policy.isEnabled('tenant-a', 'doubao-seed-2-0-pro-260215'), true);
+  assert.equal(await policy.isEnabled('tenant-a', 'doubao-seed-2-0-pro-260215'), false);
   assert.equal(await policy.isEnabled('tenant-a', 'gpt-5.4'), false);
 });
 
@@ -3123,7 +3123,7 @@ test('accepts the pinned Codex request scope and its models catalog query', asyn
   });
 });
 
-test('lists exactly the four managed chat models for Codex clients', async () => {
+test('excludes retired Doubao from Codex catalog and rejects stale enabled invocation', async () => {
   const managedRoutes: ModelGatewayRoute[] = [
     { ...route, id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', buttonLabel: 'GPT-5.6 Luna · 深度' },
     route,
@@ -3153,6 +3153,7 @@ test('lists exactly the four managed chat models for Codex clients', async () =>
   await consentStore.accept(managedPrincipal, consentInput);
   const server = createModelGatewayServer({
     routes: managedRoutes,
+    tenantModelRoutePolicy: { isEnabled: async () => true },
     authenticate: async () => managedPrincipal,
     consentStore,
     usageStore: new InMemoryUsageStore(limits),
@@ -3172,8 +3173,14 @@ test('lists exactly the four managed chat models for Codex clients', async () =>
     assert.equal(response.status, 200, JSON.stringify(catalog));
     assert.deepEqual(
       catalog.models.map(({ slug }) => slug),
-      ['gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek', 'doubao-seed-2-0-pro-260215']
+      ['gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek']
     );
+    const refused = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: 'POST', headers: { ...codexResponseHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'doubao-seed-2-0-pro-260215', stream: true, store: false, input: 'hi' }),
+    });
+    assert.equal(refused.status, 403);
+    assert.equal((await refused.json()).error.code, 'MODEL_ACCESS_DENIED');
   } finally {
     server.close();
     await once(server, 'close');
