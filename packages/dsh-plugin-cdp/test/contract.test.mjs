@@ -3,6 +3,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { createRequire } from 'node:module'
+import ToolRuntime, { validateJsonSchemaValue } from '../../../upstream/deepseek-harness/packages/core/tools/lib/index.js'
+import SystemPrompt from '../../../upstream/deepseek-harness/packages/core/system-prompt/lib/index.js'
+const nativeRequire = createRequire(new URL('../../../upstream/deepseek-harness/packages/core/tools/package.json', import.meta.url))
+const { Context } = nativeRequire('@deepseek-ai/cordis')
 import { fileURLToPath } from 'node:url'
 import {
   formatAccessibilitySnapshot,
@@ -330,4 +335,113 @@ test('makes CDP the first browser path and reserves Computer Use for an explicit
   assert.match(prompts[0].text, /only when the latest user request explicitly asks to read or operate a visible Chrome webpage/u)
   assert.match(prompts[0].text, /Never use them for attachments, image generation, native apps, or non-page work/u)
   assert.match(prompts[0].text, /only when the user explicitly inserts @电脑操控/u)
+})
+
+
+test('native registry exposes all CDP argument fields as closed JSON Schema and dispatches valid arguments', async () => {
+  const ctx = new Context()
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  const harness = settingsHarness(false)
+  const disposers = []
+  const previousFetch = globalThis.fetch
+  const previousWebSocket = globalThis.WebSocket
+  const commands = []
+  globalThis.fetch = async () => new Response(JSON.stringify([{
+    id: 'schema-page', type: 'page', title: 'Acceptance', url: 'https://example.com/',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/schema-page',
+  }]))
+  globalThis.WebSocket = class extends EventTarget {
+    static OPEN = 1
+    readyState = 1
+    constructor() { super(); queueMicrotask(() => this.dispatchEvent(new Event('open'))) }
+    send(payload) {
+      const command = JSON.parse(payload); commands.push(command)
+      queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', {
+        data: JSON.stringify({ id: command.id, result: {} }),
+      })))
+    }
+    close() { this.dispatchEvent(new Event('close')) }
+  }
+  try {
+    apply({
+      tools: ctx.tools,
+      subprocess: {
+        resolveExecutable: async command => `/fixture/${command}`,
+        spawn: () => ({ done: Promise.resolve({ exitCode: 0 }) }),
+      },
+      approval: { config: { policy: 'never' }, overrideOf: () => 'never' },
+      settings: harness.settings,
+      systemPrompt: { section: () => () => undefined },
+      userQuestions: { ask: async () => ({ answers: [{ selected: ['启用控制'] }] }) },
+      emateCapabilities: { register: () => () => undefined },
+      effect: callback => { const dispose = callback(); if (dispose) disposers.push(dispose) },
+    })
+    const cases = {
+      browser_control_access: [{ enabled: true }, ['enabled']],
+      browser_tabs: [{}, []],
+      browser_select_tab: [{ target_id: 'page-1' }, ['target_id']],
+      browser_snapshot: [{}, []],
+      browser_click: [{ index: 1 }, ['index']],
+      browser_type: [{ index: 1, text: 'acceptance', replace: true }, ['index', 'text']],
+      browser_press: [{ key: 'Enter' }, ['key']],
+      browser_navigate: [{ url: 'https://example.com/' }, ['url']],
+      browser_back: [{}, []], browser_forward: [{}, []], browser_reload: [{}, []],
+      browser_scroll: [{ direction: 'down', amount: 10 }, ['direction']],
+      browser_get_text: [{ selector: 'main' }, []],
+      browser_wait: [{ ms: 0 }, []],
+    }
+    const schemas = ctx.tools.schemas().filter(tool => tool.name.startsWith('browser_'))
+    assert.equal(schemas.length, 14)
+    for (const tool of schemas) {
+      const [args, required] = cases[tool.name]
+      const schema = tool.parameters
+      assert.equal(schema.type, 'object', tool.name)
+      assert.equal(schema.additionalProperties, false, tool.name)
+      assert.deepEqual(Object.keys(schema.properties).sort(), Object.keys(args).sort(), tool.name)
+      assert.deepEqual(schema.required ?? [], required, tool.name)
+      assert.deepEqual(validateJsonSchemaValue(schema, args, ''), [], tool.name)
+      assert.notEqual(validateJsonSchemaValue(schema, { ...args, unexpected: true }, '').length, 0, tool.name)
+      for (const key of required) {
+        const missing = { ...args }; delete missing[key]
+        assert.notEqual(validateJsonSchemaValue(schema, missing, '').length, 0, `${tool.name}.${key}`)
+      }
+    }
+    const press = schemas.find(tool => tool.name === 'browser_press').parameters
+    assert.notEqual(validateJsonSchemaValue(press, { key: 'unlisted-key' }, '').length, 0)
+    const scroll = schemas.find(tool => tool.name === 'browser_scroll').parameters
+    assert.notEqual(validateJsonSchemaValue(scroll, { direction: 'sideways' }, '').length, 0)
+    // Reproduce the old wire contract: its closed root rejects the URL and
+    // accepts {}, exactly the model-visible failure reported by the installed app.
+    const old = { type: 'object', additionalProperties: false, url: { type: 'string', required: true } }
+    assert.deepEqual(validateJsonSchemaValue(old, {}, ''), [])
+    assert.notEqual(validateJsonSchemaValue(old, { url: 'https://example.com/' }, '').length, 0)
+    // Dispatch through the native registry, not a direct execute fixture.
+    const result = await ctx.tools.execute({
+      name: 'browser_control_access', arguments: { enabled: true }, callId: 'cdp-schema-control',
+      agent: { id: 'cdp-schema-agent', session: {} }, signal: new AbortController().signal,
+    })
+    assert.equal(harness.get().allowControl, true)
+    assert.match(JSON.stringify(result), /Browser control is now enabled/)
+    const navigate = await ctx.tools.execute({
+      name: 'browser_navigate', arguments: cases.browser_navigate[0], callId: 'cdp-schema-navigate',
+      agent: { id: 'cdp-schema-agent', session: {} }, signal: new AbortController().signal,
+    })
+    assert.match(JSON.stringify(navigate), /Navigated Chrome to https:\/\/example.com\//)
+    assert.deepEqual(commands.map(({ method, params }) => ({ method, params })), [
+      { method: 'Page.navigate', params: { url: 'https://example.com/' } },
+    ])
+    const invalid = await ctx.tools.execute({
+      name: 'browser_navigate', arguments: { url: 'https://user:password@example.com/' }, callId: 'cdp-schema-reject',
+      agent: { id: 'cdp-schema-agent', session: {} }, signal: new AbortController().signal,
+    })
+    assert.equal(commands.length, 1, 'credential-bearing URL must not reach CDP')
+    assert.doesNotMatch(JSON.stringify(invalid), /Navigated Chrome to/)
+
+  } finally {
+    globalThis.fetch = previousFetch
+    globalThis.WebSocket = previousWebSocket
+    for (const dispose of disposers.reverse()) dispose()
+    await ctx.fiber.dispose()
+  }
 })
