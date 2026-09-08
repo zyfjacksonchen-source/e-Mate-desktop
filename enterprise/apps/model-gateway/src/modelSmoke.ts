@@ -286,8 +286,9 @@ async function smokeInference(
       max_output_tokens: Math.min(route.maxTokens, 256),
       ...(route.id === 'gpt-5.6-luna'
         ? { reasoning: { effort: 'high' } }
-        : route.id === 'gpt-5.6-sol' || route.id === 'gpt-6-astra'
-          ? { reasoning: { effort: 'medium' } }
+        : route.id === 'gpt-6-astra'
+          ? { reasoning: { effort: 'low' } }
+          : route.id === 'gpt-5.6-sol' ? { reasoning: { effort: 'medium' } }
           : {}),
     });
   const response = await fetchUpstream(

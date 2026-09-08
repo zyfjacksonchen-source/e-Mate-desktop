@@ -2521,7 +2521,7 @@ test('requires the default Luna route to support high reasoning', () => {
   );
 });
 
-test('Astra uses Responses medium and cannot enable priority through a client request', async () => {
+test('Astra uses Responses low and cannot enable priority through a client request', async () => {
   const astra: ModelGatewayRoute = { ...route, id: 'gpt-6-astra', upstreamModelId: 'gpt-6-astra', apiMode: 'responses' };
   await withGateway(async (baseUrl, requests) => {
     const response = await fetch(`${baseUrl}/v1/responses`, { method: 'POST', headers: responseHeaders(),
@@ -2532,7 +2532,7 @@ test('Astra uses Responses medium and cannot enable priority through a client re
     assert.equal(requests.length, 1);
     const body = await requests[0]!.json() as Record<string, unknown>;
     assert.equal(body.model, astra.id);
-    assert.deepEqual(body.reasoning, { effort: 'medium' });
+    assert.deepEqual(body.reasoning, { effort: 'low' });
     assert.equal('service_tier' in body, false);
   }, undefined, undefined, undefined, limits, astra, { isEnabled: async () => true });
 });

@@ -2411,9 +2411,9 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             ? 'high'
             : route.id === 'deepseek'
               ? 'max'
-              : ['gpt-5.6-sol', 'gpt-6-astra'].includes(route.id)
-                ? 'medium'
-                : undefined;
+              : route.id === 'gpt-6-astra'
+                ? 'low'
+                : route.id === 'gpt-5.6-sol' ? 'medium' : undefined;
         const remoteCompaction = isRemoteCompactionRequest(body);
         if (remoteCompaction && route.remoteCompactionV2 !== true) {
           throw new HttpError(403, 'REMOTE_COMPACTION_UNAVAILABLE', 'Remote compaction is not available');

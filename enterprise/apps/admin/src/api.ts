@@ -371,7 +371,7 @@ export async function testModelConnection(
       model: routeId,
       input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Reply with OK.' }] }],
       max_output_tokens: 32,
-      ...(routeId === 'gpt-6-astra' ? { reasoning: { effort: 'medium' } } : {}),
+      ...(routeId === 'gpt-6-astra' ? { reasoning: { effort: 'low' } } : {}),
       stream: true,
       store: false,
     }),

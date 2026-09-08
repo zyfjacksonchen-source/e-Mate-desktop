@@ -632,7 +632,7 @@ function policyFor(value: StoredSession, runtime: readonly RuntimeModel[]) {
     revision: Math.max(1, Date.parse(value.received_at)),
     allowed_model_ids: [...allowed],
     default_chat_model_id: chat,
-    default_chat_reasoning_effort: chat === 'gpt-5.6-luna' || chat === 'deepseek' ? 'max' : 'medium',
+    default_chat_reasoning_effort: chat === 'gpt-5.6-luna' || chat === 'deepseek' ? 'max' : chat === 'gpt-6-astra' ? 'low' : 'medium',
     image_primary_model_id: 'gpt-image-2-pro',
     issued_at: value.received_at,
     expires_at: value.session.expiresAt,

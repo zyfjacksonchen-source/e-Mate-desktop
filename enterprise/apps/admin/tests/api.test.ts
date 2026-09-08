@@ -578,3 +578,16 @@ test('model route key updates use the write-only key endpoint', async () => {
   assert.equal(call?.init?.method, 'PUT');
   assert.equal((JSON.parse(String(call?.init?.body)) as { apiKey: string }).apiKey, apiKey);
 });
+
+test('Astra connectivity sends enterprise low reasoning', async () => {
+  const session = { basePath: '/e-mate/model-api/', sessionToken: `header.${'m'.repeat(32)}.signature`,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(), allowedModelIds: ['gpt-6-astra'] };
+  let request: Record<string, unknown> | undefined;
+  await testModelConnection('gpt-6-astra', session, new AbortController().signal, { origin,
+    fetcher: async (_input, init) => {
+      if (!init?.body) return new Response(JSON.stringify({ schemaVersion: 1, models: [{ id: 'gpt-6-astra', capabilities: { imageGeneration: false } }] }), { headers: { 'content-type': 'application/json' } });
+      request = JSON.parse(String(init.body));
+      return new Response('data: {"type":"response.completed","response":{"id":"astra-test"}}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+    } });
+  assert.deepEqual(request?.reasoning, { effort: 'low' });
+});

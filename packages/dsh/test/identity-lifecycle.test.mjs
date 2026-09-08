@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { generateKeyPairSync } from 'node:crypto'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { stripTypeScriptTypes } from 'node:module'
@@ -83,6 +83,7 @@ async function loadModelPolicySource() {
     )
     .replace("from './target-runtime.js'", `from '${new URL('../src/profile/target-runtime.ts', import.meta.url).href}'`)
     .replace("from './request-size.js'", `from '${new URL('../src/profile/request-size.ts', import.meta.url).href}'`)
+    .replace('function decodeDurableModelPolicy(value, accountSubject, now)', 'export function decodeDurableModelPolicy(value, accountSubject, now)')
     .replace('function createService(ctx, table, projectionTable, quota)',
       'export function createService(ctx, table, projectionTable, quota)')
   const compiled = stripTypeScriptTypes(source, { mode: 'transform' })
@@ -787,14 +788,14 @@ test('client and enterprise identity image policies expose only gpt-image-2-pro 
   assert.equal('image_fallback_upstream_model_id' in identityPolicy, false)
 })
 
-test('Astra runtime policy requires medium and retains the existing default preference', async () => {
+test('Astra runtime policy requires low and retains the existing default preference', async () => {
   const { validateModelPolicy } = await loadModelPolicySource()
   const { policyFor } = await loadEnterpriseProviderSource()
   const remembered = JSON.parse(stored())
   remembered.session.modelGateway.allowedModelIds = ['gpt-6-astra', 'deepseek']
   const astra = policyFor(remembered, [{ id: 'gpt-6-astra' }])
   assert.equal(astra.default_chat_model_id, 'gpt-6-astra')
-  assert.equal(astra.default_chat_reasoning_effort, 'medium')
+  assert.equal(astra.default_chat_reasoning_effort, 'low')
   assert.equal(validateModelPolicy(astra, 'tenant-test:user-a', NOW).default_chat_model_id, 'gpt-6-astra')
   assert.throws(() => validateModelPolicy({ ...astra, default_chat_reasoning_effort: 'high' }, 'tenant-test:user-a', NOW))
   const mixed = policyFor(remembered, [{ id: 'gpt-6-astra' }, { id: 'deepseek' }])
@@ -1026,4 +1027,28 @@ test('identity credential generation fences a late runtime projection without pe
   } finally {
     Date.now = originalNow
   }
+})
+
+test('Astra managed effort migrates the old medium selection without hiding unknown values or changing other models', async () => {
+  const { managedReasoningEffort } = await loadModelPolicySource()
+  assert.equal(managedReasoningEffort('gpt-6-astra', 'medium'), 'low')
+  assert.equal(managedReasoningEffort('gpt-6-astra', undefined), 'low')
+  for (const effort of ['low', 'high', 'unknown']) assert.equal(managedReasoningEffort('gpt-6-astra', effort), effort)
+  assert.equal(managedReasoningEffort('gpt-5.6-sol', 'medium'), 'medium')
+  assert.equal(managedReasoningEffort('gpt-5.6-luna', 'max'), 'max')
+  assert.equal(managedReasoningEffort('deepseek', 'max'), 'max')
+  assert.equal(managedReasoningEffort('unknown', 'medium'), 'medium')
+})
+
+test('previous Astra durable default authenticates original bytes before normalizing low', async () => {
+  const { decodeDurableModelPolicy } = await loadModelPolicySource()
+  const { policyFor } = await loadEnterpriseProviderSource()
+  const remembered = JSON.parse(stored())
+  remembered.session.modelGateway.allowedModelIds = ['gpt-6-astra', 'deepseek']
+  const current = policyFor(remembered, [{ id: 'gpt-6-astra' }])
+  const { policy_sha256: ignored, ...old } = { ...current, default_chat_reasoning_effort: 'medium' }
+  const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]` : value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical(value[key])).join(',')}}` : JSON.stringify(value)
+  const receipt = { ...old, policy_sha256: createHash('sha256').update(canonical(old)).digest('hex') }
+  assert.equal(decodeDurableModelPolicy(receipt, 'tenant-test:user-a', NOW).default_chat_reasoning_effort, 'low')
+  assert.throws(() => decodeDurableModelPolicy({ ...receipt, policy_sha256: '0'.repeat(64) }, 'tenant-test:user-a', NOW), /invalid/)
 })

@@ -11,7 +11,7 @@ export const MODEL_POLICY_CHANNEL = '/emate.modelPolicy'
 const CHAT_MODELS = new Map([
   ['gpt-5.6-luna', { reasoning_effort: 'max' }],
   ['gpt-5.6-sol', { reasoning_effort: 'medium' }],
-  ['gpt-6-astra', { reasoning_effort: 'medium' }],
+  ['gpt-6-astra', { reasoning_effort: 'low' }],
   ['deepseek', { reasoning_effort: 'max' }],
 ])
 const IMAGE_MODELS = new Set(['gpt-image-2-pro'])
@@ -403,10 +403,14 @@ function decodeDurableModelPolicy(value, accountSubject, now) {
     return validateModelPolicy({
       ...current,
       allowed_model_ids: current.allowed_model_ids.filter(model => MANAGED_MODELS.has(model)),
+      ...(current.default_chat_reasoning_effort === 'medium' ? { default_chat_reasoning_effort: managedReasoningEffort(current.default_chat_model_id, current.default_chat_reasoning_effort) } : {}),
     }, accountSubject, now)
   }
-  const policy = validateModelPolicy(stored, accountSubject, now)
-  if (policy.policy_sha256 !== expected) throw new Error('e-Mate stored model policy is invalid')
+  if (sha256(canonicalJson(stored)) !== expected) throw new Error('e-Mate stored model policy is invalid')
+  const migratedEffort = stored.default_chat_reasoning_effort === 'medium'
+    ? managedReasoningEffort(stored.default_chat_model_id, stored.default_chat_reasoning_effort) : stored.default_chat_reasoning_effort
+  const policy = validateModelPolicy({ ...stored, default_chat_reasoning_effort: migratedEffort }, accountSubject, now)
+  if (migratedEffort === stored.default_chat_reasoning_effort && policy.policy_sha256 !== expected) throw new Error('e-Mate stored model policy is invalid')
   return policy
 }
 
@@ -454,7 +458,7 @@ function modelUnavailable(request, provider, model, message = `Model "${model}" 
 const RUNTIME_REASONING = new Map([
   ['gpt-5.6-luna', { max: 'high' }],
   ['gpt-5.6-sol', { medium: 'medium' }],
-  ['gpt-6-astra', { medium: 'medium' }],
+  ['gpt-6-astra', { low: 'low' }],
   ['deepseek', { max: 'max' }],
 ])
 const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
@@ -959,6 +963,13 @@ function createService(ctx, table, projectionTable, quota) {
   }
 }
 
+// Restore the previous managed Astra selection before the native adapter validates it.
+// Other explicit values still pass through native capability validation unchanged.
+export function managedReasoningEffort(model, effort) {
+  return policyModelId(model) === 'gpt-6-astra' && (effort === undefined || effort === 'medium')
+    ? CHAT_MODELS.get('gpt-6-astra').reasoning_effort : effort
+}
+
 function installApiPolicy(ctx, service) {
   const originalSessionModels = ctx.apiProxy.sessions.models
   const originalSelectModel = ctx.apiProxy.sessions.selectModel
@@ -976,6 +987,8 @@ function installApiPolicy(ctx, service) {
           ok: true,
           value: {
             ...response.result.value,
+            current: { ...response.result.value.current,
+              reasoningEffort: managedReasoningEffort(response.result.value.current.model, response.result.value.current.reasoningEffort) },
             routable: response.result.value.routable && currentAllowed,
             groups: filterGroups(response.result.value.groups, policy),
           },
@@ -1010,7 +1023,7 @@ function installApiPolicy(ctx, service) {
       ...request,
       payload: {
         ...request.payload,
-        reasoningEffort: request.payload.reasoningEffort
+        reasoningEffort: managedReasoningEffort(request.payload.model, request.payload.reasoningEffort)
           ?? CHAT_MODELS.get(policyModelId(request.payload.model))?.reasoning_effort,
       },
     })
@@ -1056,7 +1069,7 @@ export async function apply(ctx, config = {}) {
     revision: z.number().int().min(1),
     allowed_model_ids: z.array(z.enum([...MANAGED_MODELS])).min(1).max(MANAGED_MODELS.size),
     default_chat_model_id: z.enum([...CHAT_MODELS.keys()]),
-    default_chat_reasoning_effort: z.enum(['max', 'medium']),
+    default_chat_reasoning_effort: z.enum(['max', 'medium', 'low']),
     image_primary_model_id: z.literal('gpt-image-2-pro'),
     issued_at: z.iso.datetime(),
     expires_at: z.iso.datetime(),
@@ -1169,6 +1182,7 @@ export async function apply(ctx, config = {}) {
   })
   ctx.on('llm/stream', (options, next) => (async function* () {
     if (!quota.isArmed(options)) await service.assertModel(options.model)
+    options.reasoningEffort = managedReasoningEffort(options.model, options.reasoningEffort)
     const oversized = requestSizeFailure(options)
     if (oversized) {
       quota.disarmRequest(options)

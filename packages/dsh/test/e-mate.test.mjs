@@ -3903,6 +3903,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
   let credentialWriteRejected = false
   let projectedGptKey = 'production-key-redacted-for-test-123'
   let projectedGptBaseUrl = 'http://provider.example:8080/v1'
+  let astraAllowed = false
   let policyDefaultModel = 'gpt-5.6-luna'
   let deepseekChatAllowed = true
   let searchGrantStatus = 'granted'
@@ -3933,6 +3934,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     revision: 7,
     allowed_model_ids: [
       'gpt-5.6-luna', 'gpt-5.6-sol',
+      ...(astraAllowed ? ['gpt-6-astra'] : []),
       ...(deepseekChatAllowed ? ['deepseek'] : []),
       'gpt-image-2-pro',
     ],
@@ -4134,6 +4136,12 @@ test('enterprise model switch keeps native history and survives a cached-policy 
                 contextWindow: 1_050_000,
                 maxTokens: 128_000,
               },
+              ...(astraAllowed ? [{
+                id: 'gpt-6-astra', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF,
+                api: 'openai-responses', upstreamModelId: 'gpt-6-astra',
+                upstreamBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
+                label: 'Astra', input: ['text', 'image'], contextWindow: 1_050_000, maxTokens: 128_000,
+              }] : []),
               ...(deepseekChatAllowed ? [{
                 id: 'deepseek',
                 provider: 'e-mate-enterprise-deepseek',
@@ -4593,6 +4601,27 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
     )
     providerAvailable = true
+    astraAllowed = true
+    await modelPolicy.refresh({ force: true })
+    // Simulate a restored native session whose persisted selection predates this policy.
+    session.current = { provider: 'e-mate-enterprise', model: 'gpt-6-astra', reasoningEffort: 'medium' }
+    const astraHistory = structuredClone(session.messages)
+    const restored = await apiProxy.sessions.models({ rpcId: 'astra-restored', payload: { sessionId: 'session-1' } })
+    assert.equal(restored.result.value.current.reasoningEffort, 'low')
+    assert.deepEqual(llmSettings.providers['e-mate-enterprise'].models.find(model => model.id === 'gpt-6-astra').reasoningEfforts, { low: 'low' })
+    const restoredOptions = { ...session.current, sessionId: 'astra-restored-stream' }
+    for await (const _chunk of streamPolicy(restoredOptions, () => (async function* () {
+      assert.equal(restoredOptions.reasoningEffort, 'low', 'effective options reach the native adapter after migration')
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    })())) {}
+    const selectedAstra = await apiProxy.sessions.selectModel({ rpcId: 'astra-select', payload: { ...session.current, sessionId: 'session-1' } })
+    assert.equal(selectedAstra.result.value.selected.reasoningEffort, 'low')
+    assert.deepEqual(session.messages, astraHistory)
+    records.set('active', storedLegacyPolicy({ ...policy(), default_chat_model_id: 'gpt-6-astra', default_chat_reasoning_effort: 'medium', image_fallback_upstream_model_id: 'gpt-image-2', allowed_model_ids: [...policy().allowed_model_ids, 'gpt-image-2'] }))
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
+    openedDomains = 0
+    await applyModelPolicy(modelPolicyContext, modelPolicyConfig)
+    assert.equal(records.get('active').default_chat_reasoning_effort, 'low', 'hashed previous Astra default policy migrates on cold restore')
     accountSubject = 'account:other-207'
     assert.deepEqual(
       await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
