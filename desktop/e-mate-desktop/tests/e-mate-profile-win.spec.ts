@@ -18,7 +18,9 @@ afterEach(() => {
 })
 
 describe.runIf(process.platform === 'win32')('Windows managed Profile materialization', () => {
-  // Physical Profile installation and repair exceed Vitest's unit-test default on a cold Windows runner.
+  // This covers five physical operations, including cold installation and a
+  // receipt-free full validation (~92s combined on the native Windows runner).
+  // The integration-test deadline is not a startup or repair latency budget.
   it('uses physical directories and repairs a missing declared main without scanning unrelated nested files', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-win-'))
     roots.push(home)
@@ -66,5 +68,5 @@ describe.runIf(process.platform === 'win32')('Windows managed Profile materializ
     rmSync(receiptPath)
     installEmateDesktopProfile(home)
     expect(existsSync(unrelatedNestedExtra)).toBe(false)
-  }, 30_000)
+  }, 120_000)
 })
