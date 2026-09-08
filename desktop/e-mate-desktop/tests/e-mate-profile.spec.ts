@@ -213,9 +213,9 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       compaction_module_sha256?: string
     }
     expect(runtimeBinding.version).toBe(EMATE_DESKTOP_PROFILE_VERSION)
-    expect(runtimeBinding.schedule_module).toContain('@deepseek-ai/dsh-schedule')
+    expect(runtimeBinding.schedule_module).toContain(join('@deepseek-ai', 'dsh-schedule'))
     expect(runtimeBinding.schedule_module_sha256).toMatch(/^[0-9a-f]{64}$/u)
-    expect(runtimeBinding.compaction_module).toContain('@deepseek-ai/dsh-compaction')
+    expect(runtimeBinding.compaction_module).toContain(join('@deepseek-ai', 'dsh-compaction'))
     expect(runtimeBinding.compaction_module_sha256).toMatch(/^[0-9a-f]{64}$/u)
     expect(readFileSync(join(home, 'settings.yaml'), 'utf8')).toBe(
       'ui-theme:\n  preference: dark\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n',
@@ -581,7 +581,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     mkdirSync(outside)
     writeFileSync(join(outside, 'keep.txt'), 'must remain')
     rmSync(stale, { recursive: true, force: true })
-    symlinkSync(outside, stale, 'dir')
+    symlinkSync(outside, stale, process.platform === 'win32' ? 'junction' : 'dir')
     const linkedDeferred: string[] = []
     installEmateDesktopProfile(home, path => { linkedDeferred.push(path) })
     expect(linkedDeferred).toContain(stale)
