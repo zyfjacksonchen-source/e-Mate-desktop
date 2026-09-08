@@ -16,12 +16,11 @@ vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
   ImageGallery: ({ images }: { images: unknown[] }) => <div data-target-image-gallery="">{images.length} images</div>,
 }))
 
+const hostSource = readFileSync(resolve('src/index.ts'), 'utf8')
 const source = readFileSync(resolve('src/client/index.ts'), 'utf8')
 const gallery = readFileSync(resolve('src/client/image-gallery.tsx'), 'utf8')
 const galleryCss = readFileSync(resolve('src/client/image-gallery.module.css'), 'utf8')
 const chatCss = readFileSync(resolve('src/client/chat-chrome.module.css'), 'utf8')
-const activityFold = readFileSync(resolve('src/client/activity-fold.tsx'), 'utf8')
-const activityFoldCss = readFileSync(resolve('src/client/activity-fold.module.css'), 'utf8')
 const thinkingCss = readFileSync(resolve('src/client/thinking-status.module.css'), 'utf8')
 const homeCss = readFileSync(resolve('src/client/home.module.css'), 'utf8')
 const targetRoot = resolve('../../../../../upstream/deepseek-harness/packages/client')
@@ -38,6 +37,8 @@ describe('target conversation fidelity contract', () => {
   it('leaves Message, Retry, Turn status and Tool disclosure to the pinned target', () => {
     expect(source).not.toMatch(/activity-header|retry-attempts|long-message-disclosure|e-mate-message-disclosure/u)
     expect(source).not.toContain("key: 'model-retry'")
+    expect(source).not.toMatch(/registerActivityFold|message-mode-settings/u)
+    expect(hostSource).not.toContain('messageFlowMode')
     expect(targetMessage).toContain('export const RetryNodeView')
     expect(targetMessage).toContain('<ModelRetryItem node={data.current}')
     expect(targetMessage).toContain('function UserStyleBubble')
@@ -48,7 +49,7 @@ describe('target conversation fidelity contract', () => {
     expect(targetBundlePatch).toContain('id: ui-deliverables')
   })
 
-  it('keeps target renderers and durable events while folding raw process rows in the Shell projection', () => {
+  it('keeps target renderers and durable events without an alternate process projection', () => {
     expect(chatCss).not.toMatch(/data-chat-flow-kind='(?:steering|model-retry|turn-error|command)'/u)
     expect(chatCss).not.toMatch(/data-turn-tail|data-emate-activity/u)
     expect(chatCss).toContain('--dsw-font-markdown-base: 14px/22px')
@@ -62,7 +63,6 @@ describe('target conversation fidelity contract', () => {
     expect(chatCss).toContain("[data-chat-flow-kind='assistant-step'] [data-align='start']")
     expect(chatCss).toContain('[data-produced-files-row] > button[title]')
     expect(chatCss).toContain('Beautiful UI Tool Chips icon geometry (MIT)')
-    expect(activityFold).toContain("'assistant-step' | 'tool-call' | 'context'")
     expect(chatCss).toContain("[data-sample='bash'] + div > button")
     expect(chatCss).toMatch(/\[data-slot='conversation'\] \[aria-expanded\]:focus-visible[^}]*outline: none;[^}]*box-shadow: none;/u)
     expect(homeCss).toContain('--dsw-static-deepseek-500: var(--emate-color-brand);')
@@ -71,7 +71,7 @@ describe('target conversation fidelity contract', () => {
     expect(source).toMatch(/id: 'stats',[\s\S]*?priority: -1/u)
   })
 
-  it('keeps native streaming prose and GenUI together while process detail has one fold owner', async () => {
+  it('keeps native streaming prose and GenUI together with native reasoning disclosure', async () => {
     const text = '原生流式正文\n\n```dsh-ui\n{"title":"卡片","items":[{"type":"text","content":"GenUI 内容"}]}\n```'
     const view = render(
       <div data-chat-anchor-key="14:assistant-step1:0" data-chat-flow-kind="assistant-step">
@@ -97,12 +97,6 @@ describe('target conversation fidelity contract', () => {
     } finally {
       dispose()
     }
-    expect(activityFold).toContain("key: kind")
-    expect(activityFold).toContain('priority: -1')
-    expect(activityFold).toContain("return renderNative(ctx, kind, props)")
-    expect(activityFold).toContain("kind === 'text'")
-    expect(activityFold).toContain("block.kind === 'reasoning'")
-    expect(activityFoldCss).not.toContain("[data-emate-process-collapsed] :global([data-variant='think'])")
     expect(targetAssistant).toContain('streaming={streaming}')
     expect(targetAssistant).toContain('<ReasoningRow')
     expect(genuiClient).toContain("ctx.slots.inject('tool.call.toolview'")

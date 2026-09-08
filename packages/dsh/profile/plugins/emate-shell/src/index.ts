@@ -1,13 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
-import z from '@deepseek-ai/schemastery'
 
 export const inject = ['webServer']
-
-const MESSAGE_FLOW_SETTINGS_NAMESPACE = settingsNamespace('e-mate')
-const MessageFlowSettingsSchema = z.object({
-  messageFlowMode: z.transform(z.any(), value => value === 'detailed' ? 'detailed' : 'simple').default('simple'),
-})
 
 const assets = new Map([
   ['/assets/e-mate/logo.png', [readFileSync(new URL('./assets/emate-logo.png', import.meta.url)), 'image/png']],
@@ -29,9 +22,6 @@ const manifest = Buffer.from(`${JSON.stringify({
 })}\n`)
 
 export function apply(ctx) {
-  ctx.inject(['settings'], settingsCtx => {
-    settingsCtx.settings.register(MESSAGE_FLOW_SETTINGS_NAMESPACE, MessageFlowSettingsSchema)
-  })
   for (const [path, [body, contentType]] of assets) {
     ctx.effect(() => ctx.webServer.register({
       kind: 'exact',
