@@ -254,20 +254,21 @@ function managedFileCurrent(
   }
   const from = join(source, ...parts)
   const to = join(target, ...parts)
+  return managedFileContentCurrent(from, to, overrides.get(entry))
+}
+
+function managedFileContentCurrent(from: string, to: string, override: string | undefined): boolean {
   const targetMetadata = lstatSync(to)
   if (!targetMetadata.isFile() || targetMetadata.isSymbolicLink()) return false
-  const override = overrides.get(entry)
   if (override !== undefined) return sha256Bytes(override) === sha256(to)
   const sourceMetadata = statSync(from)
   return sourceMetadata.isFile() && sourceMetadata.size === targetMetadata.size && sha256(from) === sha256(to)
 }
 
 function materializedDirectoryCurrent(
-  sourceRoot: string,
-  targetRoot: string,
+  source: string,
+  target: string,
   overrides: ReadonlyMap<string, string>,
-  source = sourceRoot,
-  target = targetRoot,
   prefix = '',
 ): boolean {
   if (!sameEntries(source, target, prefix === '')) return false
@@ -281,9 +282,11 @@ function materializedDirectoryCurrent(
       const local = prefix === '' ? entry.name : `${prefix}/${entry.name}`
       if (entry.isDirectory()) {
         return targetMetadata.isDirectory()
-          && materializedDirectoryCurrent(sourceRoot, targetRoot, overrides, from, to, local)
+          && materializedDirectoryCurrent(from, to, overrides, local)
       }
-      return entry.isFile() && managedFileCurrent(sourceRoot, targetRoot, local, overrides)
+      // The recursive walk has already checked every parent as a real directory.
+      // Critical-entry checks outside this walk still validate their entire ancestry.
+      return entry.isFile() && managedFileContentCurrent(from, to, overrides.get(local))
     })
 }
 
