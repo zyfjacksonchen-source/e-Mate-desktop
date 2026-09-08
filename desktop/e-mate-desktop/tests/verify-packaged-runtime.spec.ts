@@ -220,12 +220,22 @@ describe('packaged desktop runtime verification', () => {
     expect(run.mock.calls.map(([, args]) => args.at(-1))).toEqual(['darwin-arm64', 'darwin-x64'])
     for (const [, args] of run.mock.calls) {
       expect(args).toContain('--verify-root')
+      expect(args).toContain('--packaged')
       expect(args).toContain(join(resolvePackagedResourcesRoot(runtimeContext), 'calc-runtime'))
       expect(args).not.toContain('--archive-dir')
     }
     const fail = vi.fn<PtyProbeRunner>(() => ({ status: 1, stderr: 'Calc cache contents changed' }))
     expect(() => verifyPackagedCalc(runtimeContext, fail)).toThrow('Calc cache contents changed')
     expect(fail).toHaveBeenCalledOnce()
+  })
+
+  it('uses packaged Calc inventory semantics for the Windows Builder payload', () => {
+    const run = vi.fn<PtyProbeRunner>(() => ({ status: 0, stderr: '' }))
+    verifyPackagedCalc(context('/build', 'win32', 1), run)
+    expect(run).toHaveBeenCalledOnce()
+    expect(run.mock.calls[0]![1]).toContain('--packaged')
+    expect(run.mock.calls[0]![1].at(-1)).toBe('win32-x64')
+    expect(run.mock.calls[0]![1]).not.toContain('--archive-dir')
   })
 
   it.each([1, 3])('defers macOS architecture %s until the final universal app', arch => {
@@ -517,7 +527,7 @@ it.each([['darwin', 1, 'x64'], ['darwin', 3, 'arm64'], ['win32', 1, 'x64']] as c
       ? { status: 0, stdout: 'lark-cli 0.0.0' } as never
       : runner(command, args, options))).toThrow('version mismatch')
     expect(calls.filter(call => call[1]?.endsWith('install.js'))).toHaveLength(3)
-    expect(calls[0]?.[0]).toContain(platform === 'win32' ? '.exe' : '.app/Contents/MacOS/')
+    expect((calls[0]?.[0] ?? '').split('\\').join('/')).toContain(platform === 'win32' ? '.exe' : '.app/Contents/MacOS/')
     expect(() => preparePackagedFeishu(packaged, () => ({ status: 0, stdout: 'darwin:wrong' }) as never)).toThrow('target mismatch')
     if (platform === 'darwin') {
       calls.length = 0

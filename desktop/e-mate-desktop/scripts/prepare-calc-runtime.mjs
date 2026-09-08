@@ -72,6 +72,32 @@ export function verifyInventory(entries, expected) {
   }
 }
 
+/** Builder copyDir retains files and links, creating only their parent directories. */
+export function verifyReceiptInventory(current, expected, { allowPrunedEmptyDirectories = false } = {}) {
+  if (!allowPrunedEmptyDirectories) {
+    if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('Calc cache contents changed')
+    return
+  }
+  const expectedByPath = new Map(expected.map(item => [item.path, item]))
+  const currentByPath = new Map(current.map(item => [item.path, item]))
+  const nonEmptyDirectories = new Set()
+  for (const item of expected) {
+    if (item.kind === 'directory') continue
+    let slash = item.path.lastIndexOf('/')
+    while (slash >= 0) {
+      nonEmptyDirectories.add(item.path.slice(0, slash))
+      slash = item.path.lastIndexOf('/', slash - 1)
+    }
+  }
+  for (const item of current) {
+    if (JSON.stringify(item) !== JSON.stringify(expectedByPath.get(item.path))) throw new Error('Calc cache contents changed')
+  }
+  for (const item of expected) {
+    if (currentByPath.has(item.path)) continue
+    if (item.kind !== 'directory' || nonEmptyDirectories.has(item.path)) throw new Error('Calc cache contents changed')
+  }
+}
+
 export async function prepareTarget(target, archiveDirectory, outputRoot) {
   const expected = manifest.targets[target]
   if (!expected || !target.startsWith(`${process.platform}-`) || (process.platform !== 'darwin' && target !== 'win32-x64')) throw new Error(`Native Calc extraction is not verified for ${target}`)
@@ -122,7 +148,7 @@ export async function prepareTarget(target, archiveDirectory, outputRoot) {
   }
 }
 
-export async function verifyPreparedTarget(target, outputRoot) {
+export async function verifyPreparedTarget(target, outputRoot, { packaged = false } = {}) {
   const expected = manifest.targets[target]
   if (!expected) throw new Error(`Calc target has no verified manifest: ${target}`)
   const destination = join(outputRoot, target)
@@ -130,7 +156,7 @@ export async function verifyPreparedTarget(target, outputRoot) {
   if (receipt.schema !== 1 || receipt.target !== target || receipt.version !== manifest.version || receipt.archiveSha256 !== expected.archive.sha256) throw new Error('Calc cache archive identity mismatch')
   const current = await inventory(join(destination, expected.executable.split('/')[0]))
   verifyInventory(current, expected)
-  if (JSON.stringify(current) !== JSON.stringify(receipt.entries)) throw new Error('Calc cache contents changed')
+  verifyReceiptInventory(current, receipt.entries, { allowPrunedEmptyDirectories: packaged })
   return receipt
 }
 
@@ -161,10 +187,10 @@ async function prepareFonts(outputRoot) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { 'archive-dir': { type: 'string' }, target: { type: 'string' }, 'verify-root': { type: 'string' } } })
+  const { values } = parseArgs({ options: { 'archive-dir': { type: 'string' }, target: { type: 'string' }, 'verify-root': { type: 'string' }, packaged: { type: 'boolean' } } })
   const targets = values.target ? [values.target] : process.platform === 'darwin' ? ['darwin-arm64', 'darwin-x64'] : [`${process.platform}-${process.arch}`]
   for (const target of targets) {
-    const receipt = values['verify-root'] ? await verifyPreparedTarget(target, resolve(values['verify-root']))
+    const receipt = values['verify-root'] ? await verifyPreparedTarget(target, resolve(values['verify-root']), { packaged: values.packaged })
       : await prepareTarget(target, resolve(values['archive-dir'] ?? join(packageRoot, 'build/calc-downloads')), join(packageRoot, 'build/calc-runtime'))
     process.stdout.write(`Calc ${receipt.target}: ${receipt.entries.length} verified entries\n`)
   }
