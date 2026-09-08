@@ -50,8 +50,13 @@
   font-size: 12px;
 }
 
+.root .expert { width: auto; min-height: 32px; border: 1px solid transparent; border-radius: 8px; color: var(--emate-color-muted); background: transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 12px; white-space: nowrap; }
+.expert i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .4; }
+.root .expert[aria-checked='true'] { color: var(--dsw-alias-interactive-primary); background: var(--dsw-alias-bg-layer-2); }
+.expert[aria-checked='true'] i { opacity: 1; }
+
 @media (max-width: 520px) {
-  .root button span:not([aria-hidden]) { display: none; }
+  .root button:not([data-emate-expert-mode]) span:not([aria-hidden]) { display: none; }
 }
 
 .xin { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--dsw-alias-border-l1); }

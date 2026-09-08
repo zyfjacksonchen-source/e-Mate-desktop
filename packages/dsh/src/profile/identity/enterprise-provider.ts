@@ -658,6 +658,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   let initialized = false
   let loading: Promise<StoredSession | undefined> | undefined
   let refreshing: Promise<StoredSession> | undefined
+  let checkingConsent: { revision: number; token: string; promise: Promise<ConsentStatus> } | undefined
   let leaseRevision = 0
   let credentialMutation: Promise<void> = Promise.resolve()
   let loggingOut: Promise<{ remote_revocation: 'revoked'; receipt_id: string } | { remote_revocation: 'unknown' }> | undefined
@@ -851,7 +852,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     return modelCall(value, path, init, label)
   }
 
-  const liveConsent = async (value: StoredSession) => {
+  const requestConsent = async (value: StoredSession) => {
     const expectedRevision = leaseRevision
     try {
       const status = consentStatus(await modelCall(value, '/v1/consents/current', { method: 'GET' }, 'consent status'))
@@ -868,6 +869,18 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       if (value.consent?.policy.contentHash === agreementBundleSha256) return value.consent
       throw error
     }
+  }
+
+  // Gate, account controls and settings can bootstrap together. Share only the
+  // in-flight read; every later check still validates the live policy.
+  const liveConsent = (value: StoredSession) => {
+    const token = value.session.modelGateway.sessionToken
+    if (checkingConsent?.revision === leaseRevision && checkingConsent.token === token) return checkingConsent.promise
+    const pending = { revision: leaseRevision, token, promise: requestConsent(value) }
+    checkingConsent = pending
+    const clearPending = () => { if (checkingConsent === pending) checkingConsent = undefined }
+    void pending.promise.then(clearPending, clearPending)
+    return pending.promise
   }
 
   const modelRuntimePolicy = async () => {

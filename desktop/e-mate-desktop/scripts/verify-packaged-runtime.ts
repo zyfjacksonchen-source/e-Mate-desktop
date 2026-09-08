@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { listPackage } from '@electron/asar'
@@ -421,10 +421,41 @@ export function verifyPackagedRuntime(
  */
 export async function afterPack(context: PackagedRuntimeContext): Promise<void> {
   verifyPackagedRuntime(context)
+  verifyPackagedVision(context)
   preservePackagedCalcDirectories(context)
   preservePackagedCalcMetadata(context)
   verifyPackagedCalc(context)
   verifyPackagedNodePty(context)
+}
+
+/** Reject incomplete offline visual dependencies in the actual unpacked bundle. */
+export function verifyPackagedVision(context: PackagedRuntimeContext): void {
+  const targets = context.electronPlatformName === 'darwin' ? ['darwin-arm64', 'darwin-x64']
+    : context.electronPlatformName === 'win32' ? ['win32-x64'] : []
+  if (targets.length === 0) return
+  const root = join(resolvePackagedUnpackedRoot(context), 'build/e-mate-profile/bundles/vision-toolkit/runtime')
+  const requirements = readFileSync(join(root, 'requirements.lock'), 'utf8').trim().split('\n')
+  for (const target of targets) {
+    const directory = join(root, 'wheels', target)
+    const files = readdirSync(directory)
+    if (files.length !== 3) throw new Error(`packaged Vision wheel closure is incomplete: ${target}`)
+    for (const name of ['pillow', 'numpy', 'vtracer']) {
+      const matches = files.filter(file => file.startsWith(`${name}-`) && file.endsWith('.whl'))
+      if (matches.length !== 1) throw new Error(`packaged Vision wheel is missing or duplicated: ${target}/${name}`)
+      const suffix = target === 'darwin-arm64' ? '_arm64.whl'
+        : target === 'darwin-x64' ? '_x86_64.whl' : '-win_amd64.whl'
+      if (!matches[0]!.includes('-cp312-cp312-') || !matches[0]!.endsWith(suffix)) {
+        throw new Error(`packaged Vision wheel target mismatch: ${target}/${name}`)
+      }
+      const path = join(directory, matches[0]!)
+      if (!lstatSync(path).isFile()) throw new Error(`packaged Vision wheel is not a regular file: ${path}`)
+      const digest = createHash('sha256').update(readFileSync(path)).digest('hex')
+      const lock = requirements.find(line => line.startsWith(`${name}==`))
+      if (!lock?.split(/\s+/u).includes(`--hash=sha256:${digest}`)) {
+        throw new Error(`packaged Vision wheel hash mismatch: ${target}/${name}`)
+      }
+    }
+  }
 }
 
 /** Preserve original empty directories omitted by Electron Builder's resource copier. */

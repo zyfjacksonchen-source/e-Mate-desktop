@@ -17,6 +17,7 @@ import {
   resolvePackagedUnpackedRoot,
   verifyPackagedNodePty,
   verifyPackagedCalc,
+  verifyPackagedVision,
   preservePackagedCalcDirectories,
   preserveCalcMetadataFile,
   preservePackagedCalcMetadata,
@@ -28,6 +29,28 @@ import {
   type PtyProbeRunner,
 } from '../scripts/verify-packaged-runtime.ts'
 import { FORBIDDEN_MACOS_UNIVERSAL_ENTRIES } from '../scripts/mac-universal.ts'
+
+it('rejects missing, damaged and incomplete universal Vision wheel closures in packaged bytes', () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'emate-vision-package-'))
+  const packaged = context(temporary, 'darwin', 4)
+  const root = join(resolvePackagedUnpackedRoot(packaged), 'build/e-mate-profile/bundles/vision-toolkit/runtime')
+  try {
+    mkdirSync(root, { recursive: true })
+    const names = ['pillow', 'numpy', 'vtracer']
+    writeFileSync(join(root, 'requirements.lock'), names.map(name =>
+      `${name}==1.0 --hash=sha256:${createHash('sha256').update(name).digest('hex')}`).join('\n'))
+    expect(() => verifyPackagedVision(packaged)).toThrow()
+    for (const target of ['darwin-arm64', 'darwin-x64']) {
+      mkdirSync(join(root, 'wheels', target), { recursive: true })
+      const platform = target === 'darwin-arm64' ? 'macosx_11_0_arm64' : 'macosx_10_13_x86_64'
+      for (const name of names) writeFileSync(join(root, 'wheels', target, `${name}-1.0-cp312-cp312-${platform}.whl`), name)
+      if (target === 'darwin-arm64') expect(() => verifyPackagedVision(packaged)).toThrow()
+    }
+    expect(() => verifyPackagedVision(packaged)).not.toThrow()
+    writeFileSync(join(root, 'wheels/darwin-x64/pillow-1.0-cp312-cp312-macosx_10_13_x86_64.whl'), 'damaged')
+    expect(() => verifyPackagedVision(packaged)).toThrow(/hash mismatch/u)
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
+})
 
 function context(
   appOutDir: string,

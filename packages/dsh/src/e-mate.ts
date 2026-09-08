@@ -410,7 +410,7 @@ function profileCheck(paths) {
       && byId.get('emate-schedule-import')?.name === './plugins/schedule-import.js'
       && byId.get('emate-legacy-migration')?.name === './plugins/legacy-migration.js'
       && byId.get('emate-agent-operations')?.name === './plugins/agent-operations.js'
-      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify(['systemPrompt'])
+      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify(['systemPrompt', 'connection', 'sessions'])
       && !byId.has('emate-office-ocr')
       && !byId.has('emate-browser-computer-use')
       && !byId.has('emate-memory')

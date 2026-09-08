@@ -21,6 +21,45 @@ interface MentionsProps {
 
 export const COMPOSER_PLACEHOLDER = '给小芯发送消息，支持粘贴图片或文件'
 
+interface ExpertModeProps {
+  sessionId: string
+  request: (endpoint: 'get' | 'set', active: boolean | undefined, signal: AbortSignal) => Promise<{ active: boolean }>
+}
+
+export function ComposerExpertMode({ sessionId, request }: ExpertModeProps) {
+  const [active, setActive] = useState(false)
+  const [busy, setBusy] = useState(true)
+  const [error, setError] = useState('')
+  const current = useRef<AbortController | null>(null)
+  const invoke = useRef(request)
+  invoke.current = request
+  const run = (endpoint: 'get' | 'set', value?: boolean) => {
+    current.current?.abort()
+    const controller = new AbortController()
+    current.current = controller
+    setBusy(true); setError('')
+    void invoke.current(endpoint, value, controller.signal).then(result => {
+      if (!controller.signal.aborted) setActive(result.active)
+    }).catch(reason => {
+      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '专家模式暂不可用。')
+    }).finally(() => { if (!controller.signal.aborted) setBusy(false) })
+  }
+  useLayoutEffect(() => {
+    setActive(false)
+    run('get')
+    return () => { current.current?.abort() }
+  }, [sessionId])
+  return <div className={css.root}>
+    <button type="button" role="switch" aria-checked={active} aria-label="专家模式"
+      data-emate-expert-mode="" className={css.expert} disabled={busy}
+      title={active ? '已开启：本会话使用企业知识库，点击关闭' : '开启后，本会话使用企业知识库'}
+      onClick={() => { run('set', !active) }}>
+      <i aria-hidden="true" /><span>专家模式</span>
+    </button>
+    {error && <span className={css.error} role="alert">{error}</span>}
+  </div>
+}
+
 export function ComposerMentions({ openMentions, input }: MentionsProps) {
   const control = useRef<HTMLButtonElement>(null)
   const [error, setError] = useState('')

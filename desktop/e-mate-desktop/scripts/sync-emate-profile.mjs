@@ -33,6 +33,18 @@ execFileSync('corepack', ['pnpm', 'run', 'build'], {
   shell: process.platform === 'win32',
 })
 
+// Component builds reset runtime assets. Prepare the complete Desktop target set
+// after that build and before copying bundles, including both universal slices.
+const visionTargets = process.platform === 'darwin' ? 'darwin-arm64,darwin-x64'
+  : process.platform === 'win32' ? 'win32-x64' : undefined
+if (visionTargets !== undefined) {
+  execFileSync(process.env.EMATE_BUILD_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3'), [
+    join(repositoryRoot, 'packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py'),
+    '--root', join(repositoryRoot, 'packages/dsh-plugin-vision-toolkit'),
+    '--targets', visionTargets,
+  ], { cwd: repositoryRoot, stdio: 'inherit' })
+}
+
 for (const path of [
   join(source, 'cordis.patch.yml'),
   join(source, 'plugins', 'health.js'),

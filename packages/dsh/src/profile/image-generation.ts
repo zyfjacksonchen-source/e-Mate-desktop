@@ -872,7 +872,8 @@ async function createImagePack(ctx, agent, args, signal) {
     entries[name] = new Uint8Array(stored.data)
   }
   const relativePath = packRelativePath(pack.attachmentIds)
-  const data = zipSync(entries, { level: 0 })
+  // The path is content-derived; ZIP timestamps must not change its bytes on retry.
+  const data = zipSync(entries, { level: 0, mtime: new Date(1980, 0, 1) })
   await publishImagePack(await imageWorkspace(agent), relativePath, data, signal)
   return { bytes: data.byteLength, image_count: refs.length, relative_path: relativePath }
 }

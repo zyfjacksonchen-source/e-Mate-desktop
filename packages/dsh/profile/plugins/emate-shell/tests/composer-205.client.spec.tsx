@@ -3,7 +3,7 @@ import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { COMPOSER_PLACEHOLDER, ComposerConnectors, ComposerMentions } from '../src/client/composer-connectors.tsx'
+import { COMPOSER_PLACEHOLDER, ComposerConnectors, ComposerExpertMode, ComposerMentions } from '../src/client/composer-connectors.tsx'
 import { registerComputerUseTrigger } from '../src/client/composer-mentions.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { PlanChip, type PlanChipProps } from '../../../../../../upstream/deepseek-harness/packages/client/ui-plan/src/client/PlanModeControl.tsx'
@@ -38,6 +38,18 @@ afterEach(() => {
 })
 
 describe('e-Mate 2.0.17 composer projection', () => {
+  it('restores expert mode per session and changes the switch only after the native receipt', async () => {
+    const request = vi.fn(async (endpoint: string, active?: boolean) => ({ active: endpoint === 'get' || active === true }))
+    const view = render(<ComposerExpertMode sessionId="s1" request={request} />)
+    const control = screen.getByRole('switch', { name: '专家模式' })
+    await waitFor(() => expect(control.getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(control)
+    await waitFor(() => expect(control.getAttribute('aria-checked')).toBe('false'))
+    expect(request.mock.calls[1]?.slice(0, 2)).toEqual(['set', false])
+    view.rerender(<ComposerExpertMode sessionId="s2" request={async () => ({ active: false })} />)
+    await waitFor(() => expect((control as HTMLButtonElement).disabled).toBe(false))
+    expect(control.getAttribute('aria-checked')).toBe('false')
+  })
   it('shows actual connector states and fills a service-specific draft without navigating', async () => {
     const prepareDraft = vi.fn()
     const loadConnections = vi.fn(async () => [

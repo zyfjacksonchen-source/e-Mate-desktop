@@ -132,4 +132,4 @@
 
     - id: emate-agent-operations
       name: ./plugins/agent-operations.js
-      inject: [systemPrompt]
+      inject: [systemPrompt, connection, sessions]

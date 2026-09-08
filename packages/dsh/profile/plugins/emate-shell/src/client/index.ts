@@ -32,7 +32,7 @@ import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
 import './theme-tokens.module.css'
 import './chat-chrome.module.css'
-import { ComposerConnectors, ComposerMentions } from './composer-connectors.tsx'
+import { ComposerConnectors, ComposerExpertMode, ComposerMentions } from './composer-connectors.tsx'
 import { appendConnectionDraft, loadConnectionStates, callXinConnection } from './connection-status.ts'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection, SchedulesOverlayProjection } from './home.tsx'
@@ -535,6 +535,19 @@ export function apply(ctx: any): void {
       },
     }),
   }, ComposerMentions))
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+    name: 'conversation.input.left', id: 'e-mate-expert-mode', order: 12,
+    inject: (sessionId: string) => ({
+      sessionId,
+      request: async (endpoint: 'get' | 'set', active: boolean | undefined, signal: AbortSignal) => {
+        const result = await ctx.connection.rpc.call('/emate.expert-mode', endpoint, {
+          session_id: sessionId, ...(endpoint === 'set' ? { active } : {}),
+        }, signal)
+        if (!result?.ok || typeof result.value?.active !== 'boolean') throw new Error(result?.error?.message ?? '专家模式暂不可用。')
+        return result.value
+      },
+    }),
+  }, ComposerExpertMode))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'e-mate-connectors',

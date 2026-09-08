@@ -33,7 +33,7 @@ import { apply as applyHealth } from '../profile/plugins/health.js'
 import { apply as applyShare, SHARE_CHANNEL } from '../profile/plugins/share.js'
 import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'
 import * as settingsDocumentBoundary from '../profile/plugins/settings-document-boundary.js'
-import { apply as applyAgentOperations } from '../profile/plugins/agent-operations.js'
+import { apply as applyAgentOperations, expertModeActive, expertModeRequest } from '../profile/plugins/agent-operations.js'
 import { apply as applyShell } from '../profile/plugins/emate-shell/index.js'
 import { apply as applyCapabilities, CAPABILITIES_CHANNEL } from '../profile/plugins/capabilities.js'
 import { apply as applyQrGeneration } from '../profile/plugins/qr-generation.js'
@@ -371,7 +371,7 @@ test('managed profile installation is idempotent', () => {
       'connection', 'sessionPersistence', 'storageDomain', 'timer', 'tools', 'emateModelPolicy', 'emateIdentity',
     ])
     assert.equal(patchById.get('emate-agent-operations').name, './plugins/agent-operations.js')
-    assert.deepEqual(patchById.get('emate-agent-operations').inject, ['systemPrompt'])
+    assert.deepEqual(patchById.get('emate-agent-operations').inject, ['systemPrompt', 'connection', 'sessions'])
     assert.equal(patchById.has('ui-sidebar'), false)
     assert.equal(patchById.has('emate-shell'), false)
     assert.match(patch, /\.\/plugins\/health\.js/)
@@ -2154,7 +2154,10 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const packed = await imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution())
     assert.equal(packed.image_count, 2)
     assert.match(packed.relative_path, /^\.e-mate\/images\/e-Mate-images-[0-9a-f]{12}\.zip$/u)
-    const archive = unzipSync(readFileSync(join(temporary, packed.relative_path)))
+    const archiveBytes = readFileSync(join(temporary, packed.relative_path))
+    assert.equal(archiveBytes.readUInt16LE(10), 0, 'ZIP time is stable across retries')
+    assert.equal(archiveBytes.readUInt16LE(12), 33, 'ZIP date is 1980-01-01')
+    const archive = unzipSync(archiveBytes)
     assert.deepEqual(Object.keys(archive), ['image-001.png', 'image-002.png'])
     assert.equal(Buffer.from(archive['image-001.png']).equals(inputBytes), true)
     assert.equal(Buffer.from(archive['image-002.png']).equals(readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.png', import.meta.url))), true)
@@ -2883,11 +2886,35 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
   }
 })
 
+test('expert mode persists in its native session and leaves other conversations unchanged', async () => {
+  const first = { events: [], append(type, data) { this.events.push({ type, data }) } }
+  const second = { events: [] }
+  let flushes = 0
+  const ctx = { sessions: { get: id => id === 'one' ? first : id === 'two' ? second : undefined,
+    flush: async value => { assert.equal(value, first); flushes++; return true } } }
+  let expertPolicy
+  applyAgentOperations({ ...ctx, effect: () => {}, systemPrompt: { section(value) {
+    if (value.name === 'emate:expert-mode') expertPolicy = value.text
+  } } })
+  assert.equal(expertPolicy({ agent: { session: first } }), '')
+  assert.equal(expertModeActive(first), false)
+  assert.deepEqual(await expertModeRequest(ctx, 'set', { session_id: 'one', active: true }), { active: true })
+  assert.match(expertPolicy({ agent: { session: first } }), /enterprise-knowledge Skill/u)
+  assert.equal(expertModeActive({ events: structuredClone(first.events) }), true)
+  assert.equal(expertModeActive(second), false)
+  assert.deepEqual(await expertModeRequest(ctx, 'set', { session_id: 'one', active: false }), { active: false })
+  assert.match(expertPolicy({ agent: { session: first } }), /用户已关闭/u)
+  assert.equal(flushes, 2)
+  await assert.rejects(expertModeRequest(ctx, 'set', { session_id: 'one', active: 'true' }), /请求无效/u)
+  await assert.rejects(expertModeRequest(ctx, 'set', { session_id: 'missing', active: true }), /尚未就绪/u)
+})
+
 test('Agent operation guidance owns the e-Mate persona and native image batch policy', () => {
   let section
   applyAgentOperations({
     get: name => name === 'tools' ? { schemas: () => [{ name: 'image_batch' }] } : undefined,
-    systemPrompt: { section: value => { section = value } },
+    effect: () => {},
+    systemPrompt: { section: value => { if (value.name === 'emate:agent-operations') section = value } },
   })
   const profilePatch = parseYaml(readFileSync(new URL('../profile/cordis.patch.yml', import.meta.url), 'utf8'))
   const nativeRoot = new URL('../../../upstream/deepseek-harness/', import.meta.url)
@@ -3398,7 +3425,10 @@ test('enterprise identity provider maps target credentials and the production HT
     JSON.parse(values.get('E_MATE_ENTERPRISE_SESSION')).session.modelGateway.usagePublicKey,
     usagePublicKey,
   )
-  const locked = await provider.bootstrap()
+  const beforeConcurrentBootstrap = requests.filter(request => request.path.endsWith('/v1/consents/current')).length
+  const [locked] = await Promise.all([provider.bootstrap(), provider.bootstrap(), provider.bootstrap()])
+  assert.equal(requests.filter(request => request.path.endsWith('/v1/consents/current')).length,
+    beforeConcurrentBootstrap + 1, 'concurrent startup surfaces share one live consent request')
   assert.equal(locked.authenticated, true)
   assert.equal(locked.workspace_unlocked, false)
   assert.equal('accessToken' in locked, false)
