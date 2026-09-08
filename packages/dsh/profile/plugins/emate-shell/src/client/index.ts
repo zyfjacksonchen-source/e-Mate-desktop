@@ -29,8 +29,6 @@ import {
   Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
-import { registerChatContext } from './chat-context.tsx'
-import { registerActivityFold } from './activity-fold.tsx'
 import './theme-tokens.module.css'
 import './chat-chrome.module.css'
 import { ComposerConnectors, ComposerExpertMode, ComposerMentions } from './composer-connectors.tsx'
@@ -52,7 +50,6 @@ import {
 } from './image-gallery.tsx'
 import type { ImageBatchRetryTask } from './image-batch-progress.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
-import { registerMessageModeSettings } from './message-mode-settings.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
 import { HiddenSessionLogExport } from './session-share.tsx'
@@ -474,9 +471,7 @@ export async function prepareSchedulePromptFromRoute(
 
 export function apply(ctx: any): void {
   registerPetTaskDetails(ctx, createTransientGalleryNotice(ctx))
-  const messageMode = registerMessageModeSettings(ctx)
-  registerActivityFold(ctx, messageMode)
-  registerChatContext(ctx)
+  // Native ChatView owns process rows and ToolCallTree injection.
   registerComputerUseTrigger(ctx)
   registerMentionSources(ctx)
   registerManagedPresetSurfaces(ctx)
@@ -537,8 +532,8 @@ export function apply(ctx: any): void {
       },
     }),
   }, ComposerMentions))
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
-    name: 'conversation.input.left', id: 'e-mate-expert-mode', order: 12,
+  ctx.slots.inject('e-mate.conversation.composer.after-upload', () => ctx.slots.register({
+    name: 'e-mate.conversation.composer.after-upload', id: 'e-mate-expert-mode', order: 12,
     inject: (sessionId: string) => ({
       sessionId,
       request: async (endpoint: 'get' | 'set', active: boolean | undefined, signal: AbortSignal) => {

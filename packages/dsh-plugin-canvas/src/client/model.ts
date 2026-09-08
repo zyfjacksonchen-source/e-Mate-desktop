@@ -17,11 +17,11 @@ export function insertAsset(project: CanvasProject, pageId: string, asset: Canva
     return validateProject(next)
   }
   const width = Math.min(800, asset.ref.width)
-  const count = page.elements.filter(item => item.type === 'image' && !item.isDeleted).length
+  const visible = page.elements.filter(item => !item.isDeleted)
   const anchor = page.elements.find(item => item.type === 'image' && !item.isDeleted && `sha256:${item.fileId}` === besideAttachmentId)
   // Edited outputs occupy new space; the original and its annotations retain their coordinates.
-  const x = anchor ? Math.max(...page.elements.filter(item => !item.isDeleted).map(item => Number(item.x) + Math.max(Number(item.width) || 0, Number(item.height) || 0))) + 48 : count * 40
-  const y = anchor ? Number(anchor.y) : count * 40
+  const x = visible.length ? Math.max(...visible.map(item => Number(item.x) + Math.max(Number(item.width) || 0, Number(item.height) || 0))) + 48 : 0
+  const y = anchor ? Number(anchor.y) : 0
   page.elements.push({ id: `image-${fileId.slice(0, 40)}`, type: 'image', fileId, x, y,
     width, height: width * asset.ref.height / asset.ref.width, angle: 0, strokeColor: 'transparent', backgroundColor: 'transparent',
     fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null,

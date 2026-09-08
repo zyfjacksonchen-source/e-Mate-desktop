@@ -36,6 +36,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
   const visiblePageId = useRef(pageId)
   visiblePageId.current = pageId
   const [projects, setProjects] = useState<any[]>([])
+  const [legacyProjects, setLegacyProjects] = useState<any[] | null>(null)
   const [files, setFiles] = useState<BinaryFiles>({})
   const [notice, setNotice] = useState('正在恢复项目…')
   const [error, setError] = useState<string | null>(null)
@@ -91,7 +92,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
       if (pendingFit.current !== pending || !ready()) return
       pendingFit.current = null
       // Fit the current viewport, not a previous (possibly broken) saved zoom cap.
-      pending.api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: 1, animate: false })
+      pending.api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.82, maxZoom: 1, animate: false })
     })
   }
   const fitScene = (value: ExcalidrawImperativeAPI, waitForInitialChange = false) => {
@@ -284,7 +285,9 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
       const elements = selectedAnnotationElements(target.elements, selectedElements.current)
       const annotated = elements.some(item => item.type === 'arrow' || item.type === 'text')
       if (annotated) {
+        setNotice('正在导出标注参考…')
         const blob = await exportToBlob({ elements: elements as any, appState: { viewBackgroundColor: '#ffffff', exportBackground: true }, files, mimeType: 'image/png' })
+        setNotice('正在将标注参考加入会话…')
         const [preview] = await bridge.stageImages([new File([blob], '标注参考.png', { type: 'image/png' })])
         if (!preview) throw new Error('标注参考未保存，请重试。')
         if (state.current.project !== current || transitioning.current) throw new Error('画布已变化，请重新提交修改。')
@@ -297,6 +300,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
       const roles = annotated
         ? `前 ${selectedIds.length} 张为待修改原图；最后一张为这些原图的箭头和文字标注参考。标注仅用于说明修改位置和要求，不要把标注添加到成品。未选中的图片不属于本次修改。\n`
         : '所附图片为待修改原图。\n'
+      setNotice('正在提交修改…')
       await bridge.submit(next, intent, roles + request)
       setInstruction(''); setNotice('修改已提交')
     } catch (error) { setError((error as Error).message) }
@@ -331,7 +335,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
     if (!target) return
     const existing = target.elements.find(item => item.id === annotation.textId)
     const [text] = convertToExcalidrawElements([{ type: 'text', id: annotation.textId, x: annotation.x, y: annotation.y,
-      text: value || ' ', fontSize: 16, fontFamily: 2, strokeColor: '#e03131',
+      text: value || ' ', fontSize: Math.max(20, 20 / api.current.getAppState().zoom.value), fontFamily: 2, width: 240 / api.current.getAppState().zoom.value, strokeColor: '#e03131',
       customData: { emateAnnotationArrowId: annotation.arrowId } }], { regenerateIds: false })
     const label = existing ? newElementWith(existing as any, { ...text, isDeleted: !value.trim() } as any) : { ...text, isDeleted: !value.trim() }
     const elements = existing ? target.elements.map(item => item.id === annotation.textId ? label : item) : [...target.elements, label]
@@ -371,6 +375,15 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
           <button disabled={saving} onClick={() => act(async () => { state.current.blocked = false; state.current.dirty = true; await flush(); await refreshList() })}>{recovered ? '保存恢复副本' : '保存'}</button>
           <button onClick={() => act(async () => { await flush(); const result = await bridge.call('export', { project_id: project.id }); download(result.name, new Blob([bytesOf(result.archive_base64).slice().buffer], { type: 'application/zip' })) })}>导出项目与素材</button>
           <button onClick={() => importInput.current?.click()}>导入项目</button>
+          <button onClick={() => act(async () => { setLegacyProjects(await bridge.call('legacy-list')) })}>从旧工作区画布导入</button>
+          {legacyProjects?.length === 0 && <span>没有旧工作区画布。</span>}
+          {legacyProjects?.map(item => <button key={item.id} disabled={Boolean(item.error)} onClick={() => act(async () => {
+            await flush()
+            const id = fresh()
+            await bridge.call('import-legacy', { legacy_project_id: item.id, project_id: id })
+            await openProject(id)
+            setLegacyProjects(null)
+          })}>导入「{item.title}」副本</button>)}
         </div></details>
       </header>
       <input hidden ref={imageInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" onChange={event => {
@@ -444,7 +457,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
                 const epoch = generation.current
                 focusFrame.current = requestAnimationFrame(() => {
                   if (!alive.current || transitioning.current || generation.current !== epoch || api.current !== value || !value) return
-                  value.updateScene({ appState: { selectedElementIds: { [String(image.id)]: true, [arrow.id]: true } } })
+                  value.updateScene({ appState: { selectedElementIds: { [String(image.id)]: true } } })
                   selectedElements.current = [String(image.id)]; selected.current = [`sha256:${image.fileId}`]; setSelectionCount(1)
                   const points = (arrow as any).points as number[][]
                   const first = points[0]!, last = points.at(-1)!
@@ -453,7 +466,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
                   const bend = Math.min(48, Math.max(16, length * .12))
                   const curved = newElementWith(arrow as any, { points: [first, [(first[0]! + last[0]!) / 2 - dy / length * bend, (first[1]! + last[1]!) / 2 + dx / length * bend], last], roundness: { type: 2 }, strokeColor: '#e03131' } as any)
                   value.updateScene({ elements: value.getSceneElementsIncludingDeleted().map(item => item.id === arrow.id ? curved : item), captureUpdate: CaptureUpdateAction.IMMEDIATELY })
-                  const x = arrow.x + first[0]!, y = arrow.y + first[1]! - 32
+                  const x = arrow.x + first[0]!, y = arrow.y + first[1]! - 48 / value.getAppState().zoom.value
                   const point = sceneCoordsToViewportCoords({ sceneX: x, sceneY: y }, value.getAppState())
                   const rect = stageRef.current?.getBoundingClientRect()
                   setAnnotation({ arrowId: arrow.id, textId: fresh(), x, y, left: Math.max(8, Math.min(point.x - (rect?.left ?? 0), (rect?.width ?? 400) - 248)), top: Math.max(8, point.y - (rect?.top ?? 0)), value: '' })

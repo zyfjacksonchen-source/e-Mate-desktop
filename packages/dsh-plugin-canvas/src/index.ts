@@ -41,7 +41,19 @@ export async function handleCanvas(ctx: any, endpoint: string, payload: unknown)
     const body = payload as Record<string, unknown>
     const id = sessionId(body.session_id)
     const root = await workspaceRoot(ctx, id)
-    if (endpoint === 'list') { exact(body, ['session_id']); return { ok: true, value: await listProjects(root) } }
+    if (endpoint === 'list') { exact(body, ['session_id']); return { ok: true, value: await listProjects(root, id) } }
+    // Pre-session canvas files remain available only through an explicit copy.
+    if (endpoint === 'legacy-list') { exact(body, ['session_id']); return { ok: true, value: await listProjects(root) } }
+    if (endpoint === 'import-legacy') {
+      exact(body, ['session_id', 'legacy_project_id', 'project_id'])
+      await writable(ctx, id)
+      const legacy = await loadProject(root, identifier(body.legacy_project_id))
+      if (!legacy) reject('旧项目不存在。', 'not-found')
+      const project = structuredClone(legacy!.project)
+      project.id = identifier(body.project_id); project.intents = []
+      for (const asset of project.assets) { await storedImage(ctx, asset); asset.ownerSessionId = id }
+      return { ok: true, value: await saveProject(ctx.fs, root, project, null, id) }
+    }
     if (endpoint === 'resolve-image') {
       exact(body, ['session_id', 'owner_session_id', 'attachment_id'])
       const asset = await resolveSessionAsset(ctx, id, sessionId(body.owner_session_id), String(body.attachment_id))
@@ -75,21 +87,21 @@ export async function handleCanvas(ctx: any, endpoint: string, payload: unknown)
         if (!sameRef(saved, asset.ref)) reject('导入素材尺寸不一致。', 'corrupt')
         asset.ownerSessionId = id
       }
-      const saved = await saveProject(ctx.fs, root, project, null)
+      const saved = await saveProject(ctx.fs, root, project, null, id)
       return { ok: true, value: saved }
     }
     const projectId = identifier(body.project_id)
-    if (endpoint === 'load') { exact(body, ['session_id', 'project_id']); return { ok: true, value: await loadProject(root, projectId) } }
+    if (endpoint === 'load') { exact(body, ['session_id', 'project_id']); return { ok: true, value: await loadProject(root, projectId, id) } }
     if (endpoint === 'save') {
       exact(body, ['session_id', 'project_id', 'expected_revision', 'project'])
       await writable(ctx, id)
       const project = validateProject(body.project)
       if (project.id !== projectId) reject('画布项目身份不一致。')
-      const previous = await loadProject(root, projectId)
+      const previous = await loadProject(root, projectId, id)
       await verifyNewAssets(ctx, id, project, previous?.project)
-      return { ok: true, value: await saveProject(ctx.fs, root, project, body.expected_revision as string | null) }
+      return { ok: true, value: await saveProject(ctx.fs, root, project, body.expected_revision as string | null, id) }
     }
-    const loaded = await loadProject(root, projectId)
+    const loaded = await loadProject(root, projectId, id)
     if (!loaded) reject('画布项目尚未保存。', 'not-found')
     const project = loaded!.project
     if (endpoint === 'image') {

@@ -1,4 +1,0 @@
-.toolbar { position: fixed; z-index: 1000; border: 1px solid var(--dsw-alias-border-standard, #8884); border-radius: 8px; background: var(--dsw-alias-bg-base, white); box-shadow: 0 4px 16px #0002; padding: 4px; }
-.toolbar button { display: flex; align-items: center; gap: 6px; border: 0; border-radius: 5px; background: transparent; color: var(--dsw-alias-label-primary, #222); padding: 5px 8px; font: 13px/20px system-ui; cursor: pointer; }
-.toolbar button:hover { background: var(--dsw-alias-interactive-bg-hover, #8882); }
-.toolbar button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }

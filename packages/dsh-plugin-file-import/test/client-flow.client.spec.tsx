@@ -10,6 +10,8 @@ import { InputBar } from '../../../upstream/deepseek-harness/packages/client/ui-
 import { SessionInputShell } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
 import { registerChatNodeRenderers } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/chat/register-node-renderers.ts'
 import { adaptHarnessConversationSource } from '../../../scripts/harness-conversation-adapter.mjs'
+import { stripTypeScriptTypes } from 'node:module'
+import { ComposerExpertMode } from '../../dsh/profile/plugins/emate-shell/src/client/composer-connectors.tsx'
 import { apply, inject, FILE_PICK_EVENT, FileCards, FileImportControl } from '../src/client/index.tsx'
 import { importedDraft, importedMessage, type FileReference } from '../src/client/references.ts'
 
@@ -530,6 +532,7 @@ describe('file import composer lifecycle', () => {
     let finishImport!: (value: unknown) => void
     let finishStage!: (value: unknown) => void
     const callImport = vi.fn((_channel: string, endpoint: string) => new Promise(resolve => {
+      if (endpoint === 'get') { resolve({ ok: true, value: { active: false } }); return }
       if (endpoint === 'stage-images') finishStage = resolve
       else finishImport = resolve
     }))
@@ -580,12 +583,19 @@ describe('file import composer lifecycle', () => {
           ABSENT_LEXICON: shell.lexicon, ABSENT_MENU_LAUNCHER: absentMenu,
         })
         registerChatNodeRenderers(ctx)
+        const shellSource = readFileSync(resolve(process.cwd(), '../../packages/dsh/profile/plugins/emate-shell/src/client/index.ts'), 'utf8')
+        const expertStart = shellSource.indexOf("  ctx.slots.inject('e-mate.conversation.composer.after-upload'")
+        const expertEnd = shellSource.indexOf("  ctx.slots.inject('conversation.input.right'", expertStart)
+        expect(expertStart).toBeGreaterThan(0)
+        expect(expertEnd).toBeGreaterThan(expertStart)
+        // Execute the actual product registration against the native registry.
+        new Function('ctx', 'ComposerExpertMode', stripTypeScriptTypes(shellSource.slice(expertStart, expertEnd)))(ctx, ComposerExpertMode)
         ctx.slots.register({ name: 'conversation.input.plan' }, () => <button>原生计划</button>)
         ctx.slots.register({ name: 'conversation.input.model' }, () => <button>原生模型</button>)
       } })
       const actions = { ...shell.actions, addImages: nativeAddImages, beginImageStage, cancelImageStage, addDurableImages, hydrateDurableImage: vi.fn(), removeDurableImage: vi.fn(), addFiles: vi.fn(() => true), removeFile: vi.fn() }
       runtime.renderSlot('conversation.composer.bar' as never, {
-        useInput: (select: any) => select(live), inputActions: actions, leftItems: <span>原生工具</span>,
+        useInput: (select: any) => select(live), inputActions: actions, leftItems: <button type="button" aria-label="引用">原生工具</button>,
       } as never)
       const nativeTextarea = screen.getByRole('textbox') // Fallback before the product plugin loads.
       expect(screen.queryByRole('button', { name: '添加本地图片或文件' })).toBeNull()
@@ -599,6 +609,7 @@ describe('file import composer lifecycle', () => {
       const feature = await runtime.mount({ inject, apply })
       const textarea = screen.getByRole('textbox')
       expect(lastNativeProps.accessory).toBeUndefined()
+      expect(screen.queryByRole('switch', { name: '专家模式' })).toBeNull()
       expect(runtime.slots.entries('conversation.composer.bar' as never)).toHaveLength(1)
       expect(runtime.slots.entries('e-mate.conversation.composer' as never)).toHaveLength(1)
       for (const key of ['user', 'steering']) {
@@ -611,6 +622,14 @@ describe('file import composer lifecycle', () => {
       expect(screen.getByRole('textbox')).toBe(textarea)
       expect(screen.getByRole('button', { name: '原生计划' })).toBeTruthy()
       expect(screen.getByRole('button', { name: '原生模型' })).toBeTruthy()
+      const expert = await screen.findByRole('switch', { name: '专家模式' })
+      await waitFor(() => expect((expert as HTMLButtonElement).disabled).toBe(false))
+      const mentions = screen.getByRole('button', { name: '引用' })
+      const upload = screen.getByRole('button', { name: '添加本地图片或文件' })
+      expect(mentions.compareDocumentPosition(upload) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(upload.compareDocumentPosition(expert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect([mentions, upload, expert].map(button => button.tabIndex)).toEqual([0, 0, 0])
+      expect(callImport).toHaveBeenCalledWith('/emate.expert-mode', 'get', { session_id: 'one' }, expect.any(AbortSignal))
       const typed = file('typed.png', 'image/png')
       expect(lastNativeProps.addImages([typed])).toBeNull()
       await waitFor(() => expect(callImport.mock.calls.filter(call => call[1] === 'stage-images')).toHaveLength(1))
@@ -648,7 +667,9 @@ describe('file import composer lifecycle', () => {
       guard.mockReturnValue(false)
       trigger.onPick({ session: { sessionId: 'two' }, span })
       expect(picked).toHaveBeenCalledOnce()
+      expect(callImport).toHaveBeenCalledWith('/emate.expert-mode', 'get', { session_id: 'two' }, expect.any(AbortSignal))
       await feature.dispose()
+      expect(screen.queryByRole('switch', { name: '专家模式' })).toBeNull()
       expect(runtime.slots.entries('e-mate.conversation.composer' as never)).toHaveLength(0)
       expect(screen.getByRole('textbox')).toBeTruthy()
       expect(screen.getByRole('button', { name: '原生计划' })).toBeTruthy()

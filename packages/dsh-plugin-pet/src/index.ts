@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS, PET_SETTINGS_NAMESPACE } from './settings.ts'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 export const inject = ['webServer', 'settings']
-const schema = z.object({ enabled: z.boolean().default(true), position: z.object({ x: z.number().min(0).max(1).default(0.97), y: z.number().min(0).max(1).default(0.97) }).default(DEFAULT_SETTINGS.position) })
+const schema = z.object({ enabled: z.boolean().default(DEFAULT_SETTINGS.enabled), position: z.object({ x: z.number().min(0).max(1).default(0.97), y: z.number().min(0).max(1).default(0.97) }).default(DEFAULT_SETTINGS.position) })
 export function apply(ctx: any): void {
   ctx.settings.register(settingsNamespace(PET_SETTINGS_NAMESPACE), schema)
   for (const file of ASSET_FILES) {

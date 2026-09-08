@@ -824,7 +824,7 @@ describe('completed artifact terminal', () => {
       nodes: [hidden(parseImageOutputReceipt(receipt())!)],
       seq: 20,
       openFile: vi.fn(),
-    } as never)).toBeNull()
+    } as never)).toEqual({ callIds: ['call-image-1'], paths: [], childSessionIds: [] })
     expect(selectArtifactTerminal({
       turn: turn(data),
       nodes: [hidden(parseImageOutputReceipt(receipt())!)],
@@ -1310,6 +1310,38 @@ describe('native image render stability', () => {
 
 
 describe('indexed terminal projection', () => {
+  it.each(['completed', 'interrupted'])('shows a direct image during verification and keeps one card through retries and %s', (ending) => {
+    const callId = 'call-image|fc-response-item'
+    const data = { 'e-mate-image-calls': { calls: [{ callId, seq: 2 }] } }
+    const item = parseImageOutputReceipt(receipt({ call_id: callId }))!
+    let currentTurn = turn(data, 1, 'open')
+    let nodes: any[] = []
+    let seq = 2
+    const props = () => {
+      const matched = selectArtifactTerminal({ turn: currentTurn, nodes, seq, openFile: vi.fn() } as never)!
+      return terminalProps(nodes, matched, { turn: currentTurn, seq })
+    }
+    const view = render(<ArtifactTerminal {...props() as any} />)
+    expect(screen.queryByRole('button', { name: '查看原图：result.png' })).toBeNull()
+    nodes = [hidden(item)]
+    seq = 4
+    view.rerender(<ArtifactTerminal {...props() as any} />)
+    const image = screen.getByRole('button', { name: '查看原图：result.png' })
+    // A later verification failure and model retry do not revoke produced bytes.
+    nodes = [...nodes, { key: 'verify', kind: 'tool-call', location: { kind: 'turn', turn: currentTurn }, data: { root: { kind: 'tool-result', isError: true } } }]
+    seq = 6
+    view.rerender(<ArtifactTerminal {...props() as any} />)
+    expect(screen.getByRole('button', { name: '查看原图：result.png' })).toBe(image)
+    nodes = [...nodes, { key: 'retry', kind: 'retry', location: { kind: 'turn', turn: currentTurn }, data: {} }]
+    seq = 7
+    view.rerender(<ArtifactTerminal {...props() as any} />)
+    expect(screen.getAllByRole('button', { name: '查看原图：result.png' })).toHaveLength(1)
+    currentTurn = { ...turn(data), end: { type: 'turn/end', seq: 8, time: 8, data: { turn: 1, reason: { kind: ending } } } } as any
+    seq = 8
+    view.rerender(<ArtifactTerminal {...props() as any} />)
+    expect(screen.getAllByRole('button', { name: '查看原图：result.png' })).toEqual([image])
+  })
+
   it('reads only its turn and no child receipts across unrelated updates, while a live reader still applies revisions and removals', () => {
     const original = parseImageOutputReceipt(receipt())!
     const rows = new Map<string, any>([['receipt', hidden(original)]])

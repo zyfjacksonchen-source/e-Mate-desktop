@@ -34,6 +34,37 @@ await mkdir(staged, { recursive: true })
 await cp(resolve(source, 'lib'), staged, { recursive: true })
 await cp(resolve(source, 'package.json'), resolve(root, '.build/package.json'))
 
+const skillPath = resolve(staged, 'skill.js')
+let skill = await readPinnedText(skillPath)
+skill = replaceExactlyOnce(skill,
+  `DSH Vision Toolkit gives a text-only agent structured visual engineering
+tools. Use these native tools directly: do not reproduce their Python logic,
+shell out to the bundled scripts, or parse terminal output.`,
+  `DSH Vision Toolkit provides structured visual engineering tools. Inspect
+images already visible in the current model context directly, including native
+image-generation results. Load this Skill when pixels are unavailable to the
+current model or a specific question requires these tools; ordinary result
+inspection does not require an independent vision call. Use the native tools
+directly: do not reproduce their Python logic, shell out to the bundled
+scripts, or parse terminal output.`,
+  'native visible image guidance')
+skill = replaceExactlyOnce(skill,
+  `For semantic differences, pass both paths to one vision_glance call. For UI
+verification, use vision_pixel_diff first, inspect its highest-difference box,
+then call vision_glance on that region if the pixels alone do not explain why.`,
+  `Compare already-visible images directly. If their pixels are unavailable or
+a specific semantic question remains unresolved, pass both images to one
+vision_glance call. For measured UI differences, use vision_pixel_diff and
+inspect its highest-difference box; use vision_glance only if needed to explain
+that region. Preserve delivered images when a separate inspection fails and
+report the unresolved check.`,
+  'native image comparison guidance')
+skill = replaceExactlyOnce(skill,
+  'Use whenever a task depends on image text/content, pixel coordinates, screenshot-to-UI reconstruction, visual regression, reusable image/SVG assets, or tall screenshot OCR.',
+  'Use when needed image pixels are unavailable to the current model, or a task needs structured OCR, pixel coordinates, measured visual differences, reusable image/SVG assets, or tall screenshot OCR. Inspect already-visible images and generated results directly.',
+  'native image skill selection')
+await writeFile(skillPath, skill)
+
 const upstreamIndex = resolve(staged, 'index.js')
 let index = await readPinnedText(upstreamIndex)
 const applyBefore = 'export async function apply(ctx, config = {}) {'
@@ -608,6 +639,7 @@ await writeFile(resolve(root, '.build/test-entry.mjs'), `
 export { apply } from './upstream-lib/index.js'
 export { VisionToolkitWebBackend } from './upstream-lib/web.js'
 export { VisionToolkitRuntimeManager } from './upstream-lib/runtime-manager.js'
+export { VisionToolkitRuntime } from './upstream-lib/runtime.js'
 export { prepareUpstreamRuntime } from './upstream-lib/runtime-install.js'
 export { createVisionTools } from './upstream-lib/tools.js'
 export { createPathPolicy } from './upstream-lib/paths.js'

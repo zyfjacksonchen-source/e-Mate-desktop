@@ -142,7 +142,7 @@ function receipt(event: Parameters<ConversationNodeDefinition<ToolImagesState>['
   return item === null ? null : { ...item, createdAt: event.time }
 }
 
-/** Persist only the strict receipt; presentation is owned by the completed Turn tail. */
+/** Persist only the strict receipt; presentation is owned by the native Turn tail. */
 export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> = {
   kind: 'e-mate-tool-images',
   target: 'chat',
@@ -288,7 +288,7 @@ export interface ArtifactTerminalMatch {
   }
 }
 
-/** Claim one live batch tail, or the legacy artifact terminal after its Turn closes. */
+/** Keep one live image tail; generic deliverables are added when the Turn closes. */
 export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTerminalMatch | null {
   const imageData = owner.turn.data.get('e-mate-image-calls')
   const batchCalls = (imageData?.batchCalls ?? [])
@@ -298,16 +298,20 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
   const batchRetryCalls = batchCalls.flatMap(call => call.retryTasks === undefined
     ? []
     : [{ parentCallId: call.callId, tasks: call.retryTasks }])
+  const candidates = (imageData?.calls ?? []).filter(call => call.seq <= owner.seq)
+  const callIds = [...new Set(candidates
+    .sort((left, right) => left.seq - right.seq)
+    .map(call => call.callId))]
   if (owner.turn.status !== 'closed') {
-    return batchCallIds.length === 0
+    return callIds.length === 0 && batchCallIds.length === 0
       ? null
       : {
-          callIds: [], batchCallIds,
+          callIds,
+          ...batchCallIds.length === 0 ? {} : { batchCallIds },
           ...batchRetryCalls.length === 0 ? {} : { batchRetryCalls },
           paths: [], childSessionIds: [],
         }
   }
-  const candidates = (imageData?.calls ?? []).filter(call => call.seq <= owner.seq)
   const produced = (owner.turn.data as { get(key: string): unknown }).get('deliverables') as ProducedData | undefined
   const paths: string[] = []
   const seenPaths = new Set<string>()
@@ -316,9 +320,6 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
     seenPaths.add(item.path)
     paths.push(item.path)
   }
-  const callIds = [...new Set(candidates
-    .sort((left, right) => left.seq - right.seq)
-    .map(call => call.callId))]
   const childSessionIds = [...new Set((owner.nodes ?? []).flatMap(node => node.kind === 'e-mate-subagent-settled'
     ? [(node.data as SubagentSettledData).sessionId]
     : []))]

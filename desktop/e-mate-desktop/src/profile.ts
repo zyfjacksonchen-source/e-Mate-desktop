@@ -464,9 +464,6 @@ export function prepareDesktopProfile(
       mode,
     },
   })
-  if (rows.has('emate-agent-operations')) {
-    patches.push({ id: 'emate-agent-operations', disabled: true })
-  }
   return {
     homeDir: home,
     profile,

@@ -152,17 +152,17 @@ describe('target conversation fidelity contract', () => {
       <div role="status" aria-live="polite">Deep diving...<span>15秒</span></div>
       <div role="status" aria-live="polite">正在上传</div>
     </>)
-    const target = screen.getByRole('status', { name: '正在处理' })
+    const target = screen.getByRole('status', { name: '思考中' })
     const unrelated = [...view.container.querySelectorAll<HTMLElement>('[role="status"]')]
       .find(node => node.textContent === '正在上传')!
-    expect(target.hasAttribute('data-emate-turn-status')).toBe(true)
+    expect(target.hasAttribute('data-emate-thinking-status')).toBe(true)
     expect(target.textContent).not.toContain('Deep diving...')
-    expect(target.textContent).toContain('正在处理')
-    expect(target.querySelectorAll('i')).toHaveLength(0)
-    expect(unrelated.hasAttribute('data-emate-turn-status')).toBe(false)
-    expect(activityFoldCss).toContain('steps(48, end)')
-    expect(thinkingCss).not.toContain('domino')
-    expect(activityFoldCss).toContain('prefers-reduced-motion: reduce')
+    expect(target.textContent).toContain('思考中')
+    expect(target.querySelectorAll('i')).toHaveLength(4)
+    expect(unrelated.hasAttribute('data-emate-thinking-status')).toBe(false)
+    expect(thinkingCss).toContain('var(--dsw-alias-label-secondary)')
+    expect(thinkingCss).toContain('@keyframes emate-domino')
+    expect(thinkingCss).toContain('width: 16px')
 
     const documentQuery = vi.spyOn(document, 'querySelectorAll')
     const stream = document.createElement('div')
@@ -181,12 +181,12 @@ describe('target conversation fidelity contract', () => {
       view.container.append(lateTarget)
       await Promise.resolve()
     })
-    expect(lateTarget.hasAttribute('data-emate-turn-status')).toBe(true)
+    expect(lateTarget.hasAttribute('data-emate-thinking-status')).toBe(true)
     expect(documentQuery).not.toHaveBeenCalled()
     documentQuery.mockRestore()
 
     view.unmount()
-    expect(target.hasAttribute('data-emate-turn-status')).toBe(false)
+    expect(target.hasAttribute('data-emate-thinking-status')).toBe(false)
     expect(target.textContent).toContain('Deep diving...')
   })
 })

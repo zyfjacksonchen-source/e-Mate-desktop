@@ -1875,6 +1875,16 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     }])
     assert.doesNotMatch(JSON.stringify(generatedContent.filter(block => block.type === 'text')), /sha256:|attachment(?:Id| ID)/iu)
     assert.deepEqual(generatedContent.find(block => block.type === 'image').attachment, generated.images[0].image)
+    // Exercise the native model boundary with the actual generated attachment,
+    // not a locator-only receipt or a second vision request.
+    const { toPiContext } = await import('../../../upstream/deepseek-harness/packages/llm/llm-pi-ai/src/context.ts')
+    const { createToolResultMessage, CallId } = await import(llmModule)
+    const imageFeedback = createToolResultMessage({ callId: CallId('image-call-1'), content: generatedContent })
+    const modelContext = await toPiContext({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', messages: [imageFeedback] }, imageAttachments)
+    const modelImage = modelContext.messages[0].content.find(block => block.type === 'image')
+    assert.equal(modelImage.mimeType, generated.images[0].image.mediaType)
+    assert.deepEqual(Buffer.from(modelImage.data, 'base64'), Buffer.from((await imageAttachments.readImage(generated.images[0].image)).data))
+    assert.equal(modelContext.messages[0].toolCallId, 'image-call-1')
     assert.equal(sessionEvents.at(-1).data.schema_version, 2)
     assert.equal(sessionEvents.at(-1).data.call_id, 'image-call-1')
     assert.equal(sessionEvents.at(-1).data.operation, 'generate')

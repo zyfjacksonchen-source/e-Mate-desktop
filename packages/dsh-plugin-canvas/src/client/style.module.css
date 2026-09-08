@@ -17,7 +17,7 @@
 .moreMenu input{min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:6px 8px;background:var(--dsw-alias-bg-base)}
 .stage{position:relative;flex:1;min-height:320px;overflow:hidden;background:var(--dsw-alias-bg-base)}
 .tools{position:absolute;z-index:5;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:4px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-base);box-shadow:0 2px 8px #0001}
-.tools button{border-color:transparent;padding:5px 10px;font-size:13px}
+.tools button{border-color:transparent;padding:8px 12px;font-size:14px;min-height:36px}
 .tools button[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--emate-color-brand,#eb5b16)}
 .stageHint{position:absolute;z-index:1;pointer-events:none;inset:0;display:grid;place-items:center;color:var(--dsw-alias-label-tertiary);font-size:14px}
 /* Excalidraw still owns editing, keyboard actions and history. Its full menus
@@ -35,4 +35,4 @@
 @media(max-width:560px){.header{padding:8px;gap:6px}.header>select{max-width:130px}.saveState{order:5;width:100%;font-size:11px}.ai{padding:8px;gap:6px}.tools{bottom:16px}.panel{min-height:380px}}
 @media(prefers-reduced-motion:reduce){.panel *{scroll-behavior:auto!important}}
 
-.annotation{position:absolute;z-index:6;width:240px;min-height:56px;box-sizing:border-box;resize:vertical;border:1px solid #e03131;border-radius:8px;padding:8px;background:var(--dsw-alias-bg-base);color:#e03131!important;box-shadow:0 3px 16px #0002}
+.annotation{font-size:16px!important;line-height:1.5!important;position:absolute;z-index:6;width:240px;min-height:56px;box-sizing:border-box;resize:vertical;border:1px solid #e03131;border-radius:8px;padding:8px;background:var(--dsw-alias-bg-base);color:#e03131!important;box-shadow:0 3px 16px #0002}

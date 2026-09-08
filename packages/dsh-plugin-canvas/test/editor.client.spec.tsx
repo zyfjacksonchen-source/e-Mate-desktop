@@ -24,7 +24,7 @@ vi.mock('@excalidraw/excalidraw', () => {
         if (!view.current.isLoading) props.onChange(elements.current, view.current)
       }
       props.excalidrawAPI(native.api = { getAppState: () => view.current, getSceneElementsIncludingDeleted: () => elements.current,
-      updateScene: ({ elements: next }: any) => { if (next) elements.current = next; refresh(value => value + 1) }, addFiles: vi.fn(), scrollToContent: native.scroll, setActiveTool: ({ type }: any) => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {}, activeTool: { type } }),
+      updateScene: vi.fn(({ elements: next }: any) => { if (next) elements.current = next; refresh(value => value + 1) }), addFiles: vi.fn(), scrollToContent: native.scroll, setActiveTool: ({ type }: any) => props.onChange(elements.current, { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: {}, activeTool: { type } }),
       })
       if (!native.deferReady) native.emit({ isLoading: false })
     }, [])
@@ -243,7 +243,7 @@ it('fits the initial viewport once without changing pixels or resetting later us
   const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene')
   await waitFor(() => expect(native.scroll).toHaveBeenCalledOnce())
-  expect(native.scroll).toHaveBeenCalledWith(undefined, { fitToViewport: true, viewportZoomFactor: 0.68, maxZoom: 1, animate: false })
+  expect(native.scroll).toHaveBeenCalledWith(undefined, { fitToViewport: true, viewportZoomFactor: 0.82, maxZoom: 1, animate: false })
   expect(native.props.initialData.appState.currentItemStrokeColor).toBe('#e03131')
   fireEvent.click(screen.getByText('Draw mark'))
   await act(async () => { await h.leave() })
@@ -255,8 +255,9 @@ it('finishing one new arrow opens a tail label and submits annotations without r
   const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene')
   const arrow = { id: 'new-arrow', type: 'arrow', x: -20, y: 20, width: 40, height: 0, points: [[0, 0], [40, 0]] }
+  act(() => native.emit({ zoom: { value: 0.3 } }))
   const scene = [...project.pages[0].elements, arrow]
-  const state = { scrollX: 0, scrollY: 0, zoom: { value: 1 }, viewBackgroundColor: '#ffffff', selectedElementIds: { 'new-arrow': true }, activeTool: { type: 'arrow' }, newElement: arrow, multiElement: null }
+  const state = { scrollX: 0, scrollY: 0, zoom: { value: 0.3 }, viewBackgroundColor: '#ffffff', selectedElementIds: { 'new-arrow': true }, activeTool: { type: 'arrow' }, newElement: arrow, multiElement: null }
   act(() => { native.api.updateScene({ elements: scene }); native.props.onPointerDown({ type: 'arrow' }, { originalElements: new Map(project.pages[0].elements.map(item => [item.id, item])) }); native.props.onChange(scene, state); native.props.onPointerUp() })
   expect(document.activeElement).not.toBe(screen.getByLabelText('图片修改需求'))
   act(() => native.props.onChange(scene, { ...state, newElement: null, multiElement: arrow }))
@@ -264,6 +265,10 @@ it('finishing one new arrow opens a tail label and submits annotations without r
   act(() => native.props.onChange(scene, { ...state, newElement: null }))
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('箭头标注要求')))
   fireEvent.change(screen.getByLabelText('箭头标注要求'), { target: { value: '改成橙色' } })
+  expect(native.api.updateScene).toHaveBeenCalledWith({ appState: { selectedElementIds: { [String(project.pages[0].elements[0]!.id)]: true } } })
+  const label = native.api.getSceneElementsIncludingDeleted().find((item: any) => item.type === 'text')
+  expect(label.fontSize * 0.3).toBeGreaterThanOrEqual(20)
+  expect(label.width * 0.3).toBe(240)
   expect((screen.getByLabelText('图片修改需求') as HTMLTextAreaElement).value).toBe('')
   expect((screen.getByRole('button', { name: '按标注修改', exact: true }) as HTMLButtonElement).disabled).toBe(false)
   const preview = { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: `sha256:${'c'.repeat(64)}` } }
@@ -486,7 +491,7 @@ it('waits for native scene initialization and nonzero viewport before fitting a 
   expect(native.api.getAppState()).toMatchObject({ isLoading: false, width: 1000, height: 800 })
   expect(native.api.getSceneElementsIncludingDeleted()).toEqual(project.pages[0].elements)
   const options = native.scroll.mock.calls[0][1]
-  expect(options).toMatchObject({ viewportZoomFactor: 0.68, maxZoom: 1, fitToViewport: true })
+  expect(options).toMatchObject({ viewportZoomFactor: 0.82, maxZoom: 1, fitToViewport: true })
   // This viewport can fit a 1000px square above 50%; a saved 10% must not cap it.
   expect(Math.min(1000 / 1000, 800 / 1000) * options.viewportZoomFactor).toBeGreaterThan(0.5)
   act(() => native.emit({ zoom: { value: 0.3 }, scrollX: 15, scrollY: 20 }))
@@ -644,4 +649,15 @@ it('tail labels outside the original follow only their associated arrow in edit 
   const label = { id: 'label', type: 'text', text: '去字', x: -100, y: 20, width: 50, height: 20, customData: { emateAnnotationArrowId: 'arrow' } }
   const unrelated = { ...label, id: 'unrelated', customData: { emateAnnotationArrowId: 'elsewhere' } }
   expect(selectedAnnotationElements([image, arrow, label, unrelated], ['image']).map(item => item.id)).toEqual(['image', 'arrow', 'label'])
+})
+
+
+it('places imported images beside existing content rather than overlapping it', () => {
+  const first = { ownerSessionId: 'session', ref: { attachmentId: `sha256:${'1'.repeat(64)}`, mediaType: 'image/png', bytes: 1, width: 800, height: 600 } }
+  const second = { ...first, ref: { ...first.ref, attachmentId: `sha256:${'2'.repeat(64)}` } }
+  const before = insertAsset(emptyProject('main'), 'page-1', first)
+  const original = structuredClone(before.pages[0]!.elements[0]!)
+  const after = insertAsset(before, 'page-1', second)
+  expect(after.pages[0]!.elements[0]).toEqual(original)
+  expect(Number(after.pages[0]!.elements[1]!.x)).toBeGreaterThan(Number(original.x) + Number(original.width))
 })

@@ -29,7 +29,9 @@ export const inject = [
 const SETTINGS_NAMESPACE = settingsNamespace('vision-toolkit')
 const MODEL_SETTINGS_NAMESPACE = settingsNamespace('llm-pi-ai')
 const MODEL_ID = 'gpt-5.6-luna'
-const CREDENTIAL_REF = 'E_MATE_MODEL_KEY_GPT'
+// The enterprise projection uses the same revocable session credential as chat.
+// Provider API keys are deliberately removed by the identity owner at login.
+const CREDENTIAL_REF = 'E_MATE_MODEL_SESSION_TOKEN'
 const UNCONFIGURED_BASE_URL = 'https://127.0.0.1.invalid/v1'
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 

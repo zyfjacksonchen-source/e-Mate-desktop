@@ -10,6 +10,7 @@ import { LocalFileSystem } from '../../../upstream/deepseek-harness/packages/fs/
 import { handleCanvas } from '../src/index.ts'
 import { emptyProject, intentMarker } from '../src/contract.ts'
 import { insertAsset } from '../src/client/model.ts'
+import { saveProject, canvasDirectory } from '../src/project-files.ts'
 import { nativeImageOutputs, requestCalls } from '../src/native-artifacts.ts'
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const hash = createHash('sha256').update(png).digest('hex')
@@ -100,4 +101,31 @@ test('a completed child task is importable before the whole batch ends; foreign 
   assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [{ ownerSessionId: 'child', ref }])
   child.events[0].data.client_request_id = 'foreign'
   assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+})
+
+
+test('same-workspace sessions isolate projects and explicitly copy legacy files without deleting them', async t => {
+  const h = await setup(t)
+  h.ctx.workspaceRegistry.list = () => [{ path: h.root, sessionIds: ['parent', 'other'] }]
+  h.ctx.sessions.get = id => ['parent', 'other'].includes(id) ? { header: { id }, events: [] } : undefined
+  const call = (id, endpoint, value = {}) => handleCanvas(h.ctx, endpoint, { session_id: id, ...value })
+  const old = { ...emptyProject('main'), title: '旧工作区海报' }
+  await saveProject(h.ctx.fs, h.root, old, null)
+  const oldPath = join(await canvasDirectory(h.root), 'main.json')
+  const before = await readFile(oldPath)
+  assert.deepEqual(await call('parent', 'list'), { ok: true, value: [] })
+  assert.deepEqual(await call('parent', 'load', { project_id: 'main' }), { ok: true, value: null })
+  for (const id of ['parent', 'other']) {
+    const saved = await call(id, 'save', { project_id: 'main', project: { ...emptyProject('main'), title: id }, expected_revision: null })
+    assert.equal(saved.ok, true)
+  }
+  assert.equal((await call('parent', 'load', { project_id: 'main' })).value.project.title, 'parent')
+  assert.equal((await call('other', 'load', { project_id: 'main' })).value.project.title, 'other')
+  assert.equal((await call('parent', 'legacy-list')).value[0].title, old.title)
+  assert.equal((await call('parent', 'import-legacy', { legacy_project_id: 'main', project_id: 'copied' })).ok, true)
+  assert.equal((await call('parent', 'load', { project_id: 'copied' })).value.project.title, old.title)
+  assert.deepEqual(await call('other', 'load', { project_id: 'copied' }), { ok: true, value: null })
+  assert.deepEqual(await readFile(oldPath), before)
+  const forged = await call('parent', 'load', { project_id: 'main', owner: 'other' })
+  assert.equal(forged.ok, false)
 })

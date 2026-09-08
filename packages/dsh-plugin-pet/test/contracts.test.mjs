@@ -35,7 +35,9 @@ test('all pause conditions and corrupt persisted positions are bounded',()=>{
   assert.equal(motionPaused(task,false,false),false)
   for(const changed of [{...task,firstResponsePending:true},{...task,window:{visible:false,minimized:false}},{...task,window:{visible:true,minimized:true}}])assert.equal(motionPaused(changed,false,false),true)
   assert.equal(motionPaused(task,true,false),true);assert.equal(motionPaused(task,false,true),true)
-  for(const value of [null,{}, {position:null},{position:{x:NaN,y:2}}])assert.equal(decodeSettings(value).enabled,true)
+  for(const value of [null,{}, {position:null},{position:{x:NaN,y:2}}])assert.equal(decodeSettings(value).enabled,false)
+  assert.equal(decodeSettings({enabled:true}).enabled,true)
+  assert.equal(decodeSettings({enabled:false}).enabled,false)
   const viewport={width:1000,height:800};const normalized=normalizedPosition({x:10000,y:-5},viewport);assert.deepEqual(normalized,{x:1,y:0});assert.equal(pixelPosition(normalized,viewport).x,888)
 })
 test('fixed license provenance and component boundaries remain explicit',async()=>{

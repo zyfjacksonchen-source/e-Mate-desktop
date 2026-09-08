@@ -15,7 +15,12 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { Context } from '@deepseek-ai/cordis'
+import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
+import WebServer from '@deepseek-ai/dsh-host-webserver'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { composeEntries } from '@deepseek-ai/dsh-app-boot'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 const conversationAdapterUrl = new URL('../../../scripts/harness-conversation-adapter.mjs', import.meta.url).href
@@ -124,7 +129,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     if (packagedSource) rmSync(packagedSource, { recursive: true, force: true })
   }, 60_000)
 
-  it('installs the fixed product profile and replaces legacy CLI update guidance', () => {
+  it('installs the fixed product profile and replaces legacy CLI update guidance', async () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
     roots.push(home)
 
@@ -287,7 +292,67 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(rows.find(row => row.id === 'emate-office-skills')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-office-skills',
     }))
-    expect(rows.find(row => row.id === 'emate-agent-operations')?.disabled).toBe(true)
+    const agentOperations = rows.find(row => row.id === 'emate-agent-operations')
+    expect(agentOperations).toEqual(expect.objectContaining({
+      name: './plugins/agent-operations.js',
+      inject: ['systemPrompt', 'connection', 'sessions'],
+    }))
+    expect(agentOperations?.disabled).not.toBe(true)
+    // Boot the composed Desktop row with the pinned native services. A template
+    // assertion alone missed the Desktop override that removed this HTTP route.
+    const ctx = new Context()
+    const services = [ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 }),
+      ctx.plugin(SystemPrompt, {}), ctx.plugin(SessionStore)]
+    try {
+      await Promise.all(services.map(fiber => fiber.await()))
+      services.push(ctx.plugin({ name: 'expert-test-connection', inject: ['webServer'],
+        apply: (owner: Context) => { new HostConnectionService(owner, []) } }))
+      await services.at(-1)!.await()
+      const moduleUrl = pathToFileURL(join(profile, agentOperations!.name!)).href
+      const plugin = await import(/* @vite-ignore */ moduleUrl)
+      const fiber = ctx.plugin(plugin)
+      services.push(fiber)
+      await fiber.await()
+      const first = ctx.sessions.create(SessionId('expert-first'))
+      const second = ctx.sessions.create(SessionId('expert-second'))
+      const flush = vi.fn()
+      ctx.on('session/flush', flush)
+      const rpc = async (endpoint: string, payload: object, origin?: string) => {
+        const response = await fetch(`http://127.0.0.1:${ctx.webServer.port}/emate.expert-mode/${endpoint}`, {
+          method: 'POST', headers: { 'content-type': 'application/json', ...(origin ? { origin } : {}) },
+          body: JSON.stringify({ type: 'client-request', rpcId: 'expert-test', method: endpoint, payload }),
+        })
+        if (origin) return response.status
+        expect(response.status).toBe(200)
+        const body = await response.json() as { result: unknown }
+        return body.result
+      }
+      const policy = async (session: typeof first) => {
+        const assembly = await ctx.systemPrompt.assemble({ agent: { session } } as never)
+        return assembly.sections.find(section => section.name === 'emate:expert-mode')?.text ?? ''
+      }
+      expect(await rpc('get', { session_id: first.id })).toEqual({ ok: true, value: { active: false } })
+      expect(await policy(first)).toBe('')
+      expect(await rpc('set', { session_id: first.id, active: true })).toEqual({ ok: true, value: { active: true } })
+      expect(flush).toHaveBeenCalledWith(first)
+      expect(await rpc('get', { session_id: first.id })).toEqual({ ok: true, value: { active: true } })
+      expect(await policy(first)).toContain('enterprise-knowledge Skill')
+      expect(await policy(second)).toBe('')
+      const restored = ctx.sessions.create(SessionId('expert-restored'), { seed: first.events })
+      expect(await policy(restored)).toContain('enterprise-knowledge Skill')
+      expect(await rpc('set', { session_id: first.id, active: false })).toEqual({ ok: true, value: { active: false } })
+      expect(await policy(first)).toContain('用户已关闭')
+      expect(await rpc('set', { session_id: second.id, active: true }, 'https://untrusted.example')).toBe(403)
+      expect(await policy(second)).toBe('')
+      const assembly = await ctx.systemPrompt.assemble()
+      expect(assembly.sections.find(section => section.name === 'emate:agent-operations')?.text).toContain('image_batch')
+      await fiber.dispose()
+      expect((await ctx.systemPrompt.assemble()).sections.some(section => section.name.startsWith('emate:'))).toBe(false)
+      const removed = await fetch(`http://127.0.0.1:${ctx.webServer.port}/emate.expert-mode/get`, { method: 'POST' })
+      expect(removed.status).toBe(404)
+    } finally {
+      for (const fiber of services.reverse()) await fiber.dispose()
+    }
     expect(rows.find(row => row.id === 'emate-schedules')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-schedules/lib/index.js',
       inject: ['connection', 'sessionPersistence'],

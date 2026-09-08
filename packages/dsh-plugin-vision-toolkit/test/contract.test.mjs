@@ -305,7 +305,7 @@ targetTest('Vision prepares and reuses its managed runtime without a package ind
     const config = visionConfigFromModelSettings({
       providers: {
         'e-mate-enterprise': {
-          apiKeyEnv: 'E_MATE_MODEL_KEY_GPT',
+          apiKeyEnv: 'E_MATE_MODEL_SESSION_TOKEN',
           api: 'openai-responses',
           baseURL: 'https://models.example/v1',
           models: [{ id: 'gpt-5.6-luna', input: ['text', 'image'] }],
@@ -422,14 +422,41 @@ targetTest('derives the native Responses protocol from the enterprise model proj
   const projected = {
     providers: {
       'e-mate-enterprise': {
-        apiKeyEnv: 'E_MATE_MODEL_KEY_GPT',
+        apiKeyEnv: 'E_MATE_MODEL_SESSION_TOKEN',
         api: 'openai-responses',
         baseURL: 'https://models.example/v1',
         models: [{ id: 'gpt-5.6-luna', input: ['text', 'image'] }],
       },
     },
   }
-  assert.equal(visionConfigFromModelSettings(projected).provider.protocol, 'responses')
+  const config = visionConfigFromModelSettings(projected)
+  assert.equal(config.provider.protocol, 'responses')
+  assert.equal(config.provider.credential, projected.providers['e-mate-enterprise'].apiKeyEnv)
+  assert.equal(config.provider.baseUrl, projected.providers['e-mate-enterprise'].baseURL)
+  // Exercise the pinned remote-operation boundary with only the current login
+  // credential available. No obsolete provider key or copied credential exists.
+  const { VisionToolkitRuntime } = await loadBuiltModule('.test-lib/test-entry.mjs')
+  let activeToken = 'test-session-token-in-memory'
+  const resolvedRefs = []
+  const runtime = new VisionToolkitRuntime({ credentials: {
+    resolve: async ref => {
+      resolvedRefs.push(ref)
+      return ref === 'E_MATE_MODEL_SESSION_TOKEN' && activeToken !== undefined
+        ? { value: activeToken, source: 'test-login' } : undefined
+    },
+  } }, config, {})
+  const env = await runtime.resolveVisionEnv()
+  assert.equal(env.VISION_API_KEY, activeToken)
+  assert.equal(env.VISION_BASE_URL, config.provider.baseUrl)
+  assert.equal(env.VISION_API_PROTOCOL, 'responses')
+  activeToken = 'test-refreshed-session-token-in-memory'
+  assert.equal((await runtime.resolveVisionEnv()).VISION_API_KEY, activeToken)
+  activeToken = undefined
+  await assert.rejects(runtime.resolveVisionEnv(), /credential E_MATE_MODEL_SESSION_TOKEN is not configured/u)
+  assert.deepEqual(resolvedRefs, Array(3).fill('E_MATE_MODEL_SESSION_TOKEN'))
+  const obsolete = structuredClone(projected)
+  obsolete.providers['e-mate-enterprise'].apiKeyEnv = 'E_MATE_MODEL_KEY_GPT'
+  assert.equal(visionConfigFromModelSettings(obsolete), undefined)
   projected.providers['e-mate-enterprise'].api = 'openai-completions'
   assert.equal(visionConfigFromModelSettings(projected), undefined)
 })
@@ -486,7 +513,7 @@ targetTest('managed Vision runtime stays unavailable when a replacement policy g
   const projected = {
     providers: {
       'e-mate-enterprise': {
-        apiKeyEnv: 'E_MATE_MODEL_KEY_GPT',
+        apiKeyEnv: 'E_MATE_MODEL_SESSION_TOKEN',
         api: 'openai-responses',
         baseURL: 'https://models-a.example/v1',
         models: [{ id: 'gpt-5.6-luna', input: ['text', 'image'] }],
@@ -525,4 +552,71 @@ test('Vision capability readiness is bounded, abortable, and cached between refr
   assert.match(source, /credentials\/updated/u)
   assert.doesNotMatch(source, /statusPromise/u)
   assert.match(source, /if \(epoch === statusEpoch\)/u)
+})
+
+
+targetTest('enterprise login credential changes invalidate Vision readiness without copying credentials', async () => {
+  const { apply } = await loadBuiltModule()
+  const state = await mkdtemp(join(tmpdir(), 'e-mate-vision-login-'))
+  const previousHome = process.env.DSH_HOME
+  const previousFetch = globalThis.fetch
+  process.env.DSH_HOME = state
+  const listeners = new Map()
+  const values = new Map([['llm-pi-ai', { providers: { 'e-mate-enterprise': {
+    apiKeyEnv: 'E_MATE_MODEL_SESSION_TOKEN', api: 'openai-responses',
+    baseURL: 'https://models.example/v1', models: [{ id: 'gpt-5.6-luna', input: ['text', 'image'] }],
+  } } }]])
+  let capability
+  let configured = true
+  let requests = 0
+  const ctx = {
+    settings: {
+      get: namespace => values.get(String(namespace)),
+      register: (namespace, _schema, options) => {
+        values.set(String(namespace), options.base)
+        return { get: () => values.get(String(namespace)), watch: () => () => {} }
+      },
+      replace: async (namespace, value) => { values.set(String(namespace), value) },
+    },
+    logger: { info() {}, warn() {}, error() {} },
+    tools: { register: () => () => {} }, skills: { register: () => () => {} },
+    agents: { list: () => [] }, webServer: { port: 12345 },
+    emateCapabilities: { register: value => { capability = value; return () => {} } },
+    on: (event, handler) => {
+      const handlers = listeners.get(event) ?? []
+      handlers.push(handler)
+      listeners.set(event, handlers)
+      return () => { handlers.splice(handlers.indexOf(handler), 1) }
+    },
+    inject() {},
+  }
+  globalThis.fetch = async (_url, options) => {
+    requests++
+    return Response.json({ ok: true, value: options.method === 'POST'
+      ? { healthy: true, connectionTested: true }
+      : { runtime: { ready: true }, credential: { configured }, settings: { value: values.get('vision-toolkit') } } })
+  }
+  let dispose
+  try {
+    dispose = await apply(ctx)
+    await new Promise(resolve => setImmediate(resolve))
+    const signal = new AbortController().signal
+    assert.equal((await capability.status(signal)).state, 'ready')
+    assert.equal((await capability.status(signal)).state, 'ready')
+    assert.equal(requests, 2)
+    configured = false
+    for (const listener of listeners.get('credentials/updated')) listener('E_MATE_MODEL_SESSION_TOKEN')
+    assert.equal((await capability.status(signal)).state, 'setup-required')
+    assert.equal(requests, 3, 'logout must not reuse cached successful readiness')
+    configured = true
+    for (const listener of listeners.get('credentials/updated')) listener('E_MATE_MODEL_SESSION_TOKEN')
+    assert.equal((await capability.status(signal)).state, 'ready')
+    assert.equal(requests, 5, 'reauthorization must invalidate cached failure')
+  } finally {
+    dispose?.()
+    globalThis.fetch = previousFetch
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    await rm(state, { recursive: true, force: true })
+  }
 })

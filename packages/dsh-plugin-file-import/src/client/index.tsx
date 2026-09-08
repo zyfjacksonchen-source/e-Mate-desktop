@@ -15,6 +15,7 @@ import css from './style.module.css'
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     'e-mate.conversation.composer': { kind: 'single'; scope: 'session-maybe'; owner: { nativeProps: any; InputBar: ComponentType<any> } }
+    'e-mate.conversation.composer.after-upload': { kind: 'list'; scope: 'session' }
   }
 }
 
@@ -552,7 +553,10 @@ export function apply(ctx: Context): void {
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
   ctx.effect(() => inputTriggers.registerSource(source), 'file-import: @文件 source')
   ctx.slots.inject('e-mate.conversation.composer', () => {
-    return ctx.slots.register({ name: 'e-mate.conversation.composer' }, function FileImportComposer({ nativeProps: props, InputBar }: any) {
+    return ctx.slots.register({
+      name: 'e-mate.conversation.composer',
+      children: { 'e-mate.conversation.composer.after-upload': { kind: 'list', scope: 'session' } },
+    }, function FileImportComposer({ nativeProps: props, InputBar, renderSlot }: any) {
       const input = props.useInput((state: any) => state) ?? EMPTY_INPUT
       const sessionId = props.sessionId as string | undefined
       const target = sessionId === undefined ? undefined : ctx.sessions.binding(sessionId)?.session
@@ -594,7 +598,7 @@ export function apply(ctx: Context): void {
           addImages,
           blocked: props.blocked ?? (pending ? { reason: '附件正在导入，请稍候。' } : undefined),
           accessory: accessory === null ? props.accessory : props.accessory == null ? accessory : <>{props.accessory}{accessory}</>,
-          leftItems: <>{props.leftItems}{controls}</>,
+          leftItems: <>{props.leftItems}{controls}{renderSlot('e-mate.conversation.composer.after-upload', {})}</>,
         })} />
     })
   })

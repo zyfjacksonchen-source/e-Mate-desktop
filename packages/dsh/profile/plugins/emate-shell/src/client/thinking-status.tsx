@@ -1,43 +1,93 @@
 import { useEffect } from 'react'
-import css from './activity-fold.module.css'
-import './thinking-status.module.css'
+import css from './thinking-status.module.css'
 
-/** rc.7 hardcodes TurnStatus outside its slots. This presentation adapter retires
- * only that label; native turn lifecycle, clock, scrolling and approvals stay owned by DSH. */
+const TARGET_LABEL = 'Deep diving...'
+const MARKER = 'data-emate-thinking-status'
+const STATUS_SELECTOR = '[role="status"][aria-live="polite"]'
+
+function targetLabel(node: HTMLElement): Text | undefined {
+  return [...node.childNodes].find((child): child is Text =>
+    child.nodeType === Node.TEXT_NODE && child.textContent?.trimStart().startsWith(TARGET_LABEL),
+  )
+}
+
+function createDomino(): HTMLElement {
+  const host = document.createElement('span')
+  host.className = css.host
+  host.setAttribute('aria-hidden', 'true')
+
+  const loader = document.createElement('span')
+  loader.className = css.loader
+  const domino = document.createElement('span')
+  domino.className = css.domino
+  for (let index = 0; index < 4; index += 1) domino.append(document.createElement('i'))
+  loader.append(domino)
+
+  const label = document.createElement('span')
+  label.textContent = '思考中'
+  host.append(loader, label)
+  return host
+}
+
+/** Brand-only projection over the target Harness running-turn status. */
 export function ThinkingStatusBranding() {
   useEffect(() => {
-    const entries = new Map<HTMLElement, { text: Text; value: string; label: string | null }>()
-    const decorate = (node: HTMLElement) => {
-      if (entries.has(node)) return
-      const text = [...node.childNodes].find((child): child is Text =>
-        child.nodeType === Node.TEXT_NODE && child.textContent?.trim().startsWith('Deep diving...') === true)
-      if (!text) return
-      entries.set(node, { text, value: text.data, label: node.getAttribute('aria-label') })
-      text.data = '正在处理'
-      node.setAttribute('data-emate-turn-status', '')
-      node.setAttribute('aria-label', '正在处理')
-      node.classList.add(css.shimmer)
+    let active = true
+    const decorated = new Map<HTMLElement, { host: HTMLElement; label: string | null; text: Text; value: string }>()
+    const restore = (status: HTMLElement, entry: { host: HTMLElement; label: string | null; text: Text; value: string }) => {
+      entry.host.remove()
+      entry.text.data = entry.value
+      status.removeAttribute(MARKER)
+      if (entry.label === null) status.removeAttribute('aria-label')
+      else status.setAttribute('aria-label', entry.label)
     }
-    const scan = (node: Node) => {
-      if (!(node instanceof Element)) return
-      if (node.matches('[role="status"][aria-live="polite"]')) decorate(node as HTMLElement)
-      for (const status of node.querySelectorAll<HTMLElement>('[role="status"][aria-live="polite"]')) decorate(status)
+    const sync = (candidates: Iterable<HTMLElement>) => {
+      if (!active) return
+      for (const [status, entry] of decorated) {
+        if (!status.isConnected) decorated.delete(status)
+        else if (!entry.host.isConnected) {
+          restore(status, entry)
+          decorated.delete(status)
+        }
+      }
+      for (const status of candidates) {
+        const text = targetLabel(status)
+        if (text === undefined || decorated.has(status)) continue
+        const host = createDomino()
+        const label = status.getAttribute('aria-label')
+        const value = text.data
+        text.data = ''
+        status.setAttribute(MARKER, '')
+        status.setAttribute('aria-label', '思考中')
+        status.append(host)
+        decorated.set(status, { host, label, text, value })
+      }
     }
-    scan(document.body)
+    const addClosestStatus = (node: Node, candidates: Set<HTMLElement>) => {
+      const element = node instanceof Element ? node : node.parentElement
+      const status = element?.matches(STATUS_SELECTOR) === true ? element : element?.closest(STATUS_SELECTOR)
+      if (status instanceof HTMLElement) candidates.add(status)
+    }
+    const scanAdded = (node: Node, candidates: Set<HTMLElement>) => {
+      addClosestStatus(node, candidates)
+      if (!(node instanceof Element) || node.childElementCount === 0) return
+      for (const status of node.querySelectorAll<HTMLElement>(STATUS_SELECTOR)) candidates.add(status)
+    }
+
+    sync(document.querySelectorAll<HTMLElement>(STATUS_SELECTOR))
     const observer = new MutationObserver(records => {
-      for (const record of records) for (const node of record.addedNodes) scan(node)
-      for (const node of entries.keys()) if (!node.isConnected) entries.delete(node)
+      const candidates = new Set<HTMLElement>()
+      for (const record of records) {
+        addClosestStatus(record.target, candidates)
+        for (const node of record.addedNodes) scanAdded(node, candidates)
+      }
+      sync(candidates)
     })
     observer.observe(document.body, { childList: true, subtree: true })
     return () => {
+      active = false
       observer.disconnect()
-      for (const [node, entry] of entries) {
-        entry.text.data = entry.value
-        node.classList.remove(css.shimmer)
-        node.removeAttribute('data-emate-turn-status')
-        if (entry.label === null) node.removeAttribute('aria-label')
-        else node.setAttribute('aria-label', entry.label)
-      }
+      for (const [status, entry] of decorated) restore(status, entry)
     }
   }, [])
   return null
