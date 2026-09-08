@@ -83,11 +83,15 @@ function currentSessionImages(exec: VisionExecution): Map<string, ImageRef> {
   }
   for (const value of session.events ?? []) {
     const event = record(value)
-    if (event?.type !== 'emate/image-output') continue
-    const data = record(event.data)
-    collectBlocks(data?.content, refs)
-    const output = imageRef(data?.output)
-    if (output !== undefined) refs.set(output.attachmentId, output)
+    const data = record(event?.data)
+    if (event?.type === 'user/message') collectBlocks(data?.content, refs)
+    else if (event?.type === 'assistant/message' || event?.type === 'tool/result') {
+      collectBlocks(record(data?.message)?.content, refs)
+    } else if (event?.type === 'emate/image-output') {
+      collectBlocks(data?.content, refs)
+      const output = imageRef(data?.output)
+      if (output !== undefined) refs.set(output.attachmentId, output)
+    }
   }
   return refs
 }

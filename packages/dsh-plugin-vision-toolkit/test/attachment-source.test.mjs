@@ -77,3 +77,34 @@ test('vision_glance leaves ordinary workspace paths unchanged and preserves canc
     /cancelled by caller/u,
   )
 })
+
+// Compaction may remove image blocks from deriveMessages while the owning
+// session's durable events retain the exact attachment references.
+test('vision_glance reads historical user, assistant and tool images after compaction', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'e-mate-vision-history-'))
+  const content = [{ type: 'image', attachment }]
+  const events = [
+    { type: 'user/message', data: { content } },
+    { type: 'assistant/message', data: { message: { content } } },
+    { type: 'tool/result', data: { message: { content: [{ type: 'tool-result', content }] } } },
+  ]
+  try {
+    for (const event of events) {
+      const exec = { agent: { session: { header: { cwd: workspace },
+        deriveMessages: () => [{ role: 'user', content: [{ type: 'text', text: '分析之前的图片' }] }],
+        events: [event],
+      } } }
+      let staged
+      await withResolvedVisionGlanceImages({ attachments: { readImage: async ref => {
+        assert.deepEqual(ref, attachment)
+        return { data: Uint8Array.of(1, 2, 3, 4) }
+      } } }, [attachmentId], exec, async images => {
+        staged = images[0]
+        assert.deepEqual(await readFile(staged), Buffer.from([1, 2, 3, 4]))
+      })
+      await assert.rejects(stat(staged), { code: 'ENOENT' })
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})

@@ -2540,6 +2540,70 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       }
     }
 
+    // A newly uploaded target and a previous generated composition are two
+    // distinct inputs; the historical reference must be visible and submitted.
+    {
+      const priorMessages = sessionMessages.splice(0)
+      const priorEvents = sessionEvents.splice(0)
+      const text = '帮我把图中的设计师也改成以上图片的这种站位'
+      const current = { role: 'user', source: { kind: 'user' }, content: [
+        { type: 'image', attachment: selected }, { type: 'text', text },
+      ] }
+      sessionMessages.push(current)
+      sessionEvents.push({ type: 'emate/image-output', data: { content: [{ type: 'image', attachment: second }] } })
+      sessionEvents.push({ type: 'user/message', data: { content: current.content } })
+      try {
+        const step = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
+        assert.deepEqual(step.messages.at(-1).content.filter(block => block.type === 'image')
+          .map(block => block.attachment.attachmentId), [second.attachmentId])
+        const beforeIncomplete = requests.length
+        await assert.rejects(imagegen.execute({ prompt: text, image_url: selected.attachmentId }, execution()), /current target plus its previous image reference/u)
+        assert.equal(requests.length, beforeIncomplete)
+        const output = await imagegen.execute({ prompt: text }, execution())
+        assert.deepEqual(output.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId, second.attachmentId])
+        assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
+        const form = await new Response(requestRawBodies.at(-1), {
+          headers: { 'content-type': requestContentTypes.at(-1) },
+        }).formData()
+        const refs = form.getAll('image[]')
+        assert.equal(refs.length, 2)
+        for (const [index, ref] of [selected, second].entries()) {
+          assert.deepEqual(Buffer.from(await refs[index].arrayBuffer()),
+            Buffer.from((await context.attachments.readImage(ref)).data))
+        }
+
+        // A generated result in this turn must not replace the earlier reference.
+        const nextStep = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
+        assert.deepEqual(nextStep.messages.at(-1).content.filter(block => block.type === 'image')
+          .map(block => block.attachment.attachmentId), [second.attachmentId])
+        // Ordinary single-upload edits and negated references do not inherit history.
+        for (const request of ['只去掉这张图上的文字', '不要参考以上图片，只修改当前照片',
+          '参考这张图片比例生成，按照参考图的文字排版、文字风格，在图片中加入文字：上方“顾家家居限时福利 线上预约 到店购买 立减1000元”，左下“大坐家沙发”，右下“左滑查看更多”']) {
+          current.content[1].text = request
+          const singleStep = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
+          assert.equal(singleStep.messages.at(-1).content.filter(block => block.type === 'image').length, 0)
+          const singleOutput = await imagegen.execute({ prompt: request }, execution())
+          assert.deepEqual(singleOutput.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId])
+          assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
+          const singleForm = await new Response(requestRawBodies.at(-1), {
+            headers: { 'content-type': requestContentTypes.at(-1) },
+          }).formData()
+          assert.equal(singleForm.get('prompt'), request)
+          assert.deepEqual(Buffer.from(await singleForm.get('image').arrayBuffer()),
+            Buffer.from((await context.attachments.readImage(selected)).data))
+        }
+        // An empty pre-upload history must not fall forward to this turn's output.
+        current.content[1].text = text
+        sessionEvents.splice(0, sessionEvents.length, { type: 'user/message', data: { content: current.content } },
+          { type: 'emate/image-output', data: { content: [{ type: 'image', attachment: second }] } })
+        const noEarlier = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
+        assert.equal(noEarlier.messages.at(-1).content.filter(block => block.type === 'image').length, 0)
+      } finally {
+        sessionMessages.splice(0, sessionMessages.length, ...priorMessages)
+        sessionEvents.splice(0, sessionEvents.length, ...priorEvents)
+      }
+    }
+
     const mixedEvents = []
     const mixedAgent = { ...agent, session: { ...agent.session, events: mixedEvents,
       append(type, data, options) { mixedEvents.push({ type, data, ...options, seq: mixedEvents.length, time: Date.now() }) },
