@@ -480,7 +480,7 @@ export function preparePackagedFeishu(
   }
   if (!lstatSync(binary).isFile()) throw new Error('packaged Feishu CLI executable missing')
   if (platform === 'darwin') {
-    execute('/usr/bin/lipo', ['-verify_arch', ...(context.arch === 4 ? ['x86_64', 'arm64'] : [context.arch === 1 ? 'x86_64' : 'arm64']), binary])
+    execute('/usr/bin/lipo', [binary, '-verify_arch', ...(context.arch === 4 ? ['x86_64', 'arm64'] : [context.arch === 1 ? 'x86_64' : 'arm64'])])
   }
   const version = execute(binary, ['--version'])
   if (!/(?:^|\s)v?1\.0\.88(?:\s|$)/u.test(version)) throw new Error('packaged Feishu CLI executable version mismatch')

@@ -511,7 +511,7 @@ it.each([['darwin', 1, 'x64'], ['darwin', 3, 'arm64'], ['win32', 1, 'x64']] as c
       calls.length = 0
       preparePackagedFeishu({ ...packaged, arch: 4 }, runner)
       expect(calls.some(call => call[1]?.endsWith('install.js'))).toBe(false)
-      expect(calls[0]?.slice(1, 4)).toEqual(['-verify_arch', 'x86_64', 'arm64'])
+      expect(calls[0]?.slice(1)).toEqual([join(root, 'bin/lark-cli'), '-verify_arch', 'x86_64', 'arm64'])
     }
   } finally { rmSync(temporary, { recursive: true, force: true }) }
 })
@@ -575,4 +575,21 @@ it('checks Feishu original notices, binary drift, universal handling and Windows
       { from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     ]))
   } finally { rmSync(temporary, { recursive: true, force: true }) }
+})
+
+
+const feishuStaging = join(import.meta.dirname, '../dist/mac-release/mac-universal-x64-temp')
+const feishuStagingBinary = join(resolvePackagedUnpackedRoot(context(feishuStaging, 'darwin', 1)), 'node_modules/@larksuite/cli/bin/lark-cli')
+it.skipIf(process.platform !== 'darwin' || !existsSync(feishuStagingBinary))('checks the actual staged Feishu binary with native lipo argument parsing', () => {
+  let nativeChecks = 0
+  preparePackagedFeishu(context(feishuStaging, 'darwin', 1), (command, args, options) => {
+    if (command === '/usr/bin/lipo') {
+      nativeChecks++
+      expect(args).toEqual([feishuStagingBinary, '-verify_arch', 'x86_64'])
+      return spawnSync(command, args, options)
+    }
+    // The installer already populated this staging tree. Do not install or execute it again.
+    return { status: 0, stdout: args[0] === '-p' ? 'darwin:x64' : args[0] === '--version' ? 'lark-cli 1.0.88' : '' } as never
+  })
+  expect(nativeChecks).toBe(1)
 })
