@@ -254,20 +254,21 @@ function managedFileCurrent(
   }
   const from = join(source, ...parts)
   const to = join(target, ...parts)
+  return managedFileContentCurrent(from, to, overrides.get(entry))
+}
+
+function managedFileContentCurrent(from: string, to: string, override: string | undefined): boolean {
   const targetMetadata = lstatSync(to)
   if (!targetMetadata.isFile() || targetMetadata.isSymbolicLink()) return false
-  const override = overrides.get(entry)
   if (override !== undefined) return sha256Bytes(override) === sha256(to)
   const sourceMetadata = statSync(from)
   return sourceMetadata.isFile() && sourceMetadata.size === targetMetadata.size && sha256(from) === sha256(to)
 }
 
 function materializedDirectoryCurrent(
-  sourceRoot: string,
-  targetRoot: string,
+  source: string,
+  target: string,
   overrides: ReadonlyMap<string, string>,
-  source = sourceRoot,
-  target = targetRoot,
   prefix = '',
 ): boolean {
   if (!sameEntries(source, target, prefix === '')) return false
@@ -281,9 +282,11 @@ function materializedDirectoryCurrent(
       const local = prefix === '' ? entry.name : `${prefix}/${entry.name}`
       if (entry.isDirectory()) {
         return targetMetadata.isDirectory()
-          && materializedDirectoryCurrent(sourceRoot, targetRoot, overrides, from, to, local)
+          && materializedDirectoryCurrent(from, to, overrides, local)
       }
-      return entry.isFile() && managedFileCurrent(sourceRoot, targetRoot, local, overrides)
+      // The recursive walk has already checked every parent as a real directory.
+      // Critical-entry checks outside this walk still validate their entire ancestry.
+      return entry.isFile() && managedFileContentCurrent(from, to, overrides.get(local))
     })
 }
 
@@ -331,7 +334,11 @@ function installManagedPackage(
   target: string,
   overrides: ReadonlyMap<string, string> = new Map(),
   deferCleanup?: (path: string) => void,
+  reuseInstalledGeneration = false,
 ): void {
+  // A repair in the same installed generation uses the native warm checks for
+  // unaffected packages. New or damaged packages still require full validation.
+  if (reuseInstalledGeneration && managedPackageCurrent(source, target, overrides)) return
   if (managedPackageFullyCurrent(source, target, overrides)) return
   const { candidate, stale } = managedPackageTransactionPaths(target)
   if (pathExists(candidate) || pathExists(stale)) {
@@ -574,20 +581,27 @@ function adaptedEcosystemPatch(
   ]])
 }
 
-function installedProfileCurrent(
+function installedGenerationCurrent(
   profile: string,
   dshHome: string,
 ): boolean {
   try {
     const receipt = JSON.parse(readFileSync(join(profile, PROFILE_INSTALL_RECEIPT), 'utf8')) as Record<string, unknown>
-    if (receipt.schema_version !== 2
-      || receipt.version !== EMATE_DESKTOP_PROFILE_VERSION
-      || receipt.harness_commit !== HARNESS_COMMIT
-      || receipt.dsh_home !== resolve(dshHome)
-      || receipt.source_root !== resolve(sourceRoot)
-      || receipt.profile_generation !== 'bundled'
-      || receipt.managed_package_layout !== managedPackageLayout()) return false
+    return receipt.schema_version === 2
+      && receipt.version === EMATE_DESKTOP_PROFILE_VERSION
+      && receipt.harness_commit === HARNESS_COMMIT
+      && receipt.dsh_home === resolve(dshHome)
+      && receipt.source_root === resolve(sourceRoot)
+      && receipt.profile_generation === 'bundled'
+      && receipt.managed_package_layout === managedPackageLayout()
+  } catch {
+    return false
+  }
+}
 
+function installedProfileCurrent(profile: string, dshHome: string): boolean {
+  try {
+    if (!installedGenerationCurrent(profile, dshHome)) return false
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, unknown>
       dsh?: { profile?: { bundles?: unknown[] } }
@@ -679,6 +693,7 @@ export function installEmateDesktopProfile(
   }
 
   recoverManagedPackageTransactions(profile)
+  const reuseInstalledGeneration = installedGenerationCurrent(profile, dshHome)
   rmSync(join(profile, PROFILE_INSTALL_RECEIPT), { force: true })
   cpSync(join(sourceRoot, 'plugins'), join(profile, 'plugins'), { recursive: true, force: true })
   atomicWrite(
@@ -718,14 +733,14 @@ export function installEmateDesktopProfile(
   const shellSource = bundledComponentSource('@e-mate/dsh-client-shell')
   const shellTarget = join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')
   mkdirSync(dirname(shellTarget), { recursive: true })
-  installManagedPackage(shellSource, shellTarget, new Map(), deferCleanup)
+  installManagedPackage(shellSource, shellTarget, new Map(), deferCleanup, reuseInstalledGeneration)
 
   for (const name of PLUGIN_PACKAGES) {
     const source = bundledComponentSource(name)
     const target = join(profile, 'node_modules', ...name.split('/'))
     const overrides = adaptedPluginPatch(source, name)
     mkdirSync(dirname(target), { recursive: true })
-    installManagedPackage(source, target, overrides, deferCleanup)
+    installManagedPackage(source, target, overrides, deferCleanup, reuseInstalledGeneration)
   }
 
   for (const expected of ECOSYSTEM_PLUGIN_PACKAGES) {
@@ -756,7 +771,7 @@ export function installEmateDesktopProfile(
       || typeof manifest.dsh?.bundle?.patch !== 'string') {
       throw new Error(`${expected.name} package contract does not match the pinned e-Mate desktop profile`)
     }
-    installManagedPackage(source, target, adaptedEcosystemPatch(source, expected), deferCleanup)
+    installManagedPackage(source, target, adaptedEcosystemPatch(source, expected), deferCleanup, reuseInstalledGeneration)
   }
 
   const tools = packageEntry('@deepseek-ai/dsh-tools')

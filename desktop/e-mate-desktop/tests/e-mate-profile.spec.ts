@@ -90,8 +90,9 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-// This suite installs and repairs complete on-disk profiles, including Skill assets.
-describe('e-Mate desktop profile', { timeout: 30_000 }, () => {
+// Complete Windows payloads are physical copies: cold installation alone takes
+// ~53s on the native runner. This is an integration deadline, not a latency SLA.
+describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120_000 : 30_000 }, () => {
   type ProfileModule = typeof import('../src/e-mate-profile.ts')
   let EMATE_DESKTOP_PROFILE_VERSION: ProfileModule['EMATE_DESKTOP_PROFILE_VERSION']
   let EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS: ProfileModule['EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS']
