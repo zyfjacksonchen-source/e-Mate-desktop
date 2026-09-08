@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
 import { LocalFileSystem } from '../../../upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'
-import { emptyProject, validateProject } from '../src/contract.ts'
+import { emptyProject, validateProject, intentPrompt } from '../src/contract.ts'
 import { loadProject, saveProject, listProjects, workspaceRoot } from '../src/project-files.ts'
 
 async function setup(t) {
@@ -15,6 +15,18 @@ async function setup(t) {
   t.after(async () => { await fiber.dispose(); await rm(root, { recursive: true, force: true }) })
   return { root, fs: ctx.fs }
 }
+test('canvas edit preserves ordered original and annotation roles and refuses a missing original', () => {
+  const project = emptyProject('main')
+  const sourceIds = ['sha256:' + 'a'.repeat(64), 'sha256:' + 'b'.repeat(64)]
+  const intent = { id: 'edit-1', kind: 'edit', pageId: project.pages[0].id, sessionId: 'live', sourceIds, imported: [] }
+  const prompt = intentPrompt(project, intent, '去掉海报上的文字')
+  assert(prompt.includes(JSON.stringify(sourceIds)))
+  assert.match(prompt, /imagegen 编辑原图/u)
+  assert.match(prompt, /第一张是待修改原图/u)
+  assert.match(prompt, /保留其余区域、人物身份/u)
+  assert.throws(() => intentPrompt(project, { ...intent, sourceIds: [] }, '去掉文字'), /缺少原图/u)
+  assert.match(intentPrompt(project, { ...intent, kind: 'image', sourceIds: [] }, '生成新海报'), /生成结果/u)
+})
 test('native fs atomically saves, checks exact content revision, and recovers on restart', async t => {
   const { root, fs } = await setup(t)
   const document = emptyProject('main')

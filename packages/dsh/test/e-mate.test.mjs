@@ -2496,6 +2496,8 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       '为小红书装修干货笔记创作一张竖版3:4中文封面，新图生成，并非修改原图。',
       '生成全新的封面，不要使用上图。',
       'Create a new cover, not editing the original image.',
+      '生成一张没有文字的海报。',
+      '不要去掉海报上的文字，生成一个新设计。',
     ].entries()) {
       const priorMessages = sessionMessages.splice(0)
       const priorEvents = sessionEvents.splice(0)
@@ -2513,6 +2515,31 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/generations')
     }
 
+    // A prior uploaded poster followed by text-only removal must send its exact
+    // CAS bytes to edits, even when the model omits image_url.
+    for (const text of ['去掉海报上的文字', '把照片上的文字去掉', '去除图片里的文字', '去掉文字']) {
+      const priorMessages = sessionMessages.splice(0)
+      const priorEvents = sessionEvents.splice(0)
+      sessionMessages.push(
+        { role: 'user', source: { kind: 'user' }, content: [{ type: 'image', attachment: selected }] },
+        { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] },
+      )
+      try {
+        const output = await imagegen.execute({ prompt: text }, execution())
+        assert.equal(output.receipt.operation, 'edit', text)
+        assert.deepEqual(output.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId])
+        assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
+        const form = await new Response(requestRawBodies.at(-1), {
+          headers: { 'content-type': requestContentTypes.at(-1) },
+        }).formData()
+        assert.deepEqual(Buffer.from(await form.get('image').arrayBuffer()),
+          Buffer.from((await context.attachments.readImage(selected)).data))
+      } finally {
+        sessionMessages.splice(0, sessionMessages.length, ...priorMessages)
+        sessionEvents.splice(0, sessionEvents.length, ...priorEvents)
+      }
+    }
+
     const mixedEvents = []
     const mixedAgent = { ...agent, session: { ...agent.session, events: mixedEvents,
       append(type, data, options) { mixedEvents.push({ type, data, ...options, seq: mixedEvents.length, time: Date.now() }) },
@@ -2520,6 +2547,8 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     } }
     const beforeMixed = requests.length
     for (const prompt of [
+      '去掉海报上的文字',
+      '去掉文字',
       '新图生成，并非修改原图；但请参考上图。',
       '并非不修改原图，请继续。',
       '不要修改原图，但把这张图中的灯改成蓝色。',
