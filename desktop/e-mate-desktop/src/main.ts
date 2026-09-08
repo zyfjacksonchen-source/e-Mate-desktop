@@ -47,7 +47,7 @@ import { loadProfileBaseContract } from './base-contract.ts'
 import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { resolveDesktopShellEnvironment } from './shell-environment.ts'
 import type { DesktopPnpmBootstrap } from './pnpm.ts'
-import { bundledCalcPaths, bundledPythonPath } from './vision-toolkit.ts'
+import { bundledCalcPaths, bundledPythonPath, installCalcFontEnvironment } from './vision-toolkit.ts'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import {
   createDesktopExitCoordinator,
@@ -138,6 +138,7 @@ async function start(): Promise<void> {
   let removeShutdownRequests: (() => void) | undefined
   let disposeDshRuntime: (() => void) | undefined
   let disposePnpmRuntime: (() => void) | undefined
+  let disposeCalcFonts: (() => Promise<void>) | undefined
   let runtime!: ElectronDesktopRuntime
   let rendererBootSettled = false
   let resolveRendererBoot!: (report: RendererBootReport) => void
@@ -172,6 +173,8 @@ async function start(): Promise<void> {
     async () => {
       try {
         await current?.fiber.dispose()
+        // Keep font files until native subprocess disposal has completed successfully.
+        await disposeCalcFonts?.()
       } finally {
         disposeDshRuntime?.()
         disposePnpmRuntime?.()
@@ -217,6 +220,7 @@ async function start(): Promise<void> {
   installFailLoud(BIN_NAME, failLoudProcess, async () => {
     try {
       await current?.fiber.dispose()
+      await disposeCalcFonts?.()
     } finally {
       disposeDshRuntime?.()
       disposePnpmRuntime?.()
@@ -352,6 +356,8 @@ async function start(): Promise<void> {
       emateProfileComponentSources(),
       baseContract.runtime_imports,
     )
+    const calcPaths = bundledCalcPaths()
+    if (calcPaths) disposeCalcFonts = await installCalcFontEnvironment(calcPaths.fontDirectory, process.env)
     const ctx = await boot(
       BIN_NAME,
       prepared.rootConfig,

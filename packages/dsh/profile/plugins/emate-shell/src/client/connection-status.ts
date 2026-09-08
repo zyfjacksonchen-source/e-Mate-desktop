@@ -1,4 +1,4 @@
-export type ConnectionState = 'not-connected' | 'connecting' | 'connected' | 'expired' | 'failed'
+export type ConnectionState = 'not-connected' | 'connecting' | 'connected' | 'expired' | 'failed' | 'unavailable' | 'authorization-required'
 export type ConnectionId = 'feishu' | 'dingtalk' | 'tencent_docs'
 export interface ConnectionItem { id: ConnectionId; state: ConnectionState }
 export const CONNECTIONS = [
@@ -9,6 +9,7 @@ export const CONNECTIONS = [
 
 export const CONNECTION_LABELS: Record<ConnectionState, string> = {
   'not-connected': '未连接', connecting: '连接中', connected: '已连接', expired: '授权失效', failed: '状态异常',
+  unavailable: '暂不可用', 'authorization-required': '待授权',
 }
 type Rpc = (channel: string, endpoint: string, payload: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>
 function record(value: unknown): value is Record<string, unknown> {
@@ -26,16 +27,23 @@ function valueOf(value: unknown): unknown {
   return value
 }
 export async function loadConnectionStates(call: Rpc, signal?: AbortSignal): Promise<ConnectionItem[]> {
-  const results = await Promise.allSettled([
-    call('/emate.mcpManage', 'feishu.status', {}, signal),
-    call('/dingtalk', 'connection.status', {}, signal),
-    call('/emate.mcpManage', 'list', {}, signal),
-  ])
+  const targets = [['/emate.mcpManage', 'feishu.status'], ['/dingtalk', 'connection.status'], ['/emate.mcpManage', 'list']] as const
+  const results = await Promise.allSettled(targets.map(([channel, endpoint]) => call(channel, endpoint, {}, signal)))
   return CONNECTIONS.map(({ id }, index) => {
     const result = results[index]
     let state: ConnectionState = 'failed'
     try {
-      if (result?.status !== 'fulfilled') throw new Error('status unavailable')
+      if (result?.status === 'rejected') {
+        // Native RPC throws an Error for absent HTTP routes, before its JSON envelope exists.
+        // Limit this to this exact request; network, permission and provider failures stay errors.
+        const [channel, endpoint] = targets[index]!
+        if (result.reason instanceof Error && [404, 405].some(status =>
+          result.reason.message === `transport failure for ${channel}/${endpoint}: HTTP ${status}`)) {
+          return { id, state: 'unavailable' }
+        }
+        throw new Error('status unavailable')
+      }
+      if (result === undefined) throw new Error('status unavailable')
       const value = valueOf(result.value)
       if (value === undefined) state = 'not-connected'
       else if (record(value) && id === 'feishu' && Object.hasOwn(CONNECTION_LABELS, String(value.state))) {
@@ -49,7 +57,7 @@ export async function loadConnectionStates(call: Rpc, signal?: AbortSignal): Pro
       } else if (record(value) && id === 'tencent_docs' && value.schema_version === 1 && Array.isArray(value.items)) {
         const item = value.items.find(item => record(item) && item.name === 'tencent_docs')
         state = !record(item) ? 'not-connected' : item.active === true && item.authorized === true ? 'connected'
-          : item.authorized === false ? 'expired' : 'failed'
+          : item.authorized === false ? 'authorization-required' : 'failed'
       }
     } catch { state = 'failed' }
     return { id, state }

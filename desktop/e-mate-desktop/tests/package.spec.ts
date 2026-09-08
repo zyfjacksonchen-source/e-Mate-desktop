@@ -280,6 +280,8 @@ describe('published package surface', () => {
     expect(manifest.build?.extraResources).toEqual([
       { from: 'build/python-runtime', to: 'python-runtime' },
       { from: 'build/calc-runtime', to: 'calc-runtime' },
+      { from: 'third-party-notices', to: 'third-party-notices' },
+      { from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.mac?.mergeASARs).toBe(false)

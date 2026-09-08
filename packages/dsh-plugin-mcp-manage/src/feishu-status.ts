@@ -1,4 +1,6 @@
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -37,14 +39,26 @@ async function collect(stream: Stream, handle: Handle): Promise<string> {
 }
 
 /** No installation, login or secret/config read; the packaged native CLI owns verification. */
-export async function readFeishuConnection(runner: Runner | undefined, signal?: AbortSignal, profileDir = join(homedir(), '.lark-cli')): Promise<{ state: State }> {
+export async function readFeishuConnection(runner: Runner | undefined, signal?: AbortSignal, profileDir: string | URL = join(homedir(), '.lark-cli'), cliManifest = () => {
+  const pnpm = process.env.EMATE_DESKTOP_PNPM_ENTRY
+  // Desktop already publishes this packaged-runtime anchor; Windows materializes
+  // plugin files outside the app, so resolving relative to the plugin is insufficient.
+  return pnpm === undefined ? createRequire(import.meta.url).resolve('@larksuite/cli/package.json')
+    : join(dirname(dirname(dirname(pnpm))), '@larksuite/cli/package.json')
+}): Promise<{ state: State }> {
   try { if (!(await stat(profileDir)).isDirectory()) return { state: 'failed' } }
   catch (error) { return { state: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'not-connected' : 'failed' } }
   if (runner === undefined) return { state: 'failed' }
   const bounded = AbortSignal.any([AbortSignal.timeout(12_000), ...(signal ? [signal] : [])])
   let handle: Handle | undefined
   try {
-    handle = runner.run(['--config.offline=true', 'dlx', '@larksuite/cli@1.0.88', 'auth', 'status', '--json', '--verify'], bounded)
+    const manifestPath = cliManifest()
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    if (manifest.name !== '@larksuite/cli' || manifest.version !== '1.0.88') return { state: 'failed' }
+    const executable = join(dirname(manifestPath), 'bin', process.platform === 'win32' ? 'lark-cli.exe' : 'lark-cli')
+    if (!(await stat(executable)).isFile()) return { state: 'failed' }
+    // Execute only the installed binary: official run.js can auto-download a missing binary.
+    handle = runner.run(['exec', '--', executable, 'auth', 'status', '--json', '--verify'], bounded)
     const [outcome, stdout] = await Promise.all([handle.done, collect(handle.stdout, handle), collect(handle.stderr, handle)])
     if (outcome.exitCode !== 0) return { state: 'failed' }
     return { state: feishuConnectionState(JSON.parse(stdout)) }

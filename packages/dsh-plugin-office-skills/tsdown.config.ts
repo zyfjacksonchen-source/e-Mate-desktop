@@ -18,7 +18,7 @@ const host = {
   sourcemap: false,
   clean: true,
   deps: {
-    neverBundle: [/^@deepseek-ai\//],
+    neverBundle: [/^@deepseek-ai\//, '@e-mate/desktop/vision-toolkit'],
     alwaysBundle: officeDependencies,
   },
 }

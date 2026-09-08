@@ -4,7 +4,6 @@ Each package ships with its own license text in the application files; this list
 the package names, versions, and licenses for transparency.
 | Package | Version | License |
 | --- | --- | --- |
-| @anionex/dsh-vision-toolkit | 0.1.7 | MIT |
 | @anthropic-ai/sdk | 0.91.1 | MIT |
 | @aws-crypto/sha256-browser | 5.2.0 | Apache-2.0 |
 | @aws-crypto/sha256-js | 5.2.0 | Apache-2.0 |
@@ -33,28 +32,8 @@ the package names, versions, and licenses for transparency.
 | @babel/code-frame | 7.29.7 | MIT |
 | @babel/helper-validator-identifier | 7.29.7 | MIT |
 | @babel/runtime | 7.29.7 | MIT |
-| @codemirror/autocomplete | 6.20.3 | MIT |
-| @codemirror/commands | 6.10.4 | MIT |
-| @codemirror/lang-cpp | 6.0.3 | MIT |
-| @codemirror/lang-css | 6.3.1 | MIT |
-| @codemirror/lang-go | 6.0.1 | MIT |
-| @codemirror/lang-html | 6.4.12 | MIT |
-| @codemirror/lang-java | 6.0.2 | MIT |
-| @codemirror/lang-javascript | 6.2.5 | MIT |
-| @codemirror/lang-json | 6.0.2 | MIT |
-| @codemirror/lang-markdown | 6.5.2 | MIT |
-| @codemirror/lang-php | 6.0.2 | MIT |
-| @codemirror/lang-python | 6.2.1 | MIT |
-| @codemirror/lang-rust | 6.0.2 | MIT |
-| @codemirror/lang-sql | 6.10.0 | MIT |
-| @codemirror/lang-xml | 6.1.0 | MIT |
-| @codemirror/lang-yaml | 6.1.3 | MIT |
-| @codemirror/language | 6.12.4 | MIT |
-| @codemirror/legacy-modes | 6.5.3 | MIT |
-| @codemirror/lint | 6.9.7 | MIT |
-| @codemirror/search | 6.7.1 | MIT |
-| @codemirror/state | 6.7.1 | MIT |
-| @codemirror/view | 6.43.8 | MIT |
+| @clack/core | 1.4.3 | MIT |
+| @clack/prompts | 1.7.0 | MIT |
 | @deepseek-ai/cordis | 4.0.1 | MIT |
 | @deepseek-ai/cordis-plugin-group | 1.0.1 | MIT |
 | @deepseek-ai/cordis-plugin-hmr | 1.0.16 | MIT |
@@ -262,27 +241,10 @@ the package names, versions, and licenses for transparency.
 | @kelearns/dsh-navigation-bar | 0.2.1 | MIT |
 | @koromix/koffi-darwin-arm64 | 3.1.5 | MIT |
 | @koromix/koffi-darwin-x64 | 3.1.5 | MIT |
-| @lezer/common | 1.5.2 | MIT |
-| @lezer/cpp | 1.1.6 | MIT |
-| @lezer/css | 1.3.6 | MIT |
-| @lezer/go | 1.0.1 | MIT |
-| @lezer/highlight | 1.2.3 | MIT |
-| @lezer/html | 1.3.13 | MIT |
-| @lezer/java | 1.1.3 | MIT |
-| @lezer/javascript | 1.5.4 | MIT |
-| @lezer/json | 1.0.3 | MIT |
-| @lezer/lr | 1.4.10 | MIT |
-| @lezer/markdown | 1.7.2 | MIT |
-| @lezer/php | 1.0.5 | MIT |
-| @lezer/python | 1.1.19 | MIT |
-| @lezer/rust | 1.0.2 | MIT |
-| @lezer/xml | 1.0.6 | MIT |
-| @lezer/yaml | 1.0.4 | MIT |
-| @marijn/find-cluster-break | 1.0.3 | MIT |
+| @larksuite/cli | 1.0.88 | MIT |
 | @mistralai/mistralai | 2.2.6 | Apache-2.0 |
 | @mixmark-io/domino | 2.2.0 | BSD-2-Clause |
 | @modelcontextprotocol/sdk | 1.30.0 | MIT |
-| @omdsh-dev/dsh-genui | 0.8.3 | MIT |
 | @opentelemetry/api | 1.9.1 | Apache-2.0 |
 | @opentelemetry/api-logs | 0.220.0 | Apache-2.0 |
 | @opentelemetry/core | 2.9.0 | Apache-2.0 |
@@ -335,7 +297,6 @@ the package names, versions, and licenses for transparency.
 | @vscode/ripgrep | 1.18.0 | MIT |
 | @vscode/ripgrep-darwin-arm64 | 1.18.0 | MIT |
 | @vscode/ripgrep-darwin-x64 | 1.18.0 | MIT |
-| @xterm/addon-fit | 0.10.0 | MIT |
 | accepts | 2.0.0 | MIT |
 | agent-base | 7.1.4 | MIT |
 | ajv | 8.20.0 | MIT |
@@ -365,8 +326,6 @@ the package names, versions, and licenses for transparency.
 | cookie | 0.7.2 | MIT |
 | cookie-signature | 1.2.2 | MIT |
 | cors | 2.8.6 | MIT |
-| cosmokit | 1.8.1 | MIT |
-| crelt | 1.0.7 | MIT |
 | cross-spawn | 7.0.6 | MIT |
 | data-uri-to-buffer | 4.0.1 | MIT |
 | debug | 4.4.3 | MIT |
@@ -395,7 +354,10 @@ the package names, versions, and licenses for transparency.
 | express-rate-limit | 8.6.2 | MIT |
 | extend | 3.0.2 | MIT |
 | fast-deep-equal | 3.1.3 | MIT |
+| fast-string-truncated-width | 3.0.3 | MIT |
+| fast-string-width | 3.0.2 | MIT |
 | fast-uri | 3.1.5 | BSD-3-Clause |
+| fast-wrap-ansi | 0.2.2 | MIT |
 | fetch-blob | 3.2.0 | MIT |
 | fflate | 0.8.3 | MIT |
 | finalhandler | 2.1.1 | MIT |
@@ -499,7 +461,7 @@ the package names, versions, and licenses for transparency.
 | node-addon-require-builtin-darwin-x64 | 0.1.4 | MIT |
 | node-domexception | 1.0.0 | MIT |
 | node-fetch | 3.3.2 | MIT |
-| node-pty | 1.1.0 | MIT |
+| node-pty | 1.2.0-beta.15 | MIT |
 | object-assign | 4.1.1 | MIT |
 | object-inspect | 1.13.4 | MIT |
 | on-finished | 2.4.1 | MIT |
@@ -531,12 +493,9 @@ the package names, versions, and licenses for transparency.
 | require-from-string | 2.0.2 | MIT |
 | retry | 0.13.1 | MIT |
 | router | 2.2.0 | MIT |
-| rxjs | 7.8.2 | Apache-2.0 |
 | safe-buffer | 5.2.1 | MIT |
 | safer-buffer | 2.1.2 | MIT |
-| saxes | 6.0.0 | ISC |
 | scheduler | 0.23.2 | MIT |
-| schemastery | 3.18.0 | MIT |
 | semver | 7.8.5 | ISC |
 | send | 1.2.1 | MIT |
 | serve-static | 2.2.1 | MIT |
@@ -549,10 +508,10 @@ the package names, versions, and licenses for transparency.
 | side-channel-list | 1.0.1 | MIT |
 | side-channel-map | 1.0.1 | MIT |
 | side-channel-weakmap | 1.0.2 | MIT |
+| sisteransi | 1.0.5 | MIT |
 | space-separated-tokens | 2.0.2 | MIT |
 | statuses | 2.0.2 | MIT |
 | stringify-entities | 4.0.4 | MIT |
-| style-mod | 4.1.3 | MIT |
 | toidentifier | 1.0.1 | MIT |
 | trim-lines | 3.0.1 | MIT |
 | ts-algebra | 2.0.0 | MIT |
@@ -572,50 +531,19 @@ the package names, versions, and licenses for transparency.
 | vary | 1.1.2 | MIT |
 | vfile | 6.0.3 | MIT |
 | vfile-message | 4.0.3 | MIT |
-| w3c-keyname | 2.2.8 | MIT |
 | web-streams-polyfill | 3.3.3 | MIT |
 | which | 2.0.2 | ISC |
 | wrappy | 1.0.2 | ISC |
 | ws | 8.21.3 | MIT |
-| xmlchars | 2.2.0 | MIT |
-| xterm | 5.3.0 | MIT |
 | yaml | 2.9.0 | ISC |
 | zod | 4.4.3 | MIT |
 | zod-to-json-schema | 3.25.2 | ISC |
 | zustand | 4.4.7 | MIT |
 | zwitch | 2.0.4 | MIT |
 > Notice-required licenses in use: LGPL-3.0-or-later. Their license texts ship inside node_modules; see the package LICENSE files for the full terms.
-# Beautiful UI component icons
-
-The compact Thinking, Tool Chips and external-file-arrow icon paths are adapted
-from [Beautiful UI](https://www.beautifului.dev/), released under the MIT
-License.
-
-Copyright (c) 2026 Shane Levine
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-# Xin Assistant Python runtime
-
-The Xin Assistant plugin bundles requests 2.32.5 (Apache-2.0), chardet 5.2.0
-(LGPL-2.1-or-later), idna 3.10 (BSD-3-Clause), urllib3 2.5.0 (MIT), certifi
-2025.8.3 (MPL-2.0), cryptography 46.0.7 (Apache-2.0 OR BSD-3-Clause), cffi 2.0.0
-(MIT), and pycparser 3.0 (BSD-3-Clause). Their complete upstream license texts
-ship below the plugin's `runtime/vendor` and `runtime/vendor-native`
-directories.
+## Feishu native executable notices
+The @larksuite/cli 1.0.88 native executable includes Go modules that are separate from the npm dependency table above.
+Statically verified official binary targets: darwin-arm64, darwin-x64, win32-x64; Go 1.26.5; source commit 2829ecd18846d8390dfac558125f602b07232206.
+Original license and notice texts (93 files), exact module versions, source URLs and SHA256 hashes are retained under Resources/third-party-notices/feishu-cli/1.0.88/ (resources/ on Windows). See manifest.json in that directory.
+Actual compiled module counts by target: darwin-arm64: 42; darwin-x64: 42; win32-x64: 45.
+Verified official Mac and Windows x64 binary static module correspondence, plus a conservative Go toolchain notice collection; not a legal opinion or proof of Windows execution. github.com/mattn/go-localereader@v0.0.1 supplies only an upstream README MIT declaration and author attribution, not a standalone full LICENSE text.

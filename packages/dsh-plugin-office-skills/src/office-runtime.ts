@@ -28,7 +28,7 @@ export interface WorkbookDocument {
 }
 
 export interface SlidesDocument {
-  slides: Array<{ title?: string; bullets: string[] }>
+  slides: Array<{ title?: string; bullets: string[]; notes?: string[] }>
 }
 
 export interface PdfDocumentInput {
@@ -43,7 +43,7 @@ export type OfficeDocument = TextDocument | WorkbookDocument | SlidesDocument | 
 export const OFFICE_CREATE_EXAMPLES: Readonly<Record<OfficeFormat, OfficeDocument>> = {
   docx: { title: 'e-Mate 文档', paragraphs: [{ text: '第一节', heading: 1 }, '正文内容'] },
   xlsx: { sheets: [{ name: '数据', rows: [['项目', '数量'], ['e-Mate', 207]] }] },
-  pptx: { slides: [{ title: 'e-Mate 演示', bullets: ['第一点', '第二点'] }] },
+  pptx: { slides: [{ title: 'e-Mate 演示', bullets: ['第一点', '第二点'], notes: ['演讲者备注，仅出现在备注页'] }] },
   pdf: { title: 'e-Mate PDF', pages: [{ lines: ['中文 PDF 内容', '第二行'] }] },
 }
 
@@ -213,12 +213,14 @@ function normalizedSlides(value: unknown): SlidesDocument {
   return {
     slides: input.slides.map(entry => {
       const item = record(entry)
-      exactKeys(item, ['bullets', 'title'])
+      exactKeys(item, ['bullets', 'title', 'notes'])
+      if (item.notes !== undefined && (!Array.isArray(item.notes) || item.notes.length > 100)) throw new Error('PPTX notes are invalid')
       if (!Array.isArray(item.bullets) || item.bullets.length > 100) throw new Error('PPTX bullets are invalid')
       const title = optionalTitle(item.title)
       return {
         ...(title === undefined ? {} : { title }),
         bullets: item.bullets.map(item => text(item, 'slide bullet', true)),
+        ...(item.notes === undefined ? {} : { notes: (item.notes as unknown[]).map(note => text(note, 'slide note', true)) }),
       }
     }),
   }
@@ -315,6 +317,7 @@ async function writePptx(value: SlidesDocument): Promise<Buffer> {
   for (const source of value.slides) {
     const slide = deck.addSlide()
     slide.background = { color: '111111' }
+    if (source.notes !== undefined) slide.addNotes(source.notes.join("\n"))
     if (source.title !== undefined) {
       slide.addText(source.title, { x: 0.7, y: 0.55, w: 11.9, h: 0.7, fontSize: 26, bold: true, color: 'FFFFFF', margin: 0 })
     }
@@ -468,7 +471,28 @@ async function readPptx(buffer: Buffer): Promise<SlidesDocument> {
   for (const path of paths) {
     const entry = archive.zip.file(path)
     if (entry === null) throw new Error('PPTX slide is missing')
-    slides.push({ bullets: xmlText(await readZipXml(archive, entry), 'p') })
+    const slide: SlidesDocument['slides'][number] = { bullets: xmlText(await readZipXml(archive, entry), 'p') }
+    const relations = archive.zip.file(posix.join(posix.dirname(path), '_rels', `${posix.basename(path)}.rels`))
+    if (relations !== null) {
+      const notes = namedElements(parsedXml(await readZipXml(archive, relations)), 'Relationship')
+        .find(node => node.getAttribute('Type')?.endsWith('/notesSlide'))
+      if (notes !== undefined) {
+        const target = notes.getAttribute('Target')
+        if (!target || notes.getAttribute('TargetMode') === 'External') throw new Error('PPTX notes relationship is invalid')
+        const notesPath = posix.normalize(target.startsWith('/') ? target.slice(1) : posix.join(posix.dirname(path), target))
+        if (!notesPath.startsWith('ppt/') || notesPath.includes('../')) throw new Error('PPTX notes path is unsafe')
+        const notesEntry = archive.zip.file(notesPath)
+        if (notesEntry === null) throw new Error('PPTX notes slide is missing')
+        const document = parsedXml(await readZipXml(archive, notesEntry))
+        // Notes slides also hold page numbers and slide previews; read only body placeholders.
+        const paragraphs = namedElements(document, 'sp').filter(shape => namedElements(shape, 'ph')
+          .some(placeholder => placeholder.getAttribute('type') === 'body'))
+          .flatMap(shape => namedElements(shape, 'p').map(paragraph => namedElements(paragraph, 't')
+            .map(run => run.textContent ?? '').join(''))).filter(Boolean)
+        if (paragraphs.length > 0) slide.notes = paragraphs
+      }
+    }
+    slides.push(slide)
   }
   return { slides }
 }

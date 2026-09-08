@@ -492,7 +492,8 @@ async function withGateway(
   gatewayRoute: ModelGatewayRoute = route,
   tenantModelRoutePolicy?: TenantModelRoutePolicy,
   usageStore: UsageStore = new InMemoryUsageStore(gatewayLimits),
-  imageObservation?: ModelGatewayOptions['imageObservation']
+  imageObservation?: ModelGatewayOptions['imageObservation'],
+  upstreamRejectionObservation?: ModelGatewayOptions['upstreamRejectionObservation']
 ): Promise<void> {
   const upstreamRequests: Request[] = [];
   const consentStore = new InMemoryConsentStore(consentPolicy);
@@ -516,6 +517,7 @@ async function withGateway(
     reconcileProviderInvocation,
     upstreamTimeoutMs,
     imageObservation,
+    upstreamRejectionObservation,
     fetchImplementation: async (input, init) => {
       const upstreamRequest = new Request(input, init);
       upstreamRequests.push(upstreamRequest);
@@ -3982,4 +3984,74 @@ test('upstream 413 remains an explicit rejected size response without HTML or pr
     const body = await result.text(); assert.equal(JSON.parse(body).error.code, 'UPSTREAM_REQUEST_TOO_LARGE');
     assert.doesNotMatch(body, /html|nginx|synthetic-private-details/); assert.equal(upstream.length, 1); assert.equal(rejected, 1);
   }, () => new Response('<html>nginx synthetic-private-details</html>', { status: 413, headers: { 'content-type': 'text/html' } }), undefined, undefined, limits, route, undefined, store);
+});
+
+
+test('upstream rejection evidence preserves transport facts without changing unknown invocation protection', async () => {
+  for (const endpoint of ['responses', 'image_generations', 'image_edits'] as const) {
+    const image = endpoint !== 'responses';
+    for (const scenario of ['http_non_2xx', 'unexpected_content_type', 'missing_body'] as const) {
+      const events: Array<Parameters<NonNullable<ModelGatewayOptions['upstreamRejectionObservation']>>[0]> = [];
+      await withGateway(async (baseUrl, requests) => {
+        const send = () => endpoint === 'image_edits' ? imageEditRequest(baseUrl) : image ? imageRequest(baseUrl) : modelRequest(baseUrl);
+        const result = await send();
+        assert.equal(result.status, image && scenario === 'missing_body' ? 503 : 502);
+        assert.equal(events.length, 1);
+        const event = events[0]!;
+        assert.equal(event.reason, scenario);
+        assert.equal(event.upstream_status, scenario === 'http_non_2xx' ? 503 : 200);
+        assert.equal(event.has_body, scenario !== 'missing_body');
+        assert.equal(event.content_type, scenario === 'unexpected_content_type' ? 'text/html' : image ? 'application/json' : 'text/event-stream');
+        assert.deepEqual(event.provider_trace, { header: 'x-request-id', id: 'provider-request-123' });
+        assert.equal(event.endpoint, endpoint);
+        assert.equal(event.invocation_id, requests[0]!.headers.get('idempotency-key'));
+        assert.deepEqual(Object.keys(event).sort(), ['schema_version','occurred_at','invocation_id','task_id','trace_id','route_id','provider_id','endpoint','upstream_status','content_type','has_body','reason','provider_trace'].sort());
+        assert(!JSON.stringify(event).includes('DO_NOT_LOG'));
+        assert.equal((await send()).status, 409);
+        assert.equal(requests.length, 1);
+        assert.equal(events.length, 1);
+      }, () => new Response(scenario === 'missing_body' ? null : 'DO_NOT_LOG_BODY', {
+        status: scenario === 'http_non_2xx' ? 503 : 200,
+        headers: { 'content-type': (scenario === 'unexpected_content_type' ? 'text/html' : image ? 'application/json' : 'text/event-stream') + '; private=DO_NOT_LOG_PARAMETER',
+          'x-request-id': 'provider-request-123', authorization: 'Bearer DO_NOT_LOG_TOKEN', 'set-cookie': 'DO_NOT_LOG_COOKIE', 'x-prompt': 'DO_NOT_LOG_PROMPT' },
+      }), undefined, undefined, limits, image ? imageRoute : route, image ? { isEnabled: async () => true } : undefined,
+      new InMemoryUsageStore(limits), undefined, event => events.push(event));
+    }
+  }
+});
+
+test('throwing rejection observer cannot change definite rejection retry or public response', async () => {
+  let calls = 0;
+  await withGateway(async (baseUrl, requests) => {
+    for (let index = 0; index < 2; index++) {
+      const result = await modelRequest(baseUrl);
+      assert.equal(result.status, 502);
+      assert.equal((await result.json() as { error: { code: string } }).error.code, 'UPSTREAM_REJECTED');
+    }
+    assert.equal(requests.length, 2);
+    assert.equal(calls, 2);
+  }, () => new Response('private', { status: 429 }), undefined, undefined, limits, route, undefined,
+  new InMemoryUsageStore(limits), undefined, () => { calls++; throw new Error('private observer failure'); });
+});
+
+
+test('successful upstream responses emit no rejection evidence', async () => {
+  let calls = 0;
+  await withGateway(async baseUrl => {
+    const response = await modelRequest(baseUrl);
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(calls, 0);
+  }, undefined, undefined, undefined, limits, route, undefined, new InMemoryUsageStore(limits), undefined, () => { calls++; });
+});
+
+test('invalid image JSON records transport evidence without logging its contents', async () => {
+  const events: unknown[] = [];
+  await withGateway(async baseUrl => {
+    assert.equal((await imageEditRequest(baseUrl)).status, 503);
+    assert.equal(events.length, 1);
+    assert.equal((events[0] as { reason: string }).reason, 'invalid_payload');
+    assert(!JSON.stringify(events).includes('PRIVATE_BODY'));
+  }, () => new Response('PRIVATE_BODY', { headers: { 'content-type': 'application/json' } }),
+  undefined, undefined, limits, imageRoute, { isEnabled: async () => true }, new InMemoryUsageStore(limits), undefined, event => events.push(event));
 });

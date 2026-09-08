@@ -1,6 +1,10 @@
 export const name = 'emate-agent-operations'
 export const inject = ['systemPrompt', 'connection', 'sessions']
 
+class ExpertModeRpcError extends Error {
+  constructor(error) { super(error.message); this.rpcError = error }
+}
+
 export function expertModeActive(session) {
   for (let index = session.events.length - 1; index >= 0; index--) {
     const event = session.events[index]
@@ -14,9 +18,31 @@ export async function expertModeRequest(ctx, endpoint, payload) {
     || Array.isArray(payload) || typeof payload.session_id !== 'string'
     || Object.keys(payload).some(key => !['session_id', ...(endpoint === 'set' ? ['active'] : [])].includes(key))
     || (endpoint === 'set' && typeof payload.active !== 'boolean')) throw new Error('专家模式请求无效。')
-  const session = ctx.sessions.get(payload.session_id)
-  if (session === undefined) throw new Error('会话尚未就绪，请稍后重试。')
+  let session = ctx.sessions.get(payload.session_id)
+  let inspected
+  if (session === undefined) {
+    const persistence = ctx.get?.('sessionPersistence')
+    if (persistence === undefined) throw new ExpertModeRpcError({
+      code: 'session-not-found', message: '会话尚未就绪，请稍后重试。', details: { sessionId: payload.session_id },
+    })
+    // History browsing is intentionally read-only in the native Host: it does
+    // not attach an Agent. Inspect the durable log without creating a writer.
+    inspected = await persistence.inspect(payload.session_id)
+    session = ctx.sessions.get(payload.session_id)
+    if (session === undefined && endpoint === 'get') return { active: expertModeActive(inspected) }
+  }
   if (endpoint === 'set') {
+    const api = ctx.get?.('apiProxy')
+    if (api === undefined) throw new Error('原生会话服务尚未就绪，请稍后重试。')
+    // Every write, including warm and concurrently attached Sessions, uses the
+    // native owner check. Existing ordinary Agents return without a resume.
+    const response = await api.sessions.create({
+      rpcId: `expert-mode:${payload.session_id}`,
+      payload: { sessionId: payload.session_id, cwd: (session?.header ?? inspected.meta).cwd },
+    })
+    if (!response.result.ok) throw new ExpertModeRpcError(response.result.error)
+    session = ctx.sessions.get(payload.session_id)
+    if (session === undefined) throw new Error('原生会话恢复后仍不可用。')
     if (expertModeActive(session) !== payload.active) session.append('emate/expert-mode', { active: payload.active }, { ignorable: true })
     if (!await ctx.sessions.flush(session)) throw new Error('专家模式设置尚未保存，请重试。')
   }
@@ -52,6 +78,6 @@ export function apply(ctx) {
     } })
   ctx.effect(() => ctx.connection.rpc.handle('/emate.expert-mode', async (endpoint, payload) => {
     try { return { ok: true, value: await expertModeRequest(ctx, endpoint, payload) } }
-    catch (error) { return { ok: false, error: { code: 'expert-mode-unavailable', message: error instanceof Error ? error.message : '专家模式暂不可用。' } } }
+    catch (error) { return { ok: false, error: error instanceof ExpertModeRpcError ? error.rpcError : { code: 'internal', message: error instanceof Error ? error.message : '专家模式暂不可用。', details: {} } } }
   }, { authority: 'loopback' }), 'emate: session expert mode')
 }

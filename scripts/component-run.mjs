@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
@@ -56,7 +56,14 @@ for (const component of components) {
     || !Array.isArray(manifest.eMate?.baseImports)) {
     throw new Error(`bundled Profile package identity is invalid: ${component.id}`)
   }
-  run(['--dir', component.root, 'install', '--ignore-workspace', '--frozen-lockfile'])
+  // A component-local workspace owns its native patch configuration. Otherwise
+  // isolate installation from the repository workspace as before.
+  const localWorkspace = existsSync(resolve(component.root, 'pnpm-workspace.yaml'))
+  run(['--dir', component.root, 'install', ...(localWorkspace ? [] : ['--ignore-workspace']), '--frozen-lockfile',
+    // The official Feishu binary installer runs under the target Desktop slice
+    // in afterPack; running its postinstall here would select the build host.
+    ...(component.id === '@e-mate/dsh-plugin-mcp-manage' ? ['--ignore-scripts'] : []),
+  ])
   if (component.id === '@e-mate/dsh-plugin-find-skill') {
     run(['--dir', 'upstream/plugins/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'])
   }

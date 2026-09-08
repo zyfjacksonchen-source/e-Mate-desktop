@@ -2987,10 +2987,10 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
 })
 
 test('expert mode persists in its native session and leaves other conversations unchanged', async () => {
-  const first = { events: [], append(type, data) { this.events.push({ type, data }) } }
+  const first = { header: { cwd: '/test' }, events: [], append(type, data) { this.events.push({ type, data }) } }
   const second = { events: [] }
   let flushes = 0
-  const ctx = { sessions: { get: id => id === 'one' ? first : id === 'two' ? second : undefined,
+  const ctx = { get: name => name === 'apiProxy' ? { sessions: { create: async request => ({ rpcId: request.rpcId, result: { ok: true, value: { sessionId: request.payload.sessionId } } }) } } : undefined, sessions: { get: id => id === 'one' ? first : id === 'two' ? second : undefined,
     flush: async value => { assert.equal(value, first); flushes++; return true } } }
   let expertPolicy
   applyAgentOperations({ ...ctx, effect: () => {}, systemPrompt: { section(value) {

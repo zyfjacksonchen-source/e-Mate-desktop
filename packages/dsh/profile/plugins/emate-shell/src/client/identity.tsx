@@ -460,12 +460,17 @@ export function IdentityGate({ callIdentity }: Props) {
     )
   }
 
-  const loginTitle = state?.ready !== true
+  const bootstrapPending = state === null && error === null
+  const loginTitle = bootstrapPending
+    ? '正在连接企业身份服务'
+    : state?.ready !== true
     ? '登录服务尚未就绪'
     : authView === 'register'
       ? registration === null ? '创建 e-Mate 账号' : '注册申请已提交'
       : '欢迎回来'
-  const loginSubtitle = state?.ready !== true
+  const loginSubtitle = bootstrapPending
+    ? '正在检查登录状态，请稍候'
+    : state?.ready !== true
     ? '正在连接 e-Mate 企业身份服务'
     : authView === 'register'
       ? registration === null ? '提交真实资料，等待管理员审核后即可登录' : '管理员审核完成后即可使用账号登录'
@@ -490,7 +495,7 @@ export function IdentityGate({ callIdentity }: Props) {
         {state?.ready !== true ? (
           <div className={css.blocked}>
             <p>{state?.blocker ?? error ?? '正在验证企业身份服务…'}</p>
-            <button className={css.primaryButton} type="button" disabled={busy} onClick={() => { void load() }}>重新检查</button>
+            <button className={css.primaryButton} type="button" disabled={busy || bootstrapPending} aria-busy={bootstrapPending} onClick={() => { void load() }}>{bootstrapPending ? '正在检查…' : '重新检查'}</button>
           </div>
         ) : authView === 'register' && registration !== null ? (
           <div className={css.pending} role="status">

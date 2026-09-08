@@ -4,10 +4,18 @@ import { createHash } from 'node:crypto'
 import { lstat, mkdtemp, mkdir, readFile, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import JSZip from 'jszip'
-import { createOfficePreview } from '../lib/preview.js'
-import { apply } from '../lib/index.js'
+import { installProfilePackageResolver } from '../../../desktop/e-mate-desktop/src/module-resolution.ts'
+const baseContract = JSON.parse(await readFile(new URL('../../../desktop/e-mate-desktop/base-contract.json', import.meta.url), 'utf8'))
+const releaseBaseResolver = installProfilePackageResolver(
+ new URL('../../../desktop/e-mate-desktop/lib/index.js', import.meta.url).href,
+ [fileURLToPath(new URL('../', import.meta.url))], baseContract.runtime_imports,
+)
+const { createOfficePreview } = await import('../lib/preview.js')
+const { apply } = await import('../lib/index.js')
+releaseBaseResolver()
 import { Session } from '../../../upstream/deepseek-harness/packages/core/session/lib/index.js'
 import { createMessage, createToolResultMessage } from '../../../upstream/deepseek-harness/packages/llm/llm/lib/index.js'
 import { serverResponseSchema } from '../../../upstream/deepseek-harness/packages/host/apiproxy/lib/types/api/rpc.schema.js'

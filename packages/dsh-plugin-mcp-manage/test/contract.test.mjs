@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import { readCollectedOutput } from '../lib/collected-output.mjs'
 import { parseOAuthCallback } from '../lib/oauth-callback.mjs'
@@ -32,8 +34,40 @@ test('Feishu status uses the pinned native offline runner and never starts setup
       done: Promise.resolve({ exitCode: 0 }), cancel() {},
     }
   } }
-  assert.deepEqual(await readFeishuConnection(runner, undefined, new URL('../src/', import.meta.url)), { state: 'connected' })
-  assert.deepEqual(args, ['--config.offline=true', 'dlx', '@larksuite/cli@1.0.88', 'auth', 'status', '--json', '--verify'])
+  const root = mkdtempSync(join(tmpdir(), 'feishu-installed-'))
+  try {
+    mkdirSync(join(root, 'bin'))
+    const binary = join(root, 'bin', process.platform === 'win32' ? 'lark-cli.exe' : 'lark-cli')
+    writeFileSync(binary, 'test fixture')
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@larksuite/cli', version: '1.0.88' }))
+    const resolve = () => join(root, 'package.json')
+    assert.deepEqual(await readFeishuConnection(runner, undefined, root, resolve), { state: 'connected' })
+    assert.deepEqual(args, ['exec', '--', binary, 'auth', 'status', '--json', '--verify'])
+    rmSync(binary); args = undefined
+    assert.deepEqual(await readFeishuConnection(runner, undefined, root, resolve), { state: 'failed' })
+    assert.equal(args, undefined, 'missing binary must not trigger run.js, dlx or an installer')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('Feishu resolves the Desktop native runtime anchor after plugin materialization', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'feishu-desktop-anchor-'))
+  const cli = join(root, 'node_modules', '@larksuite', 'cli')
+  const before = process.env.EMATE_DESKTOP_PNPM_ENTRY
+  let args
+  try {
+    mkdirSync(join(cli, 'bin'), { recursive: true })
+    writeFileSync(join(cli, 'package.json'), JSON.stringify({ name: '@larksuite/cli', version: '1.0.88' }))
+    const binary = join(cli, 'bin', process.platform === 'win32' ? 'lark-cli.exe' : 'lark-cli')
+    writeFileSync(binary, 'fixture')
+    process.env.EMATE_DESKTOP_PNPM_ENTRY = join(root, 'node_modules', 'pnpm', 'bin', 'pnpm.mjs')
+    const runner = { run(value) { args = value; return { stdout: (async function* () { yield '{"status":"not_configured"}' })(), stderr: (async function* () {})(), done: Promise.resolve({ exitCode: 0 }), cancel() {} } } }
+    assert.deepEqual(await readFeishuConnection(runner, undefined, root), { state: 'not-connected' })
+    assert.equal(args[2], binary)
+  } finally {
+    if (before === undefined) delete process.env.EMATE_DESKTOP_PNPM_ENTRY
+    else process.env.EMATE_DESKTOP_PNPM_ENTRY = before
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('MCP management keeps native DSH ownership and secrets out of settings', () => {

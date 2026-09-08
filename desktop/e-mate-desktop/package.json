@@ -85,7 +85,8 @@
     "README.md",
     "README.zh.md",
     "README.i18n.yaml",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "third-party-notices/**"
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -235,6 +236,7 @@
     "@deepseek-ai/dsh-workspace": "0.1.0-rc.7",
     "@deepseek-ai/schemastery": "3.18.1",
     "@kelearns/dsh-navigation-bar": "0.2.1",
+    "@larksuite/cli": "1.0.88",
     "dsh-at-file": "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz",
     "dsh-file-viewer": "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch",
     "dsh-visualize": "patch:dsh-visualize@file%3Avendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%23vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%3A%3Ahash=4f6f85&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-visualize-file-cdea8d1397.patch",
@@ -305,6 +307,14 @@
       {
         "from": "build/calc-runtime",
         "to": "calc-runtime"
+      },
+      {
+        "from": "third-party-notices",
+        "to": "third-party-notices"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
     "mac": {

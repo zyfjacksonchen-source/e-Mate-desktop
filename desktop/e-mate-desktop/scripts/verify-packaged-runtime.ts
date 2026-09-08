@@ -50,6 +50,10 @@ export const REQUIRED_PACKAGED_RUNTIME_ENTRIES = [
   'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
   'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js',
   'node_modules/pnpm/bin/pnpm.mjs',
+  'node_modules/@larksuite/cli/package.json',
+  'node_modules/@larksuite/cli/LICENSE',
+  'node_modules/@larksuite/cli/checksums.txt',
+  'node_modules/@larksuite/cli/scripts/install.js',
 ] as const
 
 /** Physical entries required because profile fallback symlinks cannot target ASAR paths. */
@@ -439,12 +443,97 @@ export function verifyPackagedRuntime(
   verifyUnpackedPackageResolution(unpackedRoot, resolvePackage)
 }
 
+/** Prepare the official CLI using each native Builder slice's own Electron, before signing. */
+export function preparePackagedFeishu(
+  context: PackagedRuntimeContext,
+  run: PtyProbeRunner = (command, args, options) => spawnSync(command, args, options),
+): void {
+  const platform = context.electronPlatformName
+  if (platform !== 'darwin' && platform !== 'win32') return
+  const root = join(resolvePackagedUnpackedRoot(context), 'node_modules/@larksuite/cli')
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  if (manifest.name !== '@larksuite/cli' || manifest.version !== '1.0.88' || manifest.license !== 'MIT') {
+    throw new Error('packaged Feishu CLI identity/license mismatch')
+  }
+  for (const file of ['LICENSE', 'checksums.txt', 'scripts/install.js']) {
+    if (!lstatSync(join(root, file)).isFile()) throw new Error(`packaged Feishu CLI missing ${file}`)
+  }
+  const executable = platform === 'darwin'
+    ? join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents/MacOS', context.packager.appInfo.productFilename)
+    : join(context.appOutDir, `${context.packager.appInfo.productFilename}.exe`)
+  const binary = join(root, 'bin', platform === 'win32' ? 'lark-cli.exe' : 'lark-cli')
+  const execute = (command: string, args: string[], timeout = 30_000) => {
+    const result = run(command, args, { encoding: 'utf8', timeout, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', LARK_CLI_RUN: 'true' } })
+    if (result.error || result.status !== 0) throw new Error(`packaged Feishu CLI command failed: ${result.error?.message ?? result.stderr ?? 'nonzero exit'}`)
+    return String(result.stdout ?? '').trim()
+  }
+  if (!(platform === 'darwin' && context.arch === 4)) {
+    const target = context.arch === 1 ? 'x64' : context.arch === 3 ? 'arm64' : undefined
+    if (target === undefined) throw new Error('packaged Feishu CLI requires an explicit native target architecture')
+    const actual = execute(executable, ['-p', 'process.platform + ":" + process.arch'], 180_000)
+    if (actual !== `${platform}:${target}`) throw new Error(`packaged Feishu CLI target mismatch: ${actual}`)
+    // npmRebuild is disabled. Use the unmodified official installer, which owns its
+    // release URLs, archive SHA256 verification and extraction. No runtime fallback.
+    console.info(`Feishu official installer: ${actual} @larksuite/cli@1.0.88`)
+    const output = execute(executable, [join(root, 'scripts/install.js')], 180_000)
+    if (output !== '') console.info(output)
+  }
+  if (!lstatSync(binary).isFile()) throw new Error('packaged Feishu CLI executable missing')
+  if (platform === 'darwin') {
+    execute('/usr/bin/lipo', ['-verify_arch', ...(context.arch === 4 ? ['x86_64', 'arm64'] : [context.arch === 1 ? 'x86_64' : 'arm64']), binary])
+  }
+  const version = execute(binary, ['--version'])
+  if (!/(?:^|\s)v?1\.0\.88(?:\s|$)/u.test(version)) throw new Error('packaged Feishu CLI executable version mismatch')
+}
+
+/** Verify the reviewed native-binary notices in the actual Builder resource tree. */
+export function verifyPackagedFeishuNotices(context: PackagedRuntimeContext): void {
+  const resources = resolvePackagedResourcesRoot(context)
+  const root = join(resources, 'third-party-notices/feishu-cli/1.0.88')
+  const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8')) as {
+    package: string; version: string; binarySha256: Record<string, string>
+    files: Array<{ path: string; bytes: number; sha256: string }>
+  }
+  if (manifest.package !== '@larksuite/cli' || manifest.version !== '1.0.88' || manifest.files.length !== 93) {
+    throw new Error('packaged Feishu native notice manifest mismatch')
+  }
+  const notice = readFileSync(join(resources, 'THIRD_PARTY_NOTICES.md'), 'utf8')
+  if (!notice.includes('## Feishu native executable notices') || !notice.includes('feishu-cli/1.0.88/')) {
+    throw new Error('packaged Feishu native notice index missing')
+  }
+  for (const file of manifest.files) {
+    if (isAbsolute(file.path) || file.path.split(/[\\/]/u).includes('..')) throw new Error('invalid Feishu notice path')
+    const bytes = readFileSync(join(root, file.path))
+    if (bytes.length !== file.bytes || createHash('sha256').update(bytes).digest('hex') !== file.sha256) {
+      throw new Error(`packaged Feishu notice hash mismatch: ${file.path}`)
+    }
+  }
+  const targets = context.electronPlatformName === 'darwin' && context.arch === 4
+    ? ['darwin-x64', 'darwin-arm64']
+    : [`${context.electronPlatformName}-${context.arch === 1 ? 'x64' : context.arch === 3 ? 'arm64' : 'unknown'}`]
+  for (const target of targets) {
+    if (!/^[a-f0-9]{64}$/u.test(manifest.binarySha256[target] ?? '')) {
+      throw new Error(`Feishu native license evidence not verified for ${target}`)
+    }
+  }
+  // Builder already validated each thin slice before its native universal merge.
+  // The merged executable has different bytes; retain the existing lipo/version checks.
+  if (context.electronPlatformName === 'darwin' && context.arch === 4) return
+  const binary = join(resolvePackagedUnpackedRoot(context), 'node_modules/@larksuite/cli/bin',
+    context.electronPlatformName === 'win32' ? 'lark-cli.exe' : 'lark-cli')
+  if (createHash('sha256').update(readFileSync(binary)).digest('hex') !== manifest.binarySha256[targets[0]!]) {
+    throw new Error('packaged Feishu binary differs from reviewed native license evidence')
+  }
+}
+
 /**
- * Run the static packaged-runtime check as Electron Builder's afterPack hook.
+ * Complete official per-slice CLI preparation and verify the native package before signing.
  * @param context - Electron Builder's afterPack context.
  * @returns A promise that rejects before signing when the runtime is incomplete.
  */
 export async function afterPack(context: PackagedRuntimeContext): Promise<void> {
+  preparePackagedFeishu(context)
+  verifyPackagedFeishuNotices(context)
   verifyPackagedRuntime(context)
   verifyPackagedVision(context)
   preservePackagedCalcDirectories(context)

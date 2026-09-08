@@ -17,6 +17,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import LlmRuntime from '@deepseek-ai/dsh-llm'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
+import UserQuestionService from '@deepseek-ai/dsh-user-questions'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import { createApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
+import { serverResponseSchema } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -29,6 +37,10 @@ const { adaptNavigationSource, NAVIGATION_PACKAGE } = await import(conversationA
   NAVIGATION_PACKAGE: string
 }
 import { prepareDesktopProfile } from '../src/profile.ts'
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap { 'emate/expert-mode': { active: boolean } }
+}
 
 const roots: string[] = []
 
@@ -302,7 +314,8 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     // assertion alone missed the Desktop override that removed this HTTP route.
     const ctx = new Context()
     const services = [ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 }),
-      ctx.plugin(SystemPrompt, {}), ctx.plugin(SessionStore)]
+      ctx.plugin(SystemPrompt, {}), ctx.plugin(SessionStore), ctx.plugin(AgentRegistry),
+      ctx.plugin(UserQuestionService), ctx.plugin(LlmRuntime), ctx.plugin(ToolRuntime), ctx.plugin(AgentLoop)]
     try {
       await Promise.all(services.map(fiber => fiber.await()))
       services.push(ctx.plugin({ name: 'expert-test-connection', inject: ['webServer'],
@@ -313,8 +326,14 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       const fiber = ctx.plugin(plugin)
       services.push(fiber)
       await fiber.await()
-      const first = ctx.sessions.create(SessionId('expert-first'))
-      const second = ctx.sessions.create(SessionId('expert-second'))
+      const api = createApiProxy(ctx, { cwd: home, defaultModelSelection: () => ({ provider: 'unused', model: 'unused' }) })
+      ctx.provide('apiProxy', api)
+      for (const sessionId of ['expert-first', 'expert-second']) {
+        const created = await api.sessions.create({ rpcId: sessionId as never, payload: { sessionId: SessionId(sessionId), cwd: home } })
+        expect(created.result.ok).toBe(true)
+      }
+      const first = ctx.sessions.get(SessionId('expert-first'))!
+      const second = ctx.sessions.get(SessionId('expert-second'))!
       const flush = vi.fn()
       ctx.on('session/flush', flush)
       const rpc = async (endpoint: string, payload: object, origin?: string) => {
@@ -324,15 +343,21 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
         })
         if (origin) return response.status
         expect(response.status).toBe(200)
-        const body = await response.json() as { result: unknown }
+        const body = serverResponseSchema.parse(await response.json())
         return body.result
       }
       const policy = async (session: typeof first) => {
-        const assembly = await ctx.systemPrompt.assemble({ agent: { session } } as never)
+        const assembly = await ctx.systemPrompt.assemble({ agent: {
+          session, options: { provider: 'unused', model: 'unused' },
+        } } as never)
         return assembly.sections.find(section => section.name === 'emate:expert-mode')?.text ?? ''
       }
       expect(await rpc('get', { session_id: first.id })).toEqual({ ok: true, value: { active: false } })
       expect(await policy(first)).toBe('')
+      expect(await rpc('get', { session_id: 'expert-missing' })).toEqual({ ok: false,
+        error: { code: 'session-not-found', message: '会话尚未就绪，请稍后重试。', details: { sessionId: 'expert-missing' } } })
+      expect(await rpc('set', { session_id: first.id, active: 'yes' })).toEqual({ ok: false,
+        error: { code: 'internal', message: '专家模式请求无效。', details: {} } })
       expect(await rpc('set', { session_id: first.id, active: true })).toEqual({ ok: true, value: { active: true } })
       expect(flush).toHaveBeenCalledWith(first)
       expect(await rpc('get', { session_id: first.id })).toEqual({ ok: true, value: { active: true } })
@@ -736,5 +761,88 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(existsSync(retiredSearchMcp)).toBe(false)
     expect(existsSync(retiredSidebar)).toBe(false)
     expect(existsSync(retiredTurnFold)).toBe(false)
+  })
+})
+
+
+describe('expert mode native cold-session RPC', () => {
+  it('reads cold state and resumes the same owner once for concurrent writes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'expert-cold-rpc-'))
+    roots.push(root)
+    const persistenceRoot = join(root, 'sessions')
+    const id = SessionId('expert-cold')
+    const childId = SessionId('expert-cold-child')
+    const seed = new Context()
+    await seed.plugin(SessionStore)
+    await seed.plugin(JsonlSessionPersistence, { root: persistenceRoot, compression: 'none' })
+    for (const sessionId of [id, childId]) {
+      const session = seed.sessions.create(sessionId, { meta: { cwd: root,
+        ...(sessionId === childId ? { origin: 'subagent', parentSession: id } : {}) } })
+      session.append('emate/expert-mode', { active: true }, { ignorable: true })
+      await seed.sessions.flush(session)
+    }
+    await seed.fiber.dispose()
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SessionStore)
+      await ctx.plugin(AgentRegistry)
+      await ctx.plugin(UserQuestionService)
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(AgentLoop)
+      await ctx.plugin(JsonlSessionPersistence, { root: persistenceRoot, compression: 'none' })
+      await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
+      await ctx.plugin({ name: 'expert-cold-connection', inject: ['webServer'],
+        apply: (owner: Context) => { new HostConnectionService(owner, []) } })
+      ctx.provide('apiProxy', createApiProxy(ctx, { cwd: root,
+        defaultModelSelection: () => ({ provider: 'unused', model: 'unused' }) }))
+      const source = new URL('../../../packages/dsh/src/profile/agent-operations.ts', import.meta.url).href
+      await ctx.plugin(await import(/* @vite-ignore */ source))
+      const resume = vi.spyOn(ctx.agents, 'resume')
+      let next = 0
+      const rpc = async (endpoint: string, payload: object) => {
+        const rpcId = `expert-cold-${++next}`
+        const response = await fetch(`http://127.0.0.1:${ctx.webServer.port}/emate.expert-mode/${endpoint}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ type: 'client-request', rpcId, method: endpoint, payload }),
+        })
+        expect(response.status).toBe(200)
+        const body = serverResponseSchema.parse(await response.json())
+        expect(body.rpcId).toBe(rpcId)
+        return body.result
+      }
+      expect(await rpc('get', { session_id: id })).toEqual({ ok: true, value: { active: true } })
+      expect(ctx.sessions.get(id)).toBeUndefined()
+      expect(ctx.agents.get(id)).toBeUndefined()
+      expect(resume).not.toHaveBeenCalled()
+      expect(await Promise.all([rpc('set', { session_id: id, active: false }),
+        rpc('set', { session_id: id, active: false })])).toEqual([
+        { ok: true, value: { active: false } }, { ok: true, value: { active: false } },
+      ])
+      expect(resume).toHaveBeenCalledTimes(1)
+      expect(await rpc('set', { session_id: id, active: false })).toEqual({ ok: true, value: { active: false } })
+      expect(resume).toHaveBeenCalledTimes(1)
+      expect(ctx.agents.get(id)?.session).toBe(ctx.sessions.get(id))
+      expect(ctx.sessions.get(id)?.header.cwd).toBe(root)
+      const states = (await ctx.sessionPersistence.inspect(id)).events
+        .filter(event => event.type === 'emate/expert-mode').map(event => event.data)
+      expect(states).toEqual([{ active: true }, { active: false }])
+      const refused = await rpc('set', { session_id: childId, active: false })
+      expect(refused).toMatchObject({ ok: false, error: { code: 'agent-busy', details: { reason: 'use subagent delivery for this child session' } } })
+      expect(ctx.agents.get(childId)).toBeUndefined()
+      const liveChild = ctx.sessions.create(SessionId('expert-live-child'), {
+        meta: { cwd: root, origin: 'subagent', parentSession: id },
+      })
+      const childEventsBefore = liveChild.events.length
+      expect(await rpc('set', { session_id: liveChild.id, active: true })).toMatchObject({
+        ok: false, error: { code: 'agent-busy', details: { reason: 'use subagent delivery for this child session' } },
+      })
+      expect(liveChild.events).toHaveLength(childEventsBefore)
+      expect(await rpc('set', { session_id: id, active: 'yes' })).toMatchObject({ ok: false, error: { code: 'internal', details: {} } })
+      expect(await rpc('get', { session_id: 'missing' })).toMatchObject({ ok: false, error: { code: 'internal', details: {} } })
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 })

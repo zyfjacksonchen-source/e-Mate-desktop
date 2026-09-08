@@ -54,15 +54,15 @@ describe('e-Mate 2.0.17 composer projection', () => {
     const prepareDraft = vi.fn()
     const loadConnections = vi.fn(async () => [
       { id: 'feishu' as const, state: 'connected' as const },
-      { id: 'dingtalk' as const, state: 'not-connected' as const },
-      { id: 'tencent_docs' as const, state: 'expired' as const },
+      { id: 'dingtalk' as const, state: 'unavailable' as const },
+      { id: 'tencent_docs' as const, state: 'authorization-required' as const },
     ])
     const before = location.href
     render(<ComposerConnectors LinkIcon={Icon} sessionId="s1" loadConnections={loadConnections} prepareDraft={prepareDraft} />)
     fireEvent.click(screen.getByRole('button', { name: '外部连接' }))
     await waitFor(() => expect(screen.getByText('已连接')).toBeTruthy())
-    expect(screen.getByText('未连接')).toBeTruthy()
-    expect(screen.getByText('授权失效')).toBeTruthy()
+    expect(screen.getByText('待授权')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /钉钉.*暂不可用/u })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /飞书.*已连接/u }))
     expect(prepareDraft).toHaveBeenCalledOnce()
     expect(prepareDraft.mock.calls[0]?.[0]).toContain('connect-feishu-cli')

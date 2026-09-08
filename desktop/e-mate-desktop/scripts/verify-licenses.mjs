@@ -129,6 +129,7 @@ if (failures.length > 0) {
   process.exit(1)
 }
 
+const nativeManifest = JSON.parse(readFileSync(join(packageRoot, 'third-party-notices/feishu-cli/1.0.88/manifest.json'), 'utf8'))
 const noticeOnly = manifests.filter(entry => NOTICE_LICENSES.has(entry.license))
 const noticesArg = process.argv.indexOf('--notices')
 if (noticesArg !== -1) {
@@ -153,6 +154,14 @@ if (noticesArg !== -1) {
     noticeOnly.length === 0
       ? ''
       : `> Notice-required licenses in use: ${[...new Set(noticeOnly.map(entry => entry.license))].join(', ')}. Their license texts ship inside node_modules; see the package LICENSE files for the full terms.`,
+    '',
+    '## Feishu native executable notices',
+    '',
+    `The ${nativeManifest.package} ${nativeManifest.version} native executable includes Go modules that are separate from the npm dependency table above.`,
+    `Statically verified official binary targets: ${Object.keys(nativeManifest.binarySha256).join(', ')}; Go ${nativeManifest.goVersion}; source commit ${nativeManifest.sourceCommit}.`,
+    `Original license and notice texts (${nativeManifest.files.length} files), exact module versions, source URLs and SHA256 hashes are retained under Resources/third-party-notices/feishu-cli/${nativeManifest.version}/ (resources/ on Windows). See manifest.json in that directory.`,
+    `Actual compiled module counts by target: ${Object.entries(nativeManifest.targetModules).map(([target, modules]) => `${target}: ${modules.length}`).join('; ')}.`,
+    nativeManifest.scope,
     '',
   ].filter(line => line !== '')
   writeFileSync(join(packageRoot, target), lines.join('\n'))

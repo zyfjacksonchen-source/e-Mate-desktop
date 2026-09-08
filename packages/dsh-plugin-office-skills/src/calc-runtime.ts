@@ -6,6 +6,7 @@ import type { Readable } from 'node:stream'
 import JSZip from 'jszip'
 import { DOMParser } from '@xmldom/xmldom'
 import { PDFDocument } from 'pdf-lib'
+import { prepareCalcFontEnvironment } from '@e-mate/desktop/vision-toolkit'
 
 const MAX_BYTES = 32 * 1024 * 1024
 const MAX_OUTPUT = 64 * 1024 * 1024
@@ -55,10 +56,6 @@ export interface CalcServices<Target> {
   }
   subprocess: { spawn(spec: ProcessSpec): ProcessHandle }
   sandbox: { confine(argv: readonly string[], policy: { mode: 'workspace-write'; workspaceRoot: string }): { argv: string[]; enforcement: 'full' | 'partial' } }
-}
-
-function xmlEscape(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;')
 }
 
 function isWebLink(value: string): boolean {
@@ -167,17 +164,16 @@ export function createCalcRuntime<Target>(services: CalcServices<Target>, paths:
         const input = join(temporary, 'input.xlsx')
         const calculated = join(temporary, 'calculated')
         const rendered = join(temporary, 'rendered')
-        await Promise.all([mkdir(join(profile, 'user'), { recursive: true }), mkdir(calculated), mkdir(rendered), mkdir(join(temporary, 'font-cache'))])
+        await Promise.all([mkdir(join(profile, 'user'), { recursive: true }), mkdir(calculated), mkdir(rendered)])
         await writeFile(input, bytes, { flag: 'wx', mode: 0o600, signal })
         await writeFile(join(profile, 'user', 'registrymodifications.xcu'), CALC_PROFILE, { flag: 'wx', mode: 0o600, signal })
-        const fonts = join(temporary, 'fonts.conf')
-        await writeFile(fonts, `<?xml version="1.0"?><fontconfig><dir>${xmlEscape(paths.fontDirectory)}</dir><cachedir>${xmlEscape(join(temporary, 'font-cache'))}</cachedir><alias><family>Calibri</family><prefer><family>Noto Sans SC</family></prefer></alias><alias><family>sans-serif</family><prefer><family>Noto Sans SC</family></prefer></alias></fontconfig>`, { flag: 'wx', mode: 0o600, signal })
+        const fontEnvironment = await prepareCalcFontEnvironment(paths.fontDirectory, temporary, signal)
         const run = async (file: string, filter: string, out: string) => {
           signal.throwIfAborted()
           const argv = [paths.executable, `-env:UserInstallation=${pathToFileURL(profile).href}`, '--headless', '--nologo', '--nodefault', '--norestore', '--convert-to', filter, '--outdir', out, file]
           // Native file-effect confinement is not a network or read-isolation guarantee.
           const confined = services.sandbox.confine(argv, { mode: 'workspace-write', workspaceRoot: temporary })
-          const handle = services.subprocess.spawn({ argv: confined.argv, cwd: temporary, env: { FONTCONFIG_FILE: fonts, FONTCONFIG_PATH: temporary, XDG_CACHE_HOME: join(temporary, 'font-cache') }, signal, graceMs: 3000, stdio: { stdin: 'ignore', stdout: { maxBytes: 64 * 1024 }, stderr: { maxBytes: 64 * 1024 } } })
+          const handle = services.subprocess.spawn({ argv: confined.argv, cwd: temporary, env: { ...fontEnvironment, XDG_CACHE_HOME: join(temporary, 'font-cache') }, signal, graceMs: 3000, stdio: { stdin: 'ignore', stdout: { maxBytes: 64 * 1024 }, stderr: { maxBytes: 64 * 1024 } } })
           mayRemoveTemporary = false
           try {
             const result = await handle.done

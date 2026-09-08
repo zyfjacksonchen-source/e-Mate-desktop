@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, statSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { runInNewContext } from 'node:vm'
 import { spawnSync } from 'node:child_process'
@@ -16,6 +16,8 @@ import {
   resolvePackagedResourcesRoot,
   resolvePackagedUnpackedRoot,
   verifyPackagedNodePty,
+  preparePackagedFeishu,
+  verifyPackagedFeishuNotices,
   verifyPackagedCalc,
   verifyPackagedVision,
   preservePackagedCalcDirectories,
@@ -483,4 +485,94 @@ it('preserves only pinned empty Calc directories and rejects symlink parents', (
     expect(() => preservePackagedCalcDirectories(runtime)).toThrow()
     expect(existsSync(join(resources, 'autotext'))).toBe(false)
   } finally { rmSync(base, { recursive: true, force: true }) }
+})
+
+
+it.each([['darwin', 1, 'x64'], ['darwin', 3, 'arm64'], ['win32', 1, 'x64']] as const)('runs the official Feishu installer under the actual %s %s slice', (platform, arch, cpu) => {
+  const temporary = mkdtempSync(join(tmpdir(), 'emate-feishu-'))
+  const packaged = context(temporary, platform, arch)
+  const root = join(resolvePackagedUnpackedRoot(packaged), 'node_modules/@larksuite/cli')
+  mkdirSync(join(root, 'scripts'), { recursive: true }); mkdirSync(join(root, 'bin'))
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@larksuite/cli', version: '1.0.88', license: 'MIT' }))
+  for (const file of ['LICENSE', 'checksums.txt', 'scripts/install.js']) writeFileSync(join(root, file), 'official fixture')
+  const calls: string[][] = []
+  const runner: PtyProbeRunner = (command, args) => {
+    calls.push([command, ...args])
+    if (args[0] === '-p') return { status: 0, stdout: `${platform}:${cpu}` } as never
+    if (args[0]?.endsWith('install.js')) writeFileSync(join(root, 'bin', platform === 'win32' ? 'lark-cli.exe' : 'lark-cli'), 'binary')
+    return { status: 0, stdout: args[0] === '--version' ? 'lark-cli 1.0.88' : '' } as never
+  }
+  try {
+    preparePackagedFeishu(packaged, runner)
+    expect(calls.filter(call => call[1]?.endsWith('install.js'))).toHaveLength(1)
+    expect(calls[0]?.[0]).toContain(platform === 'win32' ? '.exe' : '.app/Contents/MacOS/')
+    expect(() => preparePackagedFeishu(packaged, () => ({ status: 0, stdout: 'darwin:wrong' }) as never)).toThrow('target mismatch')
+    if (platform === 'darwin') {
+      calls.length = 0
+      preparePackagedFeishu({ ...packaged, arch: 4 }, runner)
+      expect(calls.some(call => call[1]?.endsWith('install.js'))).toBe(false)
+      expect(calls[0]?.slice(1, 4)).toEqual(['-verify_arch', 'x86_64', 'arm64'])
+    }
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
+})
+
+
+it('checks Feishu original notices, binary drift, universal handling and Windows static evidence', () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'emate-feishu-notices-'))
+  const packaged = context(temporary, 'darwin', 3)
+  const resources = resolvePackagedResourcesRoot(packaged)
+  const root = join(resources, 'third-party-notices/feishu-cli/1.0.88')
+  const manifestPath = join(root, 'manifest.json')
+  try {
+    cpSync(join(import.meta.dirname, '../third-party-notices/feishu-cli/1.0.88'), root, { recursive: true })
+    writeFileSync(join(resources, 'THIRD_PARTY_NOTICES.md'), '## Feishu native executable notices\nResources/third-party-notices/feishu-cli/1.0.88/')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    const binary = join(resolvePackagedUnpackedRoot(packaged), 'node_modules/@larksuite/cli/bin/lark-cli')
+    mkdirSync(join(binary, '..'), { recursive: true })
+    writeFileSync(binary, 'fixture binary')
+    manifest.binarySha256['darwin-arm64'] = createHash('sha256').update('fixture binary').digest('hex')
+    writeFileSync(manifestPath, JSON.stringify(manifest))
+    expect(() => verifyPackagedFeishuNotices(packaged)).not.toThrow()
+    writeFileSync(binary, 'different binary')
+    expect(() => verifyPackagedFeishuNotices(packaged)).toThrow('differs from reviewed')
+    expect(() => verifyPackagedFeishuNotices({ ...packaged, arch: 4 })).not.toThrow()
+    const file = join(root, manifest.files[0].path)
+    const original = readFileSync(file)
+    writeFileSync(file, 'corrupt')
+    expect(() => verifyPackagedFeishuNotices({ ...packaged, arch: 4 })).toThrow('notice hash mismatch')
+    rmSync(file)
+    expect(() => verifyPackagedFeishuNotices(packaged)).toThrow()
+    writeFileSync(file, original)
+    manifest.version = '1.0.89'
+    writeFileSync(manifestPath, JSON.stringify(manifest))
+    expect(() => verifyPackagedFeishuNotices(packaged)).toThrow('manifest mismatch')
+    manifest.version = '1.0.88'
+    writeFileSync(manifestPath, JSON.stringify(manifest))
+    const windows = context(join(temporary, 'windows'), 'win32', 1)
+    cpSync(resources, resolvePackagedResourcesRoot(windows), { recursive: true })
+    const windowsRoot = join(resolvePackagedResourcesRoot(windows), 'third-party-notices/feishu-cli/1.0.88')
+    const windowsManifestPath = join(windowsRoot, 'manifest.json')
+    const windowsManifest = JSON.parse(readFileSync(windowsManifestPath, 'utf8'))
+    const windowsBinary = join(resolvePackagedUnpackedRoot(windows), 'node_modules/@larksuite/cli/bin/lark-cli.exe')
+    writeFileSync(windowsBinary, 'Windows fixture binary')
+    windowsManifest.binarySha256['win32-x64'] = createHash('sha256').update('Windows fixture binary').digest('hex')
+    writeFileSync(windowsManifestPath, JSON.stringify(windowsManifest))
+    expect(() => verifyPackagedFeishuNotices(windows)).not.toThrow()
+    writeFileSync(windowsBinary, 'wrong Windows binary')
+    expect(() => verifyPackagedFeishuNotices(windows)).toThrow('differs from reviewed')
+    writeFileSync(windowsBinary, 'Windows fixture binary')
+    const declaration = windowsManifest.files.find((entry: { module: string }) => entry.module === 'github.com/mattn/go-localereader')
+    expect(declaration.evidenceKind).toContain('no complete LICENSE')
+    rmSync(join(windowsRoot, declaration.path))
+    expect(() => verifyPackagedFeishuNotices(windows)).toThrow()
+    expect(windowsManifest.targetModules['win32-x64']).toHaveLength(45)
+    expect(windowsManifest.targetModules['darwin-arm64']).toHaveLength(42)
+    expect(windowsManifest.targetModules['darwin-x64']).toHaveLength(42)
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '../package.json'), 'utf8'))
+    expect(pkg.files).toContain('third-party-notices/**')
+    expect(pkg.build.extraResources).toEqual(expect.arrayContaining([
+      { from: 'third-party-notices', to: 'third-party-notices' },
+      { from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
+    ]))
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
 })

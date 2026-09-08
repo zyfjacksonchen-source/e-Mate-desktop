@@ -39,6 +39,25 @@ afterEach(() => {
 })
 
 describe('e-Mate 2.0.17 identity and settings fidelity', () => {
+  it('distinguishes a pending identity bootstrap from an unavailable service without unlocking early', async () => {
+    let settle!: (value: RpcResult) => void
+    const callIdentity = vi.fn(() => new Promise<RpcResult>(resolve => { settle = resolve }))
+    render(<IdentityGate callIdentity={callIdentity} />)
+    expect(screen.getByRole('heading', { name: '正在连接企业身份服务' })).toBeTruthy()
+    expect(screen.queryByText('登录服务尚未就绪')).toBeNull()
+    expect(screen.getByRole('button', { name: '正在检查…' }).getAttribute('disabled')).not.toBeNull()
+    expect(document.querySelector('[data-emate-identity-gate]')).not.toBeNull()
+    expect(callIdentity).toHaveBeenCalledTimes(1)
+    await act(async () => { settle({ ok: false, error: { message: '身份服务连接失败' } }) })
+    expect(screen.getByRole('heading', { name: '登录服务尚未就绪' })).toBeTruthy()
+    expect(screen.getByText('身份服务连接失败')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '重新检查' }).getAttribute('disabled')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }))
+    expect(screen.getByRole('heading', { name: '正在连接企业身份服务' })).toBeTruthy()
+    await act(async () => { settle({ ok: true, value: signedIn }) })
+    expect(document.querySelector('[data-emate-identity-gate]')).toBeNull()
+  })
+
   it('keeps the AURA login contract and current SettingsDialog copy', () => {
     const identity = readFileSync(join(process.cwd(), 'src/client/identity.module.css'), 'utf8')
     const identityView = readFileSync(join(process.cwd(), 'src/client/identity.tsx'), 'utf8')

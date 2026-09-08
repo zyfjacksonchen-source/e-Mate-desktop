@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { chatCompletionsToResponsesStream, responsesToChatCompletionsRequest } from './chat-completions-adapter.ts';
-import { inspectSseFrame, parseImageGenerationResponse, type ModelGatewayRoute } from './server.ts';
+import { safeProviderTrace, inspectSseFrame, parseImageGenerationResponse, type ModelGatewayRoute } from './server.ts';
 
 export type ModelSmokeRoute = Pick<
   ModelGatewayRoute,
@@ -159,9 +159,7 @@ function evidenceId(
   providerResponseId: string | undefined,
   localId: string
 ): string {
-  const headerId = ['x-request-id', 'request-id', 'openai-request-id', 'x-tt-logid']
-    .map((name) => response.headers.get(name))
-    .find((value): value is string => Boolean(value && evidencePattern.test(value)));
+  const headerId = safeProviderTrace(response.headers)?.id;
   const providerId =
     headerId ?? (providerResponseId && evidencePattern.test(providerResponseId) ? providerResponseId : null);
   return providerId ? `provider:${providerId}` : `local:${localId}`;

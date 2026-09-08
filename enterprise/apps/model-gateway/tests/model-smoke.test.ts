@@ -1,3 +1,4 @@
+import { safeProviderTrace } from '../src/server.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ModelSmokeError, runModelSmoke, type ModelSmokeRoute } from '../src/modelSmoke.ts';
@@ -348,4 +349,15 @@ test('rejects credential-bearing and malformed opted-in HTTP URLs before smoke r
     );
     assert.equal(requests.length, 0);
   }
+});
+
+
+test('provider evidence uses the shared bounded header allowlist only', () => {
+  for (const header of ['x-request-id', 'request-id', 'openai-request-id', 'x-tt-logid']) {
+    assert.deepEqual(safeProviderTrace(new Headers({ [header]: 'provider-1234' })), { header, id: 'provider-1234' });
+  }
+  for (const id of ['bad id value', 'x'.repeat(102), 'short', 'https://private.example/path']) {
+    assert.equal(safeProviderTrace(new Headers({ 'x-request-id': id, authorization: 'Bearer secret', 'x-secret': 'private-secret' })), undefined);
+  }
+  assert.equal(safeProviderTrace(new Headers({ authorization: 'Bearer secret', 'x-arbitrary-trace': 'private-secret' })), undefined);
 });

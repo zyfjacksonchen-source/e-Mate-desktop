@@ -18,6 +18,23 @@ describe('external connection projection', () => {
     })
     expect((await loadConnectionStates(call)).map(item => item.state)).toEqual(['connected', 'failed', 'connected'])
   })
+  it.each([404, 405])('projects an absent native route as unavailable and missing credentials as authorization required (HTTP %s)', async (status) => {
+    const states = await loadConnectionStates(async (channel, endpoint) => {
+      if (channel === '/dingtalk') throw new Error(`transport failure for ${channel}/${endpoint}: HTTP ${status}`)
+      return endpoint === 'feishu.status' ? { ok: true, value: { state: 'expired' } }
+        : { ok: true, value: { schema_version: 1, items: [{ name: 'tencent_docs', active: false, authorized: false }] } }
+    })
+    expect(states.map(item => item.state)).toEqual(['expired', 'unavailable', 'authorization-required'])
+  })
+  it.each([
+    'transport failure for /dingtalk/connection.status: HTTP 403',
+    'transport failure for /dingtalk/connection.status: HTTP 500',
+    'transport failure for /another/status: HTTP 405',
+    'provider status 404',
+  ])('does not disguise permission, server or unrelated failures: %s', async (message) => {
+    expect((await loadConnectionStates(async () => { throw new Error(message) })).map(item => item.state))
+      .toEqual(['failed', 'failed', 'failed'])
+  })
   it('appends text through the native owner, leaving all attachments and submission untouched', () => {
     const snapshot = { draft: '原文 @引用', phase: 'plain', imageIds: ['image-1'], fileRefs: ['file-1'] }
     const input = { state: { getSnapshot: () => snapshot }, setDraft: vi.fn(), submit: vi.fn() }

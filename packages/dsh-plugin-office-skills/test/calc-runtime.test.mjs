@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import JSZip from 'jszip'
-import { createCalcRuntime, validateCalcWorkbook, CALC_PROFILE } from '../src/calc-runtime.ts'
+import { registerHooks } from 'node:module'
+// Source tests resolve the real Base implementation; production uses the Profile resolver.
+const baseHook = registerHooks({ resolve(specifier, context, nextResolve) {
+ if (specifier === '@e-mate/desktop/vision-toolkit') return { shortCircuit: true, url: new URL('../../../desktop/e-mate-desktop/src/vision-toolkit.ts', import.meta.url).href }
+ return nextResolve(specifier, context)
+} })
+const { createCalcRuntime, validateCalcWorkbook, CALC_PROFILE } = await import('../src/calc-runtime.ts')
+baseHook.deregister()
 
 async function workbook(extra = {}) {
  const zip = new JSZip()

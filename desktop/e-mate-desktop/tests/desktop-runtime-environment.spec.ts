@@ -1,3 +1,4 @@
+import { installCalcFontEnvironment, prepareCalcFontEnvironment } from '../src/vision-toolkit.ts'
 import { spawnSync } from 'node:child_process'
 import {
   lstatSync,
@@ -438,5 +439,56 @@ describe('desktop Host dsh runtime', () => {
     installation.dispose()
     installation.dispose()
     expect(environment).toEqual(original)
+  })
+})
+
+
+describe('bundled Calc font environment', () => {
+  it('preserves explicit user configuration and unrelated environment values', async () => {
+    const environment = { FONTCONFIG_PATH: '/user/custom/fonts', KEEP: 'untouched' }
+    const release = await installCalcFontEnvironment('/unused', environment)
+    expect(environment).toEqual({ FONTCONFIG_PATH: '/user/custom/fonts', KEEP: 'untouched' })
+    await release()
+    expect(environment.FONTCONFIG_PATH).toBe('/user/custom/fonts')
+  })
+
+  it('escapes font paths and leaves cache ownership with the caller', async () => {
+    const root = temporaryDirectory()
+    const env = await prepareCalcFontEnvironment('C:\\Fonts & More\\中文', root)
+    const xml = readFileSync(env.FONTCONFIG_FILE!, 'utf8')
+    expect(xml).toContain('C:\\Fonts &amp; More\\中文')
+    expect(xml).toContain('<cachedir>')
+    expect(xml).toContain('<family>Noto Sans SC</family>')
+    expect(env).not.toHaveProperty('XDG_CACHE_HOME')
+  })
+
+  it.skipIf(process.platform === 'win32')('inherits host fonts through the native Bash subprocess and releases only afterward', async () => {
+    const root = temporaryDirectory()
+    const oldFile = process.env.FONTCONFIG_FILE
+    const oldPath = process.env.FONTCONFIG_PATH
+    delete process.env.FONTCONFIG_FILE
+    delete process.env.FONTCONFIG_PATH
+    const release = await installCalcFontEnvironment(join(root, 'fonts'), process.env)
+    const config = process.env.FONTCONFIG_FILE!
+    const ctx = new Context()
+    const fibers = [await ctx.plugin(LocalSubprocessRuntime)]
+    ;(ctx.subprocess as LocalSubprocessRuntime).internals = { spillDir: root }
+    fibers.push(await ctx.plugin(ShellEnv))
+    fibers.push(await ctx.plugin(LocalBashExecutor, { timeoutMs: 5_000 }))
+    try {
+      const shell = ctx.shell as LocalBashExecutor
+      const result = await shell.run(shell.resolve({ command: 'cat "$FONTCONFIG_FILE"', workdir: root,
+        dshEnv: ctx.shellEnv.collect({ signal: new AbortController().signal } as ToolExecution) }))
+      expect(result.exitCode, result.stderr.text).toBe(0)
+      expect(result.stdout.text).toBe(readFileSync(config, 'utf8'))
+      expect(result.stdout.text).toContain('Noto Sans SC')
+    } finally {
+      for (const fiber of fibers.reverse()) await fiber.dispose()
+      await release()
+      expect(() => lstatSync(config)).toThrow()
+      expect(process.env.FONTCONFIG_FILE).toBeUndefined()
+      if (oldFile !== undefined) process.env.FONTCONFIG_FILE = oldFile
+      if (oldPath !== undefined) process.env.FONTCONFIG_PATH = oldPath
+    }
   })
 })

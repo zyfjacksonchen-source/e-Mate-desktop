@@ -65,6 +65,16 @@ skill = replaceExactlyOnce(skill,
   'native image skill selection')
 await writeFile(skillPath, skill)
 
+const exposurePath = resolve(staged, 'exposure.js')
+let exposure = await readPinnedText(exposurePath)
+exposure = replaceExactlyOnce(exposure,
+  '&& block.text.includes(VISION_TOOLS_SKILL_CONTENT));',
+  `&& (block.text.includes(VISION_TOOLS_SKILL_CONTENT)
+            || (block.text.trim().startsWith('<skill_content name="' + VISION_TOOLS_SKILL_NAME + '">')
+                && block.text.trim().endsWith('</skill_content>'))));`,
+  'native skill identity survives instruction updates')
+await writeFile(exposurePath, exposure)
+
 const upstreamIndex = resolve(staged, 'index.js')
 let index = await readPinnedText(upstreamIndex)
 const applyBefore = 'export async function apply(ctx, config = {}) {'
@@ -93,7 +103,12 @@ const managerAfter = `    });
         await ctx.settings.replace(VISION_TOOLKIT_SETTINGS_NAMESPACE, config);
         managedReady = true;
     }
-    const manager = new VisionToolkitRuntimeManager(ctx);
+    const manager = new VisionToolkitRuntimeManager(ctx, options.nativeRun === undefined ? undefined : async (owner, resolvedConfig) => {
+        const adapter = new UpstreamAdapter(owner, resolvedConfig);
+        adapter.nativeRun = options.nativeRun;
+        await adapter.prepare();
+        return new VisionToolkitRuntime(owner, resolvedConfig, adapter);
+    });
     let runtimePending;
     const prepareRuntime = async () => {
         if (manager.ready)
@@ -117,6 +132,7 @@ if (!index.includes(applyBefore) || !index.includes(validateBefore)
   || !index.includes(backendBefore) || !index.includes(managerBefore) || !index.includes(operationalBefore)) {
   throw new Error('pinned dsh-vision-toolkit apply contract changed')
 }
+index = `import { UpstreamAdapter } from './upstream.js';\nimport { VisionToolkitRuntime } from './runtime.js';\n` + index
 index = index
   .replace("export const name = '@anionex/dsh-vision-toolkit';", "export const name = '@e-mate/dsh-plugin-vision-toolkit';")
   .replace(applyBefore, applyAfter)
@@ -355,7 +371,30 @@ runtime = replaceExactlyOnce(
   "VISION_API_PROTOCOL: this.config.provider.protocol === 'anthropic' ? 'anthropic' : this.config.provider.protocol === 'responses' ? 'responses' : 'chat_completions',",
   'Responses runtime projection',
 )
+runtime = replaceExactlyOnce(runtime,
+  'action({ signal: deadline.signal, metrics })',
+  'action({ signal: deadline.signal, metrics, sessionId: options.sessionId, sessionScope: options.sessionScope })',
+  'native Vision operation scope')
+runtime = replaceExactlyOnce(runtime,
+  'const result = await this.adapter.run(tool, args, {\n            signal: operation.signal,',
+  'const result = await this.adapter.run(tool, args, {\n            signal: operation.signal, sessionId: operation.sessionId, sessionScope: operation.sessionScope,',
+  'native Vision subprocess scope')
 await writeFile(runtimePath, runtime)
+
+const upstreamAdapterPath = resolve(staged, 'upstream.js')
+let upstreamAdapter = await readPinnedText(upstreamAdapterPath)
+upstreamAdapter = replaceExactlyOnce(upstreamAdapter,
+  '        let handle;\n        try {\n            const pythonArgs = tool ===',
+  `        if (this.nativeRun !== undefined && options.env !== undefined) {
+            return this.nativeRun({ tool, concurrency: this.config.concurrency, python: [prepared.python.program, ...prepared.python.prefix], script, args,
+                cwd: prepared.cleanHome, environment: { ...isolatedPythonEnvironment(prepared.cleanHome), LANG: options.env.LANG },
+                signal: options.signal, sessionId: options.sessionId, sessionScope: options.sessionScope });
+        }
+        let handle;
+        try {
+            const pythonArgs = tool ===`,
+  'native Vision model callback before Python network execution')
+await writeFile(upstreamAdapterPath, upstreamAdapter)
 
 const webPath = resolve(staged, 'web.js')
 let web = await readPinnedText(webPath)
@@ -445,6 +484,10 @@ await writeFile(webPath, web)
 
 const toolsPath = resolve(staged, 'tools.js')
 let tools = await readPinnedText(toolsPath)
+tools = replaceExactlyOnce(tools,
+  'Targeted question; omit for a detailed description.',
+  'Targeted question, including questions about visible text; leave ocr false or omitted. For pure transcription use ocr=true and omit query. Omit both for a detailed description.',
+  'glance question and transcription modes')
 tools = replaceExactlyOnce(
   tools,
   'export function createVisionTools(source, projectPresentation = presentationIdentity, lifecycleSignal) {',
@@ -611,6 +654,7 @@ export declare function apply(
   config?: unknown,
   options?: {
     managed?: boolean
+    nativeRun?(input: { tool: string; concurrency: number; python: string[]; script: string; args: readonly string[]; cwd: string; environment: Record<string, string>; sessionId?: string; sessionScope?: object; signal: AbortSignal }): Promise<unknown>
     validateConfig?(value: unknown): void
     assertWriteAllowed?(exec: { agent?: { session?: unknown } }): void
     installImageInputBridge?(runtime: unknown): () => void
@@ -640,6 +684,9 @@ export { apply } from './upstream-lib/index.js'
 export { VisionToolkitWebBackend } from './upstream-lib/web.js'
 export { VisionToolkitRuntimeManager } from './upstream-lib/runtime-manager.js'
 export { VisionToolkitRuntime } from './upstream-lib/runtime.js'
+export { UpstreamAdapter } from './upstream-lib/upstream.js'
+export { VisionToolExposure } from './upstream-lib/exposure.js'
+export { createNativeVisionRun, NATIVE_VISION_GUARD } from '../src/native-model.ts'
 export { prepareUpstreamRuntime } from './upstream-lib/runtime-install.js'
 export { createVisionTools } from './upstream-lib/tools.js'
 export { createPathPolicy } from './upstream-lib/paths.js'

@@ -30,7 +30,8 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "3.18.1",
-    "@modelcontextprotocol/sdk": "1.29.0"
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@larksuite/cli": "1.0.88"
   },
   "dsh": {
     "bundle": {

@@ -8,14 +8,21 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { inflateSync } from 'node:zlib'
 import JSZip from 'jszip'
-import {
+import { installProfilePackageResolver } from '../../../desktop/e-mate-desktop/src/module-resolution.ts'
+const baseContract = JSON.parse(await readFile(new URL('../../../desktop/e-mate-desktop/base-contract.json', import.meta.url), 'utf8'))
+const releaseBaseResolver = installProfilePackageResolver(
+ new URL('../../../desktop/e-mate-desktop/lib/index.js', import.meta.url).href,
+ [fileURLToPath(new URL('../', import.meta.url))], baseContract.runtime_imports,
+)
+const {
   apply,
   inject,
   OFFICE_ADAPTER_STATUS,
   OFFICE_CREATE_EXAMPLES,
   readOfficeBuffer,
   writeOfficeBuffer,
-} from '../lib/index.js'
+} = await import('../lib/index.js')
+releaseBaseResolver()
 
 test('registers six Skills with accurate runtime states and two target Tool/Job paths', async () => {
   let provider
@@ -136,7 +143,7 @@ test('registers six Skills with accurate runtime states and two target Tool/Job 
   assert.match(contract, /operation:"create"/u)
   assert.match(contract, /type:"table"/u)
   assert.match(contract, /literal text, NOT formulas/u)
-  assert.match(contract, /PPTX basic creation supports title and bullets only/u)
+  assert.match(contract, /optional notes:string\[\] for real speaker notes/u)
   assert.equal(tools[1].output.schema.properties.document.type, 'object')
   assert.deepEqual(capabilities.map(capability => capability.id), ['office-skills'])
   assert.deepEqual(await capabilities[0].status(), {
@@ -170,6 +177,49 @@ test('meeting transcript helper preserves Chinese speakers and standalone numeri
   assert.equal(await readFile(input, 'utf8'), transcript)
 })
 
+test('writes real speaker notes and reads them through slide relationships without page-number contamination', async () => {
+  const input = { slides: [{ title: '办公验收', bullets: ['合计 40'], notes: ['17+23=40', '只在演讲者备注中显示'] }, { title: '无备注', bullets: [] }] }
+  const buffer = await writeOfficeBuffer('pptx', input)
+  const archive = await JSZip.loadAsync(buffer)
+  const body = await archive.file('ppt/slides/slide1.xml').async('string')
+  assert.doesNotMatch(body, /只在演讲者备注/u)
+  const notes = await archive.file('ppt/notesSlides/notesSlide1.xml').async('string')
+  assert.match(notes, /17\+23=40/u)
+  const parsed = await readOfficeBuffer('pptx', buffer)
+  assert.equal(parsed.slides[0].notes.join('\n'), input.slides[0].notes.join('\n'))
+  assert.equal(parsed.slides[1].notes, undefined)
+  const relations = archive.file('ppt/slides/_rels/slide1.xml.rels')
+  archive.file('ppt/notesSlides/custom.xml', notes)
+  archive.remove('ppt/notesSlides/notesSlide1.xml')
+  archive.file(relations.name, (await relations.async('string')).replace('../notesSlides/notesSlide1.xml', '../notesSlides/custom.xml'))
+  const renamed = await readOfficeBuffer('pptx', await archive.generateAsync({ type: 'nodebuffer' }))
+  assert.deepEqual(renamed.slides[0].notes, parsed.slides[0].notes)
+  archive.file(relations.name, (await archive.file(relations.name).async('string')).replace('../notesSlides/custom.xml', '../../../outside.xml'))
+  await assert.rejects(readOfficeBuffer('pptx', await archive.generateAsync({ type: 'nodebuffer' })), /notes path is unsafe/u)
+  await assert.rejects(writeOfficeBuffer('pptx', { slides: [{ bullets: [], notes: 'must be an array' }] }), /notes are invalid/u)
+})
+
+test('ships the pinned native pdf2json patch in both module formats and copied runtime', async () => {
+  const config = await readFile(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8')
+  assert.match(config, /pdf2json@4\.0\.3: patches\/pdf2json@4\.0\.3\.patch/u)
+  const patched = 'v.indexOf(x.tag)<0||(0!==x.length||x.tag==="glyf")&&(A[x.tag]=x)'
+  for (const path of ['../node_modules/pdf2json/dist/pdfparser.js', '../node_modules/pdf2json/dist/pdfparser.cjs', '../assets/pdf2json/pdfparser.js']) {
+    const source = await readFile(new URL(path, import.meta.url), 'utf8')
+    assert.equal(source.split(patched).length - 1, 1, path)
+  }
+  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.ok(manifest.files.includes('patches') && manifest.files.includes('pnpm-workspace.yaml'))
+})
+
+test('preserves ToUnicode text when a subset font has an empty glyf table', async () => {
+  // Installed feedback fixture: valid ToUnicode '=' with a present zero-length glyf table.
+  const historical = await readFile(new URL('./fixtures/pdf-empty-glyf.pdf', import.meta.url))
+  assert.deepEqual((await readOfficeBuffer('pdf', historical)).pages[0].lines, ['办公验收：17+23=40'])
+  const lines = ['办公验收：17+23=40', 'A=B', '=']
+  const bytes = await writeOfficeBuffer('pdf', { pages: [{ lines }] })
+  assert.deepEqual((await readOfficeBuffer('pdf', bytes)).pages[0].lines, lines)
+})
+
 test('round-trips real DOCX, XLSX, PPTX, and Chinese PDF bytes', async () => {
   const fixtures = [
     ['docx', OFFICE_CREATE_EXAMPLES.docx, value => {
@@ -183,6 +233,7 @@ test('round-trips real DOCX, XLSX, PPTX, and Chinese PDF bytes', async () => {
       assert.equal(value.slides.length, 1)
       assert.match(value.slides[0].bullets.join(' '), /e-Mate 演示/u)
       assert.match(value.slides[0].bullets.join(' '), /第一点/u)
+      assert.deepEqual(value.slides[0].notes, OFFICE_CREATE_EXAMPLES.pptx.slides[0].notes)
     }],
     ['pdf', OFFICE_CREATE_EXAMPLES.pdf, value => {
       assert.equal(value.pages.length, 1)

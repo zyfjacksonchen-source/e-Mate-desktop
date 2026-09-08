@@ -968,6 +968,54 @@ export class InMemoryUsageStore implements UsageStore {
   }
 }
 
+export function safeProviderTrace(headers: Headers): { header: string; id: string } | undefined {
+  for (const header of ['x-request-id', 'request-id', 'openai-request-id', 'x-tt-logid']) {
+    const id = headers.get(header);
+    if (id && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,100}$/.test(id)) return { header, id };
+  }
+  return undefined;
+}
+
+export type UpstreamRejectionObservation = {
+  schema_version: 1;
+  occurred_at: string;
+  invocation_id: string;
+  task_id: string;
+  trace_id: string;
+  route_id: string;
+  provider_id: string;
+  endpoint: 'responses' | 'chat_completions' | 'image_edits' | 'image_generations';
+  upstream_status: number;
+  content_type?: string;
+  has_body: boolean;
+  reason: 'http_non_2xx' | 'unexpected_content_type' | 'missing_body' | 'invalid_payload';
+  provider_trace?: { header: string; id: string };
+};
+
+function observeUpstreamRejection(
+  callback: ModelGatewayOptions['upstreamRejectionObservation'],
+  upstream: Response,
+  context: Pick<UpstreamRejectionObservation, 'invocation_id' | 'task_id' | 'trace_id' | 'route_id' | 'provider_id' | 'endpoint'>,
+  reason: UpstreamRejectionObservation['reason']
+): void {
+  if (callback === undefined) return;
+  queueMicrotask(() => {
+    try {
+      const mediaType = upstream.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+      const contentType = mediaType && mediaType.length <= 100 && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(mediaType) ? mediaType : undefined;
+      const providerTrace = safeProviderTrace(upstream.headers);
+      callback({
+        schema_version: 1, occurred_at: new Date().toISOString(),
+        invocation_id: context.invocation_id, task_id: context.task_id, trace_id: context.trace_id,
+        route_id: context.route_id, provider_id: context.provider_id, endpoint: context.endpoint,
+        upstream_status: upstream.status, has_body: upstream.body !== null, reason,
+        ...(contentType === undefined ? {} : { content_type: contentType }),
+        ...(providerTrace === undefined ? {} : { provider_trace: providerTrace }),
+      });
+    } catch { /* Diagnostics never own response success or invocation state. */ }
+  });
+}
+
 export type ModelGatewayOptions = {
   routes: ModelGatewayRoute[];
   authenticate(token: string): Promise<ModelGatewayPrincipal | null>;
@@ -983,6 +1031,7 @@ export type ModelGatewayOptions = {
   ) => Promise<ProviderInvocationReceipt> | ProviderInvocationReceipt;
   upstreamTimeoutMs?: number;
   imageObservation?: (event: ImageObservation) => void;
+  upstreamRejectionObservation?: (event: UpstreamRejectionObservation) => void;
 };
 
 export type TenantModelRoutePolicy = {
@@ -2556,7 +2605,13 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             'Model provider temporarily unavailable'
           );
         }
+        const observeRejection = (reason: UpstreamRejectionObservation['reason']) => observeUpstreamRejection(
+          options.upstreamRejectionObservation, upstream,
+          { invocation_id: prepared.invocationId, task_id: taskId, trace_id: traceId,
+            route_id: route.id, provider_id: route.providerId, endpoint: chatRequest ? 'chat_completions' : 'responses' }, reason
+        );
         if (!upstream.ok) {
+          observeRejection('http_non_2xx');
           if (definitelyRejectedStatuses.has(upstream.status)) {
             await options.usageStore.reject(identity, taskId, prepared.invocationId);
           }
@@ -2566,6 +2621,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Model provider rejected the request');
         }
         if (!(upstream.headers.get('content-type') ?? '').includes('text/event-stream') || !upstream.body) {
+          observeRejection(!(upstream.headers.get('content-type') ?? '').includes('text/event-stream') ? 'unexpected_content_type' : 'missing_body');
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Model provider rejected the request');
         }
         if (chatRequest) {
@@ -2803,7 +2859,13 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             'Image provider temporarily unavailable'
           );
         }
+        const observeRejection = (reason: UpstreamRejectionObservation['reason']) => observeUpstreamRejection(
+          options.upstreamRejectionObservation, upstream,
+          { invocation_id: prepared.invocationId, task_id: taskId, trace_id: traceId,
+            route_id: route.id, provider_id: route.providerId, endpoint: edit ? 'image_edits' : 'image_generations' }, reason
+        );
         if (!upstream.ok) {
+          observeRejection('http_non_2xx');
           const definitelyRejected = definitelyRejectedStatuses.has(upstream.status);
           const failure = imageFailureCode({ phase: 'provider', providerSubmitted: true, definitelyRejected });
           imageObserver?.setFailure(failure);
@@ -2814,6 +2876,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Image provider rejected the request');
         }
         if (!(upstream.headers.get('content-type') ?? '').includes('application/json')) {
+          observeRejection('unexpected_content_type');
           const failure = imageFailureCode({ phase: 'provider', providerSubmitted: true });
           imageObserver?.setFailure(failure);
           imageObserver?.emit('provider_outcome', 'failed', failure);
@@ -2824,6 +2887,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         try {
           completed = parseImageGenerationResponse(await upstream.json(), responseId);
         } catch (error) {
+          observeRejection(upstream.body === null ? 'missing_body' : 'invalid_payload');
           const failure = imageFailureCode({ phase: 'provider', providerSubmitted: true });
           imageObserver?.setFailure(failure);
           imageObserver?.emit('provider_outcome', 'failed', failure);
