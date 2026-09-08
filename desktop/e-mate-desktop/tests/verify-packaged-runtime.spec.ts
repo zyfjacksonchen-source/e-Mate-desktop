@@ -83,6 +83,18 @@ function ptyReceipt(args: readonly string[], elapsedMs = 0): string {
 }
 
 describe('packaged desktop runtime verification', () => {
+  it('rejects an ASAR-declared dependency outside the curated inventory when its physical file is missing', () => {
+    const runtimeContext = context('/build', 'win32')
+    const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
+    const missing = 'node_modules/yaml/dist/index.js'
+    expect(() => verifyPackagedRuntime(
+      runtimeContext,
+      () => [...completeArchiveEntries(), `/${missing}`],
+      filename => filename !== join(unpackedRoot, missing) && filename !== retiredXinPath(unpackedRoot),
+      completePackageResolver(unpackedRoot),
+    )).toThrow(`missing ASAR-declared physical entries: ${missing}`)
+  })
+
   it('tracks the Windows prebuilds shipped by the installed node-pty', () => {
     for (const entry of REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES) {
       expect(existsSync(join(import.meta.dirname, '..', entry))).toBe(true)
@@ -250,7 +262,7 @@ describe('packaged desktop runtime verification', () => {
       REQUIRED_UNPACKED_RUNTIME_ENTRIES.length
         + (platform === 'win32' ? REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES.length : 0)
         + (platform === 'darwin' ? FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.length : 0)
-        + 2,
+        + 2 + new Set(completeArchiveEntries()).size,
     )
     expect(resolvePackage.mock.calls.map(([specifier]) => specifier))
       .toEqual(REQUIRED_UNPACKED_PACKAGE_SPECIFIERS)
@@ -287,7 +299,7 @@ describe('packaged desktop runtime verification', () => {
       REQUIRED_UNPACKED_RUNTIME_ENTRIES.length
         + REQUIRED_MACOS_UNIVERSAL_ENTRIES.length
         + FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.length
-        + 3,
+        + 3 + new Set(completeArchiveEntries()).size,
     )
   })
 
