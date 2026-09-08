@@ -2487,6 +2487,50 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual(await jobs.at(-1).done, { status: 'failed', detail: 'Image task failed' })
     assert.doesNotMatch(JSON.stringify({ receipt: privateFailureReceipt, job: await jobs.at(-1).done }), /private|Users|image-key|prompt/iu)
 
+    // Replay the installed failure at the real Tool/Job/provider boundary. A
+    // negated reference must not select a historical image or demand an upload.
+    for (const [index, prompt] of [
+      '为小红书装修干货笔记创作一张竖版3:4中文封面，新图生成，并非修改原图。',
+      '生成全新的封面，不要使用上图。',
+      'Create a new cover, not editing the original image.',
+    ].entries()) {
+      const priorMessages = sessionMessages.splice(0)
+      const priorEvents = sessionEvents.splice(0)
+      if (index === 1) sessionEvents.push(...priorEvents)
+      sessionMessages.push({ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] })
+      let output
+      try {
+        output = await imagegen.execute({ prompt }, execution())
+      } finally {
+        sessionMessages.splice(0, sessionMessages.length, ...priorMessages)
+        sessionEvents.splice(0, sessionEvents.length, ...priorEvents)
+      }
+      assert.equal(output.receipt.operation, 'generate', `negative reference ${index}`)
+      assert.equal(output.status, 'completed')
+      assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/generations')
+    }
+
+    const mixedEvents = []
+    const mixedAgent = { ...agent, session: { ...agent.session, events: mixedEvents,
+      append(type, data, options) { mixedEvents.push({ type, data, ...options, seq: mixedEvents.length, time: Date.now() }) },
+      deriveMessages: () => [{ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] }],
+    } }
+    const beforeMixed = requests.length
+    for (const prompt of [
+      '新图生成，并非修改原图；但请参考上图。',
+      '并非不修改原图，请继续。',
+      '不要修改原图，但把这张图中的灯改成蓝色。',
+      'Create a new cover, not editing the original image, but use the attached photo.',
+    ]) {
+      await assert.rejects(imagegen.execute({ prompt }, { ...execution(), agent: mixedAgent }), /needs a source image/u)
+      assert.equal(mixedEvents.at(-1).data.billing_status, 'not-submitted')
+    }
+    await assert.rejects(imagegen.execute({ prompt: '新图生成，并非修改原图。', image_url: `sha256:${'f'.repeat(64)}` },
+      { ...execution(), agent: mixedAgent }), /not present in this e-Mate session/u)
+    await assert.rejects(imagegen.execute({ prompt: '新图生成，并非修改原图。', operation: 'generate' },
+      { ...execution(), agent: mixedAgent }), /additional property|only prompt and optional image_url/iu)
+    assert.equal(requests.length, beforeMixed)
+
     const requestsBeforePreflightFailures = requests.length
     const missingImageExec = execution()
     await assert.rejects(

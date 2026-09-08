@@ -687,6 +687,10 @@ function imageCatalogContext(agent, messages) {
 const SESSION_IMAGE_REFERENCE = /(?:上图|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图|(?:把|将)它(?:修改|改成|修成)|\b(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b)/iu
 const SESSION_IMAGE_EDIT_LOCATOR = /(?:(?:^|[把将这那请，。；：\s])(?:图|图片)(?:中|上|里)(?:的)?[^\n]{0,80}(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)|(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)[^\n]{0,80}(?:这张)?(?:图|图片)(?:中|上|里)(?:的)?)/iu
 
+// Ignore only an explicitly negated reference phrase, not the rest of its request.
+// A later affirmative edit and explicit attachment IDs still require their source.
+const NEGATED_SESSION_IMAGE_REFERENCE = /(?<!不是|并非|不要|无需|不需要)(?:并非|不是|无需|不需要|不要|不)(?:在|对|基于|使用|参考)?\s*(?:修改|编辑|重绘|调整|使用|参考)?\s*(?:上图|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图)|\b(?:not|never|without|do\s+not|don't)\s+(?:(?:edit(?:ing)?|modify(?:ing)?|modifying|use|using|reference|referencing)\s+|based\s+on\s+)(?:the\s+)?(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b/giu
+
 function implicitEditImages(agent, task) {
   if (task.attachmentIds.length > 0) return task.attachmentIds
   const messages = sessionMessages(agent)
@@ -698,7 +702,7 @@ function implicitEditImages(agent, task) {
   const text = latestUserMessage(messages)?.content
     ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
     .map(block => block.text).join('\n') ?? ''
-  const request = `${text}\n${task.prompt}`
+  const request = `${text}\n${task.prompt}`.replace(NEGATED_SESSION_IMAGE_REFERENCE, '')
   if (!SESSION_IMAGE_REFERENCE.test(request) && !SESSION_IMAGE_EDIT_LOCATOR.test(request)) return []
   const history = eventImages(agent?.session?.events)
   const newest = uniqueImages(history.length === 0 ? messageImages(messages) : history, true)[0]
