@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { bundledCalcPaths, bundledPythonPath } from '../src/vision-toolkit.ts'
 
 it('exports only the architecture-matched Vision Python carrier', () => {
-  expect(bundledPythonPath()).toMatch(new RegExp(`python-runtime/${process.platform}-${process.arch}/python/`))
+  const executable = process.platform === 'win32' ? ['python.exe'] : ['bin', 'python3']
+  expect(bundledPythonPath().endsWith(join('python-runtime', `${process.platform}-${process.arch}`, 'python', ...executable))).toBe(true)
 })
 
 it('exposes Calc only when this packaged target and its fonts both exist', () => {

@@ -9,6 +9,8 @@ import {
 import { MACOS_UNIVERSAL_NATIVE_ENTRIES } from '../scripts/mac-universal.ts'
 
 const temporaryRoots: string[] = []
+// Model the macOS artifact's modes even when this verifier runs on a Windows host.
+const artifactModes = new Map<string, number>()
 
 interface AppFixture {
   readonly root: string
@@ -31,12 +33,16 @@ function fixture(): AppFixture {
   writeFileSync(infoPlist, '<?xml version="1.0" encoding="UTF-8"?>')
   writeFileSync(executable, 'binary')
   chmodSync(executable, 0o755)
+  artifactModes.set(executable, 0o755)
   writeFileSync(appAsar, 'packed')
   for (const entry of MACOS_UNIVERSAL_NATIVE_ENTRIES) {
     const path = join(`${appAsar}.unpacked`, entry.path)
     mkdirSync(join(path, '..'), { recursive: true })
     writeFileSync(path, 'native')
-    if (entry.path.endsWith('/spawn-helper')) chmodSync(path, 0o755)
+    if (entry.path.endsWith('/spawn-helper')) {
+      chmodSync(path, 0o755)
+      artifactModes.set(path, 0o755)
+    }
   }
   return { root, infoPlist, executable, appAsar }
 }
@@ -54,7 +60,7 @@ function options(overrides: Partial<MacSmokeVerificationOptions> = {}) {
     exists: existsSync,
     stat: path => {
       const result = statSync(path)
-      return { size: result.size, isFile: result.isFile(), mode: result.mode }
+      return { size: result.size, isFile: result.isFile(), mode: artifactModes.get(path) ?? result.mode }
     },
     ...overrides,
   }
@@ -62,6 +68,7 @@ function options(overrides: Partial<MacSmokeVerificationOptions> = {}) {
 }
 
 afterEach(() => {
+  artifactModes.clear()
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
@@ -151,6 +158,7 @@ describe('macOS DMG smoke artifact verification', () => {
   it('rejects a non-executable main file', () => {
     const value = fixture()
     chmodSync(value.executable, 0o644)
+    artifactModes.set(value.executable, 0o644)
     const harness = options({ makeMountPoint: () => value.root })
 
     expectSmokeFailure(harness, 'invalid main executable')

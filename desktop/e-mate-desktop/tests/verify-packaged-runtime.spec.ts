@@ -463,7 +463,7 @@ it('preserves only pinned empty Calc directories and rejects symlink parents', (
     preservePackagedCalcDirectories(runtime)
     rmSync(join(resources, 'uno_packages'), { recursive: true })
     const outside = join(base, 'outside'); mkdirSync(outside)
-    symlinkSync(outside, join(resources, 'uno_packages'))
+    symlinkSync(outside, join(resources, 'uno_packages'), process.platform === 'win32' ? 'junction' : 'dir')
     expect(() => preservePackagedCalcDirectories(runtime)).toThrow('not a real directory')
     expect(existsSync(join(outside, 'cache'))).toBe(false)
     rmSync(join(resources, 'uno_packages'))

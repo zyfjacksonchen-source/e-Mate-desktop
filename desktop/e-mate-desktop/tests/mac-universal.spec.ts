@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   MACOS_UNIVERSAL_NATIVE_ENTRIES,
@@ -13,7 +13,7 @@ describe('universal macOS native runtime preparation', () => {
 
     expect(chmod.mock.calls).toEqual(MACOS_UNIVERSAL_NATIVE_ENTRIES
       .filter(entry => entry.path.endsWith('/spawn-helper'))
-      .map(entry => [join('/desktop', entry.path), 0o755]))
+      .map(entry => [join(resolve('/desktop'), entry.path), 0o755]))
   })
 
   it('fails before changing permissions when one architecture is incomplete', () => {
@@ -22,7 +22,7 @@ describe('universal macOS native runtime preparation', () => {
 
     expect(() => prepareMacUniversalRuntime({
       desktopRoot: '/desktop',
-      exists: path => path !== join('/desktop', missing),
+      exists: path => path !== join(resolve('/desktop'), missing),
       chmod,
     })).toThrow(missing)
     expect(chmod).not.toHaveBeenCalled()

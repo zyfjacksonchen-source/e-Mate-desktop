@@ -263,7 +263,7 @@ describe('desktop Host pnpm runtime', () => {
     const target = join(root, 'target')
     const stateDir = join(root, 'runtime')
     mkdirSync(target)
-    symlinkSync(target, stateDir)
+    symlinkSync(target, stateDir, process.platform === 'win32' ? 'junction' : 'dir')
     const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
 
     expect(() => installDesktopPnpmRuntime(options(stateDir, 'linux', environment)))
@@ -271,7 +271,7 @@ describe('desktop Host pnpm runtime', () => {
     expect(environment).toEqual({ PATH: '/usr/bin' })
   })
 
-  it('rejects a symlinked generated file before changing PATH', () => {
+  it('rejects a symlinked generated file before changing PATH', (context) => {
     const root = temporaryDirectory()
     const stateDir = join(root, 'runtime')
     const pathDir = join(stateDir, 'bin')
@@ -281,7 +281,15 @@ describe('desktop Host pnpm runtime', () => {
     mkdirSync(nodeBinDir, { recursive: true })
     const target = join(root, 'outside')
     writeFileSync(target, 'outside')
-    symlinkSync(target, join(pathDir, 'pnpm'))
+    try {
+      symlinkSync(target, join(pathDir, 'pnpm'), 'file')
+    } catch (error) {
+      if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') {
+        context.skip('Windows file symlinks require Developer Mode or the symlink privilege')
+        return
+      }
+      throw error
+    }
     const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
 
     expect(() => installDesktopPnpmRuntime(options(stateDir, 'linux', environment)))
