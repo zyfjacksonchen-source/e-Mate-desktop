@@ -524,3 +524,38 @@ test('Calc writes use existing Jobs, native services and collision-safe publicat
   assert.deepEqual(await readFile(join(root, 'source.xlsx')), original)
   dispose(); await assert.rejects(writer.execute(args, execution), /Calc 运行时尚不可用/)
 })
+
+test('PDF and spreadsheet Host commands run their original marker with managed Node outside PATH', { skip: process.platform === 'win32' }, async () => {
+  const { installDesktopPnpmRuntime } = await import('../../../desktop/e-mate-desktop/src/desktop-runtime-environment.ts')
+  const root = await mkdtemp(join(tmpdir(), 'office managed node '))
+  const emptyPath = join(root, 'empty-path')
+  await mkdir(emptyPath)
+  const environment = { PATH: emptyPath }
+  const runtime = installDesktopPnpmRuntime({
+    stateDir: join(root, 'runtime'), platform: process.platform, environment,
+    appExecutable: process.env.EMATE_TEST_NODE_EXECUTABLE ?? process.execPath,
+    pnpmBinPath: join(root, 'unused-pnpm-entry.mjs'), electronVersion: '43.4.0',
+  })
+  try {
+    const childEnv = { ...environment, DSH_EMATE_NODE: runtime.nodeShimPath }
+    assert.equal(spawnSync('/bin/sh', ['-c', 'node --version'], { env: childEnv }).status, 127)
+    let provider
+    apply({ inject() {}, skills: { registerProvider(create) { provider = create(); return () => {} } },
+      tools: { register() { return () => {} } }, jobs: { attachController() { return () => {} } },
+      sandboxPolicy: { resolve() { return { mode: 'read-only', workspaceRoot: root } } },
+      emateCapabilities: { register() { return () => {} } }, effect(register) { register() },
+    })
+    const skills = await provider.list({})
+    for (const name of ['pdf', 'spreadsheets']) {
+      const loaded = await provider.get(skills.find(skill => skill.name === name), {})
+      const command = loaded.content.match(/"\$DSH_EMATE_NODE" "[^"\n]+\/mark_artifact_operation_started\.mjs" --operation-kind create --expected-output-count 1 --output-format (?:pdf|xlsx)/u)?.[0]
+      assert.ok(command, `${name} must expose an executable Host command`)
+      const success = spawnSync('/bin/sh', ['-c', command], { env: childEnv, cwd: root, encoding: 'utf8' })
+      assert.equal(success.status, 0, success.stderr)
+      assert.equal(success.stdout, '')
+      const invalid = spawnSync('/bin/sh', ['-c', command.replace('--expected-output-count 1', '--expected-output-count 0')], { env: childEnv, cwd: root, encoding: 'utf8' })
+      assert.equal(invalid.status, 2, invalid.stderr)
+      assert.match(invalid.stderr, /usage:/u)
+    }
+  } finally { runtime.dispose(); await rm(root, { recursive: true, force: true }) }
+})

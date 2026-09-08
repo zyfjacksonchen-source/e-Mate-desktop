@@ -26,7 +26,7 @@
 
 ## 标记与交付
 
-- 原版 `container_tools/mark_artifact_operation_started.mjs` 用已有原生 Node 和资源目录下的绝对脚本路径调用。它只校验操作类型、数量、输出格式；退出成功不是创建、导出、渲染或发布产物的证据。
+- e-Mate 中，原版示例的 `node` 使用 Host 已提供的 `DSH_EMATE_NODE`，无需查找系统 Node。Bash：`"$DSH_EMATE_NODE" "{{SKILL_DIR}}/container_tools/mark_artifact_operation_started.mjs" --operation-kind create --expected-output-count 1 --output-format xlsx`；PowerShell 用 `& $env:DSH_EMATE_NODE` 调用同一绝对脚本路径及参数。按原版要求调整操作类型与预期数量。此脚本仅校验参数，成功退出不表示已生成、保存、渲染或登记产物。
 - e-Mate 不消费 `:codex-file-citation{...}`。将最终真实工作簿通过现有原生附件/产物能力交付；按原版要求仅展示用户需要的结果，不把构建器、预览或未解析标记当成交付。
 - 原版 Google Sheets 专属插件路径和 Excel Live Control 不由本 Skill 预置。需要 Google Sheets 时先确认当前实际连接与导入能力；未连接或无法导入就说明原生 Sheets 交付尚未完成，不声称本地 XLSX 已成为在线表格，也不自动发送、授权或安装 Codex 插件。
 
