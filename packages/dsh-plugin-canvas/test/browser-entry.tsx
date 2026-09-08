@@ -6,10 +6,15 @@ import { ClientModuleSystem } from '../../../upstream/deepseek-harness/packages/
 import { insertAsset } from '../src/client/model.ts'
 import { emptyPage, emptyProject } from '../src/contract.ts'
 const modules = new ClientModuleSystem({ modules: [], staticModules: { react: React, 'react-dom': ReactDOM, 'react-dom/client': Client, 'react/jsx-runtime': JSX } })
-const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+const reference = document.createElement('canvas'); reference.width = new URLSearchParams(location.search).has('narrow') ? 40 : 400; reference.height = 300
+const drawing = reference.getContext('2d')!
+drawing.fillStyle = new URLSearchParams(location.search).has('dark') ? '#151515' : '#fff8ec'; drawing.fillRect(0, 0, 400, 300)
+drawing.fillStyle = '#0080ff'; drawing.beginPath(); drawing.arc(100, 190, 70, 0, Math.PI * 2); drawing.fill()
+drawing.fillStyle = '#ff8000'; drawing.beginPath(); drawing.moveTo(290, 110); drawing.lineTo(370, 260); drawing.lineTo(210, 260); drawing.fill()
+const encoded = reference.toDataURL('image/png').split(',')[1]!
 const bytes = Uint8Array.from(atob(encoded), c => c.charCodeAt(0))
 const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
-const asset = { ownerSessionId: 'parent', ref: { attachmentId: `sha256:${hash}`, mediaType: 'image/png', bytes: bytes.length, width: 400, height: 300 } }
+const asset = { ownerSessionId: 'parent', ref: { attachmentId: `sha256:${hash}`, mediaType: 'image/png', bytes: bytes.length, width: reference.width, height: reference.height } }
 const staged = new Map<string, any>([[asset.ref.attachmentId, { bytes_base64: encoded, ref: asset.ref }]])
 let project = insertAsset(emptyProject('main'), 'page-1', asset)
 ;(window as any).canvasSubmissions = []

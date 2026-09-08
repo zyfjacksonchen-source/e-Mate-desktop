@@ -12,7 +12,11 @@ vi.mock('@excalidraw/excalidraw', () => {
   return { MainMenu,
     CaptureUpdateAction: { IMMEDIATELY: 'IMMEDIATELY', EVENTUALLY: 'EVENTUALLY' },
     newElementWith: (element: any, changes: any) => ({ ...element, ...changes, version: (element.version ?? 0) + 1, versionNonce: Math.random() * 100000 | 0 }),
-    convertToExcalidrawElements: (items: any[]) => items.map(item => ({ width: 180, height: 24, version: 1, versionNonce: 1, ...item })),
+    convertToExcalidrawElements: (items: any[]) => items.flatMap(item => {
+      const shape = { width: 180, height: 24, version: 1, versionNonce: 1, ...item }
+      return item.label ? [{ ...shape, boundElements: [{ id: item.label.id, type: 'text' }] },
+        { type: 'text', x: item.x + 5, y: item.y + 5, width: item.width - 10, height: 24, version: 1, ...item.label, containerId: item.id }] : [shape]
+    }),
     sceneCoordsToViewportCoords: ({ sceneX, sceneY }: any, view: any) => ({ x: (sceneX + view.scrollX) * view.zoom.value, y: (sceneY + view.scrollY) * view.zoom.value }),
     exportToBlob: vi.fn(async () => new Blob(['png'])), Excalidraw: (props: any) => {
     native.props = props
@@ -244,7 +248,7 @@ it('fits the initial viewport once without changing pixels or resetting later us
   await screen.findByTestId('scene')
   await waitFor(() => expect(native.scroll).toHaveBeenCalledOnce())
   expect(native.scroll).toHaveBeenCalledWith(undefined, { fitToViewport: true, viewportZoomFactor: 0.82, maxZoom: 1, animate: false })
-  expect(native.props.initialData.appState.currentItemStrokeColor).toBe('#e03131')
+  expect(native.props.initialData.appState.currentItemStrokeColor).toBe('#1e1e1e')
   fireEvent.click(screen.getByText('Draw mark'))
   await act(async () => { await h.leave() })
   expect(native.scroll).toHaveBeenCalledOnce()
@@ -252,6 +256,7 @@ it('fits the initial viewport once without changing pixels or resetting later us
 })
 it('finishing one new arrow opens a tail label and submits annotations without repeating the instruction', async () => {
   const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  project.pages[0].elements[0]!.width = 400; project.pages[0].elements[0]!.height = 400
   const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
   await screen.findByTestId('scene')
   const arrow = { id: 'new-arrow', type: 'arrow', x: -20, y: 20, width: 40, height: 0, points: [[0, 0], [40, 0]] }
@@ -267,8 +272,13 @@ it('finishing one new arrow opens a tail label and submits annotations without r
   fireEvent.change(screen.getByLabelText('箭头标注要求'), { target: { value: '改成橙色' } })
   expect(native.api.updateScene).toHaveBeenCalledWith({ appState: { selectedElementIds: { [String(project.pages[0].elements[0]!.id)]: true } } })
   const label = native.api.getSceneElementsIncludingDeleted().find((item: any) => item.type === 'text')
-  expect(label.fontSize * 0.3).toBeGreaterThanOrEqual(20)
-  expect(label.width * 0.3).toBe(240)
+  const labelBox = native.api.getSceneElementsIncludingDeleted().find((item: any) => item.id === label.containerId)
+  expect(labelBox.backgroundColor).toBe('#ffffff')
+  expect(label.strokeColor).toBe('#1e1e1e')
+  expect(labelBox.width).toBeLessThanOrEqual(400)
+  expect(labelBox.x).toBeGreaterThanOrEqual(0)
+  const selectedPreview = selectedAnnotationElements(native.api.getSceneElementsIncludingDeleted(), [String(project.pages[0].elements[0]!.id)])
+  expect(selectedPreview.some(item => item.id === labelBox.id)).toBe(true)
   expect((screen.getByLabelText('图片修改需求') as HTMLTextAreaElement).value).toBe('')
   expect((screen.getByRole('button', { name: '按标注修改', exact: true }) as HTMLButtonElement).disabled).toBe(false)
   const preview = { ...imageAsset, ref: { ...imageAsset.ref, attachmentId: `sha256:${'c'.repeat(64)}` } }
@@ -660,4 +670,19 @@ it('places imported images beside existing content rather than overlapping it', 
   const after = insertAsset(before, 'page-1', second)
   expect(after.pages[0]!.elements[0]).toEqual(original)
   expect(Number(after.pages[0]!.elements[1]!.x)).toBeGreaterThan(Number(original.x) + Number(original.width))
+})
+
+it('arrow color changes native current style and selected arrows without recoloring other elements', async () => {
+  const project = insertAsset(emptyProject('main'), 'page-1', imageAsset)
+  project.pages[0].elements.push({ id: 'color-arrow', type: 'arrow', x: 10, y: 10, points: [[0, 0], [20, 20]], strokeColor: '#1e1e1e' })
+  const h = harness(project); render(<CanvasPanel bridge={h.bridge} initialProjectId="main" />)
+  await screen.findByTestId('scene')
+  act(() => native.emit({ selectedElementIds: { 'color-arrow': true } }))
+  fireEvent.change(screen.getByLabelText('箭头颜色'), { target: { value: '#ffffff' } })
+  const call = native.api.updateScene.mock.calls.at(-1)[0]
+  expect(call.appState.currentItemStrokeColor).toBe('#ffffff')
+  expect(call.elements.find((item: any) => item.id === 'color-arrow').strokeColor).toBe('#ffffff')
+  expect(call.elements[0]).toEqual(project.pages[0].elements[0])
+  fireEvent.click(screen.getByRole('button', { name: '箭头', exact: true }))
+  expect(native.api.updateScene).toHaveBeenLastCalledWith({ appState: { currentItemStrokeColor: '#ffffff', currentItemStrokeWidth: 4 } })
 })

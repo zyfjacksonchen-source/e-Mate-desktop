@@ -166,7 +166,11 @@ export function selectedAnnotationElements(elements: CanvasPage['elements'], sel
   const texts = elements.filter(item => item.type === 'text' && !item.isDeleted && (included.has(annotationArrowId(item) as Json) || (item.containerId
     ? included.has(item.containerId)
     : images.some(image => imageContains(image, Number(item.x) + Number(item.width) / 2, Number(item.y) + Number(item.height) / 2)))))
-  for (const text of texts) included.add(text.id)
+  for (const text of texts) {
+    included.add(text.id)
+    // Native bound text needs its container in both canvas and image export.
+    if (text.containerId && annotationArrowId(text) && included.has(annotationArrowId(text) as Json)) included.add(text.containerId)
+  }
   return elements.filter(item => included.has(item.id)).map(item => {
     const copy = structuredClone(item)
     if (copy.frameId && !included.has(copy.frameId)) copy.frameId = null
