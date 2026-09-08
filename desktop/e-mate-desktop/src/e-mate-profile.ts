@@ -334,7 +334,11 @@ function installManagedPackage(
   target: string,
   overrides: ReadonlyMap<string, string> = new Map(),
   deferCleanup?: (path: string) => void,
+  reuseInstalledGeneration = false,
 ): void {
+  // A repair in the same installed generation uses the native warm checks for
+  // unaffected packages. New or damaged packages still require full validation.
+  if (reuseInstalledGeneration && managedPackageCurrent(source, target, overrides)) return
   if (managedPackageFullyCurrent(source, target, overrides)) return
   const { candidate, stale } = managedPackageTransactionPaths(target)
   if (pathExists(candidate) || pathExists(stale)) {
@@ -577,20 +581,27 @@ function adaptedEcosystemPatch(
   ]])
 }
 
-function installedProfileCurrent(
+function installedGenerationCurrent(
   profile: string,
   dshHome: string,
 ): boolean {
   try {
     const receipt = JSON.parse(readFileSync(join(profile, PROFILE_INSTALL_RECEIPT), 'utf8')) as Record<string, unknown>
-    if (receipt.schema_version !== 2
-      || receipt.version !== EMATE_DESKTOP_PROFILE_VERSION
-      || receipt.harness_commit !== HARNESS_COMMIT
-      || receipt.dsh_home !== resolve(dshHome)
-      || receipt.source_root !== resolve(sourceRoot)
-      || receipt.profile_generation !== 'bundled'
-      || receipt.managed_package_layout !== managedPackageLayout()) return false
+    return receipt.schema_version === 2
+      && receipt.version === EMATE_DESKTOP_PROFILE_VERSION
+      && receipt.harness_commit === HARNESS_COMMIT
+      && receipt.dsh_home === resolve(dshHome)
+      && receipt.source_root === resolve(sourceRoot)
+      && receipt.profile_generation === 'bundled'
+      && receipt.managed_package_layout === managedPackageLayout()
+  } catch {
+    return false
+  }
+}
 
+function installedProfileCurrent(profile: string, dshHome: string): boolean {
+  try {
+    if (!installedGenerationCurrent(profile, dshHome)) return false
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, unknown>
       dsh?: { profile?: { bundles?: unknown[] } }
@@ -682,6 +693,7 @@ export function installEmateDesktopProfile(
   }
 
   recoverManagedPackageTransactions(profile)
+  const reuseInstalledGeneration = installedGenerationCurrent(profile, dshHome)
   rmSync(join(profile, PROFILE_INSTALL_RECEIPT), { force: true })
   cpSync(join(sourceRoot, 'plugins'), join(profile, 'plugins'), { recursive: true, force: true })
   atomicWrite(
@@ -721,14 +733,14 @@ export function installEmateDesktopProfile(
   const shellSource = bundledComponentSource('@e-mate/dsh-client-shell')
   const shellTarget = join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')
   mkdirSync(dirname(shellTarget), { recursive: true })
-  installManagedPackage(shellSource, shellTarget, new Map(), deferCleanup)
+  installManagedPackage(shellSource, shellTarget, new Map(), deferCleanup, reuseInstalledGeneration)
 
   for (const name of PLUGIN_PACKAGES) {
     const source = bundledComponentSource(name)
     const target = join(profile, 'node_modules', ...name.split('/'))
     const overrides = adaptedPluginPatch(source, name)
     mkdirSync(dirname(target), { recursive: true })
-    installManagedPackage(source, target, overrides, deferCleanup)
+    installManagedPackage(source, target, overrides, deferCleanup, reuseInstalledGeneration)
   }
 
   for (const expected of ECOSYSTEM_PLUGIN_PACKAGES) {
@@ -759,7 +771,7 @@ export function installEmateDesktopProfile(
       || typeof manifest.dsh?.bundle?.patch !== 'string') {
       throw new Error(`${expected.name} package contract does not match the pinned e-Mate desktop profile`)
     }
-    installManagedPackage(source, target, adaptedEcosystemPatch(source, expected), deferCleanup)
+    installManagedPackage(source, target, adaptedEcosystemPatch(source, expected), deferCleanup, reuseInstalledGeneration)
   }
 
   const tools = packageEntry('@deepseek-ai/dsh-tools')

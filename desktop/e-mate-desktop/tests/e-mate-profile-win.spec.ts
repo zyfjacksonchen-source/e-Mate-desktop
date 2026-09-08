@@ -18,7 +18,7 @@ afterEach(() => {
 })
 
 describe.runIf(process.platform === 'win32')('Windows managed Profile materialization', () => {
-  // Four physical Profile installs can exceed Vitest's unit-test default on a cold Windows runner.
+  // Physical Profile installation and repair exceed Vitest's unit-test default on a cold Windows runner.
   it('uses physical directories and repairs a missing declared main without scanning unrelated nested files', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-win-'))
     roots.push(home)
@@ -38,12 +38,14 @@ describe.runIf(process.platform === 'win32')('Windows managed Profile materializ
     const main = join(library, 'index.js')
     const nestedExtra = join(library, '.warm-path-does-not-scan-this-file')
     const topLevelExtra = join(packageRoot, '.unexpected-top-level-entry')
+    const unrelatedNestedExtra = join(computerUseRoot, 'lib', '.unrelated-package-warm-marker')
     const receipt = readFileSync(receiptPath, 'utf8')
 
     // The shipped process enforces Windows redirection trust, so managed payloads cannot rely on junctions.
     expect(lstatSync(packageRoot).isSymbolicLink()).toBe(false)
     expect(lstatSync(library).isSymbolicLink()).toBe(false)
     writeFileSync(nestedExtra, 'warm launch must not recurse through the package tree')
+    writeFileSync(unrelatedNestedExtra, 'repairing schedules must not rescan unrelated package payloads')
     installEmateDesktopProfile(home)
     expect(readFileSync(receiptPath, 'utf8')).toBe(receipt)
     expect(existsSync(nestedExtra)).toBe(true)
@@ -52,10 +54,17 @@ describe.runIf(process.platform === 'win32')('Windows managed Profile materializ
     installEmateDesktopProfile(home)
     expect(existsSync(main)).toBe(true)
     expect(existsSync(nestedExtra)).toBe(false)
+    expect(existsSync(unrelatedNestedExtra)).toBe(true)
     expect(lstatSync(library).isSymbolicLink()).toBe(false)
 
     writeFileSync(topLevelExtra, 'managed roots are exact sets')
     installEmateDesktopProfile(home)
     expect(existsSync(topLevelExtra)).toBe(false)
+    expect(existsSync(unrelatedNestedExtra)).toBe(true)
+
+    // An absent generation receipt cannot authorize bounded package reuse.
+    rmSync(receiptPath)
+    installEmateDesktopProfile(home)
+    expect(existsSync(unrelatedNestedExtra)).toBe(false)
   }, 30_000)
 })
