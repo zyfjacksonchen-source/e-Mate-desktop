@@ -420,6 +420,12 @@ tools = replaceExactlyOnce(
   'export function createVisionTools(source, projectPresentation = presentationIdentity, lifecycleSignal, assertWriteAllowed, resolveGlanceImages) {',
   'artifact write policy hook',
 )
+tools = replaceExactlyOnce(
+  tools,
+  "description: 'One or more image paths; pass comparison images together.'",
+  "description: 'One or more workspace image paths or exact current-session sha256 attachment IDs; pass source and result together for comparison.'",
+  'glance attachment input description',
+)
 const requestBefore = `                const request = {
                     images: args.images,
                     ...(args.query === undefined ? {} : { query: args.query }),

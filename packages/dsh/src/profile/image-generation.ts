@@ -701,71 +701,7 @@ function imageCatalogContext(agent, messages, eventHistory = eventImages(agent?.
     : `Images selected in the current user request, in attachment order: ${current.map(image => `\`${image.attachmentId}\` (${image.width}×${image.height})`).join(', ')}. `
   const history = recent.length === 0 ? ''
     : `Recent images already stored in this conversation, newest first: ${recent.map(image => `\`${image.attachmentId}\``).join(', ')}. `
-  return `${selected}${history}For an edit or reference request such as \"修改上图\", call imagegen with the matching exact image_url attachment ID (normally the newest image when the user says \"上图\"); never ask the user to upload an image already listed here. For several independent edits, make one imagegen call per source, one at a time, and pass exactly one image_url to each call; never send the whole selected group to every edit. For one output using a target plus an identity, style, layout or composition reference, pass all required IDs in role order (edit target first), even when the user does not say fusion. Never omit the historical reference when a newly uploaded target must follow a previous image. A request for a wholly new image must omit image_url. To deliver several images together, call image_pack once with their exact attachment IDs.`
-}
-
-const SESSION_IMAGE_REFERENCE = /(?:上图|以上图片|上一张(?:图|图片)|之前的(?:图|图片)|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图|(?:把|将)它(?:修改|改成|修成)|\b(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b)/iu
-const SESSION_IMAGE_EDIT_LOCATOR = /(?:(?:^|[把将这那请，。；：\s])(?:图|图片)(?:中|上|里)(?:的)?[^\n]{0,80}(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)|(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)[^\n]{0,80}(?:这张)?(?:图|图片)(?:中|上|里)(?:的)?)/iu
-
-// A text-removal follow-up may name a poster/photo rather than an image. Keep
-// this imperative clause scoped so a new "poster without text" remains generation.
-const SESSION_TEXT_REMOVAL = /(?:^|[，。；：\n])\s*(?:请)?(?:帮我)?(?:(?:去掉|去除|删除|擦除|抹掉)(?:(?:这张|那张)?(?:海报|照片|图片|图)(?:上|中|里)?(?:的)?)?(?:所有)?(?:文字|文案|字)(?=$|[，。；！!\s])|(?:把|将)(?:这张|那张)?(?:海报|照片|图片|图)(?:上|中|里)?(?:的)?(?:所有)?(?:文字|文案|字)(?:全部|都)?(?:去掉|去除|删除|擦除|抹掉))/u
-
-// Ignore only an explicitly negated reference phrase, not the rest of its request.
-// A later affirmative edit and explicit attachment IDs still require their source.
-const NEGATED_SESSION_IMAGE_REFERENCE = /(?<!不是|并非|不要|无需|不需要)(?:并非|不是|无需|不需要|不要|不)(?:在|对|基于|使用|参考)?\s*(?:修改|编辑|重绘|调整|使用|参考)?\s*(?:上图|以上图片|上一张(?:图|图片)|之前的(?:图|图片)|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图)|\b(?:not|never|without|do\s+not|don't)\s+(?:(?:edit(?:ing)?|modify(?:ing)?|modifying|use|using|reference|referencing)\s+|based\s+on\s+)(?:the\s+)?(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b/giu
-
-function userImageRequest(messages) {
-  return latestUserMessage(messages)?.content
-    ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
-    .map(block => block.text).join('\n') ?? ''
-}
-
-// A current target plus a previous composition/style reference are distinct inputs.
-// Ordinary "edit this image" must continue to select only the current upload.
-const CROSS_TURN_IMAGE_REFERENCE = /(?:(?:参考|按照?|参照|改成|改为)[^\n。；]{0,40}(?:上图|以上图片|上一张(?:图|图片)|之前的(?:图|图片))|(?:match|follow|like|reference)[^\n.!?]{0,40}(?:previous|above|earlier)\s+(?:image|picture|photo))/iu
-
-function previousImageReferences(messages, history) {
-  const text = userImageRequest(messages).replace(NEGATED_SESSION_IMAGE_REFERENCE, '')
-  const current = uniqueImages(messageImages(latestUserMessage(messages) === undefined ? [] : [latestUserMessage(messages)]))
-  if (current.length > 0 && !CROSS_TURN_IMAGE_REFERENCE.test(text)) return []
-  if (!SESSION_IMAGE_REFERENCE.test(text) && !SESSION_IMAGE_EDIT_LOCATOR.test(text) && !SESSION_TEXT_REMOVAL.test(text)) return []
-  // Do not let a result produced later in this turn replace the reference that
-  // preceded the user's upload. Event order supplies the native turn boundary.
-  const currentIndex = history.findLastIndex(ref => current.some(image => image.attachmentId === ref.attachmentId))
-  const userIndex = messages.lastIndexOf(latestUserMessage(messages))
-  const beforeUpload = currentIndex >= 0 ? history.slice(0, currentIndex)
-    : history.length > 0 ? history : messageImages(messages.slice(0, userIndex))
-  return uniqueImages(beforeUpload, true)
-    .filter(ref => !current.some(image => image.attachmentId === ref.attachmentId)).slice(0, 1)
-}
-
-function implicitEditImages(agent, task, eventHistory = eventImages(agent?.session?.events)) {
-  const messages = sessionMessages(agent)
-  const current = uniqueImages(messageImages(latestUserMessage(messages) === undefined ? [] : [latestUserMessage(messages)]))
-  if (task.attachmentIds.length > 0) {
-    const previous = previousImageReferences(messages, eventHistory)
-    if (current.length === 1 && previous.length > 0 && task.attachmentIds.length === 1
-      && task.attachmentIds[0] === current[0].attachmentId) {
-      throw new Error(`this request needs the current target plus its previous image reference: pass image_url [${current[0].attachmentId}, ${previous[0].attachmentId}] with explicit roles`)
-    }
-    return task.attachmentIds
-  }
-  if (current.length === 1) return [current[0].attachmentId, ...previousImageReferences(messages, eventHistory).map(ref => ref.attachmentId)]
-  if (current.length > 1) {
-    throw new Error('multiple source images require an explicit image_url: use one exact attachment ID per independent edit, or pass the intended IDs together for one output with explicit target and reference roles')
-  }
-  const text = latestUserMessage(messages)?.content
-    ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
-    .map(block => block.text).join('\n') ?? ''
-  const request = `${text}\n${task.prompt}`.replace(NEGATED_SESSION_IMAGE_REFERENCE, '')
-  if (!SESSION_IMAGE_REFERENCE.test(request) && !SESSION_IMAGE_EDIT_LOCATOR.test(request) && !SESSION_TEXT_REMOVAL.test(request)) return []
-  const history = eventHistory
-  const newest = uniqueImages(history.length === 0 ? messageImages(messages) : history, true)[0]
-  if (newest === undefined) {
-    throw new Error('image editing needs a source image in the current conversation; upload one image once and retry')
-  }
-  return [newest.attachmentId]
+  return `${selected}${history}These are available images, not an inferred selection. Resolve the user's intent and each image's role from the conversation and pixels; recency alone does not identify an edit target. If a needed image is no longer visible, inspect its exact attachment ID with vision_glance before describing it. Pass image_url explicitly for every selected target or reference, in role order (target first), and explain their roles in the prompt. Omit image_url only for a new image without references. For independent outputs use image_batch with a separate explicit source list per task; dependent edits wait for actual results. Never ask for an image already available here. Use image_pack for packaging exact outputs. Image IDs are tool locators, never user-facing results.`
 }
 
 function normalizeTask(args) {
@@ -825,7 +761,6 @@ function assertNativeImageBatchBoundary(agent, callId) {
       throw new Error(NATIVE_BATCH_SHAPE_ERROR)
     }
     const task = normalizeTask(args)
-    task.attachmentIds = implicitEditImages(agent, task)
     if (task.attachmentIds.length === 0 && ++newImages >= 2) throw new Error(NATIVE_BATCH_ERROR)
   }
 }
@@ -1155,7 +1090,7 @@ const imageOutput = {
     return [{
       type: 'text',
       text: `Image generation completed: 1 image (${fileName}).`,
-    }]
+    }, { type: 'image', attachment: imageRef(image) }]
   },
   presentationMeta: (_args, value) => {
     const image = value.images[0].image
@@ -1280,17 +1215,10 @@ export async function apply(ctx, config = {}) {
     if (decision.kind === 'reject') return decision
     const { history } = await resolvedEventImages(ctx, agent, signal)
     const context = imageCatalogContext(agent, decision.messages, history)
-    const visible = messageImages(decision.messages)
-    const references = previousImageReferences(decision.messages, history)
-      .filter(ref => !visible.some(image => image.attachmentId === ref.attachmentId))
     return context === undefined ? decision : {
       ...decision,
       messages: [...decision.messages, createUserMessage({
-        content: [{ type: 'text', text: context },
-          ...references.flatMap(ref => [
-            { type: 'text', text: `Previous image reference ${ref.attachmentId} (${ref.width}×${ref.height}); inspect these pixels before describing or using its composition.` },
-            { type: 'image', attachment: imageRef(ref) },
-          ])],
+        content: [{ type: 'text', text: context }],
         source: { kind: 'plugin', plugin: '@e-mate/dsh-image-generation', form: 'catalog' },
       })],
     }
@@ -1303,7 +1231,7 @@ export async function apply(ctx, config = {}) {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
         oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
-        description: 'Optional exact sha256: current-session image attachment ID or ordered IDs from prior imagegen results for editing/reference fusion. Job IDs, request IDs, and URLs are invalid.',
+        description: 'Optional exact sha256: current-session image attachment ID or ordered IDs for the selected target and any identity/style/composition references. Job IDs, request IDs, and URLs are invalid.',
       },
     },
     output: imageOutput,
@@ -1328,7 +1256,6 @@ export async function apply(ctx, config = {}) {
         exec.signal.throwIfAborted()
         task = normalizeTask(args)
         const { history } = await resolvedEventImages(ctx, exec.agent, exec.signal)
-        task.attachmentIds = batchClaim === undefined ? implicitEditImages(exec.agent, task, history) : task.attachmentIds
         operation = imageOperation(task.attachmentIds)
         refs = task.attachmentIds.map(id => sessionImage(exec.agent, id, history))
       } catch (error) {
@@ -1442,7 +1369,8 @@ export async function apply(ctx, config = {}) {
       const names = value.images.map(item => item.attachment.name ?? 'e-Mate image').join(', ')
       return [{ type: 'text', text: 'Image batch ' + value.status + ': '
         + value.images.length + ' images' + (names === '' ? '' : ' (' + names + ')')
-        + ', ' + value.failures.length + ' failures.' }]
+        + ', ' + value.failures.length + ' failures.' },
+        ...value.images.map(item => ({ type: 'image', attachment: imageRef(item.attachment) }))]
     },
   }
   ctx.tools.register(defineTool({

@@ -117,6 +117,7 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
   assert.doesNotMatch(built, /from\s+["']saxes["']/u)
   assert.doesNotMatch(built, /__applyPinnedVisionToolkit|__VisionToolkitWebBackend/u)
   assert.match(built, /runtime preparation is deferred until first use/u)
+  assert.match(built, /workspace image paths or exact current-session sha256 attachment IDs/u)
   assert.match(built, /vision-toolkit settings must match the enterprise model policy/u)
   assert.equal(existsSync(new URL('runtime/requirements.lock', root)), true)
   assert.equal(existsSync(new URL('vendor/agent-vision-toolkit/UPSTREAM_MANIFEST.json', root)), true)
@@ -231,6 +232,21 @@ targetTest('Native Attachment First reloads five CAS images and keeps one prepar
       ['route', 'metadata-unknown'],
       ['route', 'text-only'],
     ])
+    const beforeDuplicate = runtimeCalls.length
+    const repeated = freeze({ provider: 'route', model: 'text-only', messages: [
+      { role: 'user', content: [{ type: 'image', attachment: refs[0] }] },
+      { role: 'user', content: [{ type: 'tool-result', toolCallId: 'generated', isError: false,
+        content: [{ type: 'image', attachment: refs[0] }] }] },
+    ] })
+    const converted = await imageInputRequestBoundary(context, runtime, repeated)
+    assert.equal(runtimeCalls.length - beforeDuplicate, 1)
+    assert.deepEqual(converted.messages[0].content[0], converted.messages[1].content[0].content[0])
+    assert.ok(converted.messages[0].content[0].text.includes(refs[0].attachmentId))
+    assert.match(converted.messages[0].content[0].text, /untrusted visual evidence/u)
+    assert.equal(repeated.messages[0].content[0].type, 'image')
+    await imageInputRequestBoundary(context, runtime, repeated)
+    assert.equal(runtimeCalls.length - beforeDuplicate, 2, 'do not reuse descriptions across requests/policy changes')
+
   } finally {
     await rm(state, { recursive: true, force: true })
   }

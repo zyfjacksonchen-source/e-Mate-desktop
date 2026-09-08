@@ -1700,7 +1700,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         status: state === 'cancelled' ? 'cancelled' : 'failed', tasks: [batchTask(1, state), batchTask(2, state)], images: [],
         failures: [1, 2].map(ordinal => ({ task_id: 'task-' + ordinal, ordinal, state, failure_code: state === 'unknown' ? 'provider-outcome-unknown' : state })), terminal_event_id: terminalId })),
     ]
-    for (const value of representative) assert.deepEqual(validateJsonSchemaValue(imageBatch.output.schema, value), [])
+    for (const value of representative) {
+      assert.deepEqual(validateJsonSchemaValue(imageBatch.output.schema, value), [])
+      assert.deepEqual(imageBatch.output.render({}, value).filter(block => block.type === 'image').map(block => block.attachment),
+        value.images.map(item => item.attachment))
+    }
     const malformed = [
       { ...representative[0], extra: true },
       (({ batch_id: _missing, ...value }) => value)(representative[0]),
@@ -1708,7 +1712,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       { ...representative[0], images: [{ ...completedImages[0], receipt: { ...completedImages[0].receipt, status: 'needs-review' } }] },
     ]
     for (const value of malformed) assert.notDeepEqual(validateJsonSchemaValue(imageBatch.output.schema, value), [])
-    const batchText = imageBatch.output.render({}, { status: 'partial', images: [{ attachment: { name: 'kept.png' } }], failures: [{}] })[0].text
+    const batchText = imageBatch.output.render({}, { status: 'partial', images: [{ attachment: { ...attachment, name: 'kept.png' } }], failures: [{}] })[0].text
     assert.match(batchText, /partial.*kept\.png.*1 failures/u)
     assert.doesNotMatch(batchText, /sha256:|child-|emate-image-/u)
     const imagegen = tools.get('imagegen')
@@ -1834,7 +1838,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       kind: 'plugin', plugin: '@e-mate/dsh-image-generation', form: 'catalog',
     })
     assert.match(admitted.messages[1].content[0].text, new RegExp(selected.attachmentId))
-    assert.match(admitted.messages[1].content[0].text, /never ask the user to upload an image already listed here/u)
+    assert.match(admitted.messages[1].content[0].text, /Never ask for an image already available here/u)
 
     const textOnly = { ...userUpload, id: 'text-only-message', content: [{ type: 'text', text: '只生成一张新图。' }] }
     const unchanged = await preStep({ agent, messages: [textOnly] }, async () => ({ kind: 'enter', messages: [textOnly] }))
@@ -1864,13 +1868,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         attachment_ids: [attachmentId],
       }),
     })
-    assert.equal(generatedContent.some(block => block.type === 'image'), false)
-    assert.deepEqual(generatedContent, [{
+    assert.equal(generatedContent.some(block => block.type === 'image'), true)
+    assert.deepEqual(generatedContent.filter(block => block.type === 'text'), [{
       type: 'text',
       text: 'Image generation completed: 1 image (e-Mate-image.png).',
     }])
-    assert.doesNotMatch(JSON.stringify(generatedContent), /sha256:|attachment(?:Id| ID)/iu)
-    assert.equal(JSON.stringify(generatedContent).includes(attachmentId), false)
+    assert.doesNotMatch(JSON.stringify(generatedContent.filter(block => block.type === 'text')), /sha256:|attachment(?:Id| ID)/iu)
+    assert.deepEqual(generatedContent.find(block => block.type === 'image').attachment, generated.images[0].image)
     assert.equal(sessionEvents.at(-1).data.schema_version, 2)
     assert.equal(sessionEvents.at(-1).data.call_id, 'image-call-1')
     assert.equal(sessionEvents.at(-1).data.operation, 'generate')
@@ -2000,13 +2004,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       kind: 'enter', messages: [...sessionMessages, modifyAbove],
     }))
     assert.match(resumed.messages.at(-1).content[0].text, new RegExp(attachmentId))
-    assert.match(resumed.messages.at(-1).content[0].text, /normally the newest image/u)
+    assert.match(resumed.messages.at(-1).content[0].text, /recency alone does not identify an edit target/u)
     sessionMessages.push(modifyAbove)
 
     let questionCalls = 0
     imageReviewAsk = async () => { questionCalls += 1; throw new Error('userQuestions must never be invoked') }
     nextResponseBytes = unreviewedBytes
-    const implicitEdit = await imagegen.execute({ prompt: 'Retouch the referenced image only.' }, execution())
+    const implicitEdit = await imagegen.execute({ prompt: 'Retouch the referenced image only.', image_url: attachmentId }, execution())
     assert.equal(implicitEdit.images.length, 1)
     assert.equal(implicitEdit.status, 'completed')
     assert.equal(implicitEdit.receipt.revision, 2)
@@ -2027,13 +2031,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
 
     sessionMessages.push({ id: 'modify-text-on-image', role: 'user', source: { kind: 'user' },
       content: [{ type: 'text', text: '图上的方林改为圣都。' }] })
-    const textEdit = await imagegen.execute({ prompt: '把图片中的方林改成圣都。' }, execution())
+    const textEdit = await imagegen.execute({ prompt: '把图片中的方林改成圣都。', image_url: attachmentId }, execution())
     assert.equal(textEdit.status, 'completed')
     assert.equal(textEdit.receipt.revision, 2)
     assert.equal(textEdit.receipt.verification.semantic, 'not-applicable')
     assert.equal(textEdit.receipt.verification.text_replacement, undefined)
     assert.equal(textEdit.receipt.verification.human_review, undefined)
-    assert.deepEqual(imagegen.output.render({}, textEdit), [{ type: 'text', text: 'Image generation completed: 1 image (e-Mate-image.png).' }])
+    assert.deepEqual(imagegen.output.render({}, textEdit).filter(block => block.type === 'text'), [{ type: 'text', text: 'Image generation completed: 1 image (e-Mate-image.png).' }])
+    assert.deepEqual(imagegen.output.render({}, textEdit).find(block => block.type === 'image').attachment, textEdit.images[0].image)
     const textMeta = imagegen.output.presentationMeta({}, textEdit)
     assert.equal(textMeta.$eMateDeliverables.schema_version, 1)
     assert.equal(textMeta.$eMateDeliverables.items.length, 1)
@@ -2058,15 +2063,6 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       mediaType: 'image/png', name: 'diagram.png',
     })
     const second = { ...storedSecond, name: join(temporary, 'private', 'diagram.png') }
-    await assert.rejects(imagegen.execute({ prompt: 'Edit both current images independently.' }, {
-      agent: { id: 'multi-image-session', session: { header: { id: 'multi-image-session', cwd: temporary }, events: [],
-        append(type, data, options) { this.events.push({ type, data, ...options, seq: this.events.length, time: Date.now() }) },
-        deriveMessages: () => [{ id: 'multi-image-message', role: 'user', source: { kind: 'user' }, content: [
-          { type: 'image', attachment: selected }, { type: 'image', attachment: second },
-          { type: 'text', text: '分别修改这两张图。' },
-        ] }],
-      } }, callId: 'multi-image-call', signal: new AbortController().signal,
-    }), /multiple source images.*exact attachment ID/iu)
     sessionMessages.push({ id: 'second-user-upload', role: 'user', source: { kind: 'user' },
       content: [{ type: 'image', attachment: second }, { type: 'text', text: '这是第二张源图。' }] })
     const fused = await imagegen.execute({ prompt: 'Fuse these two references into one new composition.',
@@ -2323,7 +2319,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
 
     const editCalls = [1, 2].map(index => ({
       id: `native-edit-${index}`,
-      args: { prompt: `Modify the above image as variant ${index}.` },
+      args: { prompt: `Modify the above image as variant ${index}.`, image_url: singleResult.images[0].image.attachmentId },
     }))
     const editPosition = appendNativeAssistant(allowedChild, editCalls)
     for (const call of editCalls) await executeNativeImageCall(allowedChild, editPosition, call)
@@ -2516,7 +2512,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     }
 
     // A prior uploaded poster followed by text-only removal must send its exact
-    // CAS bytes to edits, even when the model omits image_url.
+    // CAS bytes to edits using the Agent-selected image_url.
     for (const text of ['去掉海报上的文字', '把照片上的文字去掉', '去除图片里的文字', '去掉文字']) {
       const priorMessages = sessionMessages.splice(0)
       const priorEvents = sessionEvents.splice(0)
@@ -2525,7 +2521,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] },
       )
       try {
-        const output = await imagegen.execute({ prompt: text }, execution())
+        const output = await imagegen.execute({ prompt: text, image_url: selected.attachmentId }, execution())
         assert.equal(output.receipt.operation, 'edit', text)
         assert.deepEqual(output.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId])
         assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
@@ -2554,12 +2550,9 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       sessionEvents.push({ type: 'user/message', data: { content: current.content } })
       try {
         const step = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
-        assert.deepEqual(step.messages.at(-1).content.filter(block => block.type === 'image')
-          .map(block => block.attachment.attachmentId), [second.attachmentId])
-        const beforeIncomplete = requests.length
-        await assert.rejects(imagegen.execute({ prompt: text, image_url: selected.attachmentId }, execution()), /current target plus its previous image reference/u)
-        assert.equal(requests.length, beforeIncomplete)
-        const output = await imagegen.execute({ prompt: text }, execution())
+        assert.ok(step.messages.at(-1).content[0].text.includes(second.attachmentId))
+        assert.ok(step.messages.at(-1).content[0].text.includes(selected.attachmentId))
+        const output = await imagegen.execute({ prompt: text, image_url: [selected.attachmentId, second.attachmentId] }, execution())
         assert.deepEqual(output.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId, second.attachmentId])
         assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
         const form = await new Response(requestRawBodies.at(-1), {
@@ -2572,17 +2565,16 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
             Buffer.from((await context.attachments.readImage(ref)).data))
         }
 
-        // A generated result in this turn must not replace the earlier reference.
+        // Explicit semantic selection stays authoritative after another output.
         const nextStep = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
-        assert.deepEqual(nextStep.messages.at(-1).content.filter(block => block.type === 'image')
-          .map(block => block.attachment.attachmentId), [second.attachmentId])
+        assert.ok(nextStep.messages.at(-1).content[0].text.includes(second.attachmentId))
         // Ordinary single-upload edits and negated references do not inherit history.
         for (const request of ['只去掉这张图上的文字', '不要参考以上图片，只修改当前照片',
           '参考这张图片比例生成，按照参考图的文字排版、文字风格，在图片中加入文字：上方“顾家家居限时福利 线上预约 到店购买 立减1000元”，左下“大坐家沙发”，右下“左滑查看更多”']) {
           current.content[1].text = request
           const singleStep = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
           assert.equal(singleStep.messages.at(-1).content.filter(block => block.type === 'image').length, 0)
-          const singleOutput = await imagegen.execute({ prompt: request }, execution())
+          const singleOutput = await imagegen.execute({ prompt: request, image_url: selected.attachmentId }, execution())
           assert.deepEqual(singleOutput.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId])
           assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
           const singleForm = await new Response(requestRawBodies.at(-1), {
@@ -2592,6 +2584,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           assert.deepEqual(Buffer.from(await singleForm.get('image').arrayBuffer()),
             Buffer.from((await context.attachments.readImage(selected)).data))
         }
+        // No lexical inference: the Agent can deliberately generate without
+        // references even while current uploads and earlier images are present.
+        const explicitNewImage = await imagegen.execute({ prompt: 'A new image unrelated to these uploads.' }, execution())
+        assert.deepEqual(explicitNewImage.receipt.sources, [])
+        assert.equal(explicitNewImage.receipt.operation, 'generate')
         // An empty pre-upload history must not fall forward to this turn's output.
         current.content[1].text = text
         sessionEvents.splice(0, sessionEvents.length, { type: 'user/message', data: { content: current.content } },
@@ -2618,7 +2615,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       '不要修改原图，但把这张图中的灯改成蓝色。',
       'Create a new cover, not editing the original image, but use the attached photo.',
     ]) {
-      await assert.rejects(imagegen.execute({ prompt }, { ...execution(), agent: mixedAgent }), /needs a source image/u)
+      await assert.rejects(imagegen.execute({ prompt, image_url: selected.attachmentId }, { ...execution(), agent: mixedAgent }), /not present in this e-Mate session/u)
       assert.equal(mixedEvents.at(-1).data.billing_status, 'not-submitted')
     }
     await assert.rejects(imagegen.execute({ prompt: '新图生成，并非修改原图。', image_url: `sha256:${'f'.repeat(64)}` },
@@ -2651,7 +2648,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(invalidArgsReceipts[0].data.billing_status, 'not-submitted')
     const emptyEditEvents = []
     await assert.rejects(
-      imagegen.execute({ prompt: 'Modify the above image only.' }, {
+      imagegen.execute({ prompt: 'Modify the above image only.', image_url: attachmentId }, {
         agent: {
           id: 'empty-image-session',
           session: {
@@ -2668,7 +2665,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         },
         callId: 'empty-edit-call', signal: new AbortController().signal,
       }),
-      /needs a source image.*upload one image once/u,
+      /not present in this e-Mate session/u,
     )
     assert.equal(emptyEditEvents.length, 1)
     assert.equal(emptyEditEvents[0].data.revision, 2)
