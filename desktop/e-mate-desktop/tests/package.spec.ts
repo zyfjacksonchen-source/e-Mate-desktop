@@ -245,6 +245,7 @@ describe('published package surface', () => {
     expect(manifest.build?.productName).toBe('e-Mate')
     expect(manifest.build?.appId).toBe('net.ecoremedia.e-mate')
     expect(manifest.build?.asarUnpack).toEqual([
+      'base-contract.json',
       'package.json',
       'cordis.patch.yml',
       'build/**',

@@ -267,6 +267,7 @@
     "productName": "e-Mate",
     "asar": true,
     "asarUnpack": [
+      "base-contract.json",
       "package.json",
       "cordis.patch.yml",
       "build/**",
