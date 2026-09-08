@@ -24,7 +24,7 @@ describe('universal macOS native runtime preparation', () => {
       desktopRoot: '/desktop',
       exists: path => path !== join(resolve('/desktop'), missing),
       chmod,
-    })).toThrow(missing)
+    })).toThrow(join(resolve('/desktop'), missing))
     expect(chmod).not.toHaveBeenCalled()
   })
 })
