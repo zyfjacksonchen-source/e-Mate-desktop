@@ -5,6 +5,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-goal'
+import type {} from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import {
   THEME_SETTINGS_NAMESPACE,
@@ -97,6 +99,30 @@ export function apply(ctx: Context, config: Config): void {
     )
     return
   }
+  let active = true
+  ctx.effect(() => () => { active = false }, '@e-mate/desktop: completion notification lifetime')
+  ctx.on('session/event', (session, event) => {
+    if (!active || event.type !== 'turn/end' || event.data.reason.kind !== 'completed'
+      || session.header.origin === 'subagent') return
+    try {
+      const goals = ctx.get('goals')
+      if (goals !== undefined) {
+        const agent = ctx.get('agents')?.get(session.id)
+        if (agent === undefined || agent.session !== session) return
+        const goal = goals.get(agent)
+        if (goal !== undefined && goal.phase !== 'complete') return
+      }
+      runtime.updates.notify({
+        title: '任务已完成',
+        body: '任务已成功完成，点击查看结果。',
+        sessionId: session.id,
+        isCurrent: () => active,
+      })
+    } catch {
+      // Notification failures must never interfere with the completed native turn.
+      process.stderr.write('@e-mate/desktop: task completion notification unavailable\n')
+    }
+  })
   const appExit = ctx.get('appExit')
   if (appExit === undefined) {
     throw new Error('@e-mate/desktop: the launcher did not provide ctx.appExit')

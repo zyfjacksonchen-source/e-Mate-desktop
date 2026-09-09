@@ -24,7 +24,7 @@ import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
 import { renderSvgPage as renderNativeSvgPage } from './svg-page-renderer.ts'
-import type { DesktopRendererBootstrap } from './desktop-bootstrap-contract.ts'
+import { DESKTOP_NOTIFICATION_OPEN, DESKTOP_NOTIFICATION_TAKE, type DesktopRendererBootstrap } from './desktop-bootstrap-contract.ts'
 import { DESKTOP_UPDATE_RUN_INTERACTIVE } from './desktop-update-trigger-contract.ts'
 import type { DesktopInstallationId } from './desktop-installation-id.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
@@ -170,6 +170,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   get locale(): DesktopLocale { return app.getLocale().toLowerCase().startsWith('zh') ? 'zh' : 'en' }
   readonly updates: DesktopUpdateAdapter
 
+  private pendingNotificationSession: string | undefined
   private window: BrowserWindow | undefined
   private tray: Tray | undefined
   private scheduled: DesktopShellSpec | undefined
@@ -506,6 +507,15 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const nativeNotification = new Notification({
       title: notification.title,
       body: notification.body,
+    })
+    const owner = this.window
+    if (notification.sessionId !== undefined) nativeNotification.once('click', () => {
+      if (notification.isCurrent?.() === false || owner === undefined || owner !== this.window || owner.isDestroyed()) return
+      this.pendingNotificationSession = notification.sessionId
+      try {
+        this.show()
+        owner.webContents.send(DESKTOP_NOTIFICATION_OPEN)
+      } catch { /* Renderer may be reloading; pending selection is drained when ready. */ }
     })
     nativeNotification.show()
   }
@@ -921,6 +931,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       await this.runResourceAction(request.action, window, spec, request.resource)
     }
     ipcMain.handle(DESKTOP_RESOURCE_RUN, runDesktopResource)
+    ipcMain.handle(DESKTOP_NOTIFICATION_TAKE, (event: Electron.IpcMainInvokeEvent) => {
+      if (event.sender !== window.webContents) throw new Error('@e-mate/desktop: notification request did not originate from owning Renderer')
+      const id = this.pendingNotificationSession
+      this.pendingNotificationSession = undefined
+      return id
+    })
 
     const show = (): void => { this.show() }
     const close = (event: Electron.Event): void => {
@@ -1062,6 +1078,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       ipcMain.removeHandler(DESKTOP_RESOURCE_RUN)
+      ipcMain.removeHandler(DESKTOP_NOTIFICATION_TAKE)
+      this.pendingNotificationSession = undefined
       this.stopRendererBootMonitoring()
       app.off('activate', show)
       nativeTheme.off('updated', syncWindowsTitleBarOverlay)
@@ -1093,6 +1111,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       released = true
       ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       ipcMain.removeHandler(DESKTOP_RESOURCE_RUN)
+      ipcMain.removeHandler(DESKTOP_NOTIFICATION_TAKE)
+      this.pendingNotificationSession = undefined
       app.off('activate', show)
       nativeTheme.off('updated', syncWindowsTitleBarOverlay)
       window.off('close', close)

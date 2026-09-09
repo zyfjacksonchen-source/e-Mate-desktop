@@ -284,3 +284,47 @@ describe('desktop Host plugin', () => {
     expect(vi.mocked(harness.ctx.settings.register)).not.toHaveBeenCalled()
   })
 })
+
+
+describe('native successful turn notifications', () => {
+  it('uses live turn success, excludes children and incomplete goals, and expires with the profile', () => {
+    const h = createHarness()
+    const notify = vi.spyOn(h.runtime.updates, 'notify')
+    apply(h.ctx, config)
+    const calls = vi.mocked(h.ctx.on).mock.calls as unknown as Array<[string, (...args: any[]) => void]>
+    const event = calls.find(([name]) => name === 'session/event')![1]
+    const lifetimeIndex = vi.mocked(h.ctx.effect).mock.calls.findIndex(call => call[1] === '@e-mate/desktop: completion notification lifetime')
+    const dispose = vi.mocked(h.ctx.effect).mock.results[lifetimeIndex]!.value as () => void
+    const session = { id: 'session-1', header: {} }
+    for (const kind of ['error', 'aborted', 'blocked', 'max-tokens', 'interrupted']) {
+      event(session, { type: 'turn/end', data: { turn: 1, reason: { kind } } })
+    }
+    event(session, { type: 'step/end', data: {} })
+    event({ ...session, header: { origin: 'subagent' } }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })
+    expect(notify).not.toHaveBeenCalled()
+    const success = { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }
+    event(session, success)
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify.mock.calls[0]![0]).toMatchObject({ title: '任务已完成', body: '任务已成功完成，点击查看结果。', sessionId: 'session-1' })
+    const originalGet = h.ctx.get.bind(h.ctx)
+    let phase = 'active'
+    vi.mocked(h.ctx.get).mockImplementation(((key: string) => key === 'goals' ? { get: () => ({ phase }) }
+      : key === 'agents' ? { get: () => ({ session }) } : originalGet(key as never)) as typeof h.ctx.get)
+    event(session, success)
+    expect(notify).toHaveBeenCalledTimes(1)
+    phase = 'complete'
+    event(session, success)
+    expect(notify).toHaveBeenCalledTimes(2)
+    expect(notify.mock.calls[0]![0].isCurrent?.()).toBe(true)
+    dispose()
+    expect(notify.mock.calls[0]![0].isCurrent?.()).toBe(false)
+  })
+  it('contains notification failures without failing the completed turn', () => {
+    const h = createHarness()
+    vi.spyOn(h.runtime.updates, 'notify').mockImplementation(() => { throw new Error('OS unavailable') })
+    apply(h.ctx, config)
+    const calls = vi.mocked(h.ctx.on).mock.calls as unknown as Array<[string, (...args: any[]) => void]>
+    const event = calls.find(([name]) => name === 'session/event')![1]
+    expect(() => event({ id: 's', header: {} }, { type: 'turn/end', data: { reason: { kind: 'completed' } } })).not.toThrow()
+  })
+})

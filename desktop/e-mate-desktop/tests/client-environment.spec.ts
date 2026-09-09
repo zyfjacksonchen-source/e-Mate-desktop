@@ -183,3 +183,31 @@ describe('advanced desktop layout', () => {
     expect(layout.getSnapshot()).toMatchObject({ sidebar: 280, narrow: false, narrowExpanded: false })
   })
 })
+
+
+it('notification navigation waits for the native catalog and drops missing sessions safely', async () => {
+  const { installNotificationNavigation } = await import('../src/client/index.ts')
+  let state = { phase: 'pending', byId: {} } as any
+  let changed: (() => void) | undefined
+  let clicked: ((id: string) => void) | undefined
+  const stopList = vi.fn(() => { changed = undefined })
+  const stopBridge = vi.fn(() => { clicked = undefined })
+  const open = vi.fn()
+  const stop = installNotificationNavigation({ open, list: {
+    getSnapshot: () => state,
+    subscribe: fn => { changed = fn; return stopList },
+  } }, { subscribe: fn => { clicked = fn; return stopBridge } })
+  clicked!('one')
+  expect(open).not.toHaveBeenCalled()
+  state = { phase: 'ready', byId: { one: {} } }
+  changed!()
+  expect(open).toHaveBeenCalledExactlyOnceWith('one')
+  changed!()
+  clicked!('deleted')
+  expect(open).toHaveBeenCalledTimes(1)
+  open.mockImplementation(() => { throw new Error('deleted between snapshot and select') })
+  expect(() => clicked!('one')).not.toThrow()
+  stop()
+  expect(stopList).toHaveBeenCalledOnce()
+  expect(stopBridge).toHaveBeenCalledOnce()
+})

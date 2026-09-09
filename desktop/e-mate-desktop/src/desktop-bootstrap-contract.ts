@@ -58,3 +58,11 @@ export function parseDesktopRendererBootstrapArgument(argv: readonly string[]): 
 export interface DesktopBootstrapWindow {
   __EMATE_DESKTOP_BOOTSTRAP__?: DesktopRendererBootstrap
 }
+
+/** Narrow, main-owned notification navigation through the existing preload boundary. */
+export const DESKTOP_NOTIFICATION_BRIDGE = '__EMATE_DESKTOP_NOTIFICATION__'
+export const DESKTOP_NOTIFICATION_OPEN = 'emate:desktop-notification-open'
+export const DESKTOP_NOTIFICATION_TAKE = 'emate:desktop-notification-take'
+export interface DesktopNotificationBridge {
+  subscribe(listener: (sessionId: string) => void): () => void
+}

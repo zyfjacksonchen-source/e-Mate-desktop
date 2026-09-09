@@ -83,6 +83,10 @@ export interface DesktopTrayItemRegistration {
 
 /** Native notification shown by a desktop-owned Host plugin. */
 export interface DesktopNotification {
+  /** Trusted Host session to reveal when the operator clicks. */
+  sessionId?: string
+  /** False once the originating profile lifetime ends. */
+  isCurrent?: () => boolean
   /** Notification heading. */
   title: string
   /** Concise user-facing status. */

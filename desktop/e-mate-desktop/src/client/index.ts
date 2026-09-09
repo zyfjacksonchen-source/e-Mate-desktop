@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
 import {
   DESKTOP_BOOTSTRAP_BRIDGE,
+  DESKTOP_NOTIFICATION_BRIDGE, type DesktopNotificationBridge,
   type DesktopBootstrapWindow,
 } from '../desktop-bootstrap-contract.ts'
 import { startRendererBootReporter } from './boot-health.ts'
@@ -42,6 +43,11 @@ export function apply(ctx: ClientContext): void {
     () => startRendererBootReporter(ctx.loader),
     '@e-mate/desktop: renderer boot health report',
   )
+  const notifications = (window as unknown as Record<string, DesktopNotificationBridge | undefined>)[DESKTOP_NOTIFICATION_BRIDGE]
+  if (notifications !== undefined) ctx.effect(
+    () => installNotificationNavigation(ctx.sessions, notifications),
+    '@e-mate/desktop: notification navigation',
+  )
   ctx.effect(() => installResourceContext(ctx.sessions), '@e-mate/desktop: resource context')
   ctx.effect(
     () => installWorkspaceFolderDrop({
@@ -51,4 +57,25 @@ export function apply(ctx: ClientContext): void {
     '@e-mate/desktop: workspace folder drop',
   )
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
+}
+
+/** Consume a clicked notification only once the native session catalog is ready. */
+export function installNotificationNavigation(
+  sessions: Pick<ClientContext['sessions'], 'list' | 'open'>,
+  bridge: DesktopNotificationBridge,
+): () => void {
+  let pending: string | undefined
+  const open = (): void => {
+    if (pending === undefined) return
+    const state = sessions.list.getSnapshot()
+    if (state.phase !== 'ready') return
+    const id = pending
+    pending = undefined
+    if (Object.hasOwn(state.byId, id)) {
+      try { sessions.open(id as Parameters<typeof sessions.open>[0]) } catch { /* Deleted during selection: keep current view. */ }
+    }
+  }
+  const unsubscribeList = sessions.list.subscribe(open)
+  const unsubscribeBridge = bridge.subscribe(id => { pending = id; open() })
+  return () => { pending = undefined; unsubscribeBridge(); unsubscribeList() }
 }

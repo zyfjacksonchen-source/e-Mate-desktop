@@ -153,6 +153,9 @@ const electron = vi.hoisted(() => {
   })
 
   return {
+    contextBridge: { exposeInMainWorld: vi.fn() },
+    ipcRenderer: { on: vi.fn(), off: vi.fn(), invoke: vi.fn(async (): Promise<unknown> => undefined) },
+    webUtils: { getPathForFile: vi.fn() },
     app: {
       dock: { setIcon: vi.fn() },
       getPath: vi.fn((name: string): string => name === 'home' ? '/tmp/dsh-home' : '/tmp/dsh-desktop-user-data'),
@@ -205,6 +208,9 @@ const electron = vi.hoisted(() => {
 })
 
 vi.mock('electron', () => ({
+  contextBridge: electron.contextBridge,
+  ipcRenderer: electron.ipcRenderer,
+  webUtils: electron.webUtils,
   app: electron.app,
   BrowserWindow: electron.BrowserWindow,
   clipboard: electron.clipboard,
@@ -296,6 +302,61 @@ describe('Electron compatibility runtime', () => {
     await rejected
     await expect(runtime.renderSvgPage({ svg: '<svg/>', width: 320, height: 180 })).rejects.toThrow('Desktop is shutting down')
     expect(svgRenderer.render).toHaveBeenCalledTimes(1)
+  })
+
+  it('preload drains an early click on subscription and removes its listener on teardown', async () => {
+    const { DESKTOP_NOTIFICATION_BRIDGE, DESKTOP_NOTIFICATION_OPEN, DESKTOP_NOTIFICATION_TAKE } = await import('../src/desktop-bootstrap-contract.ts')
+    const { desktopRendererBootstrapArgument } = await import('../src/desktop-bootstrap-contract.ts')
+    const argv = process.argv
+    process.argv = [...argv, desktopRendererBootstrapArgument({ schemaVersion: 1, mode: 'advanced', platform: 'darwin', profileGeneration: 'bundled', runtimeId: 'notification-test', windowKind: 'main' })]
+    try { await import('../src/preload.ts') } finally { process.argv = argv }
+    const bridge = electron.contextBridge.exposeInMainWorld.mock.calls.find(call => call[0] === DESKTOP_NOTIFICATION_BRIDGE)![1] as { subscribe(fn: (id: string) => void): () => void }
+    electron.ipcRenderer.invoke.mockResolvedValueOnce('early-session')
+    const listener = vi.fn()
+    const stop = bridge.subscribe(listener)
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledWith('early-session'))
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith(DESKTOP_NOTIFICATION_TAKE)
+    const ping = electron.ipcRenderer.on.mock.calls.find(call => call[0] === DESKTOP_NOTIFICATION_OPEN)![1] as () => void
+    let resolve!: (value: unknown) => void
+    electron.ipcRenderer.invoke.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    ping()
+    stop()
+    resolve('late-session')
+    await Promise.resolve()
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(electron.ipcRenderer.off).toHaveBeenCalledWith(DESKTOP_NOTIFICATION_OPEN, ping)
+  })
+
+  it('delivers a completion click once to the owning renderer and clears it on disposal', async () => {
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const { DESKTOP_NOTIFICATION_OPEN, DESKTOP_NOTIFICATION_TAKE } = await import('../src/desktop-bootstrap-contract.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    electron.Notification.isSupported.mockReturnValueOnce(false)
+    runtime.updates.notify({ title: '任务已完成', body: '任务已成功完成，点击查看结果。' })
+    expect(electron.notifications).toHaveLength(0)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    let current = true
+    runtime.updates.notify({ title: '任务已完成', body: '任务已成功完成，点击查看结果。', sessionId: 'session-1', isCurrent: () => current })
+    const notification = electron.notifications[0]!
+    expect(notification.options).toEqual({ title: '任务已完成', body: '任务已成功完成，点击查看结果。' })
+    expect(notification.show).toHaveBeenCalledOnce()
+    const click = notification.once.mock.calls.find(call => call[0] === 'click')![1] as () => void
+    click()
+    expect(electron.webContents.send).toHaveBeenCalledWith(DESKTOP_NOTIFICATION_OPEN)
+    const take = electron.ipcMain.handle.mock.calls.find(call => call[0] === DESKTOP_NOTIFICATION_TAKE)![1] as (event: unknown) => unknown
+    expect(() => take({ sender: {} })).toThrow('owning Renderer')
+    expect(take({ sender: electron.webContents })).toBe('session-1')
+    expect(take({ sender: electron.webContents })).toBeUndefined()
+    current = false
+    click()
+    expect(take({ sender: electron.webContents })).toBeUndefined()
+    current = true
+    click()
+    await release()
+    expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith(DESKTOP_NOTIFICATION_TAKE)
+    expect(take({ sender: electron.webContents })).toBeUndefined()
+    expect(() => click()).not.toThrow()
   })
 
   it('uses the native macOS frame, Dock icon, and template tray image', async () => {
