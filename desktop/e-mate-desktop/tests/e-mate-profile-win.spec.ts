@@ -8,23 +8,28 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { installEmateDesktopProfile } from '../src/e-mate-profile.ts'
 
 const roots: string[] = []
 
-afterEach(() => {
+afterAll(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 describe.runIf(process.platform === 'win32')('Windows managed Profile materialization', () => {
-  // This covers five physical operations, including cold installation and a
-  // receipt-free full validation (~92s combined on the native Windows runner).
-  // The integration-test deadline is not a startup or repair latency budget.
-  it('uses physical directories and repairs a missing declared main without scanning unrelated nested files', () => {
-    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-win-'))
+  let home: string
+  let profile: string
+  // Cold fixture installation and the repair assertions are separate bounded
+  // phases. Combining all five physical operations exceeded 120s on Windows;
+  // neither deadline is a product startup or repair latency budget.
+  beforeAll(() => {
+    home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-win-'))
     roots.push(home)
-    const profile = installEmateDesktopProfile(home)
+    profile = installEmateDesktopProfile(home)
+  }, 120_000)
+
+  it('uses physical directories and repairs a missing declared main without scanning unrelated nested files', () => {
     const receiptPath = join(profile, '.e-mate-install.json')
     const packageRoot = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules')
     const computerUseRoot = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
