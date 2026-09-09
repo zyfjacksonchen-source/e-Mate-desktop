@@ -49,6 +49,7 @@ const MCP_CATALOG = new Map<string, McpServerSpec>([
 ])
 const TENCENT_DOCS_AUTH_URL = new URL('https://docs.qq.com/open/auth/mcp.html')
 const PROTECTED_PLUGIN_NAMES = new Set<string>([
+  // Retired built-in: prevent manual reinstallation beside the inventory-owned tidychat.
   '@kelearns/dsh-navigation-bar',
   '@omdsh-dev/dsh-genui',
   'dsh-at-file',

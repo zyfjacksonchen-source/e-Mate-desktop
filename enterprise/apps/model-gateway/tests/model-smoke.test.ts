@@ -23,11 +23,11 @@ function route(
 const routes = [
   route('gpt-5.6-luna', 'responses', 'gpt-5.6-luna', 'https://main-provider.ecorex.internal:18443/v1'),
   route('gpt-5.6-sol', 'responses', 'gpt-5.6-sol', 'https://main-provider.ecorex.internal:18443/v1'),
-  route('deepseek', 'chat-completions', 'deepseek-v4-flash', 'https://deepseek-provider.ecorex.internal:18443/v1'),
+  route('deepseek', 'responses', 'deepseek-v4-flash-vision-exp', 'https://deepseek-provider.ecorex.internal:18443/v1'),
   route(
-    'gpt-image2.5-flare',
+    'gpt-image-2.5-flare',
     'images-generations',
-    'gpt-image2.5-flare',
+    'gpt-image-2.5-flare',
     'https://image-provider.ecorex.internal:18443/v1'
   ),
 ];
@@ -44,7 +44,7 @@ test('Astra extends the existing GPT catalog and probes Responses low with the s
   assert.deepEqual(request.body.reasoning, { effort: 'low' });
 });
 
-function responsesStream(id: string): Response {
+function responsesStream(id: string, requestHeader = true): Response {
   return new Response(
     [
       `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'sensitive-response-text' })}`,
@@ -59,7 +59,7 @@ function responsesStream(id: string): Response {
       'data: [DONE]',
       '',
     ].join('\n\n'),
-    { headers: { 'content-type': 'text/event-stream', 'x-request-id': `request-${id}` } }
+    { headers: { 'content-type': 'text/event-stream', ...(requestHeader ? { 'x-request-id': `request-${id}` } : {}) } }
   );
 }
 
@@ -96,7 +96,7 @@ function imageResponse(id: string): Response {
   );
 }
 
-function mockFetch(options: { rejectCall?: number; rejectImage?: boolean; omitChatRequestId?: boolean } = {}): {
+function mockFetch(options: { rejectCall?: number; rejectImage?: boolean; omitRequestId?: boolean } = {}): {
   fetchImplementation: typeof fetch;
   requests: Array<{ url: string; body: Record<string, unknown> }>;
 } {
@@ -111,8 +111,8 @@ function mockFetch(options: { rejectCall?: number; rejectImage?: boolean; omitCh
       return imageResponse(`image-${requests.length}`);
     }
     return url.endsWith('/chat/completions')
-      ? chatStream(`chat-${requests.length}`, !options.omitChatRequestId)
-      : responsesStream(`response-${requests.length}`);
+      ? chatStream(`chat-${requests.length}`, !options.omitRequestId)
+      : responsesStream(`response-${requests.length}`, !options.omitRequestId);
   }) as typeof fetch;
   return { fetchImplementation, requests };
 }
@@ -140,7 +140,7 @@ test('writes only catalog-bound redacted evidence after all five live routes pas
       ['gpt-5.6-luna', 'live-inference'],
       ['gpt-5.6-sol', 'live-inference'],
       ['deepseek', 'live-inference'],
-      ['gpt-image2.5-flare', 'live-image-generation'],
+      ['gpt-image-2.5-flare', 'live-image-generation'],
     ]
   );
   assert.equal(serialized.includes(secret) || serialized.includes('sensitive-response-text'), false);
@@ -190,8 +190,8 @@ test('accepts only the official search credential route without proxying it as a
   }
 });
 
-test('does not label an adapter-generated chat id as provider evidence', async () => {
-  const { fetchImplementation } = mockFetch({ omitChatRequestId: true });
+test('native Responses uses upstream response id as evidence when request header is absent', async () => {
+  const { fetchImplementation } = mockFetch({ omitRequestId: true });
   const approval = await runModelSmoke({
     routes,
     catalogSha256: 'e'.repeat(64),
@@ -202,8 +202,8 @@ test('does not label an adapter-generated chat id as provider evidence', async (
   });
   assert.deepEqual(
     approval.results.filter(({ routeId }) => routeId === 'deepseek')
-      .map(({ evidenceId }) => evidenceId.startsWith('local:')),
-    [true]
+      .map(({ evidenceId }) => evidenceId),
+    ['provider:response-3']
   );
 });
 
@@ -219,15 +219,15 @@ test('fails closed after one fixed Pro image request', async () => {
       randomId: randomId(),
     }),
     (error: unknown) =>
-      error instanceof ModelSmokeError && error.code === 'UPSTREAM_REJECTED' && error.routeId === 'gpt-image2.5-flare'
+      error instanceof ModelSmokeError && error.code === 'UPSTREAM_REJECTED' && error.routeId === 'gpt-image-2.5-flare'
   );
   assert.deepEqual(
     requests.map(({ url }) => url.slice(url.lastIndexOf('/') + 1)),
-    ['responses', 'responses', 'completions', 'generations']
+    ['responses', 'responses', 'responses', 'generations']
   );
   assert.deepEqual(
     requests.filter(({ url }) => url.endsWith('/images/generations')).map(({ body }) => body.model),
-    ['gpt-image2.5-flare']
+    ['gpt-image-2.5-flare']
   );
 });
 
@@ -321,7 +321,9 @@ test('accepts the pinned official DeepSeek HTTPS base', async () => {
   });
 
   assert.equal(approval.results.length, 4);
-  assert.equal(requests[2]?.url, 'https://api.deepseek.com/chat/completions');
+  assert.equal(requests[2]?.url, 'https://api.deepseek.com/responses');
+  assert.equal(requests[2]?.body.model, 'deepseek-v4-flash-vision-exp');
+  assert.deepEqual(requests[2]?.body.reasoning, { effort: 'max' });
 });
 
 test('rejects credential-bearing and malformed opted-in HTTP URLs before smoke requests', async () => {

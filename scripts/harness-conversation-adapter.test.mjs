@@ -19,7 +19,7 @@ const section = (start, end) => adapted.slice(adapted.indexOf(start), adapted.in
 const owners = new Function('_deepseek_ai_dsh_client_runtime_client', [
   section('function emateDraftFiles(', '\t\t//#endregion'),
   section('\t\t//#region lib/types/client/queue/store.js', '\t\t//#region ../../../vendor/cosmokit/src/misc.ts'),
-  'return { SessionInputShell, InputHub, createChatStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView }',
+  'return { SessionInputShell, InputHub, createChatStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView, emateAssistantImageBlocks }',
 ].join('\n'))({
   defineStore: value => value,
   createSnapshotStore(initial) {
@@ -625,4 +625,26 @@ test('native multi-turn receipts support exact follow-up mentions without creati
       binding = undefined; assert.equal(mentions.resolve(path), undefined)
     } finally { if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument); else delete globalThis.document }
   }
+})
+
+
+test('assistant echo filtering is same-turn, successful native output only and responds to late images', () => {
+  const image = id => ({ kind: 'image', attachment: { attachmentId: id } })
+  const text = { kind: 'text', text: '保留说明' }
+  const a = image('a'), b = image('b'), c = image('c')
+  const node = { location: { kind: 'turn', turn: { turn: 1 } }, data: { blocks: [text, a, b, c] } }
+  const nodes = new Map()
+  const snapshot = { chat: { nodes, locations: { getTurn: turn => [...nodes.keys()].filter(key => key.startsWith(turn + ':')) } } }
+  const output = (id, isError = false, subCalls = []) => ({ kind: 'result', isError, content: [{ type: 'image', attachment: { attachmentId: id } }], subCalls })
+  assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), node.data.blocks)
+  nodes.set('1:tool', { kind: 'tool-call', data: { root: output('a', false, [output('b', true)]) } })
+  nodes.set('2:tool', { kind: 'tool-call', data: { root: output('c') } })
+  assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), [text, b, c])
+  nodes.set('1:late', { kind: 'tool-call', data: { root: output('b') } })
+  assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), [text, c])
+  nodes.delete('1:late')
+  assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), [text, b, c])
+  const marker = '//#region lib/types/client/conversation-nodes/assistant.js'
+  const part = value => { const start = value.indexOf(marker); assert.notEqual(start, -1); return value.slice(start, value.indexOf('//#endregion', start)) }
+  assert.equal(part(adapted), part(native), 'render filtering must not change native assistant projection')
 })

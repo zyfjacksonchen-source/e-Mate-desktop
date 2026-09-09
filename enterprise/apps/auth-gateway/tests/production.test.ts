@@ -60,12 +60,12 @@ test('Auth model ids and issued base URL agree with the shared Model Gateway cat
       { id: 'gemini-3.1-pro' },
       { id: 'gpt-5.6-luna' },
       { id: 'deepseek-web-search' },
-      { id: 'gpt-image2.5-flare' },
+      { id: 'gpt-image-2.5-flare' },
     ],
   };
   assert.deepEqual(
     modelRouteIdsFromCatalog(catalog, modelGatewayBaseUrl),
-    ['gemini-3.1-pro', 'gpt-5.6-luna', 'gpt-image2.5-flare']
+    ['gemini-3.1-pro', 'gpt-5.6-luna', 'gpt-image-2.5-flare']
   );
   assert.throws(
     () => modelRouteIdsFromCatalog({ ...catalog, publicBaseUrl: 'https://gateway.example.test' }, modelGatewayBaseUrl),

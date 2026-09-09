@@ -63,14 +63,14 @@ const routeContracts: readonly SmokeRouteContract[] = [
   },
   {
     id: 'deepseek',
-    apiMode: 'chat-completions',
-    upstreamModelId: 'deepseek-v4-flash',
+    apiMode: 'responses',
+    upstreamModelId: 'deepseek-v4-flash-vision-exp',
     httpsBaseUrls: ['https://deepseek-provider.ecorex.internal:18443/v1', 'https://api.deepseek.com'],
   },
   {
-    id: 'gpt-image2.5-flare',
+    id: 'gpt-image-2.5-flare',
     apiMode: 'images-generations',
-    upstreamModelId: 'gpt-image2.5-flare',
+    upstreamModelId: 'gpt-image-2.5-flare',
     httpsBaseUrls: ['https://image-provider.ecorex.internal:18443/v1'],
     httpPathname: '/v1',
   },
@@ -289,6 +289,7 @@ async function smokeInference(
         : route.id === 'gpt-6-astra'
           ? { reasoning: { effort: 'low' } }
           : route.id === 'gpt-5.6-sol' ? { reasoning: { effort: 'medium' } }
+          : route.id === 'deepseek' ? { reasoning: { effort: 'max' } }
           : {}),
     });
   const response = await fetchUpstream(

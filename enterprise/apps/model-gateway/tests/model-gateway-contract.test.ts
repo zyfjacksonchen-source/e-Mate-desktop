@@ -44,9 +44,9 @@ const route: ModelGatewayRoute = {
 };
 const imageRoute: ModelGatewayRoute = {
   ...route,
-  id: 'gpt-image2.5-flare',
+  id: 'gpt-image-2.5-flare',
   apiMode: 'images-generations',
-  upstreamModelId: 'gpt-image2.5-flare',
+  upstreamModelId: 'gpt-image-2.5-flare',
   label: '图片 Pro',
   buttonLabel: '图片 Pro',
   reasoning: false,
@@ -1867,7 +1867,7 @@ test('exposes image generation only to the desktop catalog while proxying its de
       };
       assert.deepEqual(
         catalog.models.map(({ id }) => id),
-        ['gpt-image2.5-flare']
+        ['gpt-image-2.5-flare']
       );
       assert.deepEqual(catalog.data, []);
 
@@ -2055,7 +2055,7 @@ test('reuses one durable image invocation key after definite rejection while kee
       );
       for (const upstream of upstreamRequests) {
         const body = (await upstream.json()) as Record<string, unknown>;
-        assert.equal(body.model, 'gpt-image2.5-flare');
+        assert.equal(body.model, 'gpt-image-2.5-flare');
         assert.equal(body.n, 1);
       }
     },
@@ -2558,6 +2558,15 @@ test('runtime and public catalogs keep old clients usable while Astra is visible
       const body = await response.json() as { models: Array<{ id: string }> };
       assert.deepEqual(body.models.map(({ id }) => id), version === '2.0.18' ? [route.id, astra.id] : [route.id]);
     }
+    const managed = await fetch(`${baseUrl}/v1/models?client_version=2.0.18`, {
+      headers: { ...headers, 'x-e-mate-client-version': '2.0.18' },
+    });
+    assert.equal(managed.status, 200);
+    const managedBody = await managed.json() as { models: Array<{ slug: string; default_reasoning_level: string; supported_reasoning_levels: Array<{ effort: string }> }> };
+    const managedAstra = managedBody.models.find(model => model.slug === astra.id)!;
+    assert.equal(managedAstra.default_reasoning_level, 'low');
+    assert.deepEqual(managedAstra.supported_reasoning_levels.map(level => level.effort), ['low']);
+    assert.equal(managedBody.models.find(model => model.slug === route.id)!.default_reasoning_level, 'medium');
     for (const version of [undefined, '2.0.17', '2.0.18']) {
       const response = await fetch(`${baseUrl}/v1/models`, { headers: { ...headers, ...(version ? { 'x-e-mate-client-version': version } : {}) } });
       assert.equal(response.status, 200);
@@ -4054,4 +4063,168 @@ test('invalid image JSON records transport evidence without logging its contents
     assert(!JSON.stringify(events).includes('PRIVATE_BODY'));
   }, () => new Response('PRIVATE_BODY', { headers: { 'content-type': 'application/json' } }),
   undefined, undefined, limits, imageRoute, { isEnabled: async () => true }, new InMemoryUsageStore(limits), undefined, event => events.push(event));
+});
+
+test('native Chat endpoint preserves DeepSeek reasoning and tool history through shared accounted stream', async () => {
+  const messages = [
+    { role: 'system', content: 'native instructions' },
+    { role: 'user', content: 'calculate' },
+    { role: 'assistant', content: '', reasoning_content: 'retained native reasoning', tool_calls: [{ id: 'call-native', type: 'function', function: { name: 'calculate', arguments: '{"value":2}' } }] },
+    { role: 'tool', tool_call_id: 'call-native', content: '4' },
+  ];
+  const tools = [{ type: 'function', function: { name: 'calculate', parameters: { type: 'object', properties: {} } } }];
+  const reasoning = { id: 'chat-response-1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { reasoning_content: 'native reasoning delta' }, finish_reason: null }], usage: null };
+  const tool = { id: 'chat-response-1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call-next', type: 'function', function: { name: 'calculate', arguments: '{"value":3}' } }] }, finish_reason: 'tool_calls' }], usage: null };
+  const complete = await completedChatSse(11, 3).text();
+  const raw = `data: ${JSON.stringify(reasoning)}\n\ndata: ${JSON.stringify(tool)}\n\n${complete.slice(complete.indexOf('\n\n') + 2)}`;
+  await withGateway(async (baseUrl, requests) => {
+    const body = { model: 'deepseek', messages, tools, stream: true, stream_options: { include_usage: true }, thinking: { type: 'enabled' }, reasoning_effort: 'max', max_tokens: 32 };
+    const post = (headers = responseHeaders()) => fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', headers, body: JSON.stringify(body) });
+    const response = await post();
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.equal(await response.text(), raw);
+    assert.equal(requests.length, 1);
+    assert.equal(new URL(requests[0]!.url).pathname, '/v1/chat/completions');
+    const forwarded = await requests[0]!.json();
+    assert.equal(forwarded.model, 'deepseek-v4-flash');
+    assert.deepEqual(forwarded.messages, messages);
+    assert.deepEqual(forwarded.tools, tools);
+    assert.equal(forwarded.reasoning_effort, 'max');
+    assert.deepEqual(forwarded.thinking, { type: 'enabled' });
+    assert.equal(forwarded.max_tokens, 32);
+    const audit = await fetch(`${baseUrl}/v1/usage/task-1`, { headers: auth() });
+    assert.equal(audit.status, 200);
+    const envelope = await audit.json();
+    const usage = JSON.parse(Buffer.from(envelope.payload, 'base64url').toString());
+    assert.equal(usage.inputTokens, 11); assert.equal(usage.outputTokens, 3);
+    assert.equal((await post()).status, 409);
+    assert.equal((await post({ 'content-type': 'application/json' })).status, 401);
+    assert.equal(requests.length, 1);
+  }, () => new Response(raw, { headers: { 'content-type': 'text/event-stream' } }), undefined, undefined, limits, { ...chatRoute, upstreamModelId: 'deepseek-v4-flash' }, { isEnabled: async () => true });
+});
+
+test('native Chat endpoint enforces route policy and input boundary before upstream dispatch', async () => {
+  for (const enabled of [false, true]) {
+    await withGateway(async (baseUrl, requests) => {
+      const response = await fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', headers: responseHeaders(), body: JSON.stringify({ model: 'deepseek', stream: true, messages: [{ role: 'user', content: 'hello' }], extra_body: { model: 'other' } }) });
+      assert.equal(response.status, enabled ? 400 : 403);
+      assert.equal(requests.length, 0);
+    }, undefined, undefined, undefined, limits, chatRoute, { isEnabled: async () => enabled });
+  }
+});
+
+test('native Chat endpoint never completes accounting without a complete upstream DONE frame', async () => {
+  for (const ending of ['', 'data: [DONE]']) {
+  const raw = (await completedChatSse(11, 3).text()).replace('data: [DONE]\n\n', ending);
+  await withGateway(async (baseUrl, requests) => {
+    const body = JSON.stringify({ model: 'deepseek', stream: true, messages: [{ role: 'user', content: 'hello' }] });
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', headers: responseHeaders(), body });
+    const text = await response.text().catch(() => '');
+    assert.equal(text.includes('[DONE]'), false);
+    const retry = await fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', headers: responseHeaders(), body });
+    assert.equal(retry.status, 409);
+    assert.equal(requests.length, 1);
+  }, () => new Response(raw, { headers: { 'content-type': 'text/event-stream' } }), undefined, undefined, limits, chatRoute, { isEnabled: async () => true });
+  }
+});
+
+
+test('native Chat preserves disabled thinking and accepts text arrays without enabling images', async () => {
+  await withGateway(async (baseUrl, requests) => {
+    const messages = [{ role: 'user', content: [{ type: 'text', text: 'title please' }] }, { role: 'assistant', content: null }];
+    const send = (content: unknown, task: string) => fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST', headers: { ...responseHeaders(), 'x-e-mate-task-id': task },
+      body: JSON.stringify({ model: 'deepseek', stream: true, thinking: { type: 'disabled' }, reasoning_effort: 'low', messages: [{ ...messages[0], content }, messages[1]] }),
+    });
+    const good = await send(messages[0]!.content, 'native-title');
+    assert.equal(good.status, 200); await good.text();
+    const forwarded = await requests[0]!.json();
+    assert.deepEqual(forwarded.messages, messages);
+    assert.deepEqual(forwarded.thinking, { type: 'disabled' });
+    assert.equal('reasoning_effort' in forwarded, false);
+    const image = await send([{ type: 'text', text: 'look' }, { type: 'image_url', image_url: { url: 'https://example.invalid/image.png' } }], 'native-image');
+    assert.equal(image.status, 400); assert.equal(requests.length, 1);
+  }, () => completedChatSse(11, 3), undefined, undefined, limits, chatRoute, { isEnabled: async () => true });
+});
+
+test('DeepSeek vision candidate preserves native Responses image and tool output input at max effort', async () => {
+  const visionRoute: ModelGatewayRoute = { ...chatRoute, apiMode: 'responses', nativeChatCompletions: true, upstreamModelId: 'deepseek-v4-flash-vision-exp', input: ['text', 'image'] };
+  const image = 'data:image/png;base64,iVBORw0KGgo=';
+  const input = [
+    { role: 'user', content: [{ type: 'input_text', text: 'inspect reference' }, { type: 'input_image', image_url: image }] },
+    { type: 'function_call', call_id: 'read-image', name: 'view_image', arguments: '{}' },
+    { type: 'function_call_output', call_id: 'read-image', output: [{ type: 'input_text', text: 'tool image' }, { type: 'input_image', image_url: image }] },
+  ];
+  await withGateway(async (baseUrl, upstream) => {
+    const response = await fetch(`${baseUrl}/v1/responses`, { method: 'POST', headers: responseHeaders(), body: JSON.stringify({
+      model: 'deepseek', stream: true, store: false, input, reasoning: { effort: 'low' },
+      tools: [{ type: 'function', name: 'view_image', parameters: { type: 'object', properties: {} } }],
+    }) });
+    assert.equal(response.status, 200); assert.match(await response.text(), /response.completed/);
+    const forwarded = await upstream[0]!.json();
+    assert.equal(new URL(upstream[0]!.url).pathname, '/v1/responses');
+    assert.equal(forwarded.model, 'deepseek-v4-flash-vision-exp');
+    assert.deepEqual(forwarded.input, input); assert.deepEqual(forwarded.reasoning, { effort: 'max' });
+    assert.equal(forwarded.tools[0].name, 'view_image'); assert.equal(upstream.length, 1);
+    const audit = await fetch(`${baseUrl}/v1/usage/task-1`, { headers: auth() }); assert.equal(audit.status, 200);
+  }, undefined, undefined, undefined, limits, visionRoute, { isEnabled: async () => true });
+  for (const invalid of [{ ...visionRoute, input: ['text'] }, { ...visionRoute, apiMode: 'chat-completions' }, { ...visionRoute, reasoning: false }]) {
+    assert.throws(() => createModelGatewayServer({ routes: [invalid as ModelGatewayRoute], authenticate: async () => null,
+      usageStore: new InMemoryUsageStore(limits), usageKeyId: 'usage-2026', usagePrivateKey: privateKey }), /Invalid Model Gateway route/);
+  }
+});
+
+
+test('explicit dual-protocol vision route accepts old native Chat with shared auth and accounting', async () => {
+  const visionRoute: ModelGatewayRoute = { ...chatRoute, apiMode: 'responses', nativeChatCompletions: true, upstreamModelId: 'deepseek-v4-flash-vision-exp', input: ['text', 'image'] };
+  await withGateway(async (baseUrl, requests) => {
+    const messages = [{ role: 'user', content: 'continue' },
+      { role: 'assistant', content: '', reasoning_content: 'preserved', tool_calls: [{ id: 'old-call', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'old-call', content: 'read result' }];
+    const body = JSON.stringify({ model: 'deepseek', stream: true, messages });
+    const send = (headers = responseHeaders()) => fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', headers, body });
+    assert.equal((await send({ 'content-type': 'application/json' })).status, 401);
+    const response = await send(); assert.equal(response.status, 200); assert.match(await response.text(), /\[DONE\]/);
+    assert.equal(new URL(requests[0]!.url).pathname, '/v1/chat/completions');
+    const forwarded = await requests[0]!.json(); assert.equal(forwarded.model, 'deepseek-v4-flash-vision-exp');
+    assert.deepEqual(forwarded.messages, messages); assert.equal(forwarded.reasoning_effort, 'max');
+    assert.equal((await fetch(`${baseUrl}/v1/usage/task-1`, { headers: auth() })).status, 200);
+    assert.equal((await send()).status, 409); assert.equal(requests.length, 1);
+  }, () => completedChatSse(11, 3), undefined, undefined, limits, visionRoute, { isEnabled: async () => true });
+  await withGateway(async (baseUrl, requests) => {
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', headers: responseHeaders(), body: JSON.stringify({ model: route.id, stream: true, messages: [{ role: 'user', content: 'hello' }] }) });
+    assert.equal(response.status, 403); assert.equal(requests.length, 0);
+  });
+});
+
+test('same-version runtime catalog negotiates DeepSeek metadata without changing route authorization', async () => {
+  const visionRoute: ModelGatewayRoute = { ...chatRoute, apiMode: 'responses', nativeChatCompletions: true,
+    upstreamModelId: 'deepseek-v4-flash-vision-exp', input: ['text', 'image'] };
+  const identity = { tenantId: 'tenant-a', userId: 'user-a', sessionId: 'fixture-session', modelIds: [visionRoute.id] };
+  const consentStore = new InMemoryConsentStore(consentPolicy); await consentStore.accept(identity, consentInput);
+  let enabled = true;
+  const server = createModelGatewayServer({ routes: [visionRoute], authenticate: async () => identity, consentStore,
+    tenantModelRoutePolicy: { isEnabled: async () => enabled }, usageStore: new InMemoryUsageStore(limits), usageKeyId: 'usage-2026', usagePrivateKey: privateKey });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening'); const address = server.address();
+  assert(address && typeof address === 'object'); const baseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = { authorization: `Bearer model.${'p'.repeat(32)}.signature` };
+  try {
+    const old = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.18`, { headers });
+    const modern = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.18&capabilities=responses-multimodal`, { headers });
+    assert.equal(old.status, 200); assert.equal(modern.status, 200);
+    const oldBody = await old.json(); const modernBody = await modern.json();
+    assert.equal(oldBody.schemaVersion, 1); assert.equal(modernBody.schemaVersion, 1);
+    assert.deepEqual(Object.keys(oldBody).sort(), Object.keys(modernBody).sort());
+    assert.deepEqual(oldBody.models[0], { ...modernBody.models[0], apiMode: 'chat-completions', upstreamModelId: 'deepseek-v4-flash', input: ['text'] });
+    assert.equal(modernBody.models[0].upstreamModelId, 'deepseek-v4-flash-vision-exp');
+    assert.equal(modernBody.models[0].apiMode, 'responses'); assert.deepEqual(modernBody.models[0].input, ['text', 'image']);
+    for (const query of ['capabilities=unknown', 'capabilities=responses-multimodal&capabilities=responses-multimodal', 'client_version=2.0.18&client_version=2.0.18', 'capabilities=responses-multimodal&extra=true']) {
+      assert.equal((await fetch(`${baseUrl}/v1/runtime-models?${query}`, { headers })).status, 400);
+    }
+    assert.equal((await fetch(`${baseUrl}/v1/models?capabilities=responses-multimodal`, { headers })).status, 400);
+    enabled = false;
+    for (const suffix of ['', '&capabilities=responses-multimodal']) {
+      assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.18${suffix}`, { headers })).status, 403);
+    }
+  } finally { server.close(); await once(server, 'close'); }
 });

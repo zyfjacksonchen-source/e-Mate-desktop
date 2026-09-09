@@ -31,7 +31,7 @@ const RUNTIME_MODEL_CONTRACT = new Map([
   ['gpt-5.6-luna', { upstreamModelId: 'gpt-5.6-luna', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
   ['gpt-5.6-sol', { upstreamModelId: 'gpt-5.6-sol', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
   ['gpt-6-astra', { upstreamModelId: 'gpt-6-astra', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: MODEL_SESSION_REF }],
-  ['deepseek', { upstreamModelId: 'deepseek-v4-flash', apiMode: 'chat-completions', provider: 'e-mate-enterprise-deepseek', credentialRef: MODEL_SESSION_REF }],
+  ['deepseek', { upstreamModelId: 'deepseek-v4-flash-vision-exp', apiMode: 'responses', provider: 'e-mate-enterprise-deepseek', credentialRef: MODEL_SESSION_REF }],
 ])
 export const RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze([MODEL_SESSION_REF])
 const OBSOLETE_RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze([
@@ -300,6 +300,7 @@ function runtimeModels(value: unknown, allowed: readonly string[], gatewayRoot: 
       || model.input.length > 2
       || new Set(model.input).size !== model.input.length
       || model.input.some(input => input !== 'text' && input !== 'image')
+      || id === 'deepseek' && (!model.input.includes('text') || !model.input.includes('image'))
       || !Number.isSafeInteger(model.contextWindow)
       || Number(model.contextWindow) < 1
       || Number(model.contextWindow) > 10_000_000
@@ -621,7 +622,7 @@ function mutationReceipt(value: unknown, password: boolean) {
 function policyFor(value: StoredSession, runtime: readonly RuntimeModel[]) {
   const managed = [
     ...runtime.map(({ id }) => id),
-    ...value.session.modelGateway.allowedModelIds.filter(id => id === 'gpt-image2.5-flare'),
+    ...value.session.modelGateway.allowedModelIds.filter(id => id === 'gpt-image-2.5-flare'),
   ]
   const chat = CHAT_MODELS.find(id => managed.includes(id))
   if (chat === undefined) throw new Error('e-Mate enterprise policy contains no chat model')
@@ -633,7 +634,7 @@ function policyFor(value: StoredSession, runtime: readonly RuntimeModel[]) {
     allowed_model_ids: [...allowed],
     default_chat_model_id: chat,
     default_chat_reasoning_effort: chat === 'gpt-5.6-luna' || chat === 'deepseek' ? 'max' : chat === 'gpt-6-astra' ? 'low' : 'medium',
-    image_primary_model_id: 'gpt-image2.5-flare',
+    image_primary_model_id: 'gpt-image-2.5-flare',
     issued_at: value.received_at,
     expires_at: value.session.expiresAt,
     receipt_id: value.session.sessionId,
@@ -883,7 +884,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const response = await modelCall(
       value,
-      '/v1/runtime-models?client_version=2.0.18',
+      '/v1/runtime-models?client_version=2.0.18&capabilities=responses-multimodal',
       { method: 'GET' },
       'runtime models',
     )

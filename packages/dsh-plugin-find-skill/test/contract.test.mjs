@@ -491,7 +491,9 @@ test('external connection instructions reuse device-global state', async () => {
     assert.match(document, /device-global/u)
     assert.doesNotMatch(document, /current session only|scope appropriate/u)
   }
-  assert.match(documents[0], /@larksuite\/cli@1\.0\.88 auth status --json --verify/u)
+  assert.match(documents[0], /<LARK_CLI>`? auth status --json --verify/u)
+  assert.match(documents[0], /EMATE_DESKTOP_PNPM_ENTRY/u)
+  assert.match(documents[0], /official pinned 1\.0\.88 executable/u)
   assert.match(documents[0], /including user status `needs_refresh`/u)
   assert.match(documents[0], /execute the requested user API operation normally/u)
   assert.match(documents[0], /do not run `config init`, `auth login`, or another authorization scan/u)

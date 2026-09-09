@@ -67,7 +67,7 @@ declare module '@deepseek-ai/dsh-session/types' {
   }
 }
 
-const IMAGE_MODEL = 'gpt-image2.5-flare'
+const IMAGE_MODEL = 'gpt-image-2.5-flare'
 // Historical receipts remain readable; this set never selects a request model.
 const RECEIPT_IMAGE_MODELS = new Set([IMAGE_MODEL, 'gpt-image-2-pro'])
 const IMAGE_RECEIPT_VERSION = 2
@@ -703,7 +703,7 @@ function imageCatalogContext(agent, messages, eventHistory = eventImages(agent?.
     : `Images selected in the current user request, in attachment order: ${current.map(image => `\`${image.attachmentId}\` (${image.width}×${image.height})`).join(', ')}. `
   const history = recent.length === 0 ? ''
     : `Recent images already stored in this conversation, newest first: ${recent.map(image => `\`${image.attachmentId}\``).join(', ')}. `
-  return `${selected}${history}These are available images, not an inferred selection. Resolve the user's intent and each image's role from the conversation and pixels; recency alone does not identify an edit target. If a needed image is no longer visible, inspect its exact attachment ID with vision_glance before describing it. Pass image_url explicitly for every selected target or reference, in role order (target first), and explain their roles in the prompt. Omit image_url only for a new image without references. For independent outputs use image_batch with a separate explicit source list per task; dependent edits wait for actual results. Never ask for an image already available here. Use image_pack for packaging exact outputs. Image IDs are tool locators, never user-facing results.`
+  return `${selected}${history}These are available images, not an inferred selection. Resolve the user's intent and each image's role from the conversation and pixels; recency alone does not identify an edit target. If a needed image is no longer visible, inspect its exact attachment ID with vision_glance before describing it. Pass image_url explicitly for every selected target or reference, in role order (target first), and explain their roles in the prompt. Omit image_url only for a new image without references. For independent outputs call imagegen once per output in the current Agent with explicit sources for each, or use image_batch when batch tracking is useful; dependent edits wait for actual results. Never ask for an image already available here. Use image_pack for packaging exact outputs. Image IDs are tool locators, never user-facing results.`
 }
 
 function normalizeTask(args) {
@@ -729,10 +729,9 @@ function attemptedImageOperation(args) {
   return Array.isArray(args.image_url) && args.image_url.length > 1 ? 'fusion' : 'edit'
 }
 
-const NATIVE_BATCH_ERROR = 'parent image batch rejected before provider submission: use image_batch once; never call imagegen directly for two or more independent new images'
 const NATIVE_BATCH_SHAPE_ERROR = 'imagegen cannot verify its owning native assistant/message; refusing provider submission'
 
-function assertNativeImageBatchBoundary(agent, callId) {
+function assertNativeImageCallBoundary(agent, callId) {
   const id = String(callId ?? '')
   const events = [...agent?.session?.events ?? []]
   const callEvents = events.filter(event => event?.type === 'tool/call' && String(event.data?.callId ?? '') === id)
@@ -751,20 +750,6 @@ function assertNativeImageBatchBoundary(agent, callId) {
     || callEvent.data?.name !== 'imagegen'
     || typeof ownerBlocks[0].arguments !== 'string'
     || callEvent.data?.arguments !== ownerBlocks[0].arguments) throw new Error(NATIVE_BATCH_SHAPE_ERROR)
-
-  let newImages = 0
-  for (const block of content) {
-    if (block?.type !== 'tool-call' || block.name !== 'imagegen') continue
-    if (typeof block.arguments !== 'string') throw new Error(NATIVE_BATCH_SHAPE_ERROR)
-    let args
-    try {
-      args = JSON.parse(block.arguments)
-    } catch {
-      throw new Error(NATIVE_BATCH_SHAPE_ERROR)
-    }
-    const task = normalizeTask(args)
-    if (task.attachmentIds.length === 0 && ++newImages >= 2) throw new Error(NATIVE_BATCH_ERROR)
-  }
 }
 
 function normalizePack(args) {
@@ -1228,7 +1213,7 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image2.5-flare route. For two or more mutually independent image outputs, use image_batch once and do not call imagegen directly. A native image_batch child may call imagegen exactly once with its exact admitted arguments. image_url accepts only exact current-session sha256: image attachment IDs, never Job/request IDs or URLs; ordered multiple references belong to one output and their roles must be explicit. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.\n\n' + IMAGE_PROMPT_GUIDANCE,
+    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2.5-flare route. For independent outputs, call this tool once per output in the current Agent. Dependent edits wait for the preceding real output. image_batch remains available for tracked batches. A native image_batch child may call imagegen exactly once with its exact admitted arguments. image_url accepts only exact current-session sha256: image attachment IDs, never Job/request IDs or URLs; ordered multiple references belong to one output and their roles must be explicit. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.\n\n' + IMAGE_PROMPT_GUIDANCE,
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
@@ -1237,8 +1222,8 @@ export async function apply(ctx, config = {}) {
       },
     },
     output: imageOutput,
-    // The native AgentLoop owns the per-parent exclusive lane.
-    isConcurrencySafe: () => false,
+    // Native AgentLoop schedules independent calls; each call owns its Job and receipt.
+    isConcurrencySafe: () => true,
     timeoutMs: IMAGE_TIMEOUT_MS,
     async execute(args, exec) {
       assertFreshParentCall(exec.agent, exec.callId)
@@ -1249,7 +1234,7 @@ export async function apply(ctx, config = {}) {
       let refs = []
       let task
       try {
-        assertNativeImageBatchBoundary(exec.agent, exec.callId)
+        assertNativeImageCallBoundary(exec.agent, exec.callId)
         if (!ctx.tools.schemas(exec.agent).some(schema => schema.name === 'imagegen')) {
           const error = new Error('imagegen is unavailable in the current Agent tool scope')
           ;(error as Error & { code: string }).code = 'agent-tool-unavailable'
@@ -1277,6 +1262,9 @@ export async function apply(ctx, config = {}) {
         throw error
       }
 
+      // Reserve after asynchronous source resolution, outside failure receipt handlers.
+      // A duplicate call must not overwrite another invocation's in-flight receipt.
+      assertFreshParentCall(exec.agent, exec.callId)
       appendImageReceipt(exec.agent, runningReceipt(exec.callId, operation, refs, parentSessionId))
       let ambiguousDispatch = false
       let started

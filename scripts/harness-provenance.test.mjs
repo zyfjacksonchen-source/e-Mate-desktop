@@ -9,6 +9,7 @@ import test from 'node:test'
 
 import {
   assertExactOccurrence,
+  assertNativeAgentLoop,
   assertHarnessSource,
   assertHarnessSourceClean,
   DESKTOP_OVERLAYS,
@@ -288,4 +289,14 @@ test('generated Vite configuration resolves the pinned native aliases and the pr
     const alias = config.resolve.alias.find(alias => alias.find instanceof RegExp && alias.find.test('@deepseek-ai/dsh-client-ui-primitives'))
     assert(alias.replacement.endsWith('packages/client/ui-primitives/src/index.ts'))
   } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('rejects missing, modified or overlaid Agent Loop packages at release verification', () => {
+  const native = { name: '@deepseek-ai/dsh-agent-loop', source_lib_sha256: 'native', resolved_lib_sha256: 'native', adapter: null, overlay: null }
+  assert.doesNotThrow(() => assertNativeAgentLoop([native]))
+  for (const records of [[], [{ ...native, resolved_lib_sha256: 'modified' }],
+    [{ ...native, adapter: { path: 'image-loop-adapter' } }],
+    [{ ...native, overlay: { path: 'vision.patch' } }]]) {
+    assert.throws(() => assertNativeAgentLoop(records), /Agent Loop must exactly match/)
+  }
 })

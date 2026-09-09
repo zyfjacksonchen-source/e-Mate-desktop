@@ -14,7 +14,7 @@ const CHAT_MODELS = new Map([
   ['gpt-6-astra', { reasoning_effort: 'low' }],
   ['deepseek', { reasoning_effort: 'max' }],
 ])
-const IMAGE_MODELS = new Set(['gpt-image2.5-flare'])
+const IMAGE_MODELS = new Set(['gpt-image-2.5-flare'])
 const MANAGED_MODELS = new Set([...CHAT_MODELS.keys(), ...IMAGE_MODELS])
 const SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/u
 const RECEIPT = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/u
@@ -338,7 +338,7 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
     || typeof value.default_chat_model_id !== 'string'
     || !CHAT_MODELS.has(value.default_chat_model_id)
     || value.default_chat_reasoning_effort !== CHAT_MODELS.get(value.default_chat_model_id).reasoning_effort
-    || value.image_primary_model_id !== 'gpt-image2.5-flare'
+    || value.image_primary_model_id !== 'gpt-image-2.5-flare'
     || !Array.isArray(value.allowed_model_ids)
     || value.allowed_model_ids.length < 1
     || value.allowed_model_ids.length > MANAGED_MODELS.size
@@ -395,11 +395,11 @@ function decodeDurableModelPolicy(value, accountSubject, now) {
   const migrateImage = current.image_primary_model_id === 'gpt-image-2-pro'
   return validateModelPolicy({
     ...current,
-    image_primary_model_id: migrateImage ? 'gpt-image2.5-flare' : current.image_primary_model_id,
+    image_primary_model_id: migrateImage ? 'gpt-image-2.5-flare' : current.image_primary_model_id,
     allowed_model_ids: Array.isArray(current.allowed_model_ids)
       ? current.allowed_model_ids
         .filter(model => fallback === undefined || !['gpt-image-2', 'doubao-seed-2-0-pro-260215'].includes(model))
-        .map(model => migrateImage && model === 'gpt-image-2-pro' ? 'gpt-image2.5-flare' : model)
+        .map(model => migrateImage && model === 'gpt-image-2-pro' ? 'gpt-image-2.5-flare' : model)
       : current.allowed_model_ids,
     default_chat_reasoning_effort: current.default_chat_reasoning_effort === 'medium'
       ? managedReasoningEffort(current.default_chat_model_id, current.default_chat_reasoning_effort)
@@ -408,7 +408,7 @@ function decodeDurableModelPolicy(value, accountSubject, now) {
 }
 
 function policyModelId(model) {
-  return model === 'deepseek-v4-flash' ? 'deepseek' : model
+  return model === 'deepseek-v4-flash' || model === 'deepseek-v4-flash-vision-exp' ? 'deepseek' : model
 }
 
 function allowed(policy, model) {
@@ -418,7 +418,7 @@ function allowed(policy, model) {
 // Product display order is independent of policy defaults and session selection.
 const MODEL_DISPLAY_ORDER = [
   'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
-  'gpt-image2.5-flare',
+  'gpt-image-2.5-flare',
 ]
 function modelDisplayRank(id) {
   const index = MODEL_DISPLAY_ORDER.indexOf(policyModelId(id))
@@ -531,6 +531,12 @@ async function matchesRuntimeProjection(ctx, marker, policy) {
       default_model_sha256: marker.default_model_sha256,
       credential_refs: marker.credential_refs,
     }))) return false
+  // Old text-only runtime caches cannot attest the new multimodal DeepSeek route.
+  if (policy.allowed_model_ids.includes('deepseek')) {
+    const provider = ctx.settings.get('llm-pi-ai')?.providers?.['e-mate-enterprise-deepseek']
+    const model = provider?.models?.find(model => model.id === 'deepseek')
+    if (provider?.api !== 'openai-responses' || !model?.input?.includes('image')) return false
+  }
   const refs = await presentRuntimeCredentialRefs(ctx)
   return canonicalJson(refs) === canonicalJson(marker.credential_refs)
     && marker.credential_refs.includes(SEARCH_CREDENTIAL_REF) === (marker.search_status === 'granted')
@@ -576,7 +582,7 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
       || !Array.isArray(model.input)
       || !Number.isSafeInteger(model.contextWindow)
       || !Number.isSafeInteger(model.maxTokens)
-      || model.id === 'deepseek' && model.upstreamModelId !== 'deepseek'
+      || model.id === 'deepseek' && (model.upstreamModelId !== 'deepseek' || !model.input.includes('text') || !model.input.includes('image'))
       || model.credentialRef !== MODEL_SESSION_REF
       || !RUNTIME_REASONING.has(model.upstreamModelId)
       || model.api !== 'openai-responses') {
@@ -598,7 +604,7 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
     }
     provider.models.push({
       id: model.upstreamModelId,
-      name: model.upstreamModelId,
+      name: model.id === 'deepseek' ? model.label : model.upstreamModelId,
       contextWindow: model.contextWindow,
       maxTokens: model.maxTokens,
       input: [...model.input],
@@ -1063,7 +1069,7 @@ export async function apply(ctx, config = {}) {
     allowed_model_ids: z.array(z.enum([...MANAGED_MODELS])).min(1).max(MANAGED_MODELS.size),
     default_chat_model_id: z.enum([...CHAT_MODELS.keys()]),
     default_chat_reasoning_effort: z.enum(['max', 'medium', 'low']),
-    image_primary_model_id: z.literal('gpt-image2.5-flare'),
+    image_primary_model_id: z.literal('gpt-image-2.5-flare'),
     issued_at: z.iso.datetime(),
     expires_at: z.iso.datetime(),
     receipt_id: z.string().regex(RECEIPT),

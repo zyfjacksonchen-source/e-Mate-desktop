@@ -116,7 +116,7 @@ const imageLimits = {
 };
 const imageFact = (taskId: string, imageTraffic: InvocationFact['imageTraffic'] = 'batch', tenantId = 'tenant-a'): InvocationFact => ({
   tenantId, userId: 'user-a', taskId, traceId: taskId,
-  modelId: 'gpt-image2.5-flare', providerId: 'image-provider',
+  modelId: 'gpt-image-2.5-flare', providerId: 'image-provider',
   requestDigest: 'd'.repeat(43), routeFingerprint: 'f'.repeat(43),
   ...(imageTraffic === undefined ? {} : { imageTraffic }),
 });
@@ -124,7 +124,7 @@ const imageUsage = (fact: InvocationFact) => ({
   ...fact, providerResponseId: `result-${fact.taskId}`,
   inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0,
 });
-const imagePrincipal = (tenantId = 'tenant-a') => ({ tenantId, userId: 'user-a', modelIds: ['gpt-image2.5-flare'] });
+const imagePrincipal = (tenantId = 'tenant-a') => ({ tenantId, userId: 'user-a', modelIds: ['gpt-image-2.5-flare'] });
 const concurrencyDenied = (operation: Promise<unknown>) => assert.rejects(operation, (error: unknown) => {
   assert(error instanceof InvocationAdmissionError);
   assert.equal(error.code, 'TENANT_CONCURRENCY_LIMITED');

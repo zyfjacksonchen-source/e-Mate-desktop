@@ -57,3 +57,9 @@ Subagents execute development only inside their assigned work order and write se
 - Work in the named repository worktree, not `/Users/mac/e-mate` itself.
 - Never discard another worktree's uncommitted changes. Remove old worktrees only after proving them clean; build output and dependency caches are rebuildable.
 - Only the main agent may authorize integration, cleanup, or push. Before an authorized push, inspect `git status`, the actual diff, and the focused checks; never invent release evidence.
+
+## Current release direction: rc.7 and one tidychat plugin
+
+The user explicitly cancelled the 0.1.5 migration. Keep Harness 0.1.0-rc.7 at 4da69d7c3522ee51de12822c917c503a124f7a7d and the existing native dsh-desktop reference. The Agent Loop must remain unmodified; image/Vision capabilities use native plugin/Tool interfaces. Preserve existing image reference, edit routing, terminal deduplication and recovery fixes when selecting changes from the frozen migration tree.
+
+Use dsh-tidychat for both message-process folding and conversation navigation. Do not install a second owner for either function. Automatic older-history loading is disabled, including restoration of previous autoLoad=true settings; preserve the native manual load action. Project file browsing is a separate capability and is not removed as a substitute for conversation navigation. Build, install and release acceptance still require the existing native Desktop owners and dual-platform evidence.

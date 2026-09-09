@@ -238,7 +238,6 @@ the package names, versions, and licenses for transparency.
 | @img/sharp-libvips-darwin-arm64 | 1.3.2 | LGPL-3.0-or-later |
 | @img/sharp-libvips-darwin-x64 | 1.3.2 | LGPL-3.0-or-later |
 | @joplin/turndown-plugin-gfm | 1.0.67 | MIT |
-| @kelearns/dsh-navigation-bar | 0.2.1 | MIT |
 | @koromix/koffi-darwin-arm64 | 3.1.5 | MIT |
 | @koromix/koffi-darwin-x64 | 3.1.5 | MIT |
 | @larksuite/cli | 1.0.88 | MIT |

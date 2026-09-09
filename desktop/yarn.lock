@@ -4155,7 +4155,6 @@ __metadata:
     "@deepseek-ai/dsh-workspace": "npm:0.1.0-rc.7"
     "@deepseek-ai/schemastery": "npm:3.18.1"
     "@electron/asar": "npm:3.4.1"
-    "@kelearns/dsh-navigation-bar": "npm:0.2.1"
     "@larksuite/cli": "npm:1.0.88"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
@@ -4721,17 +4720,6 @@ __metadata:
     "@jridgewell/resolve-uri": "npm:^3.1.0"
     "@jridgewell/sourcemap-codec": "npm:^1.4.14"
   checksum: 10c0/4b30ec8cd56c5fd9a661f088230af01e0c1a3888d11ffb6b47639700f71225be21d1f7e168048d6d4f9449207b978a235c07c8f15c07705685d16dc06280e9d9
-  languageName: node
-  linkType: hard
-
-"@kelearns/dsh-navigation-bar@npm:0.2.1":
-  version: 0.2.1
-  resolution: "@kelearns/dsh-navigation-bar@npm:0.2.1"
-  peerDependencies:
-    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
-    react: ^18.2.0
-    react-dom: ^18.2.0
-  checksum: 10c0/90a5c908db034f6ad8f34d644766ed8ba5866d4bcf61f6d8720fffa10cedb92343a897ae6d5eb9403eec299f3e4468e733d56eb93b195b29331088183122352a
   languageName: node
   linkType: hard
 

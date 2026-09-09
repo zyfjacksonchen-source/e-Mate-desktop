@@ -646,3 +646,72 @@ export function chatCompletionsToResponsesStream(upstream: Response, options: Ch
   });
   return new Response(body, { headers: { 'content-type': 'text/event-stream; charset=utf-8' } });
 }
+
+/** Validate the native Chat wire without converting away reasoning/tool history. */
+export function nativeChatCompletionsRequest(value: JsonObject, model: string, maxTokens: number, allowImages: boolean, effort?: string): ChatCompletionsRequest {
+  exactKeys(value, new Set(['model', 'messages', 'stream', 'stream_options', 'thinking', 'reasoning_effort', 'tools', 'tool_choice', 'parallel_tool_calls', 'temperature', 'max_tokens', 'stop']), 'chat request');
+  if (value.stream !== true || !Array.isArray(value.messages) || value.messages.length === 0) throw new Error('Invalid chat request');
+  for (const entry of value.messages) {
+    const message = object(entry, 'chat message');
+    if (!['system', 'user', 'assistant', 'tool'].includes(String(message.role))) throw new Error('Invalid message role');
+    exactKeys(message, new Set(['role', 'content', 'reasoning_content', 'tool_calls', 'tool_call_id', 'name']), 'chat message');
+    if (Array.isArray(message.content)) {
+      if (message.role !== 'user') throw new Error('Invalid content role');
+      for (const part of message.content) {
+        const item = object(part, 'content part');
+        if (item.type === 'text') string(item.text, 'text');
+        else if (item.type === 'image_url') {
+          if (!allowImages) throw new Error('Image input unavailable');
+          string(object(item.image_url, 'image URL').url, 'image URL', 48 * 1024 * 1024);
+        }
+        else throw new Error('Unsupported content part');
+      }
+    } else if (!(message.role === 'assistant' && message.content === null)) string(message.content, 'content');
+    if (message.reasoning_content !== undefined) {
+      if (message.role !== 'assistant') throw new Error('Invalid reasoning role');
+      string(message.reasoning_content, 'reasoning content');
+    }
+    if (message.role === 'tool') string(message.tool_call_id, 'tool call id', 512);
+    if (message.tool_calls !== undefined) {
+      if (message.role !== 'assistant' || !Array.isArray(message.tool_calls)) throw new Error('Invalid tool calls');
+      for (const entry of message.tool_calls) {
+        const call = object(entry, 'tool call');
+        if (call.type !== 'function') throw new Error('Invalid tool type');
+        string(call.id, 'tool call id', 512);
+        const fn = object(call.function, 'tool function');
+        string(fn.name, 'tool name', 64); string(fn.arguments, 'tool arguments');
+      }
+    }
+  }
+  if (value.tools !== undefined) {
+    if (!Array.isArray(value.tools) || value.tools.length > 128) throw new Error('Invalid tools');
+    for (const entry of value.tools) {
+      const tool = object(entry, 'tool');
+      if (tool.type !== 'function') throw new Error('Invalid tool type');
+      const fn = object(tool.function, 'tool function');
+      if (!toolNamePattern.test(string(fn.name, 'tool name', 64))) throw new Error('Invalid tool name');
+      object(fn.parameters, 'tool parameters');
+    }
+  }
+  if (value.max_tokens !== undefined && (!Number.isSafeInteger(value.max_tokens) || Number(value.max_tokens) < 1)) throw new Error('Invalid max tokens');
+  if (value.temperature !== undefined && (typeof value.temperature !== 'number' || value.temperature < 0 || value.temperature > 2)) throw new Error('Invalid temperature');
+  if (value.stop !== undefined && (!Array.isArray(value.stop) || value.stop.length > 16 || value.stop.some(item => typeof item !== 'string'))) throw new Error('Invalid stop');
+  if (value.thinking !== undefined && !['enabled', 'disabled'].includes(String(object(value.thinking, 'thinking').type))) throw new Error('Invalid thinking');
+  if (value.reasoning_effort !== undefined && !['low', 'high', 'max'].includes(String(value.reasoning_effort))) throw new Error('Invalid reasoning effort');
+  const disabledThinking = value.thinking !== undefined && object(value.thinking, 'thinking').type === 'disabled';
+  const { reasoning_effort: _requestedEffort, ...request } = value;
+  return { body: JSON.stringify({ ...request, model, stream_options: { include_usage: true }, max_tokens: Math.min(Number(value.max_tokens ?? maxTokens), maxTokens),
+    ...(disabledThinking ? {} : effort ? { thinking: { type: 'enabled' }, reasoning_effort: effort } : value.reasoning_effort === undefined ? {} : { reasoning_effort: value.reasoning_effort }),
+  }), tools: new Map() };
+}
+
+/** Only normalize accounting metadata; native Chat chunks remain byte-for-byte on the wire. */
+export function chatCompletionUsageEvent(value: unknown): JsonObject | undefined {
+  const chunk = object(value, 'chat completion chunk');
+  if (chunk.error !== undefined) throw new Error('Upstream chat completion failed');
+  if (chunk.object !== 'chat.completion.chunk' || !Array.isArray(chunk.choices) || chunk.choices.length > 1) throw new Error('Invalid chat completion chunk');
+  string(chunk.id, 'provider response id', 512);
+  if (chunk.choices.length === 1 && object(chunk.choices[0], 'chat choice').index !== 0) throw new Error('Invalid chat choice index');
+  if (chunk.usage === undefined || chunk.usage === null) return undefined;
+  return { type: 'response.completed', response: { id: string(chunk.id, 'provider response id', 512), status: 'completed', usage: responsesUsage(chunk.usage) } };
+}

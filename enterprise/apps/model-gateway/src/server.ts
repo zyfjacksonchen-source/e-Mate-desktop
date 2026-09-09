@@ -11,7 +11,7 @@ import {
 } from '@e-mate/admin-contract';
 import { ConsentStoreError, type ConsentStore } from '@e-mate/consent-store';
 import { parseTaskEventInput, type TaskEventInput } from '@e-mate/monitoring-contract';
-import { chatCompletionsToResponsesStream, responsesToChatCompletionsRequest } from './chat-completions-adapter.ts';
+import { chatCompletionsToResponsesStream, responsesToChatCompletionsRequest, nativeChatCompletionsRequest, chatCompletionUsageEvent } from './chat-completions-adapter.ts';
 import {
   createImageObservation,
   imageFailureCode,
@@ -72,9 +72,11 @@ export type ModelGatewayRoute = {
   contextWindow: number;
   maxTokens: number;
   remoteCompactionV2?: boolean;
+  nativeChatCompletions?: true;
 };
 
-const fixedReasoningEffort = (routeId: string): 'high' | 'medium' => (routeId === 'gpt-5.6-luna' ? 'high' : 'medium');
+const fixedReasoningEffort = (routeId: string): 'high' | 'medium' | 'low' =>
+  (routeId === 'gpt-5.6-luna' ? 'high' : routeId === 'gpt-6-astra' ? 'low' : 'medium');
 
 const managedCodexModelIds = new Set([
   'gpt-5.6-luna',
@@ -1585,10 +1587,11 @@ function codexTraceId(identity: ModelGatewayPrincipal, taskId: string, upstreamB
 function validModelsQuery(url: URL): boolean {
   if (!url.search) return true;
   const entries = [...url.searchParams.entries()];
-  return (
-    entries.length === 1 &&
-    entries[0]?.[0] === 'client_version' &&
-    (url.pathname === '/v1/runtime-models' || /^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/.test(entries[0][1]))
+  if (new Set(entries.map(([key]) => key)).size !== entries.length) return false;
+  return entries.every(([key, value]) =>
+    key === 'client_version'
+      ? url.pathname === '/v1/runtime-models' || /^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/.test(value)
+      : key === 'capabilities' && url.pathname === '/v1/runtime-models' && value === 'responses-multimodal'
   );
 }
 
@@ -1630,6 +1633,13 @@ function validateRoute(route: ModelGatewayRoute): void {
     (route.id === 'gpt-6-astra' &&
       (route.reasoning !== true || route.upstreamModelId !== 'gpt-6-astra' ||
         (route.apiMode !== undefined && route.apiMode !== 'responses'))) ||
+    // The multimodal candidate uses the native Responses contract; legacy
+    // Chat routes remain accepted for clients already on that protocol.
+    (route.id === 'deepseek' && route.upstreamModelId === 'deepseek-v4-flash-vision-exp' &&
+      (route.apiMode !== 'responses' || route.nativeChatCompletions !== true || route.reasoning !== true ||
+        !route.input.includes('text') || !route.input.includes('image'))) ||
+    (route.nativeChatCompletions !== undefined &&
+      (route.nativeChatCompletions !== true || route.apiMode !== 'responses')) ||
     route.input.length < 1 ||
     route.input.length > 2 ||
     new Set(route.input).size !== route.input.length ||
@@ -1648,8 +1658,8 @@ function validateRoute(route: ModelGatewayRoute): void {
     (route.remoteCompactionV2 === true &&
       (route.id !== 'gpt-5.6-sol' || route.apiMode === 'chat-completions' || route.apiMode === 'images-generations')) ||
     (route.apiMode === 'images-generations' &&
-      (route.id !== 'gpt-image2.5-flare' ||
-        route.upstreamModelId !== 'gpt-image2.5-flare' ||
+      (route.id !== 'gpt-image-2.5-flare' ||
+        route.upstreamModelId !== 'gpt-image-2.5-flare' ||
         route.reasoning !== false ||
         route.input.length !== 1 ||
         route.input[0] !== 'text'))
@@ -1670,6 +1680,7 @@ function fingerprintRoute(route: ModelGatewayRoute): string {
         providerId: route.providerId,
         cost: route.cost,
         remoteCompactionV2: route.remoteCompactionV2 === true,
+        ...(route.nativeChatCompletions === true ? { nativeChatCompletions: true } : {}),
       })
     )
     .digest('base64url');
@@ -1874,7 +1885,7 @@ function usageCost(
   );
 }
 
-export function inspectSseFrame(text: string): {
+export function inspectSseFrame(text: string, nativeChat = false): {
   done: boolean;
   terminal: boolean;
   usage?: NonNullable<ReturnType<typeof parseCompletedUsage>>;
@@ -1888,7 +1899,7 @@ export function inspectSseFrame(text: string): {
   if (data === '[DONE]') return { done: true, terminal: true };
   if (!data) return { done: false, terminal: false };
   const event = JSON.parse(data) as unknown;
-  const usage = parseCompletedUsage(event);
+  const usage = parseCompletedUsage(nativeChat ? chatCompletionUsageEvent(event) : event);
   return {
     done: false,
     terminal: Boolean(usage),
@@ -2221,6 +2232,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           throw new HttpError(400, 'UNSUPPORTED_CLIENT_VERSION', 'Unsupported runtime models client version');
         }
         const effectiveClientVersion = clientVersion ?? '2.0.12';
+        const multimodalResponses = url.searchParams.get('capabilities') === 'responses-multimodal';
         const legacyClient = effectiveClientVersion !== '2.0.17' && effectiveClientVersion !== '2.0.18';
         if (legacyClient && (identity.sessionId === undefined || !modelSessionJwtPattern.test(modelSessionToken))) {
           throw new HttpError(403, 'MODEL_SESSION_REQUIRED', 'A model session is required');
@@ -2266,10 +2278,13 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
               (await modelRouteEnabled(options.tenantModelRoutePolicy, identity.tenantId, route.id))
                 ? {
                     id: route.id,
-                    apiMode: runtimeApiMode(route),
-                    upstreamModelId: route.upstreamModelId,
+                    // Older clients validate this metadata contract literally. This
+                    // view does not change the single execution route/model.
+                    ...(route.id === 'deepseek' && route.upstreamModelId === 'deepseek-v4-flash-vision-exp' &&
+                      route.nativeChatCompletions === true && !multimodalResponses
+                      ? { apiMode: 'chat-completions' as const, upstreamModelId: 'deepseek-v4-flash', input: ['text'] as Array<'text' | 'image'> }
+                      : { apiMode: runtimeApiMode(route), upstreamModelId: route.upstreamModelId, input: route.input }),
                     label: route.label,
-                    input: route.input,
                     reasoning: route.reasoning,
                     contextWindow: route.contextWindow,
                     maxTokens: route.maxTokens,
@@ -2371,7 +2386,8 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         });
         return;
       }
-      if (url.pathname === '/v1/responses') {
+      if (url.pathname === '/v1/responses' || url.pathname === '/v1/chat/completions') {
+        const nativeChat = url.pathname === '/v1/chat/completions';
         if (request.method !== 'POST') return method(response, 'POST');
         const initialScope = responseRequestScope(request);
         const declared = request.headers['content-length'];
@@ -2397,13 +2413,13 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             .digest('base64url')}`;
         const scope = { ...initialScope, taskId };
         const route = typeof body.model === 'string' ? routes.get(body.model) : undefined;
-        if (!route || route.apiMode === 'images-generations' || !principalAllowsRoute(identity, route.id)) {
+        if (!route || route.apiMode === 'images-generations' || (nativeChat && route.apiMode !== 'chat-completions' && route.nativeChatCompletions !== true) || !principalAllowsRoute(identity, route.id)) {
           throw new HttpError(403, 'MODEL_ACCESS_DENIED', 'Model is not available');
         }
         if (!(await modelRouteEnabled(options.tenantModelRoutePolicy, identity.tenantId, route.id))) {
           throw new HttpError(403, 'MODEL_ACCESS_DENIED', 'Model is not available');
         }
-        if (body.stream !== true || body.store !== false) {
+        if (body.stream !== true || (!nativeChat && body.store !== false)) {
           throw new HttpError(400, 'INVALID_MODEL_REQUEST', 'Invalid model request');
         }
         const requiredReasoningEffort =
@@ -2414,7 +2430,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
               : route.id === 'gpt-6-astra'
                 ? 'low'
                 : route.id === 'gpt-5.6-sol' ? 'medium' : undefined;
-        const remoteCompaction = isRemoteCompactionRequest(body);
+        const remoteCompaction = !nativeChat && isRemoteCompactionRequest(body);
         if (remoteCompaction && route.remoteCompactionV2 !== true) {
           throw new HttpError(403, 'REMOTE_COMPACTION_UNAVAILABLE', 'Remote compaction is not available');
         }
@@ -2435,7 +2451,9 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         let chatRequest: ReturnType<typeof responsesToChatCompletionsRequest> | undefined;
         try {
           chatRequest =
-            route.apiMode === 'chat-completions'
+            nativeChat
+              ? nativeChatCompletionsRequest(body, route.upstreamModelId, route.maxTokens, route.input.includes('image'), requiredReasoningEffort)
+              : route.apiMode === 'chat-completions'
               ? responsesToChatCompletionsRequest(
                   managedBody,
                   route.upstreamModelId,
@@ -2624,7 +2642,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           observeRejection(!(upstream.headers.get('content-type') ?? '').includes('text/event-stream') ? 'unexpected_content_type' : 'missing_body');
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Model provider rejected the request');
         }
-        if (chatRequest) {
+        if (chatRequest && !nativeChat) {
           upstream = chatCompletionsToResponsesStream(upstream, {
             responseId: `chat-${prepared.invocationId}`,
             tools: chatRequest.tools,
@@ -2652,7 +2670,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           const frames = pending.split(/\r?\n\r?\n/);
           pending = frames.pop() ?? '';
           for (const frame of frames) {
-            const inspected = inspectSseFrame(frame);
+            const inspected = inspectSseFrame(frame, nativeChat);
             if (inspected.usage) {
               if (sawTerminal) throw new Error('Duplicate completed response');
               sawTerminal = true;
@@ -2671,7 +2689,8 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         }
         pending += decoder.decode();
         if (pending.trim()) {
-          const inspected = inspectSseFrame(pending);
+          if (nativeChat) throw new Error('Truncated native Chat SSE frame');
+          const inspected = inspectSseFrame(pending, nativeChat);
           if (inspected.usage) {
             if (sawTerminal) throw new Error('Duplicate completed response');
             sawTerminal = true;
@@ -2687,7 +2706,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             await writeChunk(response, pending);
           }
         }
-        if (!completed || !terminalFrame) {
+        if (!completed || !terminalFrame || (nativeChat && !doneFrame)) {
           throw new Error('Completed usage was unavailable');
         }
         await options.usageStore.complete(prepared.invocationId, {

@@ -240,6 +240,7 @@ try {
   }
   const graph = JSON.parse(bootMatch[1])
   const ids = new Set(graph.entries.map(entry => entry.id))
+  if (ids.has('@kelearns/dsh-navigation-bar')) throw new Error('retired navigation plugin is still active')
   for (const id of [
     '@e-mate/desktop',
     '@e-mate/dsh-plugin-file-import',
@@ -247,7 +248,7 @@ try {
     '@e-mate/dsh-plugin-skill-hub',
     '@e-mate/dsh-plugin-genui',
     '@e-mate/dsh-plugin-vision-toolkit',
-    '@kelearns/dsh-navigation-bar',
+    '@e-mate/dsh-plugin-tidychat',
     '@deepseek-ai/dsh-client-ui-conversation',
     '@deepseek-ai/dsh-client-ui-sidebar',
     ...(prepared.mode === 'compatibility' ? ['@deepseek-ai/dsh-client-ui-layout'] : []),

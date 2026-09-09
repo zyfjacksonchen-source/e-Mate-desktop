@@ -2,7 +2,6 @@
 // packages: assemblers apply these transforms to their copied client bundles.
 export const CONVERSATION_ADAPTER_PATH = 'scripts/harness-conversation-adapter.mjs'
 export const CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
-export const NAVIGATION_PACKAGE = '@kelearns/dsh-navigation-bar'
 
 function replaceOnce(source, before, after, owner, version = 'rc.7') {
   const count = source.split(before).length - 1
@@ -158,12 +157,26 @@ const CANVAS_FRAME_CSS = '[data-conversation-scroll]:has([data-emate-active-view
   + '[data-conversation-scroll] [data-emate-active-view="e-mate-canvas"]{display:flex;flex-direction:column;flex:1 1 0;min-height:0;min-width:0;overflow:hidden}'
   + '[data-emate-active-view="e-mate-canvas"]>[data-slot="conversation.view"]{display:flex;flex:1;min-height:0;min-width:0}';
 
-/** Desktop's copied navigation 0.2.1 bundle: one projection for AX and hover. */
-export function adaptNavigationSource(source) {
-  source = replaceOnce(source, '      const textOfBlocks = (blocks) => {',
-    `${[emateDraftFiles, emateImportedText, emateFileDisplay].map(fn => fn.toString()).join('\n')}\n      const textOfBlocks = (blocks) => {`, 'navigation/helpers', '0.2.1')
-  return replaceOnce(source, '            const userText = textOfBlocks(data.content)\n',
-    '            const userText = emateFileDisplay(textOfBlocks(data.content), data.source)\n', 'navigation/user-text', '0.2.1')
+// Presentation-only: the native per-Turn Tool tree remains the sole output index.
+function emateAssistantImageBlocks(snapshot, node) {
+  if (!node.data.blocks.some(block => block.kind === 'image')) return node.data.blocks;
+  const turn = node.location.kind === 'turn' || node.location.kind === 'step' ? node.location.turn : undefined;
+  if (turn === undefined) return node.data.blocks;
+  const ids = new Set();
+  const visit = block => {
+    if ('kind' in block && !block.isError) for (const part of block.content) {
+      if (part.type === 'image') ids.add(part.attachment.attachmentId);
+    }
+    for (const child of block.subCalls ?? []) visit(child);
+  };
+  for (const key of snapshot.chat.locations.getTurn(turn.turn)) {
+    const item = snapshot.chat.nodes.get(key);
+    if (item?.kind === 'tool-call') visit(item.data.root);
+  }
+  return node.data.blocks.filter(block => block.kind !== 'image' || !ids.has(block.attachment.attachmentId));
+}
+function emateSameAssistantBlocks(left, right) {
+  return left.length === right.length && left.every((block, index) => block === right[index]);
 }
 
 /** Apply exact compiled seams from packages/client/ui-conversation/src/client. */
@@ -175,6 +188,11 @@ export function adaptHarnessConversationSource(source) {
   // Every native file chip and receipt-derived prose link shares this opener.
   change('workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => {});',
     'workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => { const scope = sessions.scope(sessionId); if (scope) ctx.conversation.input.for(scope).notify("error", "文件不存在、已移出项目或无法打开，请检查原产物后重试。"); });', 'artifacts/open-error')
+
+  change('function AssistantNodeView({ node, useTurnData, openFile, loadImage, fileMentions, t }) {',
+    'function AssistantNodeView({ node, useSession, useTurnData, openFile, loadImage, fileMentions, t }) {\n const imageBlocks = useSession(snapshot => emateAssistantImageBlocks(snapshot, node), emateSameAssistantBlocks);', 'images/assistant-owner');
+  change('blocks: data.blocks,\n\t\t\t\tstreaming: data.status === "running",',
+    'blocks: imageBlocks,\n\t\t\t\tstreaming: data.status === "running",', 'images/assistant-echo');
 
   // Native Header still commits via its own scoped actions; failed saves do
   // not change view, and pending work cannot redirect a newer session/click.
@@ -192,7 +210,7 @@ export function adaptHarnessConversationSource(source) {
   change('\t\t\ttag.textContent = css$6;', '\t\t\ttag.textContent = css$6 + ' + JSON.stringify(CANVAS_FRAME_CSS) + ';', 'canvas/frame-css')
 
   // stores.ts: extend the existing per-session dsh.conversation.chat record.
-  change('\t\tfunction createChatStore() {', `${[emateDraftFiles, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView].map(fn => fn.toString()).join('\n')}\n\t\tfunction createChatStore() {`, 'stores/helper')
+  change('\t\tfunction createChatStore() {', `${[emateDraftFiles, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView, emateAssistantImageBlocks, emateSameAssistantBlocks].map(fn => fn.toString()).join('\n')}\n\t\tfunction createChatStore() {`, 'stores/helper')
   change('\t\t\t\t\tdraft: "",\n\t\t\t\t\tview: null,', '\t\t\t\t\tdraft: "",\n\t\t\t\t\tfileRefs: [],\n\t\t\t\t\timageRefs: [],\n\t\t\t\t\tview: null,', 'stores/init')
   change('\t\t\t\t\tsetDraft: (d, text) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t},', '\t\t\t\t\tsetDraft: (d, text, fileRefs = [], imageRefs = []) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t\td.fileRefs = fileRefs;\n\t\t\t\t\t\td.imageRefs = imageRefs;\n\t\t\t\t\t},', 'stores/mirror-action')
 

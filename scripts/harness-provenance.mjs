@@ -24,6 +24,15 @@ import { adaptHarnessSlotErrorSource, SLOT_ERROR_PACKAGE, SLOT_ERROR_ADAPTER_PAT
 
 export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
 export const HARNESS_VERSION = '0.1.0-rc.7'
+
+export function assertNativeAgentLoop(packages) {
+  const loops = packages.filter(value => value.name === '@deepseek-ai/dsh-agent-loop')
+  if (loops.length === 0 || loops.some(value => value.overlay !== null
+    || value.adapter !== null || !value.source_lib_sha256
+    || value.source_lib_sha256 !== value.resolved_lib_sha256)) {
+    throw new Error('Desktop Agent Loop must exactly match the pinned native package without adapters or overlays')
+  }
+}
 export const HARNESS_FRONTEND_PACKAGE = '@deepseek-ai/dsh-web-frontend'
 
 const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/updated", refresh);'
@@ -420,6 +429,7 @@ function desktopProvenance(root, receipt) {
     })
   }
   if (packages.length === 0) throw new Error('Desktop resolved no pinned Harness packages')
+  assertNativeAgentLoop(packages)
   const modelPackages = targets.filter(value => value.manifest.name === '@deepseek-ai/dsh-client-ui-model-selection')
   if (modelPackages.length === 0 || packages.some(value => value.name === '@deepseek-ai/dsh-client-ui-model-selection' && value.overlay !== null)) {
     throw new Error('Desktop native model-directory package is missing or overlaid')

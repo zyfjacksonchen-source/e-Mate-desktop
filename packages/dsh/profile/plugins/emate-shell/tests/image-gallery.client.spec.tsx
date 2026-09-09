@@ -1411,6 +1411,30 @@ describe('native typed tool image outputs', () => {
     expect(merged).toEqual([completed])
   })
 
+  it.each(['failed', 'unknown', 'needs-review', 'completed'])('keeps strict %s receipts authoritative when the assistant echoes a prior successful tool image', status => {
+    const adapter = readFileSync(resolve('../../../../../scripts/harness-conversation-adapter.mjs'), 'utf8')
+    const start = adapter.indexOf('function emateAssistantImageBlocks(')
+    const end = adapter.indexOf('function emateSameAssistantBlocks(', start)
+    const filter = new Function(adapter.slice(start, end) + '; return emateAssistantImageBlocks')()
+    const original = image('a')
+    const strict = parseImageOutputReceipt(receipt({ call_id: 'generated', revision: 3, status,
+      content: status === 'completed' || status === 'needs-review' ? [original] : [],
+      ...status === 'failed' || status === 'unknown' ? { failure_code: status } : {},
+    }))!
+    expect(strict).not.toBeNull()
+    const rows = [native('generated', [original]), hidden(strict, 'latest')]
+    const blocks = [{ kind: 'text', text: '保留说明' }, { kind: 'image', attachment: original.attachment }]
+    const assistant = { location: rows[0].location, data: { blocks } }
+    const nodes = new Map(rows.map((row, index) => [String(index), row]))
+    const filtered = filter({ chat: { nodes, locations: { getTurn: () => [...nodes.keys()] } } }, assistant)
+    const terminal = terminalImageItems(rows, ['generated'], 1)
+    expect(filtered).toEqual([blocks[0]])
+    expect(terminal).toEqual([strict])
+    const visible = [...filtered.filter((block: any) => block.kind === 'image'), ...terminal.filter(item => item.attachment)]
+    expect(visible).toHaveLength(status === 'completed' || status === 'needs-review' ? 1 : 0)
+    expect(terminal[0].status).toBe(status === 'needs-review' ? 'review-required' : status === 'completed' ? 'completed' : 'failed')
+  })
+
   it('displays native images immediately through MessageImage and retains them across retries, cancellation and session changes', async () => {
     nativeImageRendering.enabled = true
     const nodes = [native('native-call', [image('a'), image('b')])]

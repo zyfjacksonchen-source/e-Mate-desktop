@@ -42,6 +42,7 @@ import {
 } from './image-batch-client.ts'
 import {
   ImageBatchProgress,
+  exactPreview,
   type ImageBatchRetryCall,
   type ImageBatchRetryResult,
   type ImageBatchRetryTask,
@@ -1111,7 +1112,7 @@ function ArtifactTerminalBody({
   const root = summary?.cwd
   const ambiguousBatch = (matched.batchCallIds?.length ?? 0) > 0 && batches.length === 0
   const includeChildren = !ambiguousBatch && (matched.childSessionIds.length > 0 || matched.foregroundWindow !== undefined)
-  const sessions = useSessions(value => includeChildren ? value : undefined)
+  const sessions = useSessions(value => includeChildren || batches.length > 0 ? value : undefined)
   // rc.7 readers are live objects: compare the actual indexed nodes, not store identity.
   const nodes = useSession(value => value.chat.locations.getTurn(turn.turn).flatMap(key => {
     const node = value.chat.nodes.get(key)
@@ -1121,16 +1122,22 @@ function ArtifactTerminalBody({
     ? settledChildSessions(value.chat.nodes.values()) : NO_BATCH_CHILD_IDS,
   (left, right) => left.size === right.size && [...left].every(id => right.has(id)))
   const items = useMemo(
-    () => namedGalleryImageItems([
-      ...terminalImageItems(nodes, matched.callIds, turn.turn),
+    () => {
+      // A batch card owns the image only after its exact child receipt is available.
+      const batchImages = new Set(sessions === undefined ? [] : batches.flatMap(batch =>
+        batch.tasks.flatMap(task => exactPreview(sessions, task)?.attachment.attachmentId ?? [])))
+      return namedGalleryImageItems([
+      ...terminalImageItems(nodes, matched.callIds, turn.turn).filter(item =>
+        item.attachment === undefined || !batchImages.has(item.attachment.attachmentId)),
       ...sessions === undefined ? [] : terminalChildImageItems(
         childGalleryImageItems(sessions, sessionId,
           matched.foregroundWindow === undefined ? new Set(matched.childSessionIds) : undefined,
         ).filter(item => item.source === undefined || !batchChildIds.has(item.source.sessionId)),
         matched.childSessionIds, matched.foregroundWindow, settled,
       ),
-    ], title ?? ''),
-    [batchChildIds, matched.callIds, matched.childSessionIds, matched.foregroundWindow, nodes, sessionId, sessions, settled, title, turn.turn],
+    ], title ?? '')
+    },
+    [batches, batchChildIds, matched.callIds, matched.childSessionIds, matched.foregroundWindow, nodes, sessionId, sessions, settled, title, turn.turn],
   )
   const seenFailures = useRef(new Set<string>())
   const existingBytes = draftBytes(input.imageIds)

@@ -64,7 +64,7 @@ test('issued response matches desktop contract and model token authorizes consen
       userId: 'user-a',
       displayName: '测试用户',
       roles: ['MEMBER'],
-      modelIds: ['gpt-5.6-luna', 'gpt-image2.5-flare'],
+      modelIds: ['gpt-5.6-luna', 'gpt-image-2.5-flare'],
       weeklyTokenLimit: 50_000,
     },
     'session-1',
@@ -94,7 +94,7 @@ test('issued response matches desktop contract and model token authorizes consen
   assert.equal(modelJwt.claims.aud, 'e-mate-model-gateway');
   assert.deepEqual(modelJwt.claims.scopes, ['models:read', 'responses:create', 'usage:read']);
   assert.deepEqual(modelJwt.claims.roles, ['MEMBER']);
-  assert.deepEqual(modelJwt.claims.modelIds, ['gpt-5.6-luna', 'gpt-image2.5-flare']);
+  assert.deepEqual(modelJwt.claims.modelIds, ['gpt-5.6-luna', 'gpt-image-2.5-flare']);
   assert.equal(modelJwt.claims.sid, 'session-1');
   const authenticateModelGateway = createSessionTokenVerifier({
     issuer: 'e-mate-auth',
@@ -106,7 +106,7 @@ test('issued response matches desktop contract and model token authorizes consen
     tenantId: 'tenant-a',
     userId: 'user-a',
     roles: ['MEMBER'],
-    modelIds: ['gpt-5.6-luna', 'gpt-image2.5-flare'],
+    modelIds: ['gpt-5.6-luna', 'gpt-image-2.5-flare'],
     sessionId: 'session-1',
   });
 });

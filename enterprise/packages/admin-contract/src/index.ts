@@ -13,7 +13,7 @@ export const DEFAULT_ENABLED_MODEL_ROUTE_IDS = [
   'gpt-5.6-luna',
   'gpt-5.6-sol',
   'deepseek',
-  'gpt-image2.5-flare',
+  'gpt-image-2.5-flare',
 ] as const;
 
 const ADMIN_USER_UPDATE_STATUSES = ['PENDING_APPROVAL', 'ACTIVE', 'SUSPENDED'] as const;

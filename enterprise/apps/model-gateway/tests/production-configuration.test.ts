@@ -321,3 +321,25 @@ windowsTest('windows secret ACL inspection fails closed when the platform tool i
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('native Chat capability is explicit and only valid for Responses routes', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'e-mate-native-chat-'));
+  const file = join(directory, 'gateway.json');
+  try {
+    for (const capability of [undefined, true]) {
+      writeFileSync(file, JSON.stringify(configuration({ routes: [productionRoute({ apiMode: 'responses', ...(capability ? { nativeChatCompletions: true } : {}) })] })));
+      // Route validation succeeds; the existing fixture intentionally has relative secret paths.
+      assert.throws(() => loadProductionConfiguration(file), /TLS certificate path must be absolute/);
+    }
+    for (const override of [
+      { apiMode: 'responses', nativeChatCompletions: false },
+      { apiMode: 'responses', nativeChatCompletions: 'true' },
+      { apiMode: 'chat-completions', nativeChatCompletions: true },
+      { apiMode: 'images-generations', nativeChatCompletions: true },
+      { nativeChatCompletions: true },
+    ]) {
+      writeFileSync(file, JSON.stringify(configuration({ routes: [productionRoute(override)] })));
+      assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

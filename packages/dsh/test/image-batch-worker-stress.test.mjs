@@ -77,7 +77,7 @@ function controlledHarness({ outcome = () => 'completed', failTaskFlush } = {}) 
         return true
       },
     },
-    emateModelPolicy: { async assertModel(model) { assert.equal(model, 'gpt-image2.5-flare') } },
+    emateModelPolicy: { async assertModel(model) { assert.equal(model, 'gpt-image-2.5-flare') } },
     jobs: { get(id, owner) { const job = jobs.get(id); assert.equal(job?.ownerSession, owner.id); return job } },
     subagents: {
       getProvider() { return { inheritsParentContext: false, capabilities: { toolFilter: true, persona: true } } },

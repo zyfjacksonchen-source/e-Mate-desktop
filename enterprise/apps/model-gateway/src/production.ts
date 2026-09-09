@@ -545,6 +545,7 @@ function route(value: unknown): ProductionConfiguration['routes'][number] {
     [
       'id',
       ...(input.apiMode === undefined ? [] : ['apiMode']),
+      ...(input.nativeChatCompletions === undefined ? [] : ['nativeChatCompletions']),
       'upstreamModelId',
       'upstreamBaseUrl',
       ...(input.allowInsecureHttpUpstream === undefined ? [] : ['allowInsecureHttpUpstream']),
@@ -565,6 +566,10 @@ function route(value: unknown): ProductionConfiguration['routes'][number] {
   );
   const cost = record(input.cost, 'route cost');
   exact(cost, ['input', 'output', 'cacheRead', 'cacheWrite'], 'route cost');
+  if (input.nativeChatCompletions !== undefined &&
+    (input.nativeChatCompletions !== true || input.apiMode !== 'responses')) {
+    throw new Error('Invalid native Chat capability');
+  }
   if (input.remoteCompactionV2 !== undefined && typeof input.remoteCompactionV2 !== 'boolean') {
     throw new Error('Invalid remote compaction capability');
   }
@@ -604,6 +609,7 @@ function route(value: unknown): ProductionConfiguration['routes'][number] {
     contextWindow: input.contextWindow as number,
     maxTokens: input.maxTokens as number,
     ...(input.remoteCompactionV2 === true ? { remoteCompactionV2: true } : {}),
+    ...(input.nativeChatCompletions === true ? { nativeChatCompletions: true as const } : {}),
   };
 }
 

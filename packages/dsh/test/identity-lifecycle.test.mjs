@@ -84,6 +84,8 @@ async function loadModelPolicySource() {
     .replace("from './target-runtime.js'", `from '${new URL('../src/profile/target-runtime.ts', import.meta.url).href}'`)
     .replace("from './request-size.js'", `from '${new URL('../src/profile/request-size.ts', import.meta.url).href}'`)
     .replace('function decodeDurableModelPolicy(value, accountSubject, now)', 'export function decodeDurableModelPolicy(value, accountSubject, now)')
+    .replace('async function runtimeProjectionMarker(', 'export async function runtimeProjectionMarker(')
+    .replace('async function matchesRuntimeProjection(', 'export async function matchesRuntimeProjection(')
     .replace('function createService(ctx, table, projectionTable, quota)',
       'export function createService(ctx, table, projectionTable, quota)')
   const compiled = stripTypeScriptTypes(source, { mode: 'transform' })
@@ -752,7 +754,7 @@ test('image input contract trusts exact model metadata and preserves native atta
   assert.deepEqual(durable, before, 'capability resolution must never rewrite durable image blocks')
 })
 
-test('client and enterprise identity image policies expose only gpt-image2.5-flare without fallback', async () => {
+test('client and enterprise identity image policies expose only gpt-image-2.5-flare without fallback', async () => {
   const { validateModelPolicy } = await loadModelPolicySource()
   const { policyFor } = await loadEnterpriseProviderSource()
   const accountSubject = 'tenant-test:user-a'
@@ -760,16 +762,16 @@ test('client and enterprise identity image policies expose only gpt-image2.5-fla
     schema_version: 1,
     account_subject: accountSubject,
     revision: 1,
-    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image2.5-flare'],
+    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image-2.5-flare'],
     default_chat_model_id: 'gpt-5.6-luna',
     default_chat_reasoning_effort: 'max',
-    image_primary_model_id: 'gpt-image2.5-flare',
+    image_primary_model_id: 'gpt-image-2.5-flare',
     issued_at: new Date(NOW - 60_000).toISOString(),
     expires_at: new Date(NOW + 3_600_000).toISOString(),
     receipt_id: 'policy-receipt:test-user',
   }
   const policy = validateModelPolicy(rawPolicy, accountSubject, NOW)
-  assert.deepEqual(policy.allowed_model_ids.filter(id => id.startsWith('gpt-image')), ['gpt-image2.5-flare'])
+  assert.deepEqual(policy.allowed_model_ids.filter(id => id.startsWith('gpt-image')), ['gpt-image-2.5-flare'])
   assert.equal('image_fallback_upstream_model_id' in policy, false)
   assert.throws(() => validateModelPolicy({
     ...rawPolicy,
@@ -781,10 +783,10 @@ test('client and enterprise identity image policies expose only gpt-image2.5-fla
   }, accountSubject, NOW), /policy is invalid/u)
 
   const remembered = JSON.parse(stored())
-  remembered.session.modelGateway.allowedModelIds = ['gpt-5.6-luna', 'gpt-image2.5-flare', 'gpt-image-2']
+  remembered.session.modelGateway.allowedModelIds = ['gpt-5.6-luna', 'gpt-image-2.5-flare', 'gpt-image-2']
   const identityPolicy = policyFor(remembered, [{ id: 'gpt-5.6-luna' }])
-  assert.deepEqual(identityPolicy.allowed_model_ids, ['gpt-5.6-luna', 'gpt-image2.5-flare'])
-  assert.deepEqual(identityPolicy.allowed_model_ids.filter(id => id.startsWith('gpt-image')), ['gpt-image2.5-flare'])
+  assert.deepEqual(identityPolicy.allowed_model_ids, ['gpt-5.6-luna', 'gpt-image-2.5-flare'])
+  assert.deepEqual(identityPolicy.allowed_model_ids.filter(id => id.startsWith('gpt-image')), ['gpt-image-2.5-flare'])
   assert.equal('image_fallback_upstream_model_id' in identityPolicy, false)
 })
 
@@ -824,10 +826,10 @@ test('identity credential generation fences a late runtime projection without pe
     schema_version: 1,
     account_subject: 'account:test-user',
     revision: 1,
-    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image2.5-flare'],
+    allowed_model_ids: ['gpt-5.6-luna', 'deepseek', 'gpt-image-2.5-flare'],
     default_chat_model_id: 'gpt-5.6-luna',
     default_chat_reasoning_effort: 'max',
-    image_primary_model_id: 'gpt-image2.5-flare',
+    image_primary_model_id: 'gpt-image-2.5-flare',
     issued_at: new Date(now - 1_000).toISOString(),
     expires_at: new Date(now + 3_600_000).toISOString(),
     receipt_id: 'policy-receipt:test-user',
@@ -845,6 +847,12 @@ test('identity credential generation fences a late runtime projection without pe
       input: ['text', 'image'],
       contextWindow: 1_050_000,
       maxTokens: 128_000,
+    }, {
+      id: 'deepseek', provider: 'e-mate-enterprise-deepseek', credentialRef: MODEL_SESSION_REF,
+      api: 'openai-responses', upstreamModelId: 'deepseek',
+      upstreamBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
+      label: 'DeepSeek V4 Flash Vision', input: ['text', 'image'],
+      contextWindow: 1_000_000, maxTokens: 32_768,
     }],
     searchCredentialGrant: {
       schemaVersion: 1,
@@ -949,6 +957,23 @@ test('identity credential generation fences a late runtime projection without pe
   assert.equal(credentials.get(MODEL_SESSION_REF), 'model.payload.signature')
   assert.equal(credentials.get('E_MATE_SEARCH_KEY_DEEPSEEK'), runtime.searchCredentialGrant.upstreamApiKey)
   assert.deepEqual(settings.get('llm-pi-ai').providers['e-mate-enterprise'].models[0].input, ['text', 'image'])
+  const deepseek = settings.get('llm-pi-ai').providers['e-mate-enterprise-deepseek']
+  assert.equal(deepseek.api, 'openai-responses')
+  assert.equal(deepseek.models[0].name, 'DeepSeek V4 Flash Vision')
+  assert.deepEqual(deepseek.models[0].input, ['text', 'image'])
+  // Resolve the actual projected provider through the pinned native pi-ai catalog.
+  const { createRequire } = await import('node:module')
+  const nativeRequire = createRequire(new URL('../../../upstream/deepseek-harness/packages/llm/llm-pi-ai/package.json', import.meta.url))
+  const { Context } = await import(nativeRequire.resolve('@deepseek-ai/cordis'))
+  const { default: LlmRuntime } = await import(nativeRequire.resolve('@deepseek-ai/dsh-llm'))
+  const LlmPiAi = await import(new URL('../../../upstream/deepseek-harness/packages/llm/llm-pi-ai/lib/index.js', import.meta.url))
+  const nativeCtx = new Context()
+  await nativeCtx.plugin(LlmRuntime)
+  await nativeCtx.plugin(LlmPiAi, settings.get('llm-pi-ai'))
+  const nativeDeepSeek = await nativeCtx.llm.resolveModelInfo('e-mate-enterprise-deepseek', 'deepseek')
+  assert.deepEqual(nativeDeepSeek.inputModalities, ['text', 'image'])
+  assert.equal(nativeDeepSeek.name, 'DeepSeek V4 Flash Vision')
+
   assert.deepEqual(await service.imageInputContract('e-mate-enterprise', 'gpt-5.6-luna'), {
     schema_version: 1,
     capability: 'image-capable',
@@ -1051,4 +1076,56 @@ test('previous Astra durable default authenticates original bytes before normali
   const receipt = { ...old, policy_sha256: createHash('sha256').update(canonical(old)).digest('hex') }
   assert.equal(decodeDurableModelPolicy(receipt, 'tenant-test:user-a', NOW).default_chat_reasoning_effort, 'low')
   assert.throws(() => decodeDurableModelPolicy({ ...receipt, policy_sha256: '0'.repeat(64) }, 'tenant-test:user-a', NOW), /invalid/)
+})
+
+
+test('DeepSeek vision enterprise contract retains the gateway alias and rejects stale routes', async () => {
+  const { createEnterpriseIdentityProvider } = await loadEnterpriseProviderSource()
+  const remembered = JSON.parse(stored())
+  remembered.session.modelGateway.allowedModelIds = ['deepseek']
+  let model = {
+    id: 'deepseek', apiMode: 'responses', upstreamModelId: 'deepseek-v4-flash-vision-exp',
+    label: 'DeepSeek V4 Flash Vision', input: ['text', 'image'], reasoning: true,
+    contextWindow: 1_000_000, maxTokens: 32_768,
+  }
+  const provider = createEnterpriseIdentityProvider(options(mapCredentials(new Map([
+    [SESSION_REF, JSON.stringify(remembered)], [MODEL_SESSION_REF, 'model.payload.signature'],
+  ])), async input => {
+    const url = new URL(input)
+    assert.equal(url.searchParams.get('capabilities'), 'responses-multimodal')
+    return Response.json({
+    schemaVersion: 1, models: [model],
+    searchCredentialGrant: { schemaVersion: 1, status: 'denied', purpose: 'web-search',
+      provider: 'deepseek-official', credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK' },
+    })
+  }))
+  const live = await provider.modelRuntimePolicy()
+  assert.equal(live.models[0].upstreamModelId, 'deepseek')
+  assert.equal(live.models[0].api, 'openai-responses')
+  assert.deepEqual(live.models[0].input, ['text', 'image'])
+  for (const stale of [
+    { apiMode: 'chat-completions' }, { upstreamModelId: 'deepseek-v4-flash' }, { input: ['text'] },
+  ]) {
+    const original = model
+    model = { ...model, ...stale }
+    await assert.rejects(provider.modelRuntimePolicy(), /runtime model is invalid/)
+    model = original
+  }
+})
+
+test('a correctly hashed text-only DeepSeek cache must refresh before accepting vision', async () => {
+  const { runtimeProjectionMarker, matchesRuntimeProjection } = await loadModelPolicySource()
+  const provider = { api: 'openai-completions', models: [{ id: 'deepseek', input: ['text'] }] }
+  const ctx = {
+    settings: { get: ns => ns === 'llm-pi-ai' ? { providers: { 'e-mate-enterprise-deepseek': provider } } : {} },
+    credentials: { resolve: async () => undefined },
+  }
+  const policy = { allowed_model_ids: ['deepseek'], account_subject: 'account:a', revision: 1,
+    policy_sha256: 'test', expires_at: '2030-01-01T00:00:00.000Z' }
+  let marker = await runtimeProjectionMarker(ctx, policy, 'denied')
+  assert.equal(await matchesRuntimeProjection(ctx, marker, policy), false)
+  provider.api = 'openai-responses'
+  provider.models[0].input = ['text', 'image']
+  marker = await runtimeProjectionMarker(ctx, policy, 'denied')
+  assert.equal(await matchesRuntimeProjection(ctx, marker, policy), true)
 })

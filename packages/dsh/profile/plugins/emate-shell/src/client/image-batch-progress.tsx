@@ -85,7 +85,7 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function exactPreview(sessions: SessionListState, task: ImageBatchClientTask): ExactPreview | undefined {
+export function exactPreview(sessions: SessionListState, task: ImageBatchClientTask): ExactPreview | undefined {
   const childSessionId = task.childSessionId
   const pointer = task.receipt
   if (childSessionId === undefined || pointer === undefined || pointer.ownerSessionId !== childSessionId

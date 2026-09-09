@@ -33,7 +33,7 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
   const ctx = {
     effect(setup) { const dispose = setup(); if (typeof dispose === 'function') disposers.push(dispose); return dispose },
     sessions: { flush },
-    emateModelPolicy: { assertModel: async model => assert.equal(model, 'gpt-image2.5-flare') },
+    emateModelPolicy: { assertModel: async model => assert.equal(model, 'gpt-image-2.5-flare') },
     jobs: { get(id, owner) { const job = jobs.get(id); assert.equal(job.ownerSession, owner.id); return job } },
     subagents: {
       getProvider: () => ({ inheritsParentContext: false, capabilities: { toolFilter: true, persona: true } }),

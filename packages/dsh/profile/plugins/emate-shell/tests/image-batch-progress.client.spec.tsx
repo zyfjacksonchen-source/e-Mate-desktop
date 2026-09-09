@@ -362,6 +362,44 @@ describe('live image batch progress', () => {
     expect(screen.getAllByLabelText('图片批次进度')).toHaveLength(1)
   })
 
+  it('transfers four parent images to exact batch cards only after child receipts arrive', async () => {
+    const store = new ProjectionValueStore()
+    store.apply('eMateImageBatches', projection(Array(4).fill('completed'), { revisions: [3, 3, 3, 3], terminal: true }), 1)
+    const images = '4567'.split('').map((digit, index) => ({ ...attachment,
+      attachmentId: 'sha256:' + digit.repeat(64), name: `image-${index + 1}.png` }))
+    const sessions = sessionHarness(emptySessions())
+    const turn = { turn: 1, status: 'closed', start: undefined, end: undefined, steps: [], data: { get: () => undefined } }
+    const node = { kind: 'tool-call', location: { kind: 'turn', turn }, data: { root: {
+      kind: 'result', callId: parentCallId, seq: 10, time: 10, isError: false,
+      content: images.map(image => ({ type: 'image', attachment: image })),
+    } } }
+    const props = {
+      sessionId: parentSessionId, seq: 20, turn, openFile: vi.fn(),
+      matched: { callIds: [parentCallId], batchCallIds: [parentCallId], paths: [], childSessionIds: [] },
+      useSession: (selector: (value: unknown) => unknown) => selector({ chat: {
+        nodes: new Map([['output', node]]), locations: { getTurn: () => ['output'] },
+      } }),
+      useSessions: sessions.useSessions,
+      useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
+      useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
+      addImageToDraft: vi.fn(async () => {}), draftBytes: () => 0, notify: vi.fn(), runResource: vi.fn(async () => {}),
+    }
+    render(<ArtifactTerminal {...props as never} />)
+    const count = () => document.querySelectorAll('[data-attachment-id]').length
+    expect(count()).toBe(4)
+    const projected = { ...emptySessions(), byId: Object.fromEntries(images.map((image, index) => [
+      'child-' + (index + 1), { projectionValues: { eMateImageReceipts: [{ seq: 9, createdAt: 10,
+        receipt: imageReceipt('child-' + (index + 1), 'call-' + (index + 1), image),
+      }] } },
+    ])) }
+    await act(async () => { sessions.set(projected as never) })
+    expect(count()).toBe(4)
+    expect(screen.queryByRole('region', { name: '图片结果' })).toBeNull()
+    await act(async () => { sessions.set(emptySessions()) })
+    expect(count()).toBe(4)
+    expect(screen.getByRole('region', { name: '图片结果' })).toBeTruthy()
+  })
+
   it('hides foreign or malformed receipt pointers and does not duplicate on parent terminal', async () => {
     const store = new ProjectionValueStore()
     const sessions = sessionHarness({ ...emptySessions(), byId: { 'child-1': { projectionValues: {

@@ -95,7 +95,7 @@ function createStore(): PostgresAuthStore {
   assert.ok(pool);
   return new PostgresAuthStore(pool, {
     refreshDerivationSecret: Buffer.alloc(32, 9),
-    modelRouteIds: ['gpt-5.6-sol', 'gpt-image2.5-flare'],
+    modelRouteIds: ['gpt-5.6-sol', 'gpt-image-2.5-flare'],
     sessionLifetimeSeconds: 3_600,
     now: () => new Date('2026-08-02T00:00:00.000Z'),
   });
@@ -693,7 +693,7 @@ integrationTest('Postgres password login and refresh rotation are hash-only, ato
   const now = new Date('2026-08-02T00:00:00.000Z');
   const store = new PostgresAuthStore(pool, {
     refreshDerivationSecret: Buffer.alloc(32, 9),
-    modelRouteIds: ['gpt-5.6-sol', 'gpt-image2.5-flare'],
+    modelRouteIds: ['gpt-5.6-sol', 'gpt-image-2.5-flare'],
     sessionLifetimeSeconds: 3_600,
     now: () => now,
   });
@@ -705,7 +705,7 @@ integrationTest('Postgres password login and refresh rotation are hash-only, ato
   );
   await pool.query(
     `INSERT INTO e_mate_tenant_model_route (tenant_id, route_id, enabled, updated_by)
-     VALUES ($1, 'gpt-5.6-sol', true, 'test'), ($1, 'gpt-image2.5-flare', false, 'test')`,
+     VALUES ($1, 'gpt-5.6-sol', true, 'test'), ($1, 'gpt-image-2.5-flare', false, 'test')`,
     [tenantId]
   );
   const password = 'integration-password';

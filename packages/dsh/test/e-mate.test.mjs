@@ -245,6 +245,7 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-schedules',
       '@e-mate/dsh-plugin-tool-search',
+      '@e-mate/dsh-plugin-tidychat',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
@@ -1173,7 +1174,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
   assert.match(verifiedProducer, /revision: 2/u)
   assert(verifiedProducer.includes("semantic: sameSource ? 'failed' : 'not-applicable'"))
   assert.doesNotMatch(verifiedProducer, /human_review|needs-review|reviewDecision|revision: 3/u)
-  assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image2.5-flare'/gu)?.length, 1)
+  assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image-2.5-flare'/gu)?.length, 1)
   assert.equal(imageGenerationSource.match(/await request\(endpoint\(root, path\)/gu)?.length, 1)
   assert.doesNotMatch(imageGenerationSource, /['"]gpt-image-2['"]/u)
   const projectionSource = imageGenerationSource.slice(
@@ -1237,6 +1238,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     let nextNoop = false
     let nextResponseBytes
     let requestGate
+    const perCallGates = new Map()
     let rejectOutputSave = false
     let rejectOutputRead = false
     let outputAttachmentId
@@ -1275,13 +1277,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         maximumSubmissions = Math.max(maximumSubmissions, activeSubmissions)
         try {
           await new Promise(resolveImmediate => setImmediate(resolveImmediate))
-          if (requestGate !== undefined) {
+          const selectedGate = perCallGates.get(outgoing.headers.get('x-client-request-id')) ?? requestGate
+          if (selectedGate !== undefined) {
             const aborted = new Promise((_, reject) => {
               if (init.signal?.aborted) reject(init.signal.reason)
               else init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true })
             })
             await Promise.race([
-              requestGate,
+              selectedGate,
               aborted,
             ])
           }
@@ -1585,7 +1588,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(capabilities.length, 1)
     assert.deepEqual(await capabilities[0].status(), {
       state: 'ready',
-      detail: 'gpt-image2.5-flare',
+      detail: 'gpt-image-2.5-flare',
       action_ids: [],
     })
     const registeredImagegen = tools.get('imagegen')
@@ -1716,11 +1719,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(batchText, /partial.*kept\.png.*1 failures/u)
     assert.doesNotMatch(batchText, /sha256:|child-|emate-image-/u)
     const imagegen = tools.get('imagegen')
-    assert.equal(imagegen.isConcurrencySafe({}), false)
+    assert.equal(imagegen.isConcurrencySafe({ prompt: 'Independent image' }), true)
     assert.deepEqual(imagegen.output.schema.properties.status.enum, ['completed'])
     assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
     assert.deepEqual(imagegen.parameters.required, ['prompt'])
-    assert.match(imagegen.description, /use image_batch once and do not call imagegen directly/u)
+    assert.match(imagegen.description, /For independent outputs, call this tool once per output in the current Agent/u)
     assert.match(imagegen.description, /native image_batch child may call imagegen exactly once/u)
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
     let batchChildOrdinal = 0
@@ -1847,13 +1850,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
 
     const generated = await imagegen.execute({ prompt: 'Generate one verified image.' }, execution())
     assert.equal(generated.images.length, 1)
-    assert.equal(generated.images[0].model, 'gpt-image2.5-flare')
+    assert.equal(generated.images[0].model, 'gpt-image-2.5-flare')
     assert.equal(generated.status, 'completed')
     assert.equal(sessionEvents.at(-1)?.type, 'emate/image-output')
     assert.equal(sessionEvents.at(-1)?.ignorable, true)
     assert.deepEqual(requests.at(-1), {
       path: '/e-mate/model-api/v1/images/generations',
-      body: { model: 'gpt-image2.5-flare', prompt: 'Generate one verified image.' },
+      body: { model: 'gpt-image-2.5-flare', prompt: 'Generate one verified image.' },
     })
     const generatedContent = imagegen.output.render({}, generated)
     const attachmentId = String(generated.images[0].image.attachmentId)
@@ -2035,7 +2038,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       }),
     })
     assert.deepEqual(requests.at(-1), {
-      path: '/e-mate/model-api/v1/images/edits', body: { model: 'gpt-image2.5-flare',
+      path: '/e-mate/model-api/v1/images/edits', body: { model: 'gpt-image-2.5-flare',
         prompt: 'Retouch the referenced image only.', imageFields: ['image'], imageBytes: [inputBytes.byteLength] },
     })
 
@@ -2066,7 +2069,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const edited = await imagegen.execute({ prompt: 'Retouch only the supplied image.', image_url: [attachmentId] }, execution())
     assert.equal(edited.status, 'completed')
     assert.equal(edited.receipt.revision, 2)
-    assert.equal(edited.images[0].model, 'gpt-image2.5-flare')
+    assert.equal(edited.images[0].model, 'gpt-image-2.5-flare')
 
     const storedSecond = await context.attachments.saveImage({
       data: readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.png', import.meta.url)),
@@ -2222,7 +2225,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual(concurrent.map(result => result.status), ['fulfilled', 'fulfilled'])
     const [firstConcurrent, secondConcurrent] = concurrent.map(result => result.value)
     assert.equal(maximumSubmissions, 2)
-    assert.equal(policyModels.every(model => model === 'gpt-image2.5-flare'), true)
+    assert.equal(policyModels.every(model => model === 'gpt-image-2.5-flare'), true)
     assert.equal(policyModels.length, policiesBeforeConcurrentParents + 2)
     assert.equal(jobs.length, jobsBeforeConcurrentParents + 2)
     const concurrentTimeline = jobTimeline.slice(timelineBeforeConcurrentParents)
@@ -2285,28 +2288,56 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       })
     }
 
-    const blockedBatchParent = nativeParent('image-native-batch-parent')
-    const blockedBatch = Array.from({ length: 4 }, (_, index) => ({
-      id: `native-batch-new-${index + 1}`,
-      args: { prompt: `Generate independent image ${index + 1}.` },
-    }))
-    const blockedPosition = appendNativeAssistant(blockedBatchParent, blockedBatch)
-    const requestsBeforeBlockedBatch = requests.length
-    const jobsBeforeBlockedBatch = jobs.length
-    const policiesBeforeBlockedBatch = policyModels.length
-    for (const call of blockedBatch) {
-      await assert.rejects(
-        executeNativeImageCall(blockedBatchParent, blockedPosition, call),
-        error => {
-          assert.match(error.message, /parent image batch rejected before provider submission[\s\S]*use image_batch once[\s\S]*never call imagegen directly for two or more independent new images/u)
-          assert.doesNotMatch(error.message, /sibling native subagent calls|run_in_background/u)
-          return true
-        },
-      )
-    }
-    assert.equal(requests.length, requestsBeforeBlockedBatch)
-    assert.equal(jobs.length, jobsBeforeBlockedBatch)
-    assert.equal(policyModels.length, policiesBeforeBlockedBatch)
+    const parallelParent = nativeParent('image-native-parallel-parent')
+    const parallelCalls = [1, 2].map(index => ({ id: `native-parallel-${index}`, args: { prompt: `Independent image ${index}` } }))
+    const parallelPosition = appendNativeAssistant(parallelParent, parallelCalls)
+    const scopeFor = call => `image-${createHash('sha256').update(parallelParent.id).update('\0').update(call.id).digest('hex').slice(0, 32)}`
+    const releases = parallelCalls.map(call => {
+      let release
+      perCallGates.set(scopeFor(call), new Promise(resolve => { release = resolve }))
+      return release
+    })
+    const parallelRuns = parallelCalls.map(call => executeNativeImageCall(parallelParent, parallelPosition, call))
+    await waitFor(() => activeSubmissions === 2 ? true : undefined, 'same Agent image calls did not overlap')
+    releases[1]()
+    const faster = await parallelRuns[1]
+    assert.equal(faster.receipt.status, 'completed')
+    assert.equal(parallelParent.session.events.findLast(event => event.type === 'emate/image-output' && event.data.call_id === parallelCalls[0].id).data.status, 'running')
+    releases[0]()
+    const slower = await parallelRuns[0]
+    assert.notEqual(faster.job_id, slower.job_id)
+    assert.notEqual(faster.receipt.client_request_id, slower.receipt.client_request_id)
+    perCallGates.clear()
+
+    // Simultaneous duplicate calls reserve only one provider request and one receipt sequence.
+    const duplicateParent = nativeParent('image-duplicate-parent')
+    const duplicateExec = { agent: duplicateParent, callId: 'duplicate-call', signal: new AbortController().signal }
+    const requestsBeforeDuplicate = requests.length
+    const duplicates = await Promise.allSettled([1, 2].map(() => imagegen.execute({ prompt: 'One submission only' }, duplicateExec)))
+    assert.deepEqual(duplicates.map(value => value.status).sort(), ['fulfilled', 'rejected'])
+    assert.equal(requests.length, requestsBeforeDuplicate + 1)
+    assert.deepEqual(duplicateParent.session.events.filter(event => event.type === 'emate/image-output').map(event => event.data.status), ['running', 'completed'])
+
+    // A cancelled sibling and an invalid reference cannot poison a valid call.
+    const isolatedParent = nativeParent('image-isolation-parent')
+    let releaseIsolation
+    requestGate = new Promise(resolve => { releaseIsolation = resolve })
+    const cancelledController = new AbortController()
+    const isolated = [
+      imagegen.execute({ prompt: 'Cancel this image' }, { agent: isolatedParent, callId: 'isolation-cancel', signal: cancelledController.signal }),
+      imagegen.execute({ prompt: 'Keep this image' }, { agent: isolatedParent, callId: 'isolation-keep', signal: new AbortController().signal }),
+      imagegen.execute({ prompt: 'Invalid reference', image_url: `sha256:${'f'.repeat(64)}` }, { agent: isolatedParent, callId: 'isolation-invalid', signal: new AbortController().signal }),
+    ]
+    const isolatedOutcomes = Promise.allSettled(isolated)
+    await waitFor(() => activeSubmissions === 2 ? true : undefined, 'isolation calls did not overlap')
+    cancelledController.abort(new Error('cancel one image'))
+    await waitFor(() => activeSubmissions === 1 ? true : undefined, 'cancelled image did not release provider')
+    releaseIsolation()
+    requestGate = undefined
+    assert.deepEqual((await isolatedOutcomes).map(value => value.status), ['rejected', 'fulfilled', 'rejected'])
+    assert.equal(terminalReceipt(isolatedParent, 'isolation-cancel').status, 'cancelled')
+    assert.equal(terminalReceipt(isolatedParent, 'isolation-keep').status, 'completed')
+    assert.equal(terminalReceipt(isolatedParent, 'isolation-invalid').billing_status, 'not-submitted')
 
     const malformedBatchParent = nativeParent('image-native-malformed-batch-parent')
     const malformedBatch = [
@@ -2314,14 +2345,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       { id: 'native-malformed-invalid', args: { prompt: 'unreachable' }, rawArguments: '{"prompt":' },
     ]
     const malformedPosition = appendNativeAssistant(malformedBatchParent, malformedBatch)
-    await assert.rejects(
-      executeNativeImageCall(malformedBatchParent, malformedPosition, malformedBatch[0]),
-      /cannot verify its owning native assistant\/message; refusing provider submission/u,
-    )
-    assert.equal(requests.length, requestsBeforeBlockedBatch)
-    assert.equal(jobs.length, jobsBeforeBlockedBatch)
-    assert.equal(policyModels.length, policiesBeforeBlockedBatch)
-
+    await executeNativeImageCall(malformedBatchParent, malformedPosition, malformedBatch[0])
+    const mismatchedCall = { id: 'native-mismatch', args: { prompt: 'original' } }
+    const mismatchedPosition = appendNativeAssistant(malformedBatchParent, [mismatchedCall])
+    await assert.rejects(executeNativeImageCall(malformedBatchParent, mismatchedPosition, { ...mismatchedCall, args: { prompt: 'changed' } }), /cannot verify its owning native assistant/u)
+    const requestsBeforeBlockedBatch = requests.length
     const allowedChild = nativeParent('image-native-single-child')
     const singleCall = { id: 'native-single-new', args: { prompt: 'Generate one delegated child image.' } }
     const singlePosition = appendNativeAssistant(allowedChild, [singleCall])
@@ -2439,7 +2467,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(parentCasReceipt.job_id, /^emate-image-/u)
     assert.match(parentCasReceipt.provider_request_id, /^image-response-/u)
     assert.match(parentCasReceipt.client_request_id, /^image-/u)
-    assert.equal(parentCasReceipt.model, 'gpt-image2.5-flare')
+    assert.equal(parentCasReceipt.model, 'gpt-image-2.5-flare')
     assert.equal('output' in parentCasReceipt, false)
     assert.deepEqual(parentCasReceipt.sources.map(source => source.attachmentId), [attachmentId])
     assert.deepEqual(parentCasReceipt.verification, {
@@ -2705,8 +2733,8 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(remoteCounter, responsesBeforeRateLimit + 1)
     assert.deepEqual(requestScopes.slice(-2), [requestScopes.at(-1), requestScopes.at(-1)])
     assert.deepEqual(requests.slice(-2).map(request => request.body), [
-      { model: 'gpt-image2.5-flare', prompt: 'Retry one typed request admission response.' },
-      { model: 'gpt-image2.5-flare', prompt: 'Retry one typed request admission response.' },
+      { model: 'gpt-image-2.5-flare', prompt: 'Retry one typed request admission response.' },
+      { model: 'gpt-image-2.5-flare', prompt: 'Retry one typed request admission response.' },
     ])
     assert.equal(rateRetried.receipt.billing_status, 'recorded')
 
@@ -3041,9 +3069,9 @@ test('Agent operation guidance owns the e-Mate persona and native image batch po
   assert.match(section.text, /latest direct request explicitly asks to read or operate a user-visible webpage/u)
   assert.match(section.text, /never use Browser\/CDP as a fallback for `imagegen`, native `web_search`, attachment resolution/u)
   assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
-  assert.match(section.text, /exactly one image output, new or edited, call `imagegen` directly in the current Agent/u)
-  assert.match(section.text, /two or more mutually independent image outputs, call .*image_batch.* exactly once/u)
-  assert.match(section.text, /Do not delegate the batch, emit sibling subagent waves, call .*imagegen.* separately/u)
+  assert.match(section.text, /Call `imagegen` in the current Agent once per image output/u)
+  assert.match(section.text, /Independent outputs may use concurrent calls to the same Tool/u)
+  assert.match(section.text, /it is not required for multiple outputs/u)
   assert.doesNotMatch(section.text, /Batch source\/edit tasks remain unavailable/u)
   assert.match(section.text, /explicit source IDs for each edit or fusion/u)
   assert.match(section.text, /Dependent edits wait/u)
@@ -3364,7 +3392,7 @@ test('enterprise identity provider maps target credentials and the production HT
       expiresAt: new Date(clock + 10 * 60_000).toISOString(),
       usageKeyId: 'usage-key-207',
       usagePublicKey,
-      allowedModelIds: ['gpt-5.6-luna', 'gpt-image2.5-flare'],
+      allowedModelIds: ['gpt-5.6-luna', 'gpt-image-2.5-flare'],
     },
   }
   const fetchImplementation = async (input, init = {}) => {
@@ -3543,7 +3571,7 @@ test('enterprise identity provider maps target credentials and the production HT
   const modelPolicy = await provider.modelPolicy()
   assert.equal(modelPolicy.default_chat_model_id, 'gpt-5.6-luna')
   assert.deepEqual(modelPolicy.allowed_model_ids, [
-    'gpt-5.6-luna', 'gpt-image2.5-flare',
+    'gpt-5.6-luna', 'gpt-image-2.5-flare',
   ])
   assert.equal('image_fallback_upstream_model_id' in modelPolicy, false)
   const runtimePolicy = await provider.modelRuntimePolicy()
@@ -3937,11 +3965,11 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       'gpt-5.6-luna', 'gpt-5.6-sol',
       ...(astraAllowed ? ['gpt-6-astra'] : []),
       ...(deepseekChatAllowed ? ['deepseek'] : []),
-      'gpt-image2.5-flare',
+      'gpt-image-2.5-flare',
     ],
     default_chat_model_id: policyDefaultModel,
     default_chat_reasoning_effort: policyDefaultModel === 'gpt-5.6-luna' ? 'max' : 'medium',
-    image_primary_model_id: 'gpt-image2.5-flare',
+    image_primary_model_id: 'gpt-image-2.5-flare',
     issued_at: new Date(now - 1_000).toISOString(),
     expires_at: new Date(now + 60 * 60_000).toISOString(),
     receipt_id: 'policy-receipt:test-207',
@@ -3964,7 +3992,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     ))).digest('hex'),
   })
   const parseCurrentDurablePolicy = value => {
-    assert.equal(value.image_primary_model_id, 'gpt-image2.5-flare')
+    assert.equal(value.image_primary_model_id, 'gpt-image-2.5-flare')
     assert.equal('image_fallback_upstream_model_id' in value, false)
     assert.equal(value.allowed_model_ids.includes('gpt-image-2'), false)
     assert.equal(value.allowed_model_ids.includes('gpt-image-2-pro'), false)
@@ -4179,7 +4207,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     const migratedPolicy = parseCurrentDurablePolicy(records.get('active'))
     assert.deepEqual(migratedPolicy.allowed_model_ids, [
       'deepseek', 'gpt-5.6-luna',
-      'gpt-5.6-sol', 'gpt-image2.5-flare',
+      'gpt-5.6-sol', 'gpt-image-2.5-flare',
     ])
     assert.equal('image_fallback_upstream_model_id' in migratedPolicy, false)
     assert.notEqual(migratedPolicy.policy_sha256, legacyPolicySha256)
@@ -4604,7 +4632,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     const selectedAstra = await apiProxy.sessions.selectModel({ rpcId: 'astra-select', payload: { ...session.current, sessionId: 'session-1' } })
     assert.equal(selectedAstra.result.value.selected.reasoningEffort, 'low')
     assert.deepEqual(session.messages, astraHistory)
-    records.set('active', storedLegacyPolicy({ ...policy(), image_primary_model_id: 'gpt-image-2-pro', default_chat_model_id: 'gpt-6-astra', default_chat_reasoning_effort: 'medium', image_fallback_upstream_model_id: 'gpt-image-2', allowed_model_ids: [...policy().allowed_model_ids.filter(id => id !== 'gpt-image2.5-flare'), 'gpt-image-2-pro', 'gpt-image-2'] }))
+    records.set('active', storedLegacyPolicy({ ...policy(), image_primary_model_id: 'gpt-image-2-pro', default_chat_model_id: 'gpt-6-astra', default_chat_reasoning_effort: 'medium', image_fallback_upstream_model_id: 'gpt-image-2', allowed_model_ids: [...policy().allowed_model_ids.filter(id => id !== 'gpt-image-2.5-flare'), 'gpt-image-2-pro', 'gpt-image-2'] }))
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
     openedDomains = 0
     await applyModelPolicy(modelPolicyContext, modelPolicyConfig)
@@ -5264,7 +5292,7 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
       reason: 'interrupted',
       terminalEvidence: imageReceipt('failed'),
     })
-    run('audit-model-name-only', startedAt + 1_000, { model: 'gpt-image2.5-flare' })
+    run('audit-model-name-only', startedAt + 1_000, { model: 'gpt-image-2.5-flare' })
     run('audit-imagegen-tool', startedAt + 1_100, {
       terminalEvidence: (agent, time) => { settleTool(agent, time, 'imagegen', true) },
     })

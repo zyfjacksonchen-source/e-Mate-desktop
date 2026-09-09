@@ -286,7 +286,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
       }
     }
     preflight()
-    await ctx.emateModelPolicy.assertModel('gpt-image2.5-flare')
+    await ctx.emateModelPolicy.assertModel('gpt-image-2.5-flare')
     exec.signal.throwIfAborted()
 
     let state: ImageBatchReducerState | undefined
