@@ -1175,14 +1175,17 @@ export async function apply(ctx, config = {}) {
   const pairing = await loadTargetCompaction(config.bindingPath)
   ctx.effect(() => installRequestHistoryCompaction(ctx, pairing), 'emate.modelPolicy: native compaction realm byte pressure')
   ctx.on('agent/request', async (payload, next) => {
-    const request = await next()
+    const selected = await next()
+    const reasoningEffort = managedReasoningEffort(selected.model, selected.reasoningEffort)
+    // Native call preparation freezes stream options; migrate selection before that boundary.
+    const request = reasoningEffort === selected.reasoningEffort
+      ? selected : { ...selected, reasoningEffort }
     await service.assertModel(request.model)
     quota.armRequest(payload, request)
     return request
   })
   ctx.on('llm/stream', (options, next) => (async function* () {
     if (!quota.isArmed(options)) await service.assertModel(options.model)
-    options.reasoningEffort = managedReasoningEffort(options.model, options.reasoningEffort)
     const oversized = requestSizeFailure(options)
     if (oversized) {
       quota.disarmRequest(options)

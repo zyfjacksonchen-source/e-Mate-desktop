@@ -4164,8 +4164,8 @@ test('enterprise model switch keeps native history and survives a cached-policy 
                 api: 'openai-responses',
                 upstreamModelId: 'deepseek',
                 upstreamBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
-                label: 'DeepSeek V4 Pro · 最大推理',
-                input: ['text'],
+                label: 'DeepSeek V4 Flash Vision · 最大推理',
+                input: ['text', 'image'],
                 contextWindow: 131_072,
                 maxTokens: 65_536,
               }] : []),
@@ -4415,6 +4415,15 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek' })),
       { provider: 'e-mate-enterprise-deepseek', model: 'deepseek' },
     )
+    const { deepFreeze } = await import('../../../upstream/deepseek-harness/packages/llm/llm/lib/index.js')
+    const frozenDeepSeek = deepFreeze({ provider: 'e-mate-deepseek', model: 'deepseek', reasoningEffort: 'max', sessionId: 'deepseek-frozen-stream' })
+    let reachedDeepSeek = false
+    for await (const _chunk of streamPolicy(frozenDeepSeek, () => (async function* () {
+      reachedDeepSeek = true
+      assert.equal(frozenDeepSeek.reasoningEffort, 'max')
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    })())) {}
+    assert.equal(reachedDeepSeek, true, 'a frozen DeepSeek Max request reaches the native adapter')
     deepseekChatAllowed = false
     await modelPolicy.refresh({ force: true })
     assert.equal(credentialValues.has('E_MATE_MODEL_KEY_DEEPSEEK'), false)
@@ -4624,7 +4633,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     const restored = await apiProxy.sessions.models({ rpcId: 'astra-restored', payload: { sessionId: 'session-1' } })
     assert.equal(restored.result.value.current.reasoningEffort, 'low')
     assert.deepEqual(llmSettings.providers['e-mate-enterprise'].models.find(model => model.id === 'gpt-6-astra').reasoningEfforts, { low: 'low' })
-    const restoredOptions = { ...session.current, sessionId: 'astra-restored-stream' }
+    const oldSelection = deepFreeze({ ...session.current, sessionId: 'astra-restored-stream' })
+    const restoredOptions = deepFreeze(await requestPolicy({}, async () => oldSelection))
+    assert.equal(oldSelection.reasoningEffort, 'medium', 'selection migration must not mutate the original native config')
+    assert.notEqual(restoredOptions, oldSelection)
     for await (const _chunk of streamPolicy(restoredOptions, () => (async function* () {
       assert.equal(restoredOptions.reasoningEffort, 'low', 'effective options reach the native adapter after migration')
       yield { type: 'finish', reason: { kind: 'stop' } }
