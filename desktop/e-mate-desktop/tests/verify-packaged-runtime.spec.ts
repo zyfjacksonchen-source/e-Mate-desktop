@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   REQUIRED_PACKAGED_RUNTIME_ENTRIES,
   REQUIRED_MACOS_UNIVERSAL_ENTRIES,
@@ -457,21 +457,34 @@ it.each([['darwin', 1, 'x64'], ['darwin', 3, 'arm64'], ['win32', 1, 'x64']] as c
 })
 
 
-it('checks Feishu original notices, binary drift, universal handling and Windows static evidence', () => {
-  const temporary = mkdtempSync(join(tmpdir(), 'emate-feishu-notices-'))
-  const packaged = context(temporary, 'darwin', 3)
-  const resources = resolvePackagedResourcesRoot(packaged)
-  const root = join(resources, 'third-party-notices/feishu-cli/1.0.88')
-  const manifestPath = join(root, 'manifest.json')
-  try {
+describe('packaged Feishu notices', () => {
+  let temporary: string
+  let packaged: PackagedRuntimeContext
+  let resources: string
+  let root: string
+  let manifestPath: string
+  let binary: string
+  let manifest: { version: string; binarySha256: Record<string, string>; files: { path: string }[] }
+
+  // Stage and remove the real notice closure outside the assertion deadline.
+  beforeAll(() => {
+    temporary = mkdtempSync(join(tmpdir(), 'emate-feishu-notices-'))
+    packaged = context(temporary, 'darwin', 3)
+    resources = resolvePackagedResourcesRoot(packaged)
+    root = join(resources, 'third-party-notices/feishu-cli/1.0.88')
+    manifestPath = join(root, 'manifest.json')
     cpSync(join(import.meta.dirname, '../third-party-notices/feishu-cli/1.0.88'), root, { recursive: true })
     writeFileSync(join(resources, 'THIRD_PARTY_NOTICES.md'), '## Feishu native executable notices\nResources/third-party-notices/feishu-cli/1.0.88/')
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-    const binary = join(resolvePackagedUnpackedRoot(packaged), 'node_modules/@larksuite/cli/bin/lark-cli')
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    binary = join(resolvePackagedUnpackedRoot(packaged), 'node_modules/@larksuite/cli/bin/lark-cli')
     mkdirSync(join(binary, '..'), { recursive: true })
     writeFileSync(binary, 'fixture binary')
     manifest.binarySha256['darwin-arm64'] = createHash('sha256').update('fixture binary').digest('hex')
     writeFileSync(manifestPath, JSON.stringify(manifest))
+  })
+  afterAll(() => { if (temporary !== undefined) rmSync(temporary, { recursive: true, force: true }) })
+
+  it('checks original notices, binary drift, universal handling and Windows static evidence', () => {
     expect(() => verifyPackagedFeishuNotices(packaged)).not.toThrow()
     writeFileSync(binary, 'different binary')
     expect(() => verifyPackagedFeishuNotices(packaged)).toThrow('differs from reviewed')
@@ -514,7 +527,7 @@ it('checks Feishu original notices, binary drift, universal handling and Windows
       { from: 'third-party-notices', to: 'third-party-notices' },
       { from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     ]))
-  } finally { rmSync(temporary, { recursive: true, force: true }) }
+  })
 })
 
 

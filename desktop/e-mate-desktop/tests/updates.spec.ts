@@ -2,9 +2,12 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import * as atomicWrite from '@deepseek-ai/dsh-atomic-write'
 import { describe, expect, it, vi } from 'vitest'
 import type { DesktopRuntime, DesktopTrayItem } from '../src/runtime.ts'
 import { apply, Config, inject } from '../src/updates.ts'
+
+vi.mock('@deepseek-ai/dsh-atomic-write', { spy: true })
 
 async function createHarness(options: {
   readonly state?: unknown
@@ -119,14 +122,21 @@ describe('native desktop update owner', () => {
     ['an unstable SemVer', { version: 3, lastNotifiedVersion: '2.1.0-beta.1' }],
     ['an unknown schema version', { version: 4, lastNotifiedVersion: '2.1.0' }],
   ])('rejects and resets legacy state with %s', async (_name, state) => {
+    const write = vi.mocked(atomicWrite.writeFileAtomic).mockClear()
     const harness = await createHarness({ state })
-
-    await vi.waitFor(async () => {
+    try {
+      // Observe the real write before reading; do not race Windows file replacement.
+      await vi.waitFor(async () => {
+        expect(write).toHaveBeenCalledOnce()
+        await expect(write.mock.results[0]!.value).resolves.toBeUndefined()
+      })
       expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({ version: 2 })
-    })
-    expect(harness.request).not.toHaveBeenCalled()
-    expect(harness.confirmDownload).not.toHaveBeenCalled()
-    expect(harness.notify).not.toHaveBeenCalled()
-    await harness.dispose()
+      expect(harness.request).not.toHaveBeenCalled()
+      expect(harness.confirmDownload).not.toHaveBeenCalled()
+      expect(harness.notify).not.toHaveBeenCalled()
+    } finally {
+      await harness.dispose()
+      write.mockClear()
+    }
   })
 })
