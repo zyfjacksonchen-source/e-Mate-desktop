@@ -1,36 +1,33 @@
-import { mkdir, mkdtemp, lstat, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, lstat, stat, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import type { Readable } from 'node:stream'
 import JSZip from 'jszip'
 import { DOMParser } from '@xmldom/xmldom'
-import { PDFDocument } from 'pdf-lib'
-import { prepareCalcFontEnvironment } from '@e-mate/desktop/vision-toolkit'
 
 const MAX_BYTES = 32 * 1024 * 1024
 const MAX_OUTPUT = 64 * 1024 * 1024
 const MAX_EXPANDED = 128 * 1024 * 1024
 const MAX_XML = 16 * 1024 * 1024
-const TIMEOUT = 120_000
+export const CALC_TIMEOUT_MS = 120_000
 
 export interface CalcRequest {
   sourcePath: string
   workspaceRoot: string
-  output: 'xlsx' | 'pdf'
+  output: 'xlsx'
   signal: AbortSignal
 }
 
 export interface CalcResult {
   bytes: Uint8Array
-  format: 'xlsx' | 'pdf'
-  engine: 'LibreOffice Calc'
+  format: 'xlsx'
+  engine: 'formulas'
 }
 
 /** Paths are supplied by the Desktop's verified asset owner, never discovered on PATH. */
 export interface CalcRuntimePaths {
   executable: string
-  fontDirectory: string
+  script: string
 }
 
 interface ProcessSpec {
@@ -64,16 +61,6 @@ function isWebLink(value: string): boolean {
     return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname.length > 0
   } catch { return false }
 }
-
-export const CALC_PROFILE = `<?xml version="1.0" encoding="UTF-8"?>
-<oor:items xmlns:oor="http://openoffice.org/2001/registry">
- <item oor:path="/org.openoffice.Office.Calc/Formula/Load"><prop oor:name="OOXMLRecalcMode" oor:op="fuse"><value>0</value></prop></item>
- <item oor:path="/org.openoffice.Office.Calc/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>1</value></prop></item>
- <item oor:path="/org.openoffice.Office.Common/Security/Scripting">
-  <prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop>
-  <prop oor:name="DisableActiveContent" oor:op="fuse"><value>true</value></prop>
- </item>
-</oor:items>`
 
 /** Bounded ZIP streaming avoids trusting declared uncompressed sizes. No archive is extracted. */
 export async function validateCalcWorkbook(bytes: Uint8Array, signal: AbortSignal): Promise<void> {
@@ -148,11 +135,11 @@ export async function validateCalcWorkbook(bytes: Uint8Array, signal: AbortSigna
 export function createCalcRuntime<Target>(services: CalcServices<Target>, paths: CalcRuntimePaths) {
   return {
     async convert(request: CalcRequest): Promise<CalcResult> {
-      if (!isAbsolute(paths.executable) || !isAbsolute(paths.fontDirectory) || !isAbsolute(request.workspaceRoot)) throw new Error('Calc requires fixed absolute runtime, font and workspace paths')
-      if (request.output !== 'xlsx' && request.output !== 'pdf') throw new Error('Calc output format is unsupported')
-      const signal = AbortSignal.any([request.signal, AbortSignal.timeout(TIMEOUT)])
+      if (!isAbsolute(paths.executable) || !isAbsolute(paths.script) || !isAbsolute(request.workspaceRoot)) throw new Error('Calc requires fixed absolute managed Python, helper and workspace paths')
+      if (request.output !== 'xlsx') throw new Error('Calc output format is unsupported')
+      const signal = AbortSignal.any([request.signal, AbortSignal.timeout(CALC_TIMEOUT_MS)])
       signal.throwIfAborted()
-      if (!(await lstat(paths.executable)).isFile() || !(await lstat(paths.fontDirectory)).isDirectory()) throw new Error('Managed Calc runtime or fonts are missing')
+      if (!(await stat(paths.executable)).isFile() || !(await lstat(paths.script)).isFile()) throw new Error('Managed Python runtime or formula helper is missing')
       const source = await services.fs.resolve(request.sourcePath, { cwd: request.workspaceRoot, signal })
       const bytes = await services.fs.readBytes(source, signal, MAX_BYTES)
       if (bytes.byteLength > MAX_BYTES) throw new Error('Calc input exceeds 32 MiB')
@@ -160,27 +147,25 @@ export function createCalcRuntime<Target>(services: CalcServices<Target>, paths:
       const temporary = await mkdtemp(join(tmpdir(), 'emate-calc-'))
       let mayRemoveTemporary = true
       try {
-        const profile = join(temporary, 'profile')
         const input = join(temporary, 'input.xlsx')
-        const calculated = join(temporary, 'calculated')
-        const rendered = join(temporary, 'rendered')
-        await Promise.all([mkdir(join(profile, 'user'), { recursive: true }), mkdir(calculated), mkdir(rendered)])
+        const output = join(temporary, 'result.xlsx')
         await writeFile(input, bytes, { flag: 'wx', mode: 0o600, signal })
-        await writeFile(join(profile, 'user', 'registrymodifications.xcu'), CALC_PROFILE, { flag: 'wx', mode: 0o600, signal })
-        const fontEnvironment = await prepareCalcFontEnvironment(paths.fontDirectory, temporary, signal)
-        const run = async (file: string, filter: string, out: string) => {
+        const run = async () => {
           signal.throwIfAborted()
-          const argv = [paths.executable, `-env:UserInstallation=${pathToFileURL(profile).href}`, '--headless', '--nologo', '--nodefault', '--norestore', '--convert-to', filter, '--outdir', out, file]
+          const argv = [paths.executable, '-I', paths.script, input, output]
           // Native file-effect confinement is not a network or read-isolation guarantee.
           const confined = services.sandbox.confine(argv, { mode: 'workspace-write', workspaceRoot: temporary })
-          const handle = services.subprocess.spawn({ argv: confined.argv, cwd: temporary, env: { ...fontEnvironment, XDG_CACHE_HOME: join(temporary, 'font-cache') }, signal, graceMs: 3000, stdio: { stdin: 'ignore', stdout: { maxBytes: 64 * 1024 }, stderr: { maxBytes: 64 * 1024 } } })
+          const handle = services.subprocess.spawn({ argv: confined.argv, cwd: temporary, env: {}, signal, graceMs: 3000, stdio: { stdin: 'ignore', stdout: { maxBytes: 64 * 1024 }, stderr: { maxBytes: 64 * 1024 } } })
           mayRemoveTemporary = false
           try {
             const result = await handle.done
             signal.throwIfAborted()
-            if (result.exitCode !== 0) throw new Error(`Calc conversion failed (exit ${result.exitCode})`)
+            if (result.exitCode !== 0) {
+              const detail = handle.collected.stderr?.readFrom(0).text.trim().slice(-4096)
+              throw new Error(`Calc conversion failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`)
+            }
           } finally {
-            // Also waits for descendants before the private profile is removed.
+            // Also waits for descendants before the private snapshot is removed.
             try {
               handle.terminate()
               await handle.done.catch(() => {})
@@ -197,16 +182,11 @@ export function createCalcRuntime<Target>(services: CalcServices<Target>, paths:
           if (!info.isFile() || info.isSymbolicLink() || info.size === 0 || info.size > MAX_OUTPUT) throw new Error('Calc output is missing, unsafe or exceeds 64 MiB')
           return await readFile(file, { signal })
         }
-        await run(input, 'xlsx:Calc MS Excel 2007 XML', calculated)
-        const xlsx = join(calculated, 'input.xlsx')
-        const workbook = await readOutput(xlsx)
+        await run()
+        const workbook = await readOutput(output)
         await validateCalcWorkbook(workbook, signal)
-        if (request.output === 'xlsx') return { bytes: workbook, format: 'xlsx', engine: 'LibreOffice Calc' }
-        await run(xlsx, 'pdf:calc_pdf_Export', rendered)
-        const pdf = await readOutput(join(rendered, 'input.pdf'))
-        if (!pdf.subarray(0, 5).equals(Buffer.from('%PDF-')) || (await PDFDocument.load(pdf)).getPageCount() === 0) throw new Error('Calc did not produce a valid PDF')
         signal.throwIfAborted()
-        return { bytes: pdf, format: 'pdf', engine: 'LibreOffice Calc' }
+        return { bytes: workbook, format: 'xlsx', engine: 'formulas' }
       } finally {
         if (mayRemoveTemporary) await rm(temporary, { recursive: true, force: true })
       }

@@ -467,12 +467,10 @@ test('Calc writes use existing Jobs, native services and collision-safe publicat
   t.after(() => rm(root, { recursive: true, force: true }))
   const original = await writeOfficeBuffer('xlsx', { sheets: [{ name: '中文', rows: [['金额', 3]] }] })
   await writeFile(join(root, 'source.xlsx'), original)
-  const executable = join(root, 'soffice'), fonts = join(root, 'fonts')
-  await writeFile(executable, 'fixture'); await mkdir(fonts)
+  const executable = join(root, 'python')
+  await writeFile(executable, 'fixture')
   const tools = [], calls = []
   let mode = 'workspace-write', fail = false, environment = {}, dispose
-  const { PDFDocument } = await import('pdf-lib')
-  const pdf = await PDFDocument.create(); pdf.addPage(); const pdfBytes = await pdf.save()
   apply({
     inject(dependencies, callback) {
       if (!dependencies.includes('sandbox')) return
@@ -484,9 +482,9 @@ test('Calc writes use existing Jobs, native services and collision-safe publicat
           calls.push(spec)
           const done = (async () => {
             if (fail) return { exitCode: 1 }
-            const output = spec.argv[spec.argv.indexOf('--outdir') + 1]
-            const isPdf = spec.argv.includes('pdf:calc_pdf_Export')
-            await writeFile(join(output, isPdf ? 'input.pdf' : 'input.xlsx'), isPdf ? pdfBytes : original)
+            const output = spec.argv.at(-1)
+            assert.equal(spec.argv[1], '-I')
+            await writeFile(output, original)
             return { exitCode: 0 }
           })()
           return { done, terminate() {}, async waitForExit() { return true }, collected: {} }
@@ -501,12 +499,12 @@ test('Calc writes use existing Jobs, native services and collision-safe publicat
   assert.deepEqual(tools.map(tool => tool.name), ['office_write', 'office_read'])
   const writer = tools[0], execution = { agent: { session: { header: { cwd: root } } }, signal: new AbortController().signal }
   const args = { format: 'xlsx', filename: '结果.xlsx', document: { operation: 'recalculate', source_path: 'source.xlsx' } }
-  await assert.rejects(writer.execute(args, execution), /Calc 运行时尚不可用/)
-  environment = { DSH_EMATE_CALC: executable, DSH_EMATE_CALC_FONTS: fonts }
+  await assert.rejects(writer.execute(args, execution), /Python 公式运行时尚不可用/)
+  environment = { DSH_EMATE_PYTHON: executable }
   for (const document of [{ operation: 'recalculate' }, { ...args.document, extra: true }, { ...args.document, source_path: '../escape.xlsx' }]) {
     await assert.rejects(writer.execute({ ...args, document }, execution))
   }
-  await assert.rejects(writer.execute({ ...args, format: 'docx', filename: 'bad.docx' }, execution), /Calc output/)
+  await assert.rejects(writer.execute({ ...args, format: 'docx', filename: 'bad.docx' }, execution), /Calc recalculation output/)
   mode = 'read-only'; await assert.rejects(writer.execute(args, execution), /read-only/); mode = 'workspace-write'
   assert.equal(calls.length, 0)
   const first = await writer.execute(args, execution)
@@ -514,18 +512,17 @@ test('Calc writes use existing Jobs, native services and collision-safe publicat
   assert.equal(first.relative_path, '.e-mate/office/结果.xlsx'); assert.equal(second.relative_path, '.e-mate/office/结果-2.xlsx')
   assert.equal(first.job_id, 'calc-job')
   assert.deepEqual(await readFile(join(root, first.relative_path)), original)
-  const rendered = await writer.execute({ ...args, format: 'pdf', filename: '结果.pdf' }, execution)
-  assert.equal((await PDFDocument.load(await readFile(join(root, rendered.relative_path)))).getPageCount(), 1)
-  assert.equal(calls.length, 4)
+  await assert.rejects(writer.execute({ ...args, format: 'pdf', filename: '结果.pdf' }, execution), /PDF pagination is not provided/)
+  assert.equal(calls.length, 2)
   await writer.execute({ format: 'xlsx', filename: '普通.xlsx', document: { sheets: [{ name: '数据', rows: [[1]] }] } }, execution)
-  assert.equal(calls.length, 4)
+  assert.equal(calls.length, 2)
   fail = true; await assert.rejects(writer.execute({ ...args, filename: '失败.xlsx' }, execution), /Calc conversion failed/)
   await assert.rejects(readFile(join(root, '.e-mate/office/失败.xlsx')))
   const controller = new AbortController(); controller.abort(new Error('cancelled'))
   await assert.rejects(writer.execute({ ...args, filename: '取消.xlsx' }, { ...execution, signal: controller.signal }), /cancelled/)
   await assert.rejects(readFile(join(root, '.e-mate/office/取消.xlsx')))
   assert.deepEqual(await readFile(join(root, 'source.xlsx')), original)
-  dispose(); await assert.rejects(writer.execute(args, execution), /Calc 运行时尚不可用/)
+  dispose(); await assert.rejects(writer.execute(args, execution), /Python 公式运行时尚不可用/)
 })
 
 test('PDF and spreadsheet Host commands run their original marker with managed Node outside PATH', { skip: process.platform === 'win32' }, async () => {

@@ -10,13 +10,13 @@
 - 不调用 Codex 专属 `load_workspace_dependencies`，不搜索或复制用户的 Codex 私有缓存，不构造同名 `Workbook`、`workbook.recalculate()` 或 `workbook.render()` 空实现。原版附带的 `artifact_tool_docs/` 保留为来源参考，不能据此声称运行库已安装。
 - 本次材料替换不代表 openpyxl、重算引擎、渲染工具或外部连接已接通。执行前以实际 Host 状态与真实检查为准；无法完成的步骤须明确说明。
 
-## 现有 Office Tool 重算与 PDF 输出
+## 现有 Office Tool 公式重算
 
-使用已有 `office_write`：`format="xlsx"` 或 `format="pdf"`，匹配扩展名的 `filename`，以及 `document={"operation":"recalculate","source_path":"工作簿.xlsx"}`。输入必须是当前任务工作区内普通 XLSX 文件。PDF 先经同一 Calc 重算再导出；输出经原有 Job 和附件路径保存为新文件，同名自动避让，不覆盖原件。
+使用已有 `office_write`：`format="xlsx"`、匹配扩展名的 `filename`，以及 `document={"operation":"recalculate","source_path":"工作簿.xlsx"}`。输入必须是当前任务工作区内普通 XLSX。此路径通过唯一受管 `DSH_EMATE_PYTHON` 调用固定 `formulas` 引擎，沿现有 Job/附件保存新文件，同名避让，不覆盖原件。只回写实际计算结果的单元格缓存，保留原公式、样式与其余工作簿部件；不调用引擎的值覆盖导出。
 
-此路径仅在 Host 实际提供有效绝对路径 `DSH_EMATE_CALC` 和 `DSH_EMATE_CALC_FONTS` 且对应受管程序、字体存在时可用；缺失会明确失败，不从 PATH 寻找其他安装，也不能由本指南推断安装包已包含运行时。宏、嵌入对象、外部数据或主动公式等不支持的内容会拒绝处理。单次超时 120 秒，输入与最终发布文件上限 32 MiB。
+支持引擎已实现的标量公式及跨表依赖；未知函数、计算错误、循环/未解析结果、外部引用、宏、主动内容及不支持的数组/数据表公式会明确失败，不返回旧缓存或虚构结果。单次超时 120 秒，输入与发布文件上限 32 MiB。缺少受管运行时或依赖时明确报错，不搜索系统 Python、不下载补装、不使用 LibreOffice。
 
-完成 XLSX 后用 `office_read` 核对真实缓存值，并检查输入变化、跨表公式及错误值。PDF 仍按 PDF Skill 渲染并目视检查中文、分页、图表和样式；转换退出成功不代表视觉保真或全部 Excel 功能兼容。
+用 `office_read` 核对真实缓存值，并检查输入变化、跨表公式及错误值。重算不提供 XLSX→PDF 分页渲染；如另行生成内容预览，必须标明是内容预览，不能冒充原工作表分页/图表保真验收。单元格缓存正确不等于 Excel 所有功能兼容。
 
 ## 公式、保真与可见结果
 

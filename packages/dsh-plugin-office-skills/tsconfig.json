@@ -23,7 +23,6 @@
     "jsx": "react-jsx",
     "skipLibCheck": true,
     "paths": {
-      "@e-mate/desktop/vision-toolkit": ["../../desktop/e-mate-desktop/src/vision-toolkit.ts"],
       "react": [
         "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react"
       ],

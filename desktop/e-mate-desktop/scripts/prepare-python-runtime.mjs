@@ -92,6 +92,7 @@ if sys.argv[3]=='native':
  sys.path.insert(0,sys.argv[2])
  import reportlab,pypdf,pdfplumber,openpyxl,PIL.Image,pypdfium2
  import pptx,xlsxwriter,lxml.etree,pathops,uharfbuzz,yaml,typing_extensions
+ import formulas,numpy,scipy,schedula
 print(json.dumps({'distributions':verified,'native_imports':sys.argv[3]=='native'},sort_keys=True))
 `
 

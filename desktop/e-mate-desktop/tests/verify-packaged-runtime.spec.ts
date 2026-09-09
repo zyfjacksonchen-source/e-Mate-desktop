@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, statSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { runInNewContext } from 'node:vm'
 import { spawnSync } from 'node:child_process'
@@ -18,11 +18,7 @@ import {
   verifyPackagedNodePty,
   preparePackagedFeishu,
   verifyPackagedFeishuNotices,
-  verifyPackagedCalc,
   verifyPackagedVision,
-  preservePackagedCalcDirectories,
-  preserveCalcMetadataFile,
-  preservePackagedCalcMetadata,
   verifyPackagedRuntime,
   type ArchiveLister,
   type FileProbe,
@@ -211,31 +207,6 @@ describe('packaged desktop runtime verification', () => {
     expect(() => verifyPackagedNodePty(context('/build', 'darwin'), run)).toThrow('ETIMEDOUT')
     expect(run).toHaveBeenCalledOnce()
     expect(run.mock.calls[0]![2]).toMatchObject({ timeout: 180_000, killSignal: 'SIGKILL' })
-  })
-
-  it('verifies both complete Calc payloads without allowing package-time downloads', () => {
-    const run = vi.fn<PtyProbeRunner>(() => ({ status: 0, stderr: '' }))
-    const runtimeContext = context('/build', 'darwin', 4)
-    verifyPackagedCalc(runtimeContext, run)
-    expect(run.mock.calls.map(([, args]) => args.at(-1))).toEqual(['darwin-arm64', 'darwin-x64'])
-    for (const [, args] of run.mock.calls) {
-      expect(args).toContain('--verify-root')
-      expect(args).toContain('--packaged')
-      expect(args).toContain(join(resolvePackagedResourcesRoot(runtimeContext), 'calc-runtime'))
-      expect(args).not.toContain('--archive-dir')
-    }
-    const fail = vi.fn<PtyProbeRunner>(() => ({ status: 1, stderr: 'Calc cache contents changed' }))
-    expect(() => verifyPackagedCalc(runtimeContext, fail)).toThrow('Calc cache contents changed')
-    expect(fail).toHaveBeenCalledOnce()
-  })
-
-  it('uses packaged Calc inventory semantics for the Windows Builder payload', () => {
-    const run = vi.fn<PtyProbeRunner>(() => ({ status: 0, stderr: '' }))
-    verifyPackagedCalc(context('/build', 'win32', 1), run)
-    expect(run).toHaveBeenCalledOnce()
-    expect(run.mock.calls[0]![1]).toContain('--packaged')
-    expect(run.mock.calls[0]![1].at(-1)).toBe('win32-x64')
-    expect(run.mock.calls[0]![1]).not.toContain('--archive-dir')
   })
 
   it.each([1, 3])('defers macOS architecture %s until the final universal app', arch => {
@@ -440,61 +411,6 @@ describe('packaged desktop runtime verification', () => {
       `required package export @deepseek-ai/dsh-base/package.json resolved outside ${unpackedRoot}: ${escapedPath}`,
     )
   })
-})
-
-
-it('preserves verified original Calc metadata and rejects corrupt sources or linked destinations', () => {
-  const base = mkdtempSync(join(tmpdir(), 'emate-calc-plist-'))
-  const source = join(base, 'source'), destination = join(base, 'destination')
-  const name = 'Contents/Info.plist', original = '<plist>original upstream metadata</plist>'
-  const digest = createHash('sha256').update(original).digest('hex')
-  try {
-    for (const root of [source, destination]) mkdirSync(join(root, 'Contents'), { recursive: true })
-    writeFileSync(join(source, name), original)
-    writeFileSync(join(destination, name), '<plist>injected Electron integrity</plist>')
-    preserveCalcMetadataFile(source, destination, name, digest)
-    expect(readFileSync(join(destination, name), 'utf8')).toBe(original)
-    const mtime = statSync(join(destination, name)).mtimeMs
-    preserveCalcMetadataFile(source, destination, name, digest)
-    expect(statSync(join(destination, name)).mtimeMs).toBe(mtime)
-    writeFileSync(join(source, name), 'corrupt')
-    expect(() => preserveCalcMetadataFile(source, destination, name, digest)).toThrow('digest mismatch')
-    expect(readFileSync(join(destination, name), 'utf8')).toBe(original)
-    writeFileSync(join(source, name), original)
-    rmSync(join(destination, name))
-    expect(() => preserveCalcMetadataFile(source, destination, name, digest)).toThrow()
-    if (process.platform !== 'win32') {
-      symlinkSync(join(source, name), join(destination, name))
-      expect(() => preserveCalcMetadataFile(source, destination, name, digest)).toThrow('regular file')
-      rmSync(join(destination, 'Contents'), { recursive: true })
-      symlinkSync(join(source, 'Contents'), join(destination, 'Contents'))
-      expect(() => preserveCalcMetadataFile(source, destination, name, digest)).toThrow('real directory')
-    }
-    expect(() => preservePackagedCalcMetadata(context('/missing', 'win32', 1))).not.toThrow()
-    expect(() => preservePackagedCalcMetadata(context('/missing', 'darwin', 1))).not.toThrow()
-  } finally { rmSync(base, { recursive: true, force: true }) }
-})
-
-it('preserves only pinned empty Calc directories and rejects symlink parents', () => {
-  const base = mkdtempSync(join(tmpdir(), 'emate-calc-empty-'))
-  const runtime = context(base, 'darwin', 1)
-  const root = join(resolvePackagedResourcesRoot(runtime), 'calc-runtime/darwin-x64/LibreOffice.app')
-  const resources = join(root, 'Contents/Resources')
-  try {
-    mkdirSync(join(resources, 'autotext'), { recursive: true })
-    preservePackagedCalcDirectories(runtime)
-    for (const name of ['autotext/common', 'en.lproj', 'uno_packages', 'uno_packages/cache', 'uno_packages/cache/uno_packages']) expect(statSync(join(resources, name)).isDirectory()).toBe(true)
-    preservePackagedCalcDirectories(runtime)
-    rmSync(join(resources, 'uno_packages'), { recursive: true })
-    const outside = join(base, 'outside'); mkdirSync(outside)
-    symlinkSync(outside, join(resources, 'uno_packages'), process.platform === 'win32' ? 'junction' : 'dir')
-    expect(() => preservePackagedCalcDirectories(runtime)).toThrow('not a real directory')
-    expect(existsSync(join(outside, 'cache'))).toBe(false)
-    rmSync(join(resources, 'uno_packages'))
-    rmSync(join(resources, 'autotext'), { recursive: true })
-    expect(() => preservePackagedCalcDirectories(runtime)).toThrow()
-    expect(existsSync(join(resources, 'autotext'))).toBe(false)
-  } finally { rmSync(base, { recursive: true, force: true }) }
 })
 
 
