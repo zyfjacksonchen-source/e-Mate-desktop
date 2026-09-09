@@ -285,18 +285,21 @@ describe('desktop profile composition', () => {
     expect(() => readDesktopShellMode({ path })).toThrow('invalid settings document')
   })
 
-  it('treats empty machine-wide patch documents as no entries and rejects malformed roots', () => {
-    const home = temporaryHome()
-    const path = join(home, 'cordis.patch.yml')
-    const baseline = composeEntries([prepareDesktopProfile(undefined, home, 'win32').patches])
-
-    for (const content of ['', '# no machine-wide patches\n']) {
+  it.each(['', '# no machine-wide patches\n'])(
+    'treats an empty machine-wide patch document %j as no entries',
+    (content) => {
+      const home = temporaryHome()
+      const path = join(home, 'cordis.patch.yml')
+      const baseline = composeEntries([prepareDesktopProfile(undefined, home, 'win32').patches])
       writeFileSync(path, content)
       const rows = composeEntries([prepareDesktopProfile(undefined, home, 'win32').patches])
       expect(rows).toEqual(baseline)
-    }
+    },
+  )
 
-    writeFileSync(path, 'not: a patch list\n')
+  it('rejects a malformed machine-wide patch root', () => {
+    const home = temporaryHome()
+    writeFileSync(join(home, 'cordis.patch.yml'), 'not: a patch list\n')
     expect(() => prepareDesktopProfile(undefined, home, 'win32')).toThrow(
       'must be a top-level YAML array of loader patch entries',
     )
