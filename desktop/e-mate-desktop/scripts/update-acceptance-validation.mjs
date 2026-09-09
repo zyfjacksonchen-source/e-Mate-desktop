@@ -88,7 +88,7 @@ export function validateCandidateManifest(manifestValue) {
   const root = 'desktop/candidates/' + manifest.source_commit + '/'
   artifact(artifacts.darwin, 'manifest.artifacts.darwin', root + 'darwin/e-Mate-' + manifest.version + '-mac-universal.dmg')
   artifact(artifacts.win32, 'manifest.artifacts.win32', root + 'win32/e-Mate-' + manifest.version + '-win-x64-Setup.exe')
-  if (schema === 2) artifact(manifest.source_companion, 'manifest.source_companion', root + 'sources/e-Mate-' + manifest.version + '-calc-sources.tar')
+  if (schema === 2) artifact(manifest.source_companion, 'manifest.source_companion', root + 'sources/e-Mate-' + manifest.version + '-runtime-sources.tar')
   return manifest
 }
 

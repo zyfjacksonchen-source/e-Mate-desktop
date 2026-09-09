@@ -7,7 +7,7 @@ const version = '2.0.18'
 const macHash = 'b'.repeat(64)
 const winHash = 'c'.repeat(64)
 const candidateRoot = 'desktop/candidates/' + source + '/'
-const companion = { key: candidateRoot + 'sources/e-Mate-' + version + '-calc-sources.tar', bytes: 30, sha256: 'f'.repeat(64) }
+const companion = { key: candidateRoot + 'sources/e-Mate-' + version + '-runtime-sources.tar', bytes: 30, sha256: 'f'.repeat(64) }
 const manifest = { schema_version: 2, source_commit: source, version, source_companion: companion, artifacts: {
   darwin: { key: candidateRoot + 'darwin/e-Mate-' + version + '-mac-universal.dmg', bytes: 10, sha256: macHash },
   win32: { key: candidateRoot + 'win32/e-Mate-' + version + '-win-x64-Setup.exe', bytes: 20, sha256: winHash },
@@ -46,7 +46,7 @@ test('source companion cannot be omitted, substituted, or downgraded on either p
   for (const mutate of [
     v => { delete v.manifest.source_companion },
     v => { v.manifest.schema_version = 1; delete v.manifest.source_companion },
-    v => { v.manifest.source_companion.key = 'desktop/candidates/' + '0'.repeat(40) + '/sources/e-Mate-2.0.18-calc-sources.tar' },
+    v => { v.manifest.source_companion.key = 'desktop/candidates/' + '0'.repeat(40) + '/sources/e-Mate-2.0.18-runtime-sources.tar' },
     v => { delete v.mac.source_companion },
     v => { v.windows.source_companion.sha256 = '0'.repeat(64) },
     v => { v.mac.source_companion.bytes += 1 },
@@ -55,11 +55,11 @@ test('source companion cannot be omitted, substituted, or downgraded on either p
     assert.throws(() => verifyUpdateAcceptance(value.manifest, value.mac, value.windows), /update acceptance rejected/u)
   }
   const accepted = verifyUpdateAcceptance(manifest, mac, windows)
-  assert.equal(accepted.release_source_companion.key, 'desktop/releases/v2.0.18/' + source + '/e-Mate-2.0.18-calc-sources.tar')
+  assert.equal(accepted.release_source_companion.key, 'desktop/releases/v2.0.18/' + source + '/e-Mate-2.0.18-runtime-sources.tar')
   assert.equal(accepted.release_source_companion.sha256, companion.sha256)
 })
 
-test('historical pre-Calc schema remains readable without inventing source evidence', () => {
+test('historical pre-source-companion schema remains readable without inventing source evidence', () => {
   const old = JSON.parse(JSON.stringify({ manifest, mac, windows }).replaceAll('2.0.18', '2.0.17'))
   for (const row of [old.manifest, old.mac, old.windows]) { row.schema_version = 1; delete row.source_companion }
   const accepted = verifyUpdateAcceptance(old.manifest, old.mac, old.windows)

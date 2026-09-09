@@ -22,7 +22,7 @@ function evidence(version = '2.0.18') {
   const root = 'desktop/candidates/' + SOURCE + '/', installers = { darwin: encoder.encode('exact mac installer'), win32: encoder.encode('exact windows installer') }
   const artifacts = { darwin: { key: root + 'darwin/e-Mate-' + version + '-mac-universal.dmg', bytes: installers.darwin.byteLength, sha256: sha256(installers.darwin) }, win32: { key: root + 'win32/e-Mate-' + version + '-win-x64-Setup.exe', bytes: installers.win32.byteLength, sha256: sha256(installers.win32) } }
   const sourceBytes = encoder.encode('corresponding sources')
-  const sourceCompanion = { key: root + 'sources/e-Mate-' + version + '-calc-sources.tar', bytes: sourceBytes.byteLength, sha256: sha256(sourceBytes) }
+  const sourceCompanion = { key: root + 'sources/e-Mate-' + version + '-runtime-sources.tar', bytes: sourceBytes.byteLength, sha256: sha256(sourceBytes) }
   const state = platform => ({ app_path: platform === 'darwin' ? '/Applications/e-Mate.app' : 'C:/Program Files/e-Mate/e-Mate.exe', dsh_home: platform === 'darwin' ? '/Users/test/.dsh' : 'C:/Users/test/.dsh', user_data: platform === 'darwin' ? '/Users/test/Library/Application Support/e-Mate' : 'C:/Users/test/AppData/Roaming/e-Mate', installation_id_sha256: 'd'.repeat(64), test_session_id: 'session-' + platform })
   const receipt = platform => ({ schema_version: 2, source_companion: sourceCompanion, platform, source_commit: SOURCE, version, installer: { bytes: artifacts[platform].bytes, sha256: artifacts[platform].sha256 }, native_download: { succeeded: true, bytes: artifacts[platform].bytes, sha256: artifacts[platform].sha256 }, native_install: { succeeded: true }, normal_launch: { succeeded: true, launched_version: version }, continuity: { from_version: '2.0.16', before: state(platform), after: { ...state(platform) } }, debug: { port_closed: true } })
   return { root, installers, artifacts, sourceBytes, sourceCompanion, manifest: { schema_version: 2, source_companion: sourceCompanion, source_commit: SOURCE, version, artifacts }, mac: receipt('darwin'), windows: receipt('win32') }
@@ -153,7 +153,7 @@ test('source missing, changed bytes behind matching metadata, and foreign metada
 })
 
 test('source publication failure leaves aliases untouched; identical retry publishes source before installers', async () => {
-  const key = 'desktop/releases/v2.0.18/' + SOURCE + '/e-Mate-2.0.18-calc-sources.tar'
+  const key = 'desktop/releases/v2.0.18/' + SOURCE + '/e-Mate-2.0.18-runtime-sources.tar'
   const value = fixture({ failPublicKey: key })
   assert.equal((await worker.fetch(request(), value.env)).status, 409)
   assert.deepEqual(value.publicWrites, [key])
@@ -184,7 +184,7 @@ test('same installers with a substituted source archive cannot reuse a retryable
 
 test('existing source immutable collision is detected before any public write', async () => {
   const value = fixture()
-  const key = 'desktop/releases/v2.0.18/' + SOURCE + '/e-Mate-2.0.18-calc-sources.tar'
+  const key = 'desktop/releases/v2.0.18/' + SOURCE + '/e-Mate-2.0.18-runtime-sources.tar'
   value.publicStore.set(key, { bytes: encoder.encode('wrong source'), customMetadata: {}, httpMetadata: {}, etag: 'collision' })
   const result = await worker.fetch(request(), value.env)
   assert.equal(result.status, 409)
