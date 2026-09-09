@@ -27,7 +27,7 @@ it('mounts native navigation, jumps to a user row and preserves manual history l
     await waitFor(() => expect(view.container.querySelectorAll('canvas')).toHaveLength(1))
     const rail = within(view.container).getByRole('slider', { name: '用户消息定位' })
     expect(rail.getAttribute('tabindex')).toBe('0')
-    await waitFor(() => expect(fillRect.mock.calls.some(call => call[2] === 52 && call[3] === 4)).toBe(true))
+    await waitFor(() => expect(fillRect.mock.calls.some(call => call[2] === 22 && call[3] === 3)).toBe(true))
     expect(beginPath).not.toHaveBeenCalled() // No triangular pointer.
     expect(document.documentElement.style.getPropertyValue('--tidychat-nav-color-hot')).toBe('#242424')
     fireEvent.keyDown(rail, { key: 'End' })
@@ -62,7 +62,7 @@ it('mounts the keyed native settings slot with fold/navigation controls but no a
 })
 
 
-it('draws quiet ticks with stable 20px spacing and progressively longer neighbours', async () => {
+it('draws compact quiet ticks with stable 12px spacing and progressively longer neighbours', async () => {
   document.body.innerHTML = '<main data-conversation-scroll>' + Array.from({ length: 6 }, (_, i) => `<div data-chat-anchor-key="user:${i + 1}" data-chat-flow-kind="user">message ${i + 1}</div>`).join('') + '</main>'
   const host = document.querySelector('main')!
   Object.assign(host, { scrollTo: vi.fn() })
@@ -80,11 +80,11 @@ it('draws quiet ticks with stable 20px spacing and progressively longer neighbou
     await runtime.declare({ 'conversation.session.header.utilities': { kind: 'list', scope: 'session' } } as never)
     await runtime.mount({ apply, inject: [...inject] })
     const view = runtime.renderSlot('conversation.session.header.utilities' as never, { sessionId: id } as never)
-    await waitFor(() => expect(draw.mock.calls.slice(-6).map(call => call[2])[0]).toBe(52))
+    await waitFor(() => expect(draw.mock.calls.slice(-6).map(call => call[2])[0]).toBe(22))
     const ticks = draw.mock.calls.slice(-6)
-    expect(ticks.every(call => call[3] === 4)).toBe(true)
-    expect(ticks.slice(1).map((call, i) => call[1] - ticks[i][1])).toEqual([20, 20, 20, 20, 20])
-    expect(ticks.slice(-2).map(call => call[2])).toEqual([12, 12])
+    expect(ticks.every(call => call[3] === 3)).toBe(true)
+    expect(ticks.slice(1).map((call, i) => call[1] - ticks[i][1])).toEqual([12, 12, 12, 12, 12])
+    expect(ticks.slice(-2).map(call => call[2])).toEqual([14, 14])
     expect(ticks[0][2]).toBeGreaterThan(ticks[1][2])
     expect(ticks[1][2]).toBeGreaterThan(ticks[2][2])
     expect(ticks[2][2]).toBeGreaterThan(ticks[3][2])

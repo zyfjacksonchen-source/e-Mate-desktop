@@ -106,7 +106,7 @@ const CSS = `
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  padding: 6px 2px 6px 24px;
+  padding: 6px 2px;
 }
 .tidychat-nav-canvas {
   display: block;
@@ -1130,8 +1130,8 @@ export function apply(ctx: any): void {
     }
   })
 
-  // Reserve the reference inset and the 52px current tick.
-  const NAV_RAIL_WIDTH = 88
+  // Preserve the compact navigation footprint, including the slot padding.
+  const NAV_RAIL_WIDTH = 48
 
   const measurePos = (): { left: number; top: number; gutter: number } | null => {
     // 新版 DSH 里 [data-slot="conversation.session"] 是 0×0 的空壳元素（slot host 未参与布局），
@@ -1155,14 +1155,14 @@ export function apply(ctx: any): void {
   }
 
   // ===== Adaptive Conversation Navigation Rail（v0.2.0 Canvas Minimap）=====
-  const NAV_RAIL_BAR_H = 4
-  const NAV_RAIL_BAR_LEN = 12
-  const NAV_RAIL_BAR_LEN_CURRENT = 52
-  const NAV_RAIL_TURN_SPACING = 20
+  const NAV_RAIL_BAR_H = 3
+  const NAV_RAIL_BAR_LEN = 14
+  const NAV_RAIL_BAR_LEN_CURRENT = 22
+  const NAV_RAIL_TURN_SPACING = 12
   const NAV_RAIL_MIN_HEIGHT = 48
   const HEADER_OFFSET = 64
 
-  // 轨道高度自适应：turn 少时按 20px/轮 收紧（不用最大高度），turn 多时封顶 min(70vh, 660px)
+  // 轨道高度自适应：turn 少时按 12px/轮 收紧（不用最大高度），turn 多时封顶 min(70vh, 660px)
   const railHeight = (n: number): number => Math.min(Math.min(window.innerHeight * 0.7, 660), Math.max(NAV_RAIL_MIN_HEIGHT, n * NAV_RAIL_TURN_SPACING))
 
   // 导航条（挂到会话头部 utilities 槽，fixed 定位到聊天区左缘；独立开关 navigator）
