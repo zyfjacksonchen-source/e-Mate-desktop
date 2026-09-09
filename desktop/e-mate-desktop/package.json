@@ -105,7 +105,7 @@
   },
   "scripts": {
     "prepare:python": "node scripts/prepare-python-runtime.mjs",
-    "build": "yarn run prepare:python && yarn run prepare:calc && yarn run build:sdk",
+    "build": "yarn run prepare:python && yarn run build:sdk",
     "build:sdk": "node ../../scripts/harness-provenance.mjs sync-desktop && node scripts/sync-emate-profile.mjs && node scripts/generate-mac-app-icon.mjs && node scripts/generate-tray-icons.mjs && node scripts/clean.mjs && tsdown && tsc -p tsconfig.json --emitDeclarationOnly && tsc -p tsconfig.client.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.tests.client.json --noEmit",
     "test": "vitest run",
@@ -124,8 +124,7 @@
     "package:dir": "yarn run build && node scripts/package-dir.mjs",
     "dist:mac": "node scripts/package-mac.ts",
     "dist:win": "node scripts/package-win.ts",
-    "prepack": "yarn run check",
-    "prepare:calc": "node scripts/prepare-calc-runtime.mjs"
+    "prepack": "yarn run check"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.1",
@@ -305,10 +304,6 @@
         "to": "python-runtime"
       },
       {
-        "from": "build/calc-runtime",
-        "to": "calc-runtime"
-      },
-      {
         "from": "third-party-notices",
         "to": "third-party-notices"
       },
@@ -338,7 +333,7 @@
       "signIgnore": [
         "\\.(?:pak|dat|wasm)$"
       ],
-      "x64ArchFiles": "**/{node_modules/{node-pty/prebuilds/darwin-*/**,node-addon-require-builtin-darwin-*/**,@vscode/ripgrep-darwin-*/**,@img/sharp-darwin-*/**,@img/sharp-libvips-darwin-*/**,@koromix/koffi-darwin-*/**},python-runtime/darwin-*/**,python-runtime/darwin-*/**/.dylibs/**,calc-runtime/darwin-*/**}"
+      "x64ArchFiles": "**/{node_modules/{node-pty/prebuilds/darwin-*/**,node-addon-require-builtin-darwin-*/**,@vscode/ripgrep-darwin-*/**,@img/sharp-darwin-*/**,@img/sharp-libvips-darwin-*/**,@koromix/koffi-darwin-*/**},python-runtime/darwin-*/**,python-runtime/darwin-*/**/.dylibs/**}"
     },
     "win": {
       "target": [

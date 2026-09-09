@@ -17,6 +17,7 @@
   },
   "files": [
     "assets",
+    "scripts/recalculate-workbook.py",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
     "patches",
@@ -70,7 +71,7 @@
   "eMate": {
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
-    "baseImports": ["@e-mate/desktop/vision-toolkit"]
+    "baseImports": []
   },
   "dependencies": {
     "@pdf-lib/fontkit": "1.1.1",

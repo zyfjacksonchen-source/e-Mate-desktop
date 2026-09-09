@@ -163,7 +163,7 @@ describe('published package surface', () => {
   })
 
   it('keeps host-only preparation and profile boot out of portable source checks', () => {
-    expect(manifest.scripts?.build).toBe('yarn run prepare:python && yarn run prepare:calc && yarn run build:sdk')
+    expect(manifest.scripts?.build).toBe('yarn run prepare:python && yarn run build:sdk')
     expect(manifest.scripts?.['build:sdk']).not.toContain('prepare:python')
     expect(manifest.scripts?.['check:source']).toBe('yarn run build:sdk && yarn run typecheck && yarn run test && yarn run verify:closure && yarn run verify:cli && yarn run verify:loader && yarn run verify:licenses')
     expect(manifest.scripts?.['check:source']).not.toContain('verify:profile')
@@ -279,7 +279,6 @@ describe('published package surface', () => {
     ])
     expect(manifest.build?.extraResources).toEqual([
       { from: 'build/python-runtime', to: 'python-runtime' },
-      { from: 'build/calc-runtime', to: 'calc-runtime' },
       { from: 'third-party-notices', to: 'third-party-notices' },
       { from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     ])

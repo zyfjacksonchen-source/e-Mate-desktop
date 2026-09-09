@@ -368,7 +368,7 @@ export function apply(ctx: OfficeContext): void {
   ctx.effect(() => ctx.jobs.attachController('emate-office'), 'emate.office: target Job controller')
   ctx.effect(() => ctx.tools.register({
     name: 'office_write',
-    description: 'Create a local Office file. DOCX supports styled creation, template filling and text replacement. PNG renders a standalone workspace SVG using the native Desktop renderer: document={source_svg,width,height}. XLSX/PDF also accept document={operation:"recalculate",source_path:"workspace.xlsx"} using managed Calc; Basic creation shapes and their limits are inline in the document parameter; loaded Skill workflows and quality requirements still apply. Always writes a new file and preserves the source.',
+    description: 'Create a local Office file. DOCX supports styled creation, template filling and text replacement. PNG renders a standalone workspace SVG using the native Desktop renderer: document={source_svg,width,height}. XLSX also accepts document={operation:"recalculate",source_path:"workspace.xlsx"} using managed Python formulas with original formulas/styles preserved; recalculation does not export PDF; Basic creation shapes and their limits are inline in the document parameter; loaded Skill workflows and quality requirements still apply. Always writes a new file and preserves the source.',
     parameters: {
       type: 'object', additionalProperties: false, required: ['document', 'filename', 'format'],
       properties: {
@@ -377,7 +377,7 @@ export function apply(ctx: OfficeContext): void {
           ...Object.entries(OFFICE_CREATE_EXAMPLES).map(([format, example]) => `${format}: ${JSON.stringify(example)}`),
           'DOCX basic paragraphs accepts strings or {text,heading?:1|2|3}. For styled DOCX, tables and images, use {operation:"create",spec:{blocks:[...]}}. Table block: {type:"table",headers:["项目","数量"],rows:[["样例","40"]]}. Other blocks: heading {text,level?}, paragraph {text} or {runs:[{text,bold?,italic?}]}, image {path,width,height,caption?}, page-break. spec also accepts title,subtitle,header,footer,font,accent. Full Word input guidance remains in documents/references/tool-input.md.',
           'DOCX existing template: {operation:"template",source_path:"template.docx",values:{placeholder:"value"}}. Targeted replacement: {operation:"replace",source_path:"source.docx",replacements:[{find:"old",replace:"new"}]}. All source paths are workspace-relative; no inline image bytes.',
-          'XLSX basic rows accept string, finite number, boolean or null only. Strings beginning with = are literal text, NOT formulas. For formulas/styles, use the Spreadsheets Skill with managed Python/openpyxl, then this Tool with {operation:"recalculate",source_path:"workbook.xlsx"}, format xlsx or pdf. Read back real cached results; never invent formula values.',
+          'XLSX basic rows accept string, finite number, boolean or null only. Strings beginning with = are literal text, NOT formulas. For formulas/styles, use the Spreadsheets Skill with managed Python/openpyxl, then this Tool with {operation:"recalculate",source_path:"workbook.xlsx"}, format xlsx. Read back real cached results; never invent formula values.',
           'PPTX basic creation supports title, bullets and optional notes:string[] for real speaker notes. Notes are separate from slide body; do not put them in bullets. It does not support table/layout/SVG authoring. A selected PPT Master workflow keeps its own authoring/export and integrity checks; this basic shape does not replace it.',
           'PDF basic creation accepts optional title and pages of lines only, not forms, arbitrary layouts or existing-PDF edits. PNG uses {source_svg:"slide.svg",width:1280,height:720} with a self-contained workspace SVG and native Desktop rendering.',
         ].join('\n') },
@@ -399,16 +399,16 @@ export function apply(ctx: OfficeContext): void {
         let data: Buffer
         const document = input.document as Record<string, unknown> | null
         if (document?.operation === 'recalculate') {
-          if (targetFormat !== 'xlsx' && targetFormat !== 'pdf') throw new Error('Calc output must be XLSX or PDF')
+          if (targetFormat !== 'xlsx') throw new Error('Calc recalculation output must be XLSX; PDF pagination is not provided')
           if (Array.isArray(document) || Object.keys(document).some(key => !['operation', 'source_path'].includes(key))) throw new Error('Calc operation contains an unsupported field')
           const source = await workspaceFile(root, document.source_path)
           if (extname(source.name).toLowerCase() !== '.xlsx') throw new Error('Calc source must be an XLSX file')
           const host = calcHost
           const environment = host?.shellEnv.collect(exec)
-          const executable = environment?.DSH_EMATE_CALC
-          const fontDirectory = environment?.DSH_EMATE_CALC_FONTS
-          if (typeof executable !== 'string' || !isAbsolute(executable) || typeof fontDirectory !== 'string' || !isAbsolute(fontDirectory)) throw new Error('受管 Calc 运行时尚不可用。')
-          const runtime = createCalcRuntime({ fs: host.fs, subprocess: host.subprocess, sandbox: host.sandbox }, { executable, fontDirectory })
+          const executable = environment?.DSH_EMATE_PYTHON
+          if (typeof executable !== 'string' || !isAbsolute(executable)) throw new Error('受管 Python 公式运行时尚不可用。')
+          const script = fileURLToPath(new URL('../scripts/recalculate-workbook.py', import.meta.url))
+          const runtime = createCalcRuntime({ fs: host.fs, subprocess: host.subprocess, sandbox: host.sandbox }, { executable, script })
           const result = await runtime.convert({ sourcePath: source.path, workspaceRoot: root, output: targetFormat, signal: jobSignal })
           data = Buffer.from(result.bytes)
         } else if (targetFormat === 'png') {
