@@ -358,6 +358,40 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(existsSync(sentinel)).toBe(true)
   })
 
+  it('refreshes changed bundled plugins and patch on same-version replacement without rewriting a stable profile', () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const profile = installEmateDesktopProfile(home)
+    const receipt = join(profile, '.e-mate-install.json')
+    const settings = readFileSync(join(home, 'settings.yaml'), 'utf8')
+    const userPlugin = join(profile, 'plugins', 'user-owned.js')
+    const session = join(home, 'sessions', 'preserved.jsonl')
+    mkdirSync(join(home, 'sessions'), { recursive: true })
+    writeFileSync(userPlugin, 'user plugin')
+    writeFileSync(session, 'session history')
+    const oldTime = new Date('2020-01-01T00:00:00Z')
+    for (const relativePath of ['plugins/model-policy.js', 'plugins/identity/index.js', 'cordis.patch.yml']) {
+      const source = join(packagedSource, relativePath)
+      const original = readFileSync(source, 'utf8')
+      const changed = `${original}\n${relativePath.endsWith('.yml') ? '#' : '//'} same-version replacement\n`
+      try {
+        utimesSync(receipt, oldTime, oldTime)
+        writeFileSync(source, changed)
+        installEmateDesktopProfile(home)
+        expect(readFileSync(join(profile, relativePath), 'utf8')).toContain('same-version replacement')
+        expect(statSync(receipt).mtimeMs).not.toBe(oldTime.getTime())
+        expect(readFileSync(join(home, 'settings.yaml'), 'utf8')).toBe(settings)
+        expect(readFileSync(userPlugin, 'utf8')).toBe('user plugin')
+        expect(readFileSync(session, 'utf8')).toBe('session history')
+        utimesSync(receipt, oldTime, oldTime)
+        installEmateDesktopProfile(home)
+        expect(statSync(receipt).mtimeMs).toBe(oldTime.getTime())
+      } finally {
+        writeFileSync(source, original)
+      }
+    }
+  })
+
   it('repairs a managed package with a top-level extra while preserving package-external data', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
     roots.push(home)

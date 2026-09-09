@@ -599,9 +599,30 @@ function installedGenerationCurrent(
   }
 }
 
+// Compare the copied, Desktop-owned payload even when a replacement keeps the
+// same version and installation path. Target-only files include runtime binding
+// and user plugins, so they are outside this comparison.
+function bundledPluginFilesCurrent(source: string, target: string): boolean {
+  const metadata = lstatSync(target)
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) return false
+  return readdirSync(source, { withFileTypes: true }).every(entry => {
+    const from = join(source, entry.name)
+    const to = join(target, entry.name)
+    return entry.isDirectory()
+      ? bundledPluginFilesCurrent(from, to)
+      : entry.isFile() && managedFileContentCurrent(from, to, undefined)
+  })
+}
+
+function bundledProfilePatch(): string {
+  return `${readFileSync(join(sourceRoot, 'cordis.patch.yml'), 'utf8').trimEnd()}\n\n- id: dsh-file-viewer\n  config:\n    allowAbsolutePaths: false\n`
+}
+
 function installedProfileCurrent(profile: string, dshHome: string): boolean {
   try {
     if (!installedGenerationCurrent(profile, dshHome)) return false
+    if (!bundledPluginFilesCurrent(join(sourceRoot, 'plugins'), join(profile, 'plugins'))
+      || !managedFileContentCurrent(join(sourceRoot, 'cordis.patch.yml'), join(profile, 'cordis.patch.yml'), bundledProfilePatch())) return false
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, unknown>
       dsh?: { profile?: { bundles?: unknown[] } }
@@ -698,7 +719,7 @@ export function installEmateDesktopProfile(
   cpSync(join(sourceRoot, 'plugins'), join(profile, 'plugins'), { recursive: true, force: true })
   atomicWrite(
     join(profile, 'cordis.patch.yml'),
-    `${readFileSync(join(sourceRoot, 'cordis.patch.yml'), 'utf8').trimEnd()}\n\n- id: dsh-file-viewer\n  config:\n    allowAbsolutePaths: false\n`,
+    bundledProfilePatch(),
   )
   atomicWrite(join(profile, 'cordis.yml'), '[]\n')
   let previous: {
