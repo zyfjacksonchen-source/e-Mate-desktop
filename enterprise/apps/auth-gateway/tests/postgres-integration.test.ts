@@ -784,3 +784,33 @@ integrationTest('Postgres password login and refresh rotation are hash-only, ato
     { ok: false, code: 'SESSION_REVOKED' }
   );
 });
+
+integrationTest('legacy image grants survive login and refresh while canonical tenant policy remains authoritative', async () => {
+  assert.ok(pool);
+  const store = createStore(); await store.initialize();
+  const tenant = `${tenantId}-image-compat`, user = `${userId}-image-compat`;
+  const userLogin = `image-${suffix}@example.test`;
+  await insertLegacyUser(tenant, user, userLogin, 'legacy-password');
+  await pool.query("UPDATE e_mate_tenant_user SET allowed_model_ids = ARRAY['gpt-5.6-sol','gpt-image-2-pro'] WHERE tenant_id=$1 AND user_id=$2", [tenant, user]);
+  await pool.query("INSERT INTO e_mate_tenant_model_route (tenant_id,route_id,enabled,published,updated_by) VALUES ($1,'gpt-image-2-pro',false,true,'test')", [tenant]);
+  const login = await store.authenticatePassword({ tenantId: tenant, clientId: 'e-mate-desktop', user: userLogin, password: 'legacy-password', clientVersion: '2.0.18' });
+  assert.equal(login.ok, true); if (!login.ok) return;
+  assert.deepEqual(login.identity.modelIds, ['gpt-5.6-sol']);
+  await pool.query("UPDATE e_mate_tenant_model_route SET enabled=true WHERE tenant_id=$1 AND route_id='gpt-image-2-pro'", [tenant]);
+  const refresh = await store.rotateRefreshToken({ clientId: 'e-mate-desktop', refreshToken: login.refreshToken, refreshRequestId: 'image-compat-1', clientVersion: '2.0.18' });
+  assert.equal(refresh.ok, true); if (!refresh.ok) return;
+  assert.deepEqual(refresh.identity.modelIds, ['gpt-5.6-sol','gpt-image-2.5-flare']);
+  const { PostgresUsageStore } = await import('../../model-gateway/src/postgres-usage-store.ts');
+  const usage = new PostgresUsageStore(pool, { tenantRequestsPerMinute: 1000, tenantBurst: 1000, tenantMaxConcurrent: 1, invocationLeaseMs: 180000 });
+  const principal = { tenantId: tenant, userId: user, modelIds: ['gpt-image-2-pro'] };
+  assert.deepEqual(await usage.activeModelIds(principal, ['gpt-image-2.5-flare']), ['gpt-image-2.5-flare']);
+  await pool.query("UPDATE e_mate_tenant_user SET allowed_model_ids=ARRAY['gpt-5.6-sol'] WHERE tenant_id=$1 AND user_id=$2", [tenant,user]);
+  assert.deepEqual(await usage.activeModelIds(principal, ['gpt-image-2.5-flare']), []);
+  await pool.query("UPDATE e_mate_tenant_user SET allowed_model_ids=ARRAY['gpt-5.6-sol','gpt-image-2.5-flare'] WHERE tenant_id=$1 AND user_id=$2", [tenant,user]);
+  assert.deepEqual(await usage.activeModelIds(principal, ['gpt-image-2.5-flare']), ['gpt-image-2.5-flare']);
+
+  await pool.query("INSERT INTO e_mate_tenant_model_route (tenant_id,route_id,enabled,published,updated_by) VALUES ($1,'gpt-image-2.5-flare',false,true,'test')", [tenant]);
+  const disabled = await store.rotateRefreshToken({ clientId: 'e-mate-desktop', refreshToken: refresh.refreshToken, refreshRequestId: 'image-compat-2', clientVersion: '2.0.18' });
+  assert.equal(disabled.ok, true); if (!disabled.ok) return;
+  assert.deepEqual(disabled.identity.modelIds, ['gpt-5.6-sol']);
+});

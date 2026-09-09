@@ -332,10 +332,14 @@ export class PostgresAuthStore implements AuthStore {
       SELECT ARRAY(
         SELECT candidate.route_id
           FROM unnest($2::text[]) WITH ORDINALITY AS candidate(route_id, position)
-          LEFT JOIN e_mate_tenant_model_route AS policy
-            ON policy.tenant_id = $1
-           AND policy.route_id = candidate.route_id
-         WHERE candidate.route_id = ANY(app_user.allowed_model_ids)
+          LEFT JOIN LATERAL (
+            SELECT enabled, published FROM e_mate_tenant_model_route
+             WHERE tenant_id = $1 AND (route_id = candidate.route_id OR
+               (candidate.route_id = 'gpt-image-2.5-flare' AND route_id = 'gpt-image-2-pro'))
+             ORDER BY (route_id = candidate.route_id) DESC LIMIT 1
+          ) AS policy ON true
+         WHERE (candidate.route_id = ANY(app_user.allowed_model_ids) OR
+           (candidate.route_id = 'gpt-image-2.5-flare' AND 'gpt-image-2-pro' = ANY(app_user.allowed_model_ids)))
            AND COALESCE(policy.published, true)
            AND COALESCE(policy.enabled, candidate.route_id = ANY($4::text[]))
          ORDER BY candidate.position

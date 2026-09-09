@@ -1,3 +1,4 @@
+import { imageModelGrantView } from '@e-mate/admin-contract';
 import {
   createHash,
   createPrivateKey,
@@ -199,7 +200,7 @@ export function createSessionTokenIssuer(options: SessionTokenIssuerOptions) {
         expiresAt: new Date(modelExpiry * 1_000).toISOString(),
         usageKeyId,
         usagePublicKey,
-        allowedModelIds: [...identity.modelIds],
+        allowedModelIds: imageModelGrantView(identity.modelIds),
       },
     };
   };

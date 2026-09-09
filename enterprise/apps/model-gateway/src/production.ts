@@ -5,7 +5,7 @@ import { createServer, type Server } from 'node:https';
 import { isAbsolute, join } from 'node:path';
 import { createSecureContext } from 'node:tls';
 import { once } from 'node:events';
-import { parseConsentPolicy, type ConsentPolicy } from '@e-mate/admin-contract';
+import { canonicalModelRouteId, parseConsentPolicy, type ConsentPolicy } from '@e-mate/admin-contract';
 import { openPostgresConsentStore } from '@e-mate/consent-store';
 import { openPostgresUsageStore } from './postgres-usage-store.ts';
 import { openPostgresTenantModelRoutePolicy } from './tenant-model-route-policy.ts';
@@ -84,7 +84,7 @@ export function createProductionAuthenticator(
         sessionPrincipal.userId,
         sessionPrincipal.sessionId
       ))) return null;
-      const tokenScopedRouteIds = callableRouteIds.filter((routeId) => sessionPrincipal.modelIds.includes(routeId));
+      const tokenScopedRouteIds = callableRouteIds.filter((routeId) => sessionPrincipal.modelIds.some(id => canonicalModelRouteId(id) === routeId));
       if (tokenScopedRouteIds.length === 0) return null;
       const modelIds = await usageStore.activeModelIds(sessionPrincipal, tokenScopedRouteIds);
       return modelIds.length > 0 ? { ...sessionPrincipal, modelIds } : null;

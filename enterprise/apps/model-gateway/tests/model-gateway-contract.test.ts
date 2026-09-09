@@ -94,7 +94,7 @@ test('decrypts tenant route keys only for their bound tenant and route', async (
   const tag = cipher.getAuthTag();
   const pool = {
     query: async () => ({
-      rows: [{ upstream_key_ciphertext: ciphertext, upstream_key_nonce: nonce, upstream_key_tag: tag }],
+      rows: [{ route_id: 'gpt-5.6-sol', upstream_key_ciphertext: ciphertext, upstream_key_nonce: nonce, upstream_key_tag: tag }],
     }),
   };
   const policy = new PostgresTenantModelRoutePolicy(pool as never, encryptionKey);
@@ -493,7 +493,8 @@ async function withGateway(
   tenantModelRoutePolicy?: TenantModelRoutePolicy,
   usageStore: UsageStore = new InMemoryUsageStore(gatewayLimits),
   imageObservation?: ModelGatewayOptions['imageObservation'],
-  upstreamRejectionObservation?: ModelGatewayOptions['upstreamRejectionObservation']
+  upstreamRejectionObservation?: ModelGatewayOptions['upstreamRejectionObservation'],
+  grantedModels?: string[]
 ): Promise<void> {
   const upstreamRequests: Request[] = [];
   const consentStore = new InMemoryConsentStore(consentPolicy);
@@ -505,7 +506,7 @@ async function withGateway(
     routes: [gatewayRoute],
     authenticate: async (token) =>
       token === sessionToken
-        ? principal('tenant-a', 'user-a', gatewayRoute.id)
+        ? { ...principal('tenant-a', 'user-a', gatewayRoute.id), ...(grantedModels ? { modelIds: grantedModels } : {}) }
         : token === otherToken
           ? principal('tenant-b', 'user-b', gatewayRoute.id)
           : null,
@@ -4227,4 +4228,99 @@ test('same-version runtime catalog negotiates DeepSeek metadata without changing
       assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.18${suffix}`, { headers })).status, 403);
     }
   } finally { server.close(); await once(server, 'close'); }
+});
+
+
+test('released Pro wire requests use one exact Flare route and preserve signed usage identity', async () => {
+  for (const grant of [['gpt-image-2-pro'], ['gpt-image-2.5-flare'], []]) {
+    let enabled = true;
+    await withGateway(async (url, requests) => {
+      const response = await imageRequest(url, { model: 'gpt-image-2-pro', prompt: 'fixture' });
+      assert.equal(response.status, grant.length ? 200 : 403);
+      if (!grant.length) { assert.equal(requests.length, 0); return; }
+      assert.equal((await requests[0]!.clone().json()).model, 'gpt-image-2.5-flare');
+      const usage = await fetch(`${url}/v1/usage/task-1`, { headers: auth() });
+      assert.equal(usage.status, 200);
+      const envelope = await usage.json();
+      const payload = Buffer.from(envelope.payload, 'base64url');
+      assert.equal(verify(null, payload, publicKey, Buffer.from(envelope.signature, 'base64url')), true);
+      const value = JSON.parse(payload.toString());
+      assert.equal(value.modelId, 'gpt-image-2-pro');
+      // Existing audit binding rejects a different wire model before dispatch.
+      assert.equal((await imageRequest(url, { model: imageRoute.id, prompt: 'fixture' })).status, 503);
+      assert.equal(requests.length, 1);
+      const edit = new FormData();
+      edit.set('model', 'gpt-image-2-pro'); edit.set('prompt', 'Preserve the reference');
+      edit.set('image', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }), 'input.png');
+      assert.equal((await imageEditRequest(url, edit, 'legacy-edit')).status, 200);
+      const upstreamEdit = await requests[1]!.clone().formData();
+      assert.equal(upstreamEdit.get('model'), imageRoute.id);
+      assert.deepEqual([...new Uint8Array(await (upstreamEdit.get('image') as Blob).arrayBuffer())], [1, 2, 3]);
+
+      assert.equal((await imageRequest(url, { model: 'gpt-image2.5-flare', prompt: 'fixture' })).status, 403);
+      enabled = false;
+      assert.equal((await imageRequest(url, { model: 'gpt-image-2-pro', prompt: 'fixture' })).status, 403);
+      assert.equal(requests.length, 2);
+    }, () => Response.json({ data: [{ b64_json: 'aGVsbG8=' }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }),
+    undefined, undefined, limits, imageRoute, { isEnabled: async (_tenant, id) => { assert.equal(id, imageRoute.id); return enabled; } },
+    new InMemoryUsageStore(limits), undefined, undefined, grant);
+  }
+});
+
+
+test('canonical image lookup decrypts a legacy record with its original AAD and refuses foreign records', async () => {
+  const key = Buffer.alloc(32, 7), nonce = Buffer.alloc(12, 3);
+  const secret = 'fixture-image-key-never-logged';
+  const cipher = createCipheriv('aes-256-gcm', key, nonce);
+  cipher.setAAD(Buffer.from('tenant-a\0gpt-image-2-pro'));
+  const row = { route_id: 'gpt-image-2-pro', upstream_key_ciphertext: Buffer.concat([cipher.update(secret), cipher.final()]),
+    upstream_key_nonce: nonce, upstream_key_tag: cipher.getAuthTag() };
+  const policy = new PostgresTenantModelRoutePolicy({ query: async () => ({ rows: [row] }) } as never, key);
+  assert.equal(await policy.upstreamApiKey('tenant-a', imageRoute.id), secret);
+  await assert.rejects(policy.upstreamApiKey('tenant-b', imageRoute.id));
+  row.route_id = 'gpt-5.6-sol';
+  await assert.rejects(policy.upstreamApiKey('tenant-a', imageRoute.id), /unavailable/);
+});
+
+test('production authentication maps only the released image grant before live authorization intersection', async () => {
+  let ids = ['gpt-image-2-pro']; let live = true;
+  const authenticate = createProductionAuthenticator(
+    async () => ({ tenantId: 'tenant-a', userId: 'user-a', sessionId: 'session-1', modelIds: ids }),
+    { isUserSessionActive: async () => true } as never,
+    { activeModelIds: async (_principal: ModelGatewayPrincipal, scope: string[]) => {
+      assert.deepEqual(scope, ['gpt-image-2.5-flare']); return live ? scope : [];
+    } } as never, ['gpt-image-2.5-flare', 'gpt-5.6-sol']);
+  assert.deepEqual((await authenticate(sessionToken))?.modelIds, ['gpt-image-2.5-flare']);
+  live = false; assert.equal(await authenticate(sessionToken), null);
+  ids = ['gpt-image2.5-flare']; assert.equal(await authenticate(sessionToken), null);
+  ids = []; assert.equal(await authenticate(sessionToken), null);
+});
+
+test('signed old Pro JWT through production authentication exposes only canonical public image catalog', async () => {
+  const { sign } = await import('node:crypto');
+  const { createSessionTokenVerifier } = await import('../src/session-auth.ts');
+  const now = Date.now(), seconds = Math.floor(now / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: 'EdDSA', typ: 'e-mate-model-session+jwt', kid: 'fixture' })).toString('base64url');
+  const claims = Buffer.from(JSON.stringify({ schemaVersion: 1, iss: 'fixture', aud: 'gateway',
+    sub: 'user-a', sid: 'session-1', tenantId: 'tenant-a', modelIds: ['gpt-image-2-pro'],
+    scopes: ['models:read', 'responses:create', 'usage:read'], iat: seconds, nbf: seconds, exp: seconds + 600, jti: 'fixture-token-0001' })).toString('base64url');
+  const body = `${header}.${claims}`, jwt = `${body}.${sign(null, Buffer.from(body), privateKey).toString('base64url')}`;
+  const verifySession = createSessionTokenVerifier({ issuer: 'fixture', audience: 'gateway', publicKeys: new Map([['fixture', publicKey]]), now: () => now });
+  const authenticate = createProductionAuthenticator(verifySession,
+    { isUserSessionActive: async () => true } as never,
+    { activeModelIds: async (_principal: ModelGatewayPrincipal, ids: string[]) => ids } as never, [imageRoute.id]);
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await consentStore.accept(principal('tenant-a','user-a', imageRoute.id), consentInput);
+  const server = createModelGatewayServer({ routes: [imageRoute], authenticate, consentStore,
+    tenantModelRoutePolicy: { isEnabled: async () => true }, usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'fixture', usagePrivateKey: privateKey });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const address = server.address(); assert(address && typeof address === 'object');
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/models`, { headers: { authorization: `Bearer ${jwt}` } });
+    assert.equal(response.status, 200);
+    const catalog = await response.json();
+    assert.deepEqual(catalog.models.map((model: { id: string }) => model.id), [imageRoute.id]);
+    assert.deepEqual(catalog.data, []);
+  } finally { server.close(); await once(server,'close'); }
 });

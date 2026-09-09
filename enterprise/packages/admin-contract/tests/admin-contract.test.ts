@@ -1,3 +1,4 @@
+import { canonicalModelRouteId, imageModelGrantView } from '../src/index.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -432,4 +433,13 @@ test('retired image routes cannot be re-enabled through an old catalog or client
   }
   assert.equal(isDefaultEnabledModelRoute('gpt-image-2.5-flare'), true);
   assert.equal(modelSupportsClient('gpt-image-2.5-flare', '2.0.18'), true);
+});
+
+
+test('released Pro wire compatibility does not grant unrelated image models', () => {
+  assert.equal(canonicalModelRouteId('gpt-image-2-pro'), 'gpt-image-2.5-flare');
+  assert.equal(canonicalModelRouteId('gpt-image2.5-flare'), 'gpt-image2.5-flare');
+  assert.deepEqual(imageModelGrantView(['deepseek']), ['deepseek']);
+  assert.deepEqual(imageModelGrantView(['gpt-image-2-pro']), ['gpt-image-2-pro', 'gpt-image-2.5-flare']);
+  assert.deepEqual(imageModelGrantView(['gpt-image-2.5-flare']), ['gpt-image-2.5-flare', 'gpt-image-2-pro']);
 });

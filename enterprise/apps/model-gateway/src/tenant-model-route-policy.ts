@@ -31,8 +31,9 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
       `
       SELECT enabled AND published AS enabled
         FROM e_mate_tenant_model_route
-       WHERE tenant_id = $1 AND route_id = $2
-       LIMIT 1
+       WHERE tenant_id = $1 AND (route_id = $2 OR
+         ($2 = 'gpt-image-2.5-flare' AND route_id = 'gpt-image-2-pro'))
+       ORDER BY (route_id = $2) DESC LIMIT 1
     `,
       [tenantId, routeId]
     );
@@ -123,9 +124,14 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
              ARRAY(
                SELECT candidate.route_id
                  FROM unnest($2::text[]) WITH ORDINALITY AS candidate(route_id, position)
-                 LEFT JOIN e_mate_tenant_model_route AS policy
-                   ON policy.tenant_id = authenticated.tenant_id
-                  AND policy.route_id = candidate.route_id
+                 LEFT JOIN LATERAL (
+                   SELECT stored.published, stored.enabled
+                     FROM e_mate_tenant_model_route AS stored
+                    WHERE stored.tenant_id = authenticated.tenant_id
+                      AND (stored.route_id = candidate.route_id OR
+                        (candidate.route_id = 'gpt-image-2.5-flare' AND stored.route_id = 'gpt-image-2-pro'))
+                    ORDER BY (stored.route_id = candidate.route_id) DESC LIMIT 1
+                 ) AS policy ON true
                 WHERE COALESCE(policy.published, true)
                   AND COALESCE(policy.enabled, candidate.route_id = ANY($3::text[]))
                 ORDER BY candidate.position
@@ -157,15 +163,17 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
     const tenantId = identifier(tenantIdInput, 'tenant id');
     const routeId = identifier(routeIdInput, 'route id');
     const result = await this.#pool.query<{
+      route_id: string;
       upstream_key_ciphertext: Buffer | null;
       upstream_key_nonce: Buffer | null;
       upstream_key_tag: Buffer | null;
     }>(
       `
-      SELECT upstream_key_ciphertext, upstream_key_nonce, upstream_key_tag
+      SELECT route_id, upstream_key_ciphertext, upstream_key_nonce, upstream_key_tag
         FROM e_mate_tenant_model_route
-       WHERE tenant_id = $1 AND route_id = $2
-       LIMIT 1
+       WHERE tenant_id = $1 AND (route_id = $2 OR
+         ($2 = 'gpt-image-2.5-flare' AND route_id = 'gpt-image-2-pro'))
+       ORDER BY (route_id = $2) DESC LIMIT 1
     `,
       [tenantId, routeId]
     );
@@ -177,6 +185,7 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
       return null;
     }
     if (
+      (row.route_id !== routeId && !(routeId === 'gpt-image-2.5-flare' && row.route_id === 'gpt-image-2-pro')) ||
       !this.#routeKeyEncryptionKey ||
       !row.upstream_key_ciphertext ||
       row.upstream_key_nonce?.byteLength !== 12 ||
@@ -185,7 +194,7 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
       throw new Error('Model route key is unavailable');
     }
     const decipher = createDecipheriv('aes-256-gcm', this.#routeKeyEncryptionKey, row.upstream_key_nonce);
-    decipher.setAAD(Buffer.from(`${tenantId}\0${routeId}`, 'utf8'));
+    decipher.setAAD(Buffer.from(`${tenantId}\0${row.route_id}`, 'utf8'));
     decipher.setAuthTag(row.upstream_key_tag);
     const apiKey = Buffer.concat([decipher.update(row.upstream_key_ciphertext), decipher.final()]).toString('utf8');
     if (apiKey.length < 20 || apiKey.length > 8_192 || /\s/.test(apiKey)) {

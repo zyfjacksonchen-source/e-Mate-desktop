@@ -1,3 +1,14 @@
+// One image capability; Pro is a wire ID used by released clients, never another execution route.
+export const IMAGE_ROUTE_ID = 'gpt-image-2.5-flare';
+export const LEGACY_IMAGE_ROUTE_ID = 'gpt-image-2-pro';
+export function canonicalModelRouteId(id: string): string {
+  return id === LEGACY_IMAGE_ROUTE_ID ? IMAGE_ROUTE_ID : id;
+}
+export function imageModelGrantView(ids: readonly string[]): string[] {
+  return ids.some(id => canonicalModelRouteId(id) === IMAGE_ROUTE_ID)
+    ? [...new Set([...ids, IMAGE_ROUTE_ID, LEGACY_IMAGE_ROUTE_ID])] : [...ids];
+}
+
 export const ADMIN_USER_ROLES = ['TENANT_ADMIN', 'AUDIT_ADMIN', 'MEMBER'] as const;
 export function isRetiredModelRoute(modelId: string): boolean {
   return modelId === 'doubao-seed-2-0-pro-260215' || modelId === 'gpt-image-2-pro' || modelId === 'gpt-image-2';

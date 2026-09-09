@@ -14,6 +14,9 @@ import {
   parseTenantUserDelete,
   parseTenantUserList,
   parseTenantUserUpdate,
+  canonicalModelRouteId,
+  IMAGE_ROUTE_ID,
+  LEGACY_IMAGE_ROUTE_ID,
   isDefaultEnabledModelRoute,
   isRetiredModelRoute,
   type AdminApiKeyCreate,
@@ -487,7 +490,7 @@ function userFromRow(row: UserRow): TenantUser {
     roles: row.roles,
     status: row.status,
     tokenLimit: row.token_limit === null ? null : Number(row.token_limit),
-    allowedModelIds: row.allowed_model_ids,
+    allowedModelIds: [...new Set(row.allowed_model_ids.map(canonicalModelRouteId))],
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   });
@@ -669,10 +672,10 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     );
     const policies = new Map(result.rows.map((row) => [row.route_id, row]));
     const available = this.#catalog.filter((route) => {
-      const policy = policies.get(route.routeId);
+      const policy = policies.get(route.routeId) ?? (route.routeId === IMAGE_ROUTE_ID ? policies.get(LEGACY_IMAGE_ROUTE_ID) : undefined);
       return (policy?.published ?? true) && (policy?.enabled ?? isDefaultEnabledModelRoute(route.routeId));
     }).map((route) => route.routeId);
-    validateUserModelGrants(available, allowed, previous, activating);
+    validateUserModelGrants(available, allowed, previous.map(canonicalModelRouteId), activating);
   }
 
   async listUsers(principal: RuntimeRegistryPrincipal): Promise<TenantUserList> {
@@ -1090,6 +1093,16 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     }
   }
 
+  // Keep existing policy/key storage; the public image route remains canonical.
+  async #imagePolicyRecord(client: PoolClient, tenantId: string, routeId: string): Promise<string> {
+    if (routeId !== IMAGE_ROUTE_ID) return routeId;
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [tenantId + ':' + routeId]);
+    const result = await client.query<{ route_id: string }>(
+      'SELECT route_id FROM e_mate_tenant_model_route WHERE tenant_id=$1 AND route_id=ANY($2::text[]) ORDER BY (route_id=$3) DESC LIMIT 1 FOR UPDATE',
+      [tenantId, [IMAGE_ROUTE_ID, LEGACY_IMAGE_ROUTE_ID], IMAGE_ROUTE_ID]);
+    return result.rows[0]?.route_id ?? routeId;
+  }
+
   async listModelRoutes(principal: RuntimeRegistryPrincipal): Promise<AdminModelRouteList> {
     const tenantId = identifier(principal.tenantId, 'tenant id');
     const result = await this.#pool.query<ModelRouteRow>(
@@ -1107,7 +1120,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     return parseAdminModelRouteList({
       schemaVersion: 1,
       routes: this.#catalog.map((route) => {
-        const policy = policies.get(route.routeId);
+        const policy = policies.get(route.routeId) ?? (route.routeId === IMAGE_ROUTE_ID ? policies.get(LEGACY_IMAGE_ROUTE_ID) : undefined);
         return {
           schemaVersion: 1,
           routeId: route.routeId,
@@ -1136,6 +1149,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
+      const recordId = await this.#imagePolicyRecord(client, tenantId, routeId);
       const result = await client.query<{
         published: boolean;
         enabled: boolean;
@@ -1157,7 +1171,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
                     AND upstream_key_nonce IS NOT NULL
                     AND upstream_key_tag IS NOT NULL AS key_configured
       `,
-        [tenantId, routeId, input.enabled, principal.userId]
+        [tenantId, recordId, input.enabled, principal.userId]
       );
       await this.#audit(client, principal, 'MODEL_ROUTE_UPDATED', 'MODEL_ROUTE', routeId, {
         enabled: input.enabled,
@@ -1195,6 +1209,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
+      const recordId = await this.#imagePolicyRecord(client, tenantId, routeId);
       const result = await client.query<{
         published: boolean;
         enabled: boolean;
@@ -1214,7 +1229,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
                    upstream_key_ciphertext IS NOT NULL
                      AND upstream_key_nonce IS NOT NULL
                      AND upstream_key_tag IS NOT NULL AS key_configured`,
-        [tenantId, routeId, input.published, principal.userId]
+        [tenantId, recordId, input.published, principal.userId]
       );
       await this.#audit(
         client,
@@ -1257,10 +1272,11 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     if (!route) return null;
     const input = parseAdminModelRouteKeyUpdate(value);
     if (!this.#routeKeyEncryptionKey) throw new Error('Model route key management is unavailable');
-    const encrypted = encryptRouteKey(this.#routeKeyEncryptionKey, tenantId, routeId, input.apiKey);
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
+      const recordId = await this.#imagePolicyRecord(client, tenantId, routeId);
+      const encrypted = encryptRouteKey(this.#routeKeyEncryptionKey!, tenantId, recordId, input.apiKey);
       const result = await client.query<{
         published: boolean;
         enabled: boolean;
@@ -1283,7 +1299,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
       `,
         [
           tenantId,
-          routeId,
+          recordId,
           isDefaultEnabledModelRoute(routeId),
           principal.userId,
           encrypted.ciphertext,

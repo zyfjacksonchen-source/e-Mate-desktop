@@ -256,6 +256,7 @@ export class PostgresUsageStore implements UsageStore {
          SELECT candidate.route_id
            FROM unnest($3::text[]) WITH ORDINALITY AS candidate(route_id, position)
           WHERE candidate.route_id = ANY(app_user.allowed_model_ids)
+             OR (candidate.route_id = 'gpt-image-2.5-flare' AND 'gpt-image-2-pro' = ANY(app_user.allowed_model_ids))
           ORDER BY candidate.position
        ) AS model_ids
          FROM e_mate_tenant_user AS app_user

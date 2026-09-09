@@ -456,3 +456,42 @@ test(
     }
   }
 );
+
+test('real image policy editing preserves legacy key storage and canonical disable precedence', {
+  skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
+}, async () => {
+  const { createCipheriv } = await import('node:crypto');
+  const { PostgresTenantModelRoutePolicy } = await import('../../model-gateway/src/tenant-model-route-policy.ts');
+  const tenantId = `image-${randomUUID()}`, routeId = 'gpt-image-2.5-flare', legacy = 'gpt-image-2-pro';
+  const key = Buffer.alloc(32, 8), nonce = Buffer.alloc(12, 7), secret = 'fixture-only-key-not-production';
+  const cipher = createCipheriv('aes-256-gcm', key, nonce);
+  cipher.setAAD(Buffer.from(`${tenantId}\0${legacy}`));
+  const ciphertext = Buffer.concat([cipher.update(secret), cipher.final()]);
+  const db = new Pool({ connectionString: postgresUrl });
+  const { store, close } = await openPostgresAdminManagementStore(postgresUrl as string,
+    [{ routeId, label: 'Image', provider: 'fixture' }], key);
+  const principal = { tenantId, userId: 'admin', roles: ['TENANT_ADMIN'], projectIds: [] };
+  const policy = new PostgresTenantModelRoutePolicy(db, key);
+  try {
+    await db.query(`INSERT INTO e_mate_tenant_model_route
+      (tenant_id,route_id,enabled,published,updated_by,upstream_key_ciphertext,upstream_key_nonce,upstream_key_tag)
+      VALUES ($1,$2,false,false,'fixture',$3,$4,$5)`, [tenantId,legacy,ciphertext,nonce,cipher.getAuthTag()]);
+    const updated = await store.updateModelRoute(principal, routeId, { schemaVersion: 1, enabled: true });
+    assert.equal(updated?.published, false); assert.equal(updated?.keyConfigured, true);
+    assert.equal(await policy.isEnabled(tenantId, routeId), false);
+    assert.equal(await policy.upstreamApiKey(tenantId, routeId), secret);
+    await store.publishModelRoute(principal, routeId, { schemaVersion: 1, published: true });
+    assert.equal(await policy.isEnabled(tenantId, routeId), true);
+    await store.updateModelRouteKey(principal, routeId, { schemaVersion: 1, apiKey: 'replacement-fixture-key' });
+    assert.equal(await policy.upstreamApiKey(tenantId, routeId), 'replacement-fixture-key');
+    assert.deepEqual((await db.query('SELECT route_id FROM e_mate_tenant_model_route WHERE tenant_id=$1', [tenantId])).rows, [{ route_id: legacy }]);
+    await db.query("INSERT INTO e_mate_tenant_model_route (tenant_id,route_id,enabled,published,updated_by) VALUES ($1,$2,false,true,'fixture')", [tenantId,routeId]);
+    assert.equal(await policy.isEnabled(tenantId, routeId), false);
+    assert.equal(await policy.upstreamApiKey(tenantId, routeId), null);
+    const catalog = await store.listModelRoutes(principal);
+    assert.equal(catalog.routes[0]?.enabled, false); assert.equal(catalog.routes[0]?.keyConfigured, false);
+  } finally {
+    await db.query('DELETE FROM e_mate_tenant_model_route WHERE tenant_id=$1', [tenantId]);
+    await close(); await db.end();
+  }
+});

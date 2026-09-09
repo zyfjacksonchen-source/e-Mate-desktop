@@ -266,3 +266,29 @@ test('retired Doubao cannot be listed, enabled or republished from a stale deplo
   assert.equal(await store.updateModelRoute(principal, routeId, { schemaVersion: 1, enabled: true }), null);
   assert.equal(await store.publishModelRoute(principal, routeId, { schemaVersion: 1, published: true }), null);
 });
+
+test('canonical image administration edits the existing legacy record without losing key or publication', async () => {
+  const { createDecipheriv } = await import('node:crypto');
+  const key = Buffer.alloc(32, 8), now = new Date();
+  const writes: unknown[][] = [];
+  const client = { release() {}, async query(sql: string, args: unknown[] = []) {
+    if (sql.startsWith('SELECT route_id FROM')) return { rows: [{ route_id: 'gpt-image-2-pro' }] };
+    if (sql.includes('INSERT INTO e_mate_tenant_model_route')) {
+      writes.push(args);
+      return { rows: [{ published: false, enabled: false, updated_at: now, key_updated_at: now, key_configured: true }] };
+    }
+    return { rows: [] };
+  } };
+  const store = new PostgresAdminManagementStore({ connect: async () => client } as unknown as Pool,
+    [{ routeId: 'gpt-image-2.5-flare', label: 'Image', provider: 'fixture' }], key);
+  const state = await store.updateModelRoute(tenantAdmin('tenant-a'), 'gpt-image-2.5-flare', { schemaVersion: 1, enabled: false });
+  assert.equal(state?.keyConfigured, true); assert.equal(state?.published, false);
+  assert.equal(writes[0]?.[1], 'gpt-image-2-pro');
+  await store.publishModelRoute(tenantAdmin('tenant-a'), 'gpt-image-2.5-flare', { schemaVersion: 1, published: false });
+  assert.equal(writes[1]?.[1], 'gpt-image-2-pro');
+  await store.updateModelRouteKey(tenantAdmin('tenant-a'), 'gpt-image-2.5-flare', { schemaVersion: 1, apiKey: 'fixture-key-only-never-logged' });
+  const args = writes[2]!; assert.equal(args[1], 'gpt-image-2-pro');
+  const decipher = createDecipheriv('aes-256-gcm', key, args[5] as Buffer);
+  decipher.setAAD(Buffer.from('tenant-a\0gpt-image-2-pro')); decipher.setAuthTag(args[6] as Buffer);
+  assert.equal(Buffer.concat([decipher.update(args[4] as Buffer), decipher.final()]).toString(), 'fixture-key-only-never-logged');
+});

@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { once } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import {
+  canonicalModelRouteId,
   isDefaultEnabledModelRoute,
   isRetiredModelRoute,
   modelSupportsClient,
@@ -1127,7 +1128,7 @@ function legacyRuntimeGatewayRoute(publicBaseUrl: string | undefined): {
 }
 
 function principalAllowsRoute(identity: ModelGatewayPrincipal, routeId: string): boolean {
-  return routeId !== deepSeekSearchCredentialRouteId && identity.modelIds.includes(routeId);
+  return routeId !== deepSeekSearchCredentialRouteId && identity.modelIds.some(id => canonicalModelRouteId(id) === canonicalModelRouteId(routeId));
 }
 
 function officialDeepSeekSearchCredentialRoute(
@@ -2735,7 +2736,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         const body: Record<string, unknown> = editBody === undefined
           ? await readJson(request)
           : { model: editBody.model, prompt: editBody.prompt, images: editBody.images };
-        const route = typeof body.model === 'string' ? routes.get(body.model) : undefined;
+        const route = typeof body.model === 'string' ? routes.get(canonicalModelRouteId(body.model)) : undefined;
         if (!route || route.apiMode !== 'images-generations' || !principalAllowsRoute(identity, route.id)) {
           throw new HttpError(403, 'MODEL_ACCESS_DENIED', 'Model is not available');
         }
@@ -2800,7 +2801,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           userId: identity.userId,
           taskId,
           traceId,
-          modelId: route.id,
+          modelId: body.model as string,
           providerId: route.providerId,
           requestDigest: requestDigest.digest('base64url'),
           routeFingerprint,
@@ -2918,7 +2919,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           userId: identity.userId,
           taskId,
           traceId,
-          modelId: route.id,
+          modelId: body.model as string,
           providerId: route.providerId,
           ...completed.usage,
           costUsd: usageCost(route, completed.usage),
