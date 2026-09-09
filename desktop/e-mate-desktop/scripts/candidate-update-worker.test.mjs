@@ -209,7 +209,7 @@ test('fails closed for malformed manifests and immutable-path or R2 identity mis
 })
 
 test('new source-bound manifest uses existing native routes and rejects a schema downgrade', async () => {
-  const value = manifest({ schema_version: 2, version: '2.0.18', source_companion: { key: ROOT + 'sources/e-Mate-2.0.18-calc-sources.tar', bytes: 30, sha256: 'a'.repeat(64) } })
+  const value = manifest({ schema_version: 2, version: '2.0.18', source_companion: { key: ROOT + 'sources/e-Mate-2.0.18-runtime-sources.tar', bytes: 30, sha256: 'a'.repeat(64) } })
   for (const row of Object.values(value.artifacts)) row.key = row.key.replace('2.0.17', '2.0.18')
   const current = fixture({ manifest: value })
   assert.equal((await worker.fetch(request('/desktop/downloads/mac'), current.env)).status, 200)
