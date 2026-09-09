@@ -98,7 +98,7 @@ test('user administration filters approval state and reuses the existing batch p
   assert.equal(copy.pendingApproval, '待审批');
   assert.equal(copy.approveAllPending, '全选当前筛选内待审批并配置模型');
   assert.equal(copy.selectAllModels, '全选可用模型');
-  assert.match(app, /userStatusFilter === 'ALL' \|\| user\.status === userStatusFilter/);
+  assert.match(app, /userStatusFilter === 'ALL' \? user\.status !== 'DELETED' : user\.status === userStatusFilter/);
   assert.match(app, /openPolicy\(pendingFilteredUsers, true\)/);
   assert.match(
     app,
