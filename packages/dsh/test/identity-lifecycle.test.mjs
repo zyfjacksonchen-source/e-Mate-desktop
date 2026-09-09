@@ -1129,3 +1129,24 @@ test('a correctly hashed text-only DeepSeek cache must refresh before accepting 
   marker = await runtimeProjectionMarker(ctx, policy, 'denied')
   assert.equal(await matchesRuntimeProjection(ctx, marker, policy), true)
 })
+
+
+test('authenticated Skill Hub transport preserves terminal session rejection and never sends a revoked token', async () => {
+  const { createEnterpriseIdentityProvider: createProvider } = await loadEnterpriseProviderSource()
+  for (const code of ['INVALID_GRANT', 'SESSION_REVOKED', 'TOKEN_REUSED']) {
+    const remembered = JSON.parse(stored())
+    remembered.session.modelGateway.expiresAt = new Date(NOW + 30_000).toISOString()
+    const values = new Map(MANAGED_REFS.map(ref => [ref, ref === SESSION_REF ? JSON.stringify(remembered) : `managed-${ref}`]))
+    const requests = []
+    const provider = createProvider(options(mapCredentials(values), async input => {
+      requests.push(new URL(input).pathname)
+      assert.equal(new URL(input).pathname.endsWith('/v1/auth/refresh'), true)
+      return Response.json({ error: { code } }, { status: 401 })
+    }))
+    const url = 'https://mvdcm.ecoremedia.net/ecorex-agent/client/skill-hub/v1/skills?query=小红书'
+    await assert.rejects(provider.authenticatedRequest(url), error => error.code === 'auth')
+    assert.equal(values.size, 0)
+    await assert.rejects(provider.authenticatedRequest(url), error => error.code === 'auth')
+    assert.equal(requests.length, 1, 'no second refresh or catalog request after terminal revocation')
+  }
+})

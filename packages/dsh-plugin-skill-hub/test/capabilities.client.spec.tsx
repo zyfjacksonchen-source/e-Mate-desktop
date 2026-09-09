@@ -310,3 +310,23 @@ describe('capability center fidelity surface', () => {
     await waitFor(() => expect(callSkillHub).toHaveBeenCalledWith('skills.disable', { slug: 'installed-skill' }))
   })
 })
+
+
+it('does not present failed catalog reads as an empty search, even after dismissing the error', async () => {
+  let available = false
+  const request = vi.fn(async (endpoint: string) => {
+    if (endpoint === 'catalog.search') return available
+      ? { ok: true, value: { items: [], next_cursor: null } }
+      : { ok: false, error: { message: 'Skill Hub 服务暂时不可用，请稍后重试。' } }
+    if (endpoint === 'inventory.list') return { ok: true, value: { schema_version: 1, items: [] } }
+    return { ok: true, value: { items: [] } }
+  })
+  renderPage(request as never)
+  expect(await screen.findByText('Skill Hub 服务暂时不可用，请稍后重试。')).toBeTruthy()
+  expect(screen.queryByText('没有匹配的 Skill。')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '关闭错误' }))
+  expect(screen.queryByText('没有匹配的 Skill。')).toBeNull()
+  available = true
+  fireEvent.submit(screen.getByPlaceholderText('搜索 Skill Hub').closest('form')!)
+  expect(await screen.findByText('没有匹配的 Skill。')).toBeTruthy()
+})

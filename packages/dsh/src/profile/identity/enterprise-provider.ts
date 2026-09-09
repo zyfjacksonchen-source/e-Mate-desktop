@@ -82,6 +82,12 @@ class RefreshFailure extends Error {
   }
 }
 
+/** Typed failure for authenticated consumers; no provider credentials leave this boundary. */
+export class EnterpriseAuthenticationRequired extends Error {
+  readonly code = 'auth'
+  constructor() { super('e-Mate login is required') }
+}
+
 export class IdentityServiceUnavailable extends Error {
   constructor(readonly reason: 'transport' | 'upstream-http', readonly status?: number) {
     super('企业身份服务暂时不可用，请稍后重试。')
@@ -1127,8 +1133,18 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       if (target.username || target.password || target.hash || (!modelTarget && !skillHubTarget && !knowledgeTarget)) {
         throw new Error('e-Mate authenticated request target is outside the managed enterprise root')
       }
-      const value = await (knowledgeTarget ? activeAccessSession() : active())
-      if (value === undefined) throw new Error('e-Mate login is required')
+      let value: StoredSession | undefined
+      try {
+        value = await (knowledgeTarget ? activeAccessSession() : active())
+      } catch (error) {
+        // active() already clears revoked credentials. Preserve that terminal outcome
+        // as authentication, rather than making downstream consumers guess from text.
+        if (error instanceof RefreshFailure && TERMINAL_REFRESH_FAILURE_CODES.has(error.code)) {
+          throw new EnterpriseAuthenticationRequired()
+        }
+        throw error
+      }
+      if (value === undefined) throw new EnterpriseAuthenticationRequired()
       const revision = leaseRevision
       const headers = new Headers(init.headers)
       if (headers.has('authorization')) throw new Error('e-Mate authenticated request cannot override authorization')

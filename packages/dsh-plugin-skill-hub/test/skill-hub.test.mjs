@@ -164,6 +164,16 @@ test('keeps operation failures typed across service, transport, integrity, recov
     })
     await assert.rejects(hub.search(), error => error.code === code)
   }
+  const signedOut = createSkillHubClient({ dshHome: temporaryHome(), store: {}, request: async url => {
+    assert.equal(new URL(url).origin, 'https://mvdcm.ecoremedia.net')
+    throw Object.assign(new Error('private identity failure'), { code: 'auth' })
+  } })
+  await assert.rejects(signedOut.search(), error => {
+    assert.equal(skillHubFailure(error).code, 'auth')
+    assert.match(skillHubFailure(error).message, /重新登录/u)
+    assert.doesNotMatch(skillHubFailure(error).message, /private|服务暂时不可用/u)
+    return true
+  })
   const offline = createSkillHubClient({ dshHome: temporaryHome(), store: {}, request: async () => { throw new Error('offline') } })
   await assert.rejects(offline.search(), error => error.code === 'network')
   assert.throws(() => inspectSkillArchive(Buffer.from('bad zip')), error => error.code === 'integrity')

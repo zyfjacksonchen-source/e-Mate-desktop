@@ -1221,6 +1221,7 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
       })
     } catch (error) {
       if (error?.name === 'AbortError') throw error
+      if (error?.code === 'auth') throw new SkillHubOperationError('auth', 'e-Mate login is required', { cause: error })
       throw new SkillHubOperationError('network', 'Skill Hub network request failed', { cause: error })
     }
   }

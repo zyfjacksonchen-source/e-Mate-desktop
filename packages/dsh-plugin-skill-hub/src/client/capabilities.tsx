@@ -244,6 +244,7 @@ export function CapabilitiesPage({
   const [query, setQuery] = useState('')
   const [installedQuery, setInstalledQuery] = useState('')
   const [items, setItems] = useState<SkillCard[]>([])
+  const [catalogLoaded, setCatalogLoaded] = useState(false)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [builtins, setBuiltins] = useState<BuiltinCapability[]>([])
   const [installed, setInstalled] = useState<InstalledSkill[]>([])
@@ -294,6 +295,7 @@ export function CapabilitiesPage({
 
   const loadCatalog = async (nextQuery = query, cursor?: string) => {
     if (loading) return
+    if (cursor === undefined) setCatalogLoaded(false)
     setLoading(true)
     setError(null)
     try {
@@ -311,6 +313,7 @@ export function CapabilitiesPage({
         if (!Array.isArray(value?.items) || (value.next_cursor !== null && typeof value.next_cursor !== 'string')) throw new Error('Skill Hub 返回了无效目录。')
         setItems(previous => cursor === undefined ? value.items as SkillCard[] : [...previous, ...value.items as SkillCard[]])
         setNextCursor(value.next_cursor as string | null)
+        setCatalogLoaded(true)
       } catch (skillHubError) {
         if (cursor === undefined) setItems([])
         setError(message(skillHubError))
@@ -579,7 +582,7 @@ export function CapabilitiesPage({
                 <button className={css.uploadAction} type="button" onClick={() => { setTab('upload') }}><DownloadIcon size={16} />上传 Skill</button>
               </form>
               {loading && items.length === 0 ? <p className={css.empty}>正在读取 e-Mate Skill Hub…</p> : null}
-              {!loading && visibleItems.length === 0 ? <p className={css.empty}>没有匹配的 Skill。</p> : null}
+              {!loading && catalogLoaded && visibleItems.length === 0 ? <p className={css.empty}>没有匹配的 Skill。</p> : null}
               <div className={css.hubGrid}>
                 {visibleItems.map(card => {
                   const action = catalogAction(card, inventoryState, installedBySlug.get(card.slug))
