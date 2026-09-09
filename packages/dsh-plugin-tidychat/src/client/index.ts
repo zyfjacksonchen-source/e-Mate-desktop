@@ -106,12 +106,17 @@ const CSS = `
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  padding: 6px 2px;
+  padding: 6px 2px 6px 24px;
 }
 .tidychat-nav-canvas {
   display: block;
   cursor: pointer;
   touch-action: none;
+}
+.tidychat-nav-canvas:focus-visible {
+  outline: 1px solid var(--dsw-alias-label-primary, currentColor);
+  outline-offset: 4px;
+  border-radius: 3px;
 }
 /* 双类名 + !important：泡泡挂载在顶栏 header 内，部分样式主题（如 maid-atelier 换肤）会写
    「header 内所有 nav/span/button/a/div」这类大范围 color:inherit 规则，优先级约 (0,3,2)，
@@ -997,25 +1002,17 @@ export function apply(ctx: any): void {
   }
   const resolveNavColors = (): { bar: string; hot: string } => {
     const cs = getComputedStyle(document.documentElement)
-    const brand = cs.getPropertyValue('--dsw-alias-state-business-primary').trim() || '#3b82f6'
     const caption = cs.getPropertyValue('--dsw-alias-label-caption').trim() || 'rgba(127,127,127,0.5)'
-    // 默认色 auto = 尊重主题：优先用宿主 label-caption，与实际背景对比不足时才切纠偏灰
-    const autoBar = (): string => {
-      const captionRgb = parseRgb(caption)
-      const bgRgb = findBackgroundRgb()
-      if (captionRgb !== null && bgRgb !== null && contrastRatio(captionRgb, bgRgb) >= 3) return caption
-      return isDarkBackground() ? 'rgba(226,226,226,0.85)' : 'rgba(80,80,80,0.78)'
-    }
+    const brand = cs.getPropertyValue('--dsw-alias-label-primary').trim() || (isDarkBackground() ? '#f5f5f5' : '#242424')
+    // Inactive ticks are deliberately quiet; selection and keyboard focus carry contrast.
+    const autoBar = (): string => isDarkBackground() ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.22)'
     // 默认色：auto / custom（调色盘选色）/ 历史色系（gray…red × 明度）
     const colorMode = config.navColor ?? 'auto'
     const bar = colorMode === 'auto' ? autoBar()
       : colorMode === 'custom' ? validColor(config.navColorCustom, autoBar())
       : hueColor(colorMode, config.navColorLight, caption)
-    // 强调色：auto = 跟随主题品牌色；custom = 调色盘选色；历史色系 = 色系 × 明度
-    const accentMode = config.navAccent ?? 'auto'
-    const hot = accentMode === 'auto' ? brand
-      : accentMode === 'custom' ? validColor(config.navAccentCustom, brand)
-      : hueColor(accentMode, config.navAccentLight, brand)
+    // The minimal reading-position mark follows the theme, including persisted legacy accent settings.
+    const hot = brand
     return { bar, hot }
   }
   // 保守兜底（仅提示卡）：只有当浮层背景「不透明」（alpha ≥ 0.85）且 label token 与背景
@@ -1110,7 +1107,7 @@ export function apply(ctx: any): void {
   // applyNavColors 值不变时不写 style，避免与观察器互相触发。
   ctx.effect(() => {
     if (typeof MutationObserver === 'undefined') return
-    const themeObs = new MutationObserver(() => { applyNavColors() })
+    const themeObs = new MutationObserver(() => { applyNavColors(); for (const refresh of listeners) refresh() })
     themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] })
     return () => {
       themeObs.disconnect()
@@ -1133,8 +1130,8 @@ export function apply(ctx: any): void {
     }
   })
 
-  // 定位条横向占用：rail padding 2px + slot padding 6px×2 + 竖条最宽 30px ≈ 44px，留 4px 余量
-  const NAV_RAIL_WIDTH = 48
+  // Reserve the reference inset and the 52px current tick.
+  const NAV_RAIL_WIDTH = 88
 
   const measurePos = (): { left: number; top: number; gutter: number } | null => {
     // 新版 DSH 里 [data-slot="conversation.session"] 是 0×0 的空壳元素（slot host 未参与布局），
@@ -1158,17 +1155,14 @@ export function apply(ctx: any): void {
   }
 
   // ===== Adaptive Conversation Navigation Rail（v0.2.0 Canvas Minimap）=====
-  const NAV_RAIL_BAR_H = 3
-  const NAV_RAIL_BAR_LEN = 14
-  const NAV_RAIL_BAR_LEN_NEAR = 26
-  const NAV_RAIL_BAR_LEN_CURRENT = 22
-  const NAV_RAIL_FISH_EYE_RADIUS = 4
-  const NAV_RAIL_FISH_EYE_BOOST = 0.5
-  const NAV_RAIL_TURN_SPACING = 12
+  const NAV_RAIL_BAR_H = 4
+  const NAV_RAIL_BAR_LEN = 12
+  const NAV_RAIL_BAR_LEN_CURRENT = 52
+  const NAV_RAIL_TURN_SPACING = 20
   const NAV_RAIL_MIN_HEIGHT = 48
   const HEADER_OFFSET = 64
 
-  // 轨道高度自适应：turn 少时按 12px/轮 收紧（不用最大高度），turn 多时封顶 min(70vh, 660px)
+  // 轨道高度自适应：turn 少时按 20px/轮 收紧（不用最大高度），turn 多时封顶 min(70vh, 660px)
   const railHeight = (n: number): number => Math.min(Math.min(window.innerHeight * 0.7, 660), Math.max(NAV_RAIL_MIN_HEIGHT, n * NAV_RAIL_TURN_SPACING))
 
   // 导航条（挂到会话头部 utilities 槽，fixed 定位到聊天区左缘；独立开关 navigator）
@@ -1213,26 +1207,11 @@ export function apply(ctx: any): void {
         setCurrent((p) => (p === cur ? p : cur))
       }
 
-      // 鱼眼布局：hover 附近 ±R 间距放大，远处自动压缩（简单权重模型，无复杂数理）
-      const layoutPositions = (n: number, hoverIdx: number | null, H: number): number[] => {
-        const weights: number[] = []
-        for (let i = 0; i < n; i++) {
-          let w = 1
-          if (hoverIdx !== null) {
-            const d = Math.abs(i - hoverIdx)
-            if (d <= NAV_RAIL_FISH_EYE_RADIUS) w = 1 + (NAV_RAIL_FISH_EYE_RADIUS - d + 1) * NAV_RAIL_FISH_EYE_BOOST
-          }
-          weights.push(w)
-        }
-        const total = weights.reduce((a, b) => a + b, 0)
-        const usable = Math.max(H - NAV_RAIL_BAR_H, 1)
-        const pos: number[] = []
-        let acc = 0
-        for (let i = 0; i < n; i++) {
-          acc += weights[i]
-          pos.push(((acc - weights[i] / 2) / total) * usable + NAV_RAIL_BAR_H / 2)
-        }
-        return pos
+      // Keep tick targets stationary while nearby lengths expand around the reading position.
+      const layoutPositions = (n: number, _hoverIdx: number | null, H: number): number[] => {
+        const pitch = Math.min(NAV_RAIL_TURN_SPACING, H / Math.max(1, n))
+        const first = (H - (n - 1) * pitch) / 2
+        return Array.from({ length: n }, (_, i) => first + i * pitch)
       }
       // 命中测试：与绘制共用同一布局函数，所见即所得（positions 单调，二分）
       const indexFromY = (y: number, positions: number[]): number => {
@@ -1255,7 +1234,7 @@ export function apply(ctx: any): void {
         const n = users.length
         if (n === 0) return
         const H = railHeight(users.length)
-        const W = NAV_RAIL_WIDTH - 8
+        const W = NAV_RAIL_BAR_LEN_CURRENT + 4
         const dpr = window.devicePixelRatio || 1
         if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
           canvas.width = Math.round(W * dpr)
@@ -1270,27 +1249,16 @@ export function apply(ctx: any): void {
         const cs = getComputedStyle(document.documentElement)
         // 配色优先读 applyNavColors 写入的变量，未写入（旧版兜底）再回退到主题 token
         const barColor = cs.getPropertyValue('--tidychat-nav-color').trim() || cs.getPropertyValue('--dsw-alias-label-caption').trim() || 'rgba(127,127,127,0.5)'
-        const hotColor = cs.getPropertyValue('--tidychat-nav-color-hot').trim() || cs.getPropertyValue('--dsw-alias-state-business-primary').trim() || '#3b82f6'
+        const hotColor = cs.getPropertyValue('--tidychat-nav-color-hot').trim() || cs.getPropertyValue('--dsw-alias-label-primary').trim() || (isDarkBackground() ? '#f5f5f5' : '#242424')
         const positions = layoutPositions(n, hover, H)
-        const nearest = (i: number): boolean => hover !== null && Math.abs(i - hover) <= 2
+        const focus = hover ?? current
         for (let i = 0; i < n; i++) {
           const y = positions[i]
-          const isCurrent = current === i
-          const isHover = hover === i
-          const len = isHover ? NAV_RAIL_BAR_LEN_NEAR : (isCurrent ? NAV_RAIL_BAR_LEN_CURRENT : (nearest(i) ? NAV_RAIL_BAR_LEN + 4 : NAV_RAIL_BAR_LEN))
-          const color = isCurrent || isHover ? hotColor : barColor
-          ctx.fillStyle = color
+          const distance = focus === null ? 4 : Math.min(4, Math.abs(i - focus))
+          const weight = (1 + Math.cos(Math.PI * distance / 4)) / 2
+          const len = NAV_RAIL_BAR_LEN + (NAV_RAIL_BAR_LEN_CURRENT - NAV_RAIL_BAR_LEN) * weight
+          ctx.fillStyle = current === i || hover === i ? hotColor : barColor
           ctx.fillRect(0, y - NAV_RAIL_BAR_H / 2, len, NAV_RAIL_BAR_H)
-          // 当前 turn 右侧加个小指针
-          if (isCurrent) {
-            ctx.fillStyle = hotColor
-            ctx.beginPath()
-            ctx.moveTo(len + 2, y)
-            ctx.lineTo(len + 6, y - 3)
-            ctx.lineTo(len + 6, y + 3)
-            ctx.closePath()
-            ctx.fill()
-          }
         }
       }
 
@@ -1414,6 +1382,20 @@ export function apply(ctx: any): void {
         setTip(null)
       }
 
+      const handleKeyDown = (ev: React.KeyboardEvent<HTMLCanvasElement>): void => {
+        const selected = hover ?? current ?? 0
+        const next = ev.key === 'ArrowDown' ? Math.min(users.length - 1, selected + 1)
+          : ev.key === 'ArrowUp' ? Math.max(0, selected - 1)
+          : ev.key === 'Home' ? 0 : ev.key === 'End' ? users.length - 1 : null
+        if (next === null && ev.key !== 'Enter' && ev.key !== ' ') return
+        ev.preventDefault()
+        if (next === null) { jumpTo(selected); return }
+        setHover(next)
+        const u = users[next]
+        const rect = canvasRef.current?.getBoundingClientRect()
+        if (u && rect) setTip({ x: rect.right + 8, y: rect.top + layoutPositions(users.length, next, railHeight(users.length))[next], num: next + 1, time: hhmm(u.time), text: u.summary })
+      }
+
       if (!enabled) return null
       // 宿主布局未就绪（拿不到会话左缘）时不渲染，避免出现在写死的 280px 猜测位
       if (pos === null) return null
@@ -1428,6 +1410,16 @@ export function apply(ctx: any): void {
       }, React.createElement('canvas', {
         ref: canvasRef,
         className: 'tidychat-nav-canvas',
+        tabIndex: 0,
+        role: 'slider',
+        'aria-label': '用户消息定位',
+        'aria-orientation': 'vertical',
+        'aria-valuemin': 1,
+        'aria-valuemax': users.length,
+        'aria-valuenow': (hover ?? current ?? 0) + 1,
+        'aria-valuetext': users[hover ?? current ?? 0]?.summary,
+        onKeyDown: handleKeyDown,
+        onBlur: handlePointerLeave,
         onPointerMove: handlePointerMove,
         onPointerLeave: handlePointerLeave,
         onPointerDown: handlePointerDown,
@@ -1580,7 +1572,7 @@ export function apply(ctx: any): void {
             onClick: () => setColorOpen(!colorOpen),
           },
             React.createElement('span', { className: 'tidychat-group-title' }, '配色（高级）'),
-            React.createElement('span', { className: 'tidychat-group-note' }, '定位条与强调色'),
+            React.createElement('span', { className: 'tidychat-group-note' }, '定位条默认色'),
             React.createElement('svg', {
               className: 'tidychat-card-chevron' + (colorOpen ? ' tidychat-card-chevron-open' : ''),
               viewBox: '0 0 14 14', width: 14, height: 14, fill: 'none',
@@ -1591,10 +1583,8 @@ export function apply(ctx: any): void {
           colorOpen ? React.createElement('div', { className: 'tidychat-group-body' },
             colorField('定位条默认色', 'navColor', 'navColorCustom', String(value.navColor ?? 'auto'), String(value.navColorCustom ?? ''),
               'linear-gradient(135deg, #222 50%, #f2f2f2 50%)',
-              '自动 = 尊重主题：优先用宿主淡色文字色，与背景对比不足时自动换纠偏灰；自定义 = 用取色器无极调色，或直接输入 HEX / RGB。'),
-            colorField('强调色（当前 / 悬停回合）', 'navAccent', 'navAccentCustom', String(value.navAccent ?? 'auto'), String(value.navAccentCustom ?? ''),
-              'var(--dsw-alias-state-business-primary, #3b82f6)',
-              '自动 = 跟随主题品牌色；自定义 = 用取色器无极调色，或直接输入 HEX / RGB。当前轮次与悬停回合以该色高亮。'),
+              '自动 = 跟随明暗主题显示低对比刻度；自定义 = 用取色器无极调色，或直接输入 HEX / RGB。'),
+            React.createElement('p', { className: 'tidychat-field-desc' }, '当前回合跟随主题文字色显示。'),
           ) : null,
         ),
         React.createElement('div', { key: 'report', className: 'tidychat-report-field' },
