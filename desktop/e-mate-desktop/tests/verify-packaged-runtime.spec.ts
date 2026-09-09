@@ -489,7 +489,7 @@ describe('packaged Feishu notices', () => {
     writeFileSync(binary, 'different binary')
     expect(() => verifyPackagedFeishuNotices(packaged)).toThrow('differs from reviewed')
     expect(() => verifyPackagedFeishuNotices({ ...packaged, arch: 4 })).not.toThrow()
-    const file = join(root, manifest.files[0].path)
+    const file = join(root, manifest.files[0]!.path)
     const original = readFileSync(file)
     writeFileSync(file, 'corrupt')
     expect(() => verifyPackagedFeishuNotices({ ...packaged, arch: 4 })).toThrow('notice hash mismatch')
