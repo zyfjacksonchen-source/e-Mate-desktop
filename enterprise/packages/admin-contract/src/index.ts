@@ -1,6 +1,6 @@
 export const ADMIN_USER_ROLES = ['TENANT_ADMIN', 'AUDIT_ADMIN', 'MEMBER'] as const;
 export function isRetiredModelRoute(modelId: string): boolean {
-  return modelId === 'doubao-seed-2-0-pro-260215';
+  return modelId === 'doubao-seed-2-0-pro-260215' || modelId === 'gpt-image-2-pro' || modelId === 'gpt-image-2';
 }
 export const ASTRA_MODEL_ID = 'gpt-6-astra';
 export function modelSupportsClient(modelId: string, clientVersion?: string): boolean {
@@ -13,7 +13,7 @@ export const DEFAULT_ENABLED_MODEL_ROUTE_IDS = [
   'gpt-5.6-luna',
   'gpt-5.6-sol',
   'deepseek',
-  'gpt-image-2-pro',
+  'gpt-image2.5-flare',
 ] as const;
 
 const ADMIN_USER_UPDATE_STATUSES = ['PENDING_APPROVAL', 'ACTIVE', 'SUSPENDED'] as const;

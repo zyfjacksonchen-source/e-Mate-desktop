@@ -44,9 +44,9 @@ const route: ModelGatewayRoute = {
 };
 const imageRoute: ModelGatewayRoute = {
   ...route,
-  id: 'gpt-image-2-pro',
+  id: 'gpt-image2.5-flare',
   apiMode: 'images-generations',
-  upstreamModelId: 'gpt-image-2-pro',
+  upstreamModelId: 'gpt-image2.5-flare',
   label: '图片 Pro',
   buttonLabel: '图片 Pro',
   reasoning: false,
@@ -1867,7 +1867,7 @@ test('exposes image generation only to the desktop catalog while proxying its de
       };
       assert.deepEqual(
         catalog.models.map(({ id }) => id),
-        ['gpt-image-2-pro']
+        ['gpt-image2.5-flare']
       );
       assert.deepEqual(catalog.data, []);
 
@@ -2055,7 +2055,7 @@ test('reuses one durable image invocation key after definite rejection while kee
       );
       for (const upstream of upstreamRequests) {
         const body = (await upstream.json()) as Record<string, unknown>;
-        assert.equal(body.model, 'gpt-image-2-pro');
+        assert.equal(body.model, 'gpt-image2.5-flare');
         assert.equal(body.n, 1);
       }
     },

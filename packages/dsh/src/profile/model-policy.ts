@@ -14,7 +14,7 @@ const CHAT_MODELS = new Map([
   ['gpt-6-astra', { reasoning_effort: 'low' }],
   ['deepseek', { reasoning_effort: 'max' }],
 ])
-const IMAGE_MODELS = new Set(['gpt-image-2-pro'])
+const IMAGE_MODELS = new Set(['gpt-image2.5-flare'])
 const MANAGED_MODELS = new Set([...CHAT_MODELS.keys(), ...IMAGE_MODELS])
 const SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/u
 const RECEIPT = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/u
@@ -338,7 +338,7 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
     || typeof value.default_chat_model_id !== 'string'
     || !CHAT_MODELS.has(value.default_chat_model_id)
     || value.default_chat_reasoning_effort !== CHAT_MODELS.get(value.default_chat_model_id).reasoning_effort
-    || value.image_primary_model_id !== 'gpt-image-2-pro'
+    || value.image_primary_model_id !== 'gpt-image2.5-flare'
     || !Array.isArray(value.allowed_model_ids)
     || value.allowed_model_ids.length < 1
     || value.allowed_model_ids.length > MANAGED_MODELS.size
@@ -375,15 +375,7 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
 }
 
 function encodeDurableModelPolicy(policy) {
-  const { policy_sha256: _currentHash, ...current } = policy
-  const allowedModelIds = [...current.allowed_model_ids]
-  if (allowedModelIds.includes('gpt-image-2-pro')) allowedModelIds.push('gpt-image-2')
-  const durable = {
-    ...current,
-    allowed_model_ids: [...new Set(allowedModelIds)].sort(),
-    image_fallback_upstream_model_id: 'gpt-image-2',
-  }
-  return { ...durable, policy_sha256: sha256(canonicalJson(durable)) }
+  return structuredClone(policy)
 }
 
 function decodeDurableModelPolicy(value, accountSubject, now) {
@@ -391,27 +383,28 @@ function decodeDurableModelPolicy(value, accountSubject, now) {
     throw new Error('e-Mate stored model policy is invalid')
   }
   const { policy_sha256: expected, ...stored } = value
-  if (stored.image_fallback_upstream_model_id !== undefined) {
-    if (stored.image_fallback_upstream_model_id !== 'gpt-image-2'
-      || !Array.isArray(stored.allowed_model_ids)
-      || new Set(stored.allowed_model_ids).size !== stored.allowed_model_ids.length
-      || stored.allowed_model_ids.includes('gpt-image-2') && !stored.allowed_model_ids.includes('gpt-image-2-pro')
-      || sha256(canonicalJson(stored)) !== expected) {
-      throw new Error('e-Mate legacy model policy is invalid')
-    }
-    const { image_fallback_upstream_model_id: _fallback, ...current } = stored
-    return validateModelPolicy({
-      ...current,
-      allowed_model_ids: current.allowed_model_ids.filter(model => MANAGED_MODELS.has(model)),
-      ...(current.default_chat_reasoning_effort === 'medium' ? { default_chat_reasoning_effort: managedReasoningEffort(current.default_chat_model_id, current.default_chat_reasoning_effort) } : {}),
-    }, accountSubject, now)
-  }
+  // Authenticate the original bytes before any model or reasoning migration.
   if (sha256(canonicalJson(stored)) !== expected) throw new Error('e-Mate stored model policy is invalid')
-  const migratedEffort = stored.default_chat_reasoning_effort === 'medium'
-    ? managedReasoningEffort(stored.default_chat_model_id, stored.default_chat_reasoning_effort) : stored.default_chat_reasoning_effort
-  const policy = validateModelPolicy({ ...stored, default_chat_reasoning_effort: migratedEffort }, accountSubject, now)
-  if (migratedEffort === stored.default_chat_reasoning_effort && policy.policy_sha256 !== expected) throw new Error('e-Mate stored model policy is invalid')
-  return policy
+  const { image_fallback_upstream_model_id: fallback, ...current } = stored
+  if (fallback !== undefined && (fallback !== 'gpt-image-2'
+    || !Array.isArray(current.allowed_model_ids)
+    || new Set(current.allowed_model_ids).size !== current.allowed_model_ids.length
+    || current.allowed_model_ids.includes('gpt-image-2') && !current.allowed_model_ids.includes('gpt-image-2-pro'))) {
+    throw new Error('e-Mate legacy model policy is invalid')
+  }
+  const migrateImage = current.image_primary_model_id === 'gpt-image-2-pro'
+  return validateModelPolicy({
+    ...current,
+    image_primary_model_id: migrateImage ? 'gpt-image2.5-flare' : current.image_primary_model_id,
+    allowed_model_ids: Array.isArray(current.allowed_model_ids)
+      ? current.allowed_model_ids
+        .filter(model => fallback === undefined || !['gpt-image-2', 'doubao-seed-2-0-pro-260215'].includes(model))
+        .map(model => migrateImage && model === 'gpt-image-2-pro' ? 'gpt-image2.5-flare' : model)
+      : current.allowed_model_ids,
+    default_chat_reasoning_effort: current.default_chat_reasoning_effort === 'medium'
+      ? managedReasoningEffort(current.default_chat_model_id, current.default_chat_reasoning_effort)
+      : current.default_chat_reasoning_effort,
+  }, accountSubject, now)
 }
 
 function policyModelId(model) {
@@ -425,7 +418,7 @@ function allowed(policy, model) {
 // Product display order is independent of policy defaults and session selection.
 const MODEL_DISPLAY_ORDER = [
   'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
-  'gpt-image-2-pro',
+  'gpt-image2.5-flare',
 ]
 function modelDisplayRank(id) {
   const index = MODEL_DISPLAY_ORDER.indexOf(policyModelId(id))
@@ -1070,7 +1063,7 @@ export async function apply(ctx, config = {}) {
     allowed_model_ids: z.array(z.enum([...MANAGED_MODELS])).min(1).max(MANAGED_MODELS.size),
     default_chat_model_id: z.enum([...CHAT_MODELS.keys()]),
     default_chat_reasoning_effort: z.enum(['max', 'medium', 'low']),
-    image_primary_model_id: z.literal('gpt-image-2-pro'),
+    image_primary_model_id: z.literal('gpt-image2.5-flare'),
     issued_at: z.iso.datetime(),
     expires_at: z.iso.datetime(),
     receipt_id: z.string().regex(RECEIPT),
@@ -1079,14 +1072,15 @@ export async function apply(ctx, config = {}) {
   const policyRecord = z.object(policyShape).strict()
   const legacyPolicyRecord = z.object({
     ...policyShape,
-    allowed_model_ids: z.array(z.enum([...MANAGED_MODELS, 'doubao-seed-2-0-pro-260215', 'gpt-image-2']))
-      .min(1).max(MANAGED_MODELS.size + 2),
-    image_fallback_upstream_model_id: z.literal('gpt-image-2'),
+    image_primary_model_id: z.literal('gpt-image-2-pro'),
+    allowed_model_ids: z.array(z.enum([...MANAGED_MODELS, 'gpt-image-2-pro', 'doubao-seed-2-0-pro-260215', 'gpt-image-2']))
+      .min(1).max(MANAGED_MODELS.size + 3),
+    image_fallback_upstream_model_id: z.literal('gpt-image-2').optional(),
   }).strict().transform(value => {
     const { policy_sha256: expected, ...legacy } = value
-    if (new Set(legacy.allowed_model_ids).size !== legacy.allowed_model_ids.length
-      || legacy.allowed_model_ids.includes('gpt-image-2') && !legacy.allowed_model_ids.includes('gpt-image-2-pro')
-      || sha256(canonicalJson(legacy)) !== expected) {
+    if (sha256(canonicalJson(legacy)) !== expected
+      || new Set(legacy.allowed_model_ids).size !== legacy.allowed_model_ids.length
+      || legacy.allowed_model_ids.includes('gpt-image-2') && !legacy.allowed_model_ids.includes('gpt-image-2-pro')) {
       throw new Error('e-Mate legacy model policy is invalid')
     }
     return value

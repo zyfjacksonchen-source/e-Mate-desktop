@@ -67,7 +67,9 @@ declare module '@deepseek-ai/dsh-session/types' {
   }
 }
 
-const IMAGE_MODEL = 'gpt-image-2-pro'
+const IMAGE_MODEL = 'gpt-image2.5-flare'
+// Historical receipts remain readable; this set never selects a request model.
+const RECEIPT_IMAGE_MODELS = new Set([IMAGE_MODEL, 'gpt-image-2-pro'])
 const IMAGE_RECEIPT_VERSION = 2
 const MAX_PROMPT_CHARS = 20_000
 const MAX_EDIT_IMAGES = 16
@@ -530,12 +532,12 @@ function validReceiptV2(value, refs, parentSessionId, childSessionId) {
       && value.billing_status === 'recorded'
       && typeof value.provider_request_id === 'string'
       && typeof value.client_request_id === 'string'
-      && value.model === IMAGE_MODEL
+      && RECEIPT_IMAGE_MODELS.has(value.model)
   }
   if (value.content.length !== 0) return false
   if (value.status === 'failed' && value.billing_status === 'recorded') {
     if (typeof value.job_id !== 'string' || typeof value.provider_request_id !== 'string'
-      || typeof value.client_request_id !== 'string' || value.model !== IMAGE_MODEL) return false
+      || typeof value.client_request_id !== 'string' || !RECEIPT_IMAGE_MODELS.has(value.model)) return false
     return value.output !== undefined && (sameSource
       ? value.failure_code === 'source-output-same-sha256'
       : value.verification?.human_review?.decision === 'rejected' && value.failure_code === 'user-rejected')
@@ -1226,7 +1228,7 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2-pro route. For two or more mutually independent image outputs, use image_batch once and do not call imagegen directly. A native image_batch child may call imagegen exactly once with its exact admitted arguments. image_url accepts only exact current-session sha256: image attachment IDs, never Job/request IDs or URLs; ordered multiple references belong to one output and their roles must be explicit. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.\n\n' + IMAGE_PROMPT_GUIDANCE,
+    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image2.5-flare route. For two or more mutually independent image outputs, use image_batch once and do not call imagegen directly. A native image_batch child may call imagegen exactly once with its exact admitted arguments. image_url accepts only exact current-session sha256: image attachment IDs, never Job/request IDs or URLs; ordered multiple references belong to one output and their roles must be explicit. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.\n\n' + IMAGE_PROMPT_GUIDANCE,
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {

@@ -1648,8 +1648,8 @@ function validateRoute(route: ModelGatewayRoute): void {
     (route.remoteCompactionV2 === true &&
       (route.id !== 'gpt-5.6-sol' || route.apiMode === 'chat-completions' || route.apiMode === 'images-generations')) ||
     (route.apiMode === 'images-generations' &&
-      (route.id !== 'gpt-image-2-pro' ||
-        route.upstreamModelId !== 'gpt-image-2-pro' ||
+      (route.id !== 'gpt-image2.5-flare' ||
+        route.upstreamModelId !== 'gpt-image2.5-flare' ||
         route.reasoning !== false ||
         route.input.length !== 1 ||
         route.input[0] !== 'text'))

@@ -1173,7 +1173,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
   assert.match(verifiedProducer, /revision: 2/u)
   assert(verifiedProducer.includes("semantic: sameSource ? 'failed' : 'not-applicable'"))
   assert.doesNotMatch(verifiedProducer, /human_review|needs-review|reviewDecision|revision: 3/u)
-  assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image-2-pro'/gu)?.length, 1)
+  assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image2.5-flare'/gu)?.length, 1)
   assert.equal(imageGenerationSource.match(/await request\(endpoint\(root, path\)/gu)?.length, 1)
   assert.doesNotMatch(imageGenerationSource, /['"]gpt-image-2['"]/u)
   const projectionSource = imageGenerationSource.slice(
@@ -1585,7 +1585,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(capabilities.length, 1)
     assert.deepEqual(await capabilities[0].status(), {
       state: 'ready',
-      detail: 'gpt-image-2-pro',
+      detail: 'gpt-image2.5-flare',
       action_ids: [],
     })
     const registeredImagegen = tools.get('imagegen')
@@ -1847,13 +1847,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
 
     const generated = await imagegen.execute({ prompt: 'Generate one verified image.' }, execution())
     assert.equal(generated.images.length, 1)
-    assert.equal(generated.images[0].model, 'gpt-image-2-pro')
+    assert.equal(generated.images[0].model, 'gpt-image2.5-flare')
     assert.equal(generated.status, 'completed')
     assert.equal(sessionEvents.at(-1)?.type, 'emate/image-output')
     assert.equal(sessionEvents.at(-1)?.ignorable, true)
     assert.deepEqual(requests.at(-1), {
       path: '/e-mate/model-api/v1/images/generations',
-      body: { model: 'gpt-image-2-pro', prompt: 'Generate one verified image.' },
+      body: { model: 'gpt-image2.5-flare', prompt: 'Generate one verified image.' },
     })
     const generatedContent = imagegen.output.render({}, generated)
     const attachmentId = String(generated.images[0].image.attachmentId)
@@ -2035,7 +2035,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       }),
     })
     assert.deepEqual(requests.at(-1), {
-      path: '/e-mate/model-api/v1/images/edits', body: { model: 'gpt-image-2-pro',
+      path: '/e-mate/model-api/v1/images/edits', body: { model: 'gpt-image2.5-flare',
         prompt: 'Retouch the referenced image only.', imageFields: ['image'], imageBytes: [inputBytes.byteLength] },
     })
 
@@ -2066,7 +2066,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const edited = await imagegen.execute({ prompt: 'Retouch only the supplied image.', image_url: [attachmentId] }, execution())
     assert.equal(edited.status, 'completed')
     assert.equal(edited.receipt.revision, 2)
-    assert.equal(edited.images[0].model, 'gpt-image-2-pro')
+    assert.equal(edited.images[0].model, 'gpt-image2.5-flare')
 
     const storedSecond = await context.attachments.saveImage({
       data: readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.png', import.meta.url)),
@@ -2133,6 +2133,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const legacyChildReceipt = {
       ...structuredClone(generated.receipt),
       call_id: 'legacy-child-receipt-v2',
+      model: 'gpt-image-2-pro',
       child_session_id: 'legacy-image-child',
       job_id: 'emate-image-legacy',
       provider_request_id: 'image-response-legacy',
@@ -2221,7 +2222,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual(concurrent.map(result => result.status), ['fulfilled', 'fulfilled'])
     const [firstConcurrent, secondConcurrent] = concurrent.map(result => result.value)
     assert.equal(maximumSubmissions, 2)
-    assert.equal(policyModels.every(model => model === 'gpt-image-2-pro'), true)
+    assert.equal(policyModels.every(model => model === 'gpt-image2.5-flare'), true)
     assert.equal(policyModels.length, policiesBeforeConcurrentParents + 2)
     assert.equal(jobs.length, jobsBeforeConcurrentParents + 2)
     const concurrentTimeline = jobTimeline.slice(timelineBeforeConcurrentParents)
@@ -2438,7 +2439,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(parentCasReceipt.job_id, /^emate-image-/u)
     assert.match(parentCasReceipt.provider_request_id, /^image-response-/u)
     assert.match(parentCasReceipt.client_request_id, /^image-/u)
-    assert.equal(parentCasReceipt.model, 'gpt-image-2-pro')
+    assert.equal(parentCasReceipt.model, 'gpt-image2.5-flare')
     assert.equal('output' in parentCasReceipt, false)
     assert.deepEqual(parentCasReceipt.sources.map(source => source.attachmentId), [attachmentId])
     assert.deepEqual(parentCasReceipt.verification, {
@@ -2704,8 +2705,8 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(remoteCounter, responsesBeforeRateLimit + 1)
     assert.deepEqual(requestScopes.slice(-2), [requestScopes.at(-1), requestScopes.at(-1)])
     assert.deepEqual(requests.slice(-2).map(request => request.body), [
-      { model: 'gpt-image-2-pro', prompt: 'Retry one typed request admission response.' },
-      { model: 'gpt-image-2-pro', prompt: 'Retry one typed request admission response.' },
+      { model: 'gpt-image2.5-flare', prompt: 'Retry one typed request admission response.' },
+      { model: 'gpt-image2.5-flare', prompt: 'Retry one typed request admission response.' },
     ])
     assert.equal(rateRetried.receipt.billing_status, 'recorded')
 
@@ -3363,7 +3364,7 @@ test('enterprise identity provider maps target credentials and the production HT
       expiresAt: new Date(clock + 10 * 60_000).toISOString(),
       usageKeyId: 'usage-key-207',
       usagePublicKey,
-      allowedModelIds: ['gpt-5.6-luna', 'gpt-image-2-pro'],
+      allowedModelIds: ['gpt-5.6-luna', 'gpt-image2.5-flare'],
     },
   }
   const fetchImplementation = async (input, init = {}) => {
@@ -3542,7 +3543,7 @@ test('enterprise identity provider maps target credentials and the production HT
   const modelPolicy = await provider.modelPolicy()
   assert.equal(modelPolicy.default_chat_model_id, 'gpt-5.6-luna')
   assert.deepEqual(modelPolicy.allowed_model_ids, [
-    'gpt-5.6-luna', 'gpt-image-2-pro',
+    'gpt-5.6-luna', 'gpt-image2.5-flare',
   ])
   assert.equal('image_fallback_upstream_model_id' in modelPolicy, false)
   const runtimePolicy = await provider.modelRuntimePolicy()
@@ -3936,17 +3937,18 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       'gpt-5.6-luna', 'gpt-5.6-sol',
       ...(astraAllowed ? ['gpt-6-astra'] : []),
       ...(deepseekChatAllowed ? ['deepseek'] : []),
-      'gpt-image-2-pro',
+      'gpt-image2.5-flare',
     ],
     default_chat_model_id: policyDefaultModel,
     default_chat_reasoning_effort: policyDefaultModel === 'gpt-5.6-luna' ? 'max' : 'medium',
-    image_primary_model_id: 'gpt-image-2-pro',
+    image_primary_model_id: 'gpt-image2.5-flare',
     issued_at: new Date(now - 1_000).toISOString(),
     expires_at: new Date(now + 60 * 60_000).toISOString(),
     receipt_id: 'policy-receipt:test-207',
   })
   const legacyPolicy = {
     ...policy(),
+    image_primary_model_id: 'gpt-image-2-pro',
     allowed_model_ids: [
       'deepseek', 'doubao-seed-2-0-pro-260215', 'gpt-5.6-luna',
       'gpt-5.6-sol', 'gpt-image-2', 'gpt-image-2-pro',
@@ -3961,26 +3963,11 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       Object.keys(value).sort().map(key => [key, value[key]]),
     ))).digest('hex'),
   })
-  const parsePolicyWith213Schema = value => {
-    const keys = [
-      'account_subject', 'allowed_model_ids', 'default_chat_model_id', 'default_chat_reasoning_effort',
-      'expires_at', 'image_fallback_upstream_model_id', 'image_primary_model_id', 'issued_at',
-      'policy_sha256', 'receipt_id', 'revision', 'schema_version',
-    ]
-    assert.deepEqual(Object.keys(value).sort(), keys.sort())
-    assert.equal(value.schema_version, 1)
-    assert.equal(value.image_primary_model_id, 'gpt-image-2-pro')
-    assert.equal(value.image_fallback_upstream_model_id, 'gpt-image-2')
-    const legacyManagedModels = new Set([
-      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek', 'doubao-seed-2-0-pro-260215',
-      'gpt-image-2-pro', 'gpt-image-2',
-    ])
-    assert.equal(Array.isArray(value.allowed_model_ids), true)
-    assert.equal(value.allowed_model_ids.length >= 1 && value.allowed_model_ids.length <= legacyManagedModels.size, true)
-    assert.equal(value.allowed_model_ids.every(model => legacyManagedModels.has(model)), true)
-    assert.equal(value.allowed_model_ids.includes(value.default_chat_model_id), true)
-    assert.equal(new Set(value.allowed_model_ids).size, value.allowed_model_ids.length)
-    assert.equal(value.allowed_model_ids.includes('gpt-image-2') && !value.allowed_model_ids.includes('gpt-image-2-pro'), false)
+  const parseCurrentDurablePolicy = value => {
+    assert.equal(value.image_primary_model_id, 'gpt-image2.5-flare')
+    assert.equal('image_fallback_upstream_model_id' in value, false)
+    assert.equal(value.allowed_model_ids.includes('gpt-image-2'), false)
+    assert.equal(value.allowed_model_ids.includes('gpt-image-2-pro'), false)
     assert.equal(value.policy_sha256, storedLegacyPolicy(Object.fromEntries(
       Object.entries(value).filter(([key]) => key !== 'policy_sha256'),
     )).policy_sha256)
@@ -4189,12 +4176,12 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     const modelPolicyConfig = { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') }
     await applyModelPolicy(modelPolicyContext, modelPolicyConfig)
 
-    const migratedPolicy = parsePolicyWith213Schema(records.get('active'))
+    const migratedPolicy = parseCurrentDurablePolicy(records.get('active'))
     assert.deepEqual(migratedPolicy.allowed_model_ids, [
       'deepseek', 'gpt-5.6-luna',
-      'gpt-5.6-sol', 'gpt-image-2', 'gpt-image-2-pro',
+      'gpt-5.6-sol', 'gpt-image2.5-flare',
     ])
-    assert.equal(migratedPolicy.image_fallback_upstream_model_id, 'gpt-image-2')
+    assert.equal('image_fallback_upstream_model_id' in migratedPolicy, false)
     assert.notEqual(migratedPolicy.policy_sha256, legacyPolicySha256)
     const { policy_sha256: migratedHash, ...migratedPayload } = migratedPolicy
     assert.equal(migratedHash, storedLegacyPolicy(migratedPayload).policy_sha256)
@@ -4227,11 +4214,11 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     assert.equal('account_subject' in current.value, false)
     assert.equal('image_fallback_upstream_model_id' in current.value, false)
     assert.equal(current.value.allowed_model_ids.includes('gpt-image-2'), false)
-    const refreshedDurablePolicy = parsePolicyWith213Schema(records.get('active'))
-    assert.equal(refreshedDurablePolicy.image_fallback_upstream_model_id, 'gpt-image-2')
-    assert.equal(refreshedDurablePolicy.allowed_model_ids.includes('gpt-image-2'), true)
+    const refreshedDurablePolicy = parseCurrentDurablePolicy(records.get('active'))
+    assert.equal('image_fallback_upstream_model_id' in refreshedDurablePolicy, false)
+    assert.equal(refreshedDurablePolicy.allowed_model_ids.includes('gpt-image-2'), false)
     assert.notEqual(refreshedDurablePolicy.policy_sha256, legacyPolicySha256)
-    assert.notEqual(refreshedDurablePolicy.policy_sha256, current.value.policy_sha256)
+    assert.equal(refreshedDurablePolicy.policy_sha256, current.value.policy_sha256)
     assert.equal(projectionRecords.get('active').policy_sha256, current.value.policy_sha256)
     assert.equal(Object.values(llmSettings.providers)
       .flatMap(provider => provider.models.map(model => model.id))
@@ -4617,7 +4604,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     const selectedAstra = await apiProxy.sessions.selectModel({ rpcId: 'astra-select', payload: { ...session.current, sessionId: 'session-1' } })
     assert.equal(selectedAstra.result.value.selected.reasoningEffort, 'low')
     assert.deepEqual(session.messages, astraHistory)
-    records.set('active', storedLegacyPolicy({ ...policy(), default_chat_model_id: 'gpt-6-astra', default_chat_reasoning_effort: 'medium', image_fallback_upstream_model_id: 'gpt-image-2', allowed_model_ids: [...policy().allowed_model_ids, 'gpt-image-2'] }))
+    records.set('active', storedLegacyPolicy({ ...policy(), image_primary_model_id: 'gpt-image-2-pro', default_chat_model_id: 'gpt-6-astra', default_chat_reasoning_effort: 'medium', image_fallback_upstream_model_id: 'gpt-image-2', allowed_model_ids: [...policy().allowed_model_ids.filter(id => id !== 'gpt-image2.5-flare'), 'gpt-image-2-pro', 'gpt-image-2'] }))
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
     openedDomains = 0
     await applyModelPolicy(modelPolicyContext, modelPolicyConfig)
@@ -5277,7 +5264,7 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
       reason: 'interrupted',
       terminalEvidence: imageReceipt('failed'),
     })
-    run('audit-model-name-only', startedAt + 1_000, { model: 'gpt-image-2-pro' })
+    run('audit-model-name-only', startedAt + 1_000, { model: 'gpt-image2.5-flare' })
     run('audit-imagegen-tool', startedAt + 1_100, {
       terminalEvidence: (agent, time) => { settleTool(agent, time, 'imagegen', true) },
     })

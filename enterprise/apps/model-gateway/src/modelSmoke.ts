@@ -68,9 +68,9 @@ const routeContracts: readonly SmokeRouteContract[] = [
     httpsBaseUrls: ['https://deepseek-provider.ecorex.internal:18443/v1', 'https://api.deepseek.com'],
   },
   {
-    id: 'gpt-image-2-pro',
+    id: 'gpt-image2.5-flare',
     apiMode: 'images-generations',
-    upstreamModelId: 'gpt-image-2-pro',
+    upstreamModelId: 'gpt-image2.5-flare',
     httpsBaseUrls: ['https://image-provider.ecorex.internal:18443/v1'],
     httpPathname: '/v1',
   },

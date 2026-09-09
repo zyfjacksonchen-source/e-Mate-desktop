@@ -25,9 +25,9 @@ const routes = [
   route('gpt-5.6-sol', 'responses', 'gpt-5.6-sol', 'https://main-provider.ecorex.internal:18443/v1'),
   route('deepseek', 'chat-completions', 'deepseek-v4-flash', 'https://deepseek-provider.ecorex.internal:18443/v1'),
   route(
-    'gpt-image-2-pro',
+    'gpt-image2.5-flare',
     'images-generations',
-    'gpt-image-2-pro',
+    'gpt-image2.5-flare',
     'https://image-provider.ecorex.internal:18443/v1'
   ),
 ];
@@ -140,7 +140,7 @@ test('writes only catalog-bound redacted evidence after all five live routes pas
       ['gpt-5.6-luna', 'live-inference'],
       ['gpt-5.6-sol', 'live-inference'],
       ['deepseek', 'live-inference'],
-      ['gpt-image-2-pro', 'live-image-generation'],
+      ['gpt-image2.5-flare', 'live-image-generation'],
     ]
   );
   assert.equal(serialized.includes(secret) || serialized.includes('sensitive-response-text'), false);
@@ -219,7 +219,7 @@ test('fails closed after one fixed Pro image request', async () => {
       randomId: randomId(),
     }),
     (error: unknown) =>
-      error instanceof ModelSmokeError && error.code === 'UPSTREAM_REJECTED' && error.routeId === 'gpt-image-2-pro'
+      error instanceof ModelSmokeError && error.code === 'UPSTREAM_REJECTED' && error.routeId === 'gpt-image2.5-flare'
   );
   assert.deepEqual(
     requests.map(({ url }) => url.slice(url.lastIndexOf('/') + 1)),
@@ -227,7 +227,7 @@ test('fails closed after one fixed Pro image request', async () => {
   );
   assert.deepEqual(
     requests.filter(({ url }) => url.endsWith('/images/generations')).map(({ body }) => body.model),
-    ['gpt-image-2-pro']
+    ['gpt-image2.5-flare']
   );
 });
 

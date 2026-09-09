@@ -32,7 +32,7 @@ import { messagesFor } from '../src/i18n.ts';
 const origin = 'https://admin.example.test';
 
 test('model routes display Astra first and preserve unknown order and route policies', async () => {
-  const ids = ['custom-z', 'gpt-image-2-pro', 'gpt-5.6-luna', 'custom-a', 'deepseek',
+  const ids = ['custom-z', 'gpt-image2.5-flare', 'gpt-5.6-luna', 'custom-a', 'deepseek',
     'gpt-6-astra', 'doubao-seed-2-0-pro-260215', 'gpt-5.6-sol'];
   const routes = ids.map((routeId, index) => ({
     schemaVersion: 1, routeId, label: routeId, provider: 'test',
@@ -49,7 +49,7 @@ test('model routes display Astra first and preserve unknown order and route poli
     },
   });
   const expectedIds = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
-    'gpt-image-2-pro', 'custom-z', 'custom-a'];
+    'gpt-image2.5-flare', 'custom-z', 'custom-a'];
   assert.deepEqual(result, {
     schemaVersion: 1,
     routes: expectedIds.map(id => original.find(route => route.routeId === id)),

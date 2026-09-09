@@ -511,7 +511,7 @@ const MODEL_DISPLAY_ORDER = new Map([
   'gpt-5.6-sol',
   'gpt-5.6-luna',
   'deepseek',
-  'gpt-image-2-pro',
+  'gpt-image2.5-flare',
 ].map((id, index) => [id, index]));
 
 export async function loadModelRoutes(

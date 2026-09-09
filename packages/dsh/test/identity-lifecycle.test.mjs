@@ -752,7 +752,7 @@ test('image input contract trusts exact model metadata and preserves native atta
   assert.deepEqual(durable, before, 'capability resolution must never rewrite durable image blocks')
 })
 
-test('client and enterprise identity image policies expose only gpt-image-2-pro without fallback', async () => {
+test('client and enterprise identity image policies expose only gpt-image2.5-flare without fallback', async () => {
   const { validateModelPolicy } = await loadModelPolicySource()
   const { policyFor } = await loadEnterpriseProviderSource()
   const accountSubject = 'tenant-test:user-a'
@@ -760,16 +760,16 @@ test('client and enterprise identity image policies expose only gpt-image-2-pro 
     schema_version: 1,
     account_subject: accountSubject,
     revision: 1,
-    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image-2-pro'],
+    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image2.5-flare'],
     default_chat_model_id: 'gpt-5.6-luna',
     default_chat_reasoning_effort: 'max',
-    image_primary_model_id: 'gpt-image-2-pro',
+    image_primary_model_id: 'gpt-image2.5-flare',
     issued_at: new Date(NOW - 60_000).toISOString(),
     expires_at: new Date(NOW + 3_600_000).toISOString(),
     receipt_id: 'policy-receipt:test-user',
   }
   const policy = validateModelPolicy(rawPolicy, accountSubject, NOW)
-  assert.deepEqual(policy.allowed_model_ids.filter(id => id.startsWith('gpt-image-')), ['gpt-image-2-pro'])
+  assert.deepEqual(policy.allowed_model_ids.filter(id => id.startsWith('gpt-image')), ['gpt-image2.5-flare'])
   assert.equal('image_fallback_upstream_model_id' in policy, false)
   assert.throws(() => validateModelPolicy({
     ...rawPolicy,
@@ -781,10 +781,10 @@ test('client and enterprise identity image policies expose only gpt-image-2-pro 
   }, accountSubject, NOW), /policy is invalid/u)
 
   const remembered = JSON.parse(stored())
-  remembered.session.modelGateway.allowedModelIds = ['gpt-5.6-luna', 'gpt-image-2-pro', 'gpt-image-2']
+  remembered.session.modelGateway.allowedModelIds = ['gpt-5.6-luna', 'gpt-image2.5-flare', 'gpt-image-2']
   const identityPolicy = policyFor(remembered, [{ id: 'gpt-5.6-luna' }])
-  assert.deepEqual(identityPolicy.allowed_model_ids, ['gpt-5.6-luna', 'gpt-image-2-pro'])
-  assert.deepEqual(identityPolicy.allowed_model_ids.filter(id => id.startsWith('gpt-image-')), ['gpt-image-2-pro'])
+  assert.deepEqual(identityPolicy.allowed_model_ids, ['gpt-5.6-luna', 'gpt-image2.5-flare'])
+  assert.deepEqual(identityPolicy.allowed_model_ids.filter(id => id.startsWith('gpt-image')), ['gpt-image2.5-flare'])
   assert.equal('image_fallback_upstream_model_id' in identityPolicy, false)
 })
 
@@ -824,10 +824,10 @@ test('identity credential generation fences a late runtime projection without pe
     schema_version: 1,
     account_subject: 'account:test-user',
     revision: 1,
-    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image-2-pro'],
+    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image2.5-flare'],
     default_chat_model_id: 'gpt-5.6-luna',
     default_chat_reasoning_effort: 'max',
-    image_primary_model_id: 'gpt-image-2-pro',
+    image_primary_model_id: 'gpt-image2.5-flare',
     issued_at: new Date(now - 1_000).toISOString(),
     expires_at: new Date(now + 3_600_000).toISOString(),
     receipt_id: 'policy-receipt:test-user',

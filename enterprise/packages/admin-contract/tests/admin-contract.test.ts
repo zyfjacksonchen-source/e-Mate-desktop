@@ -417,10 +417,19 @@ test('only the five production routes are enabled before an explicit tenant deci
   assert.equal(isDefaultEnabledModelRoute('gemini-3.1-pro-high'), false);
   assert.equal(isDefaultEnabledModelRoute('deepseek'), true);
   assert.equal(isDefaultEnabledModelRoute('doubao-seed-2-0-pro-260215'), false);
-  assert.equal(isDefaultEnabledModelRoute('gpt-image-2-pro'), true);
+  assert.equal(isDefaultEnabledModelRoute('gpt-image2.5-flare'), true);
   assert.equal(isDefaultEnabledModelRoute('gpt-5.6-enterprise'), false);
 });
 
 test('retired Doubao is excluded from every client version including current releases', () => {
   for (const version of [undefined, '2.0.16', '2.0.17', '2.0.18', '2.0.19']) assert.equal(modelSupportsClient('doubao-seed-2-0-pro-260215', version), false);
+});
+
+test('retired image routes cannot be re-enabled through an old catalog or client', () => {
+  for (const id of ['gpt-image-2-pro', 'gpt-image-2']) {
+    assert.equal(isDefaultEnabledModelRoute(id), false);
+    for (const version of [undefined, '2.0.16', '2.0.18']) assert.equal(modelSupportsClient(id, version), false);
+  }
+  assert.equal(isDefaultEnabledModelRoute('gpt-image2.5-flare'), true);
+  assert.equal(modelSupportsClient('gpt-image2.5-flare', '2.0.18'), true);
 });

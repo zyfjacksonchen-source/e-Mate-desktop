@@ -107,7 +107,7 @@ test('exact existing child terminal and Job finalize parent without spawn or pro
   const parent = session([created(), linkEvent()])
   const childReceipt = { schema_version: 2, revision: 2, call_id: 'image-call', operation: 'generate', status: 'completed',
     billing_status: 'recorded', parent_session_id: 'child-1', client_request_id: 'image-' + linked().task_id.slice('sha256:'.length),
-    provider_request_id: 'provider-1', model: 'gpt-image-2-pro', sources: [], content: [{ type: 'image', attachment: ref }],
+    provider_request_id: 'provider-1', model: 'gpt-image2.5-flare', sources: [], content: [{ type: 'image', attachment: ref }],
     job_id: 'emate-image-1', output: ref, verifier: {}, verification: {} }
   const row = { seq: 4, receipt: childReceipt }
   const child = { id: 'child-1', session: { header: { id: 'child-1', origin: 'subagent', parentSession: SESSION } } }
@@ -242,4 +242,23 @@ test('durable result rejects foreign child pointer and never reads labels or tim
   }
   const parent = { id: SESSION, session: { header: { id: SESSION } } }
   await assert.rejects(readDurableImageBatchResult(ctx, parent, batch.batch_id, new AbortController().signal), /does not resolve exactly once/)
+})
+
+test('old and Flare parent receipts remain usable references without invoking a provider', async () => {
+  for (const model of ['gpt-image-2-pro', 'gpt-image2.5-flare']) {
+    const receipt = { schema_version: 2, revision: 2, call_id: 'image-call', operation: 'generate', status: 'completed',
+      billing_status: 'recorded', parent_session_id: SESSION, client_request_id: 'client-request-1',
+      provider_request_id: 'provider-request-1', model, sources: [], content: [{ type: 'image', attachment: ref }],
+      job_id: 'image-job-1', output: ref,
+      verifier: { structural: 'attachment-cas-v1', semantic: 'not-required' },
+      verification: { structural: 'passed', source_output: 'not-applicable', semantic: 'not-applicable' } }
+    const parent = { id: SESSION, session: { header: { id: SESSION }, events: [{ type: 'emate/image-output', data: receipt }], deriveMessages: () => [] } }
+    let reads = 0
+    const ctx = { attachments: { readImage: async attachment => { reads++; return { ref: attachment, data: new Uint8Array(attachment.bytes) } } } }
+    assert.deepEqual(await resolveBatchSources(ctx, parent, [ref.attachmentId], new AbortController().signal), [ref])
+    assert.equal(reads, 1)
+    receipt.model = 'unadmitted-image-model'
+    await assert.rejects(resolveBatchSources(ctx, parent, [ref.attachmentId], new AbortController().signal), /not a successful current-session/)
+    assert.equal(reads, 1)
+  }
 })

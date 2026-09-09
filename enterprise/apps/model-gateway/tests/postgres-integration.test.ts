@@ -381,7 +381,7 @@ test(
       userId,
       taskId,
       traceId: `trace-${suffix}`,
-      modelId: 'gpt-image-2-pro',
+      modelId: 'gpt-image2.5-flare',
       providerId: 'custom-gpt',
       requestDigest: 'A'.repeat(43),
       routeFingerprint: 'R'.repeat(43),
@@ -969,13 +969,13 @@ test(
     const userId = `user-${suffix}`;
     const taskId = `image-task-${suffix}`;
     const database = pool();
-    const principal: ModelGatewayPrincipal = { tenantId, userId, modelIds: ['gpt-image-2-pro'] };
+    const principal: ModelGatewayPrincipal = { tenantId, userId, modelIds: ['gpt-image2.5-flare'] };
     const invocation: InvocationFact = {
       tenantId,
       userId,
       taskId,
       traceId: `image-trace-${suffix}`,
-      modelId: 'gpt-image-2-pro',
+      modelId: 'gpt-image2.5-flare',
       providerId: 'custom-gpt',
       requestDigest: 'I'.repeat(43),
       routeFingerprint: 'F'.repeat(43),
