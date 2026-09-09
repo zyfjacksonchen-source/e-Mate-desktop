@@ -9,7 +9,10 @@ outside this bridge.
 
 Use Wei-Shaw/sub2api commit
 `99c8e4bf7564823bafbab369acab6539e734c1bb`. Apply
-`sub2api-fast-mode.patch` to that exact clean checkout. The patch binds policy
+`sub2api-fast-mode.patch` and `sub2api-image-wrapper.patch` to that exact clean
+checkout. The image patch uses `gpt-5.6-luna` as the OAuth Responses outer model;
+the image tool keeps the requested or native channel-mapped model unchanged.
+The fast-mode patch binds policy
 rules to the authenticated API-key ID and lets an explicit force rule add
 `service_tier: "priority"` when an existing client omitted the field.
 
@@ -18,7 +21,17 @@ Linux amd64 server with Go 1.26.5, `CGO_ENABLED=0`, `-tags embed`, `-trimpath`,
 and the upstream release linker fields (`main.Version`, `main.Commit`,
 `main.Date`, and `main.BuildType=release`). Run the patched FastPolicy tests in
 `backend/internal/service`, `backend/internal/server/middleware`, and
-`backend/internal/handler/admin` before packaging.
+`backend/internal/handler/admin` before packaging. Also run the native image
+Responses builder and OAuth forwarding tests to preserve generation, edit references, streaming and API-key passthrough.
+
+For existing e-Mate clients that request `gpt-image-2-pro`, use Sub2API native
+channel mapping for the existing enterprise group to
+`gpt-image-2.5-flare`. Keep `billing_model_source=upstream`, no custom prices,
+model restrictions disabled, and all unrelated mappings and features intact.
+The legacy name is a request compatibility ID, not a fallback. Client policy
+must retain its accepted ID until that client supports a new model identifier.
+A saved mapping does not prove live image generation: verify the image endpoint
+and its upstream model receipt after deployment.
 
 Place the resulting binary as `sub2api` in an empty build context and build it
 with `Dockerfile.gpt-fast-mode`. That Dockerfile deliberately retains the
@@ -65,6 +78,15 @@ active, and updates the whole batch with a PostgreSQL compare-and-swap. Its
 append-only audit contains actor and requested model state, never credentials.
 
 ## Activate and verify
+
+The deployed proxy composes `docker-compose.yml`, its existing
+`docker-compose.override.yml`, and `docker-compose.flare.yml` in that order.
+The last native Compose overlay changes only `services.sub2api.image` to the
+verified immutable local image digest. Preserve that file in later Compose
+invocations; omitting it restores the earlier proxy image. The prior Compose
+file list and image digest are recorded alongside the candidate build for
+rollback. Native `docker compose up --no-deps --pull never --wait` owns service
+replacement and health checks; do not replace the running binary in place.
 
 Deploy the patched proxy first. From the unprivileged Analytics image, verify a
 read succeeds through the restricted key and pinned host key. Then deploy the

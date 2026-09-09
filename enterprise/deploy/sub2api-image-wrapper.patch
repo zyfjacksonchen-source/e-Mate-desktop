@@ -1,0 +1,107 @@
+diff --git a/backend/internal/service/openai_images.go b/backend/internal/service/openai_images.go
+index f32fc56..d775e05 100644
+--- a/backend/internal/service/openai_images.go
++++ b/backend/internal/service/openai_images.go
+@@ -39,7 +39,7 @@ const (
+ 	openAIImageBackendUserAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+ 	openAIImageMaxDownloadBytes    = 20 << 20 // 20MB per image download
+ 	openAIImageMaxUploadPartSize   = 20 << 20 // 20MB per multipart upload part
+-	openAIImagesResponsesMainModel = "gpt-5.4-mini"
++	openAIImagesResponsesMainModel = "gpt-5.6-luna"
+ )
+ 
+ type OpenAIImagesCapability string
+diff --git a/backend/internal/service/openai_images_test.go b/backend/internal/service/openai_images_test.go
+index 82f9c3a..a91d75f 100644
+--- a/backend/internal/service/openai_images_test.go
++++ b/backend/internal/service/openai_images_test.go
+@@ -711,7 +711,7 @@ func findOpenAIImageTestSSEEvent(events []openAIImageTestSSEEvent, name string)
+ 
+ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+-	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","size":"1024x1024","quality":"high","n":3}`)
++	body := []byte(`{"model":"gpt-image-2.5-flare","prompt":"draw a cat","size":"1024x1024","quality":"high","n":3}`)
+ 
+ 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+ 	req.Header.Set("Content-Type", "application/json")
+@@ -753,8 +753,8 @@ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *te
+ 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+ 	require.NoError(t, err)
+ 	require.NotNil(t, result)
+-	require.Equal(t, "gpt-image-2", result.Model)
+-	require.Equal(t, "gpt-image-2", result.UpstreamModel)
++	require.Equal(t, "gpt-image-2.5-flare", result.Model)
++	require.Equal(t, "gpt-image-2.5-flare", result.UpstreamModel)
+ 	require.Equal(t, 3, result.ImageCount)
+ 	require.Equal(t, 46, result.Usage.InputTokens)
+ 	require.Equal(t, 2459, result.Usage.OutputTokens)
+@@ -769,18 +769,18 @@ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *te
+ 	require.Equal(t, "acct-123", upstream.lastReq.Header.Get("chatgpt-account-id"))
+ 	require.Equal(t, "responses=experimental", upstream.lastReq.Header.Get("OpenAI-Beta"))
+ 
+-	require.Equal(t, openAIImagesResponsesMainModel, gjson.GetBytes(upstream.lastBody, "model").String())
++	require.Equal(t, "gpt-5.6-luna", gjson.GetBytes(upstream.lastBody, "model").String())
+ 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+ 	require.Equal(t, "image_generation", gjson.GetBytes(upstream.lastBody, "tools.0.type").String())
+ 	require.Equal(t, "generate", gjson.GetBytes(upstream.lastBody, "tools.0.action").String())
+-	require.Equal(t, "gpt-image-2", gjson.GetBytes(upstream.lastBody, "tools.0.model").String())
++	require.Equal(t, "gpt-image-2.5-flare", gjson.GetBytes(upstream.lastBody, "tools.0.model").String())
+ 	require.Equal(t, "1024x1024", gjson.GetBytes(upstream.lastBody, "tools.0.size").String())
+ 	require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "tools.0.quality").String())
+ 	require.Equal(t, int64(3), gjson.GetBytes(upstream.lastBody, "tools.0.n").Int())
+ 	require.Equal(t, "draw a cat", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
+ 
+ 	require.Equal(t, http.StatusOK, rec.Code)
+-	require.Equal(t, "gpt-image-2", gjson.Get(rec.Body.String(), "model").String())
++	require.Equal(t, "gpt-image-2.5-flare", gjson.Get(rec.Body.String(), "model").String())
+ 	require.Len(t, gjson.Get(rec.Body.String(), "data").Array(), 3)
+ 	require.Equal(t, "aW1hZ2UtMQ==", gjson.Get(rec.Body.String(), "data.0.b64_json").String())
+ 	require.Equal(t, "aW1hZ2UtMg==", gjson.Get(rec.Body.String(), "data.1.b64_json").String())
+@@ -1531,7 +1531,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsMultipartUsesResponsesAPI(t
+ 
+ 	var body bytes.Buffer
+ 	writer := multipart.NewWriter(&body)
+-	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
++	require.NoError(t, writer.WriteField("model", "gpt-image-2.5-flare"))
+ 	require.NoError(t, writer.WriteField("prompt", "replace background with aurora"))
+ 	require.NoError(t, writer.WriteField("input_fidelity", "high"))
+ 	require.NoError(t, writer.WriteField("output_format", "webp"))
+@@ -1595,12 +1595,13 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsMultipartUsesResponsesAPI(t
+ 	require.NoError(t, err)
+ 	require.NotNil(t, result)
+ 	require.Equal(t, 1, result.ImageCount)
+-	require.Equal(t, "gpt-image-2", gjson.GetBytes(upstream.lastBody, "tools.0.model").String())
++	require.Equal(t, "gpt-5.6-luna", gjson.GetBytes(upstream.lastBody, "model").String())
++	require.Equal(t, "gpt-image-2.5-flare", gjson.GetBytes(upstream.lastBody, "tools.0.model").String())
+ 	require.Equal(t, "edit", gjson.GetBytes(upstream.lastBody, "tools.0.action").String())
+ 	require.False(t, gjson.GetBytes(upstream.lastBody, "tools.0.input_fidelity").Exists())
+ 	require.Equal(t, "webp", gjson.GetBytes(upstream.lastBody, "tools.0.output_format").String())
+-	require.True(t, strings.HasPrefix(gjson.GetBytes(upstream.lastBody, "input.0.content.1.image_url").String(), "data:image/png;base64,"))
+-	require.True(t, strings.HasPrefix(gjson.GetBytes(upstream.lastBody, "tools.0.input_image_mask.image_url").String(), "data:image/png;base64,"))
++	require.Equal(t, "data:image/png;base64,cG5nLWltYWdlLWNvbnRlbnQ=", gjson.GetBytes(upstream.lastBody, "input.0.content.1.image_url").String())
++	require.Equal(t, "data:image/png;base64,cG5nLW1hc2stY29udGVudA==", gjson.GetBytes(upstream.lastBody, "tools.0.input_image_mask.image_url").String())
+ 	require.Equal(t, "replace background with aurora", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
+ 	require.Equal(t, "ZWRpdGVk", gjson.Get(rec.Body.String(), "data.0.b64_json").String())
+ 	require.Equal(t, "replace background with aurora", gjson.Get(rec.Body.String(), "data.0.revised_prompt").String())
+@@ -1691,16 +1692,18 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsStreamingTransformsEvents(t
+ func TestBuildOpenAIImagesResponsesRequest_PassesThroughNForMultiImageModels(t *testing.T) {
+ 	parsed := &OpenAIImagesRequest{
+ 		Endpoint: openAIImagesGenerationsEndpoint,
+-		Model:    "gpt-image-2",
++		Model:    "gpt-image-2.5-flare",
+ 		Prompt:   "draw a cat",
+ 		N:        2,
+ 	}
+ 
+-	body, err := buildOpenAIImagesResponsesRequest(parsed, "gpt-image-2")
++	body, err := buildOpenAIImagesResponsesRequest(parsed, "gpt-image-2.5-flare")
+ 	require.NoError(t, err)
+ 	require.NotNil(t, body)
++	require.Equal(t, "gpt-5.6-luna", gjson.GetBytes(body, "model").String())
++	require.Equal(t, "generate", gjson.GetBytes(body, "tools.0.action").String())
+ 	require.Equal(t, int64(2), gjson.GetBytes(body, "tools.0.n").Int())
+-	require.Equal(t, "gpt-image-2", gjson.GetBytes(body, "tools.0.model").String())
++	require.Equal(t, "gpt-image-2.5-flare", gjson.GetBytes(body, "tools.0.model").String())
+ 	require.Equal(t, "draw a cat", gjson.GetBytes(body, "input.0.content.0.text").String())
+ }
+ 
