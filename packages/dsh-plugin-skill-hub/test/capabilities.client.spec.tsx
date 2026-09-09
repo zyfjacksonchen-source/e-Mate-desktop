@@ -312,6 +312,32 @@ describe('capability center fidelity surface', () => {
 })
 
 
+it('submits the catalog query and filters through the visible search button', async () => {
+  const { callSkillHub } = renderPage()
+  const submit = screen.getByRole('button', { name: '搜索' }) as HTMLButtonElement
+  await waitFor(() => expect(submit.disabled).toBe(false))
+  expect(submit.type).toBe('submit')
+  expect(submit.form).toBe(screen.getByPlaceholderText('搜索 Skill Hub').closest('form'))
+  callSkillHub.mockClear()
+
+  fireEvent.change(screen.getByPlaceholderText('搜索 Skill Hub'), { target: { value: ' 小红书 ' } })
+  fireEvent.change(screen.getByLabelText('市场分类'), { target: { value: 'content_creation' } })
+  fireEvent.change(screen.getByLabelText('按标签筛选'), { target: { value: ' writing ' } })
+  expect(callSkillHub).not.toHaveBeenCalled()
+  fireEvent.click(submit)
+  await waitFor(() => expect(callSkillHub).toHaveBeenCalledWith('catalog.search', {
+    query: '小红书', limit: 24, category: 'content_creation', tag: 'writing',
+  }))
+  await waitFor(() => expect(submit.disabled).toBe(false))
+
+  callSkillHub.mockClear()
+  fireEvent.change(screen.getByPlaceholderText('搜索 Skill Hub'), { target: { value: '' } })
+  fireEvent.change(screen.getByLabelText('市场分类'), { target: { value: 'all' } })
+  fireEvent.change(screen.getByLabelText('按标签筛选'), { target: { value: '' } })
+  fireEvent.click(submit)
+  await waitFor(() => expect(callSkillHub).toHaveBeenCalledWith('catalog.search', { query: '', limit: 24 }))
+})
+
 it('does not present failed catalog reads as an empty search, even after dismissing the error', async () => {
   let available = false
   const request = vi.fn(async (endpoint: string) => {

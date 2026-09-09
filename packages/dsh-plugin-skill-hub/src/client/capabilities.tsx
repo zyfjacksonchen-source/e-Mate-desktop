@@ -579,6 +579,7 @@ export function CapabilitiesPage({
                 <label className={css.search}><SearchIcon size={16} /><input type="search" value={query} placeholder="搜索 Skill Hub" maxLength={128} onChange={event => setQuery(event.target.value)} /></label>
                 <select aria-label="市场分类" value={hubCategory} onChange={event => setHubCategory(event.target.value as HubCategory | 'all')}><option value="all">全部市场</option><option value="third_party">第三方</option><option value="content_creation">内容创作</option><option value="office_productivity">办公效率</option></select>
                 <input aria-label="按标签筛选" value={hubTag} placeholder="标签" onChange={event => setHubTag(event.target.value)} />
+                <button type="submit" disabled={loading}>搜索</button>
                 <button className={css.uploadAction} type="button" onClick={() => { setTab('upload') }}><DownloadIcon size={16} />上传 Skill</button>
               </form>
               {loading && items.length === 0 ? <p className={css.empty}>正在读取 e-Mate Skill Hub…</p> : null}
