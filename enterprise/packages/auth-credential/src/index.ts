@@ -265,3 +265,27 @@ export async function verifyEcorexV0292Password(password: string, encodedHash?: 
   const actual = await pbkdf2Key(password, selected.salt);
   return verifier !== undefined && timingSafeEqual(actual, selected.hash);
 }
+
+/** Caller holds the DELETED tenant-user row lock in the same transaction.
+ * Retain historical ownership; release only credentials belonging to that user.
+ */
+export async function revokeDeletedUserCredentials(
+  query: (sql: string, values: string[]) => Promise<unknown>, tenantId: string, userId: string
+): Promise<void> {
+  await query(
+    `UPDATE e_mate_auth_session SET status = 'REVOKED', revoked_at = clock_timestamp()
+          WHERE tenant_id = $1 AND user_id = $2 AND status = 'ACTIVE'`, [tenantId, userId]
+  );
+  await query(
+    `UPDATE e_mate_auth_refresh_token AS refresh
+            SET status = 'REVOKED', consumed_request_id = NULL,
+                replacement_generation = NULL, consumed_at = NULL
+           FROM e_mate_auth_session AS session
+          WHERE refresh.session_id = session.session_id
+            AND session.tenant_id = $1 AND session.user_id = $2 AND refresh.status <> 'REVOKED'`,
+    [tenantId, userId]
+  );
+  await query('DELETE FROM e_mate_auth_password_credential WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]);
+  await query('DELETE FROM e_mate_auth_legacy_password_credential WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]);
+  await query('DELETE FROM e_mate_auth_login_identity WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]);
+}

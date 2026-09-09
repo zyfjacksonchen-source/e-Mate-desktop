@@ -2,6 +2,7 @@ import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
 import { DEFAULT_ENABLED_MODEL_ROUTE_IDS, modelSupportsClient } from '@e-mate/admin-contract';
 import {
   AUTH_CREDENTIAL_SCHEMA_SQL,
+  revokeDeletedUserCredentials,
   AUTH_CREDENTIAL_SOURCE_VERSION_MIGRATION_SQL,
   normalizeLoginIdentifier,
   isLoginIdentityConflict,
@@ -282,15 +283,21 @@ export class PostgresAuthStore implements AuthStore {
         await client.query('COMMIT');
         return { ok: false, code: 'INVALID_CHALLENGE' };
       }
-      const existing = await client.query(
-        `SELECT 1 FROM e_mate_auth_login_identity
-          WHERE tenant_id = $1 AND login_identifier_normalized = $2`,
-        [tenantId, account]
+      // Lock the historical owner, not the reusable login string: a repeated old
+      // deletion must never remove the replacement user's identity or permissions.
+      const existing = await client.query<{ user_id: string; status: string }>(
+        `SELECT app_user.user_id, app_user.status FROM e_mate_auth_login_identity AS identity
+          JOIN e_mate_tenant_user AS app_user
+            ON app_user.tenant_id = identity.tenant_id AND app_user.user_id = identity.user_id
+         WHERE identity.tenant_id = $1 AND identity.login_identifier_normalized = $2
+         FOR UPDATE OF app_user`, [tenantId, account]
       );
-      if (existing.rowCount !== 0) {
+      const owner = existing.rows[0];
+      if (owner && owner.status !== 'DELETED') {
         await client.query('COMMIT');
         return { ok: false, code: 'ACCOUNT_EXISTS' };
       }
+      if (owner) await revokeDeletedUserCredentials((sql, values) => client.query(sql, values), tenantId, owner.user_id);
       const userId = randomUUID();
       await client.query(
         `INSERT INTO e_mate_tenant_user (

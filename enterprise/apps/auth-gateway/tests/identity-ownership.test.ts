@@ -172,3 +172,42 @@ test('only the named account ownership constraint maps to an account conflict', 
   assert.equal(isLoginIdentityConflict({ code: '23505', constraint: 'unrelated_primary_key' }), false);
   assert.equal(isLoginIdentityConflict({ code: '40001' }), false);
 });
+
+integration('deleted login can register a new owner without inheriting sessions, grants or history', async (t) => {
+  for (const historical of [false, true]) {
+    const { pool, auth, admin } = await fixture(t);
+    await legacy(pool);
+    if (!historical) await admin.resetPassword(principal, 'legacy-user', { schemaVersion: 1, password });
+    const old = (await admin.listUsers(principal)).users[0]!;
+    const sid = randomUUID();
+    await pool.query(`INSERT INTO e_mate_auth_session (session_id,tenant_id,user_id,client_id,status,expires_at)
+      VALUES ($1,'fixture','legacy-user','e-mate-desktop','ACTIVE',clock_timestamp()+interval '1 hour')`, [sid]);
+    await pool.query(`INSERT INTO e_mate_auth_refresh_token (token_hash,session_id,generation,status,expires_at)
+      VALUES ($1,$2,0,'ACTIVE',clock_timestamp()+interval '1 hour')`, [Buffer.alloc(32, 5), sid]);
+    const deletion = { schemaVersion: 1 as const, expectedUpdatedAt: old.updatedAt };
+    if (historical) await pool.query("UPDATE e_mate_tenant_user SET status='DELETED' WHERE user_id='legacy-user'");
+    else await admin.deleteUser(principal, old.userId, deletion);
+    const register = async () => {
+      const c = await auth.issueRegistrationChallenge();
+      return auth.register({ tenantId: 'fixture', account: 'LEGACY@EXAMPLE.TEST', realName: 'New person', password,
+        challengeId: c.challengeId, verificationCode: c.code });
+    };
+    const results = await Promise.all([register(), register()]);
+    assert.equal(results.filter(x => x.ok).length, 1);
+    assert.deepEqual(results.find(x => !x.ok), { ok: false, code: 'ACCOUNT_EXISTS' });
+    const next = results.find(x => x.ok)!;
+    assert(next.ok);
+    assert.notEqual(next.registrationId, old.userId);
+    await admin.deleteUser(principal, old.userId, deletion); // An old retry cannot clear the new owner.
+    const owner = (await pool.query('SELECT user_id FROM e_mate_auth_login_identity')).rows;
+    assert.deepEqual(owner, [{ user_id: next.registrationId }]);
+    const users = (await admin.listUsers(principal)).users;
+    assert.equal(users.find(u => u.userId === old.userId)?.status, 'DELETED');
+    assert.equal(users.find(u => u.userId === next.registrationId)?.status, 'PENDING_APPROVAL');
+    assert.deepEqual(users.find(u => u.userId === next.registrationId)?.allowedModelIds, []);
+    assert.equal((await pool.query('SELECT status FROM e_mate_auth_session')).rows[0].status, 'REVOKED');
+    assert.equal((await pool.query('SELECT status FROM e_mate_auth_refresh_token')).rows[0].status, 'REVOKED');
+    assert.equal((await pool.query('SELECT user_id FROM e_mate_auth_credential_migration')).rows[0].user_id, old.userId);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM e_mate_auth_legacy_password_credential')).rows[0].n, 0);
+  }
+});

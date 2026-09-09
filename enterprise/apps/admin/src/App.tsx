@@ -349,7 +349,7 @@ export function App() {
     ? facts.users.filter((user) => {
         const query = userSearch.trim().toLocaleLowerCase();
         return (
-          (userStatusFilter === 'ALL' || user.status === userStatusFilter) &&
+          (userStatusFilter === 'ALL' ? user.status !== 'DELETED' : user.status === userStatusFilter) &&
           (!query || `${user.displayName}\n${user.userId}`.toLocaleLowerCase().includes(query))
         );
       })

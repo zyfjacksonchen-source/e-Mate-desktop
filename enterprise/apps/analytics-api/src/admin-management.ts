@@ -36,7 +36,7 @@ import {
   type TenantUserList,
   type TenantUserUpdate,
 } from '@e-mate/admin-contract';
-import { AUTH_CREDENTIAL_SCHEMA_SQL, derivePasswordVerifier, normalizeLoginIdentifier, isLoginIdentityConflict } from '@e-mate/auth-credential';
+import { AUTH_CREDENTIAL_SCHEMA_SQL, revokeDeletedUserCredentials, derivePasswordVerifier, normalizeLoginIdentifier, isLoginIdentityConflict } from '@e-mate/auth-credential';
 import type { RuntimeRegistryPrincipal } from './runtime-registry.ts';
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -981,6 +981,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
         );
         await this.#audit(client, principal, 'USER_DELETED', 'USER', userId);
       }
+      await revokeDeletedUserCredentials((sql, values) => client.query(sql, values), tenantId, userId);
       await client.query('COMMIT');
       return true;
     } catch (error) {
