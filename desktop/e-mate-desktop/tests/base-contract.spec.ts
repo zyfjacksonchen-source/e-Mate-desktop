@@ -15,7 +15,6 @@ function contract(): Record<string, unknown> {
     harness_version: '0.1.5-rc.1',
     harness_commit: '78a2b98562185d6fe46f4071653cae61132bf1ea',
     runtime_imports: {
-      '@deepseek-ai/dsh-client-runtime': '0.1.5-rc.1',
       '@deepseek-ai/dsh-settings': '0.1.5-rc.1',
       '@e-mate/desktop/vision-toolkit': '2.0.18',
       react: '18.3.1',

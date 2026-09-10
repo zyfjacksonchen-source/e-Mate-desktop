@@ -100,7 +100,9 @@ describe('published package surface', () => {
     expect(manifest.dsh?.client).toEqual({
       platform: 'web',
       inject: [
-        '@deepseek-ai/dsh-client-runtime',
+        '@deepseek-ai/dsh-api-session-controller',
+        '@deepseek-ai/dsh-api-workspace-controller',
+        '@deepseek-ai/dsh-client-ui-slots',
         '@deepseek-ai/dsh-client-ui-theme',
       ],
     })
