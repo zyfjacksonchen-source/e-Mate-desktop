@@ -1222,3 +1222,50 @@ async function* sessionLogZipEntries(deps, rootContent, sessionId, includeDescen
 | `conversation` | 待办（**47 处**，结构性重写） |
 
 5/8 收口。剩余 3 条中 2 条同根因（0.1.5 重构会话节点定义层），建议一起设计。
+
+### 21.30 Round 16：artifact 两个适配器的完整接缝普查（一次测全）
+
+#### 方法改进：让适配器"假装"每处接缝都命中
+先前只能迭代式地看到"第一个失败点"。本轮改为**劫持 `split`**，对长度 ≥8 的字符串分隔符一律返回双元素数组
+（使 `count === 1` 检查通过），于是**整条流水线一次跑完**，捕获全部接缝。
+
+> **又踩了一个自伤**：第一版在 `split` 仍被劫持时就去计数，于是每处都显示 1x（自证命中）。
+> 必须在**恢复原 `split` 之后**再计数。这与前几轮的教训同源：**测量工具的副作用必须与测量本身分离**。
+
+#### 结果：`artifact-links`（lib 面）6 处，**全部失配**
+
+| 接缝 | 状态 |
+|---|---|
+| `function renderAnchor(url, children, key) {` | **MISS**（0.1.5 为 `+ glyph = true`） |
+| `case "link": return renderAnchor(node.url, …` | **MISS** |
+| `return renderAnchor(definition.url, …` | **MISS** |
+| `function renderImage(url, alt, key) {` | **MISS**（0.1.5 为 `+ context`） |
+| `case "image": return renderImage(node.url, …` | **MISS** |
+| `return renderImage(definition.url, …` | **MISS** |
+
+**6 处全是签名变化** → 与 `fs-bytes`/`session-title` 同类：**精度问题**，不是语义重写。
+但注入点仍需设计（0.1.5 已自行给 `renderImage` 传 `context`，见 21.16）。
+
+#### 结果：`artifact-deliverables` 6 处，**3 命中 / 3 失配**
+
+| 接缝 | 状态 |
+|---|---|
+| `function selectProducedFiles(owner) { …` | **OK** |
+| `const paths = selectProducedFiles(owner);` | **OK** |
+| `const deliverablesDefinition = {` | **OK** |
+| `select: selectProducedFiles,` | **MISS** → 0.1.5 为 `select: selectDeliverables,` |
+| `\t\t\t"connection"\n\t\t];` | **MISS** |
+| `\t\t\t\tvalue: { produced: context.state.produced }\n…` | **MISS** |
+
+#### 修正一处口径
+Round 10 记的"`artifact-links` 21 处"是**整个模块**的总数（lib 面 6 + vite 面 6 + deliverables 6 + 其余）。
+按**功能面**看：lib 面 6 处、deliverables 6 处 —— 单面的规模远小于 21。
+
+#### 适配器总账（Round 16 末）
+
+| 适配器 | 状态 |
+|---|---|
+| `fs-bytes` / `fs-escalation` / `session-title` / `slot-error` / `session-export` | **收口（5）** |
+| `artifact-links` | 6 处全失配，**全为签名变化**，待改 + 定注入点 |
+| `artifact-deliverables` | 6 处中 3 命中、3 待改 |
+| `conversation` | 待办（47 处，结构性） |
