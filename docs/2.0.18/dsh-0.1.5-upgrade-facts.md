@@ -831,4 +831,34 @@ if (registration.provider.automatic === "all-prompts" || session.header.parentSe
 | **精度问题（低成本）** | `session-title`（`messages.length`→`count`） | 一条替换 |
 | **语义已变（需重写/重定）** | `fs-escalation`（`resolvePolicy` 消失）、`conversation`（`turn-tail` 节点与图像工具名消失） | 高 |
 | **宿主消失（需重定目标）** | `slot-error`（`client-runtime`）、`session-export`（`apiproxy`） | 中 |
-| **待判** | `artifact-links`、`artifact-deliverables` | 待逐条计数 |
+| **待判** | `artifact-links`、`artifact-deliverables` | 待逐条计数 |### 21.13 Round 6：两处更正与两条适配器进展
+
+#### 更正：我上一轮把 `fs-escalation` 判错了
+`adaptHarnessFsSource` 的目标包是 **`dsh-tool-fs`**（见 `applyHarnessRuntimeAdapters` 里 `packageEntry('dsh-tool-fs')`），
+而我上一轮喂的是 `dsh-fs`，于是得到"`resolvePolicy` 完全不存在"的错误读数，并据此判为"语义已变"。
+
+**实际结果**：`FS_OLD` 在 0.1.5 的 `dsh-tool-fs` 里**完整命中 1 次**，适配器**直接可用**（247 字节增量）。
+> 教训：接缝普查必须用**适配器实际作用的目标包**；差一个包名就会把"可用"误判成"需重写"。
+
+#### `session-title` 重写完成（不是改名，是真正重写）
+0.1.5 把调度器里的 `messages.length` 换成了预计算的 `this.titleInputOf(session).count`，
+而 **`messages` 根本不在该作用域内** —— 原替换产物会引用未定义绑定。
+
+已按 0.1.5 自身 API 重写：
+- 接缝匹配含 `count === 1` 的那一行
+- 替换体改用 `this.titleInputOf(session)` 取 `{ count, first }`，文本取自 `first.text`
+- `normalizeSessionTitle` / `fallbackSessionTitle` 在 0.1.5 均存在；`event` 仍在作用域内（方法签名 `onUserMessage(session, event)`）
+
+**验证**：对 0.1.5 真实产物调用适配器 → 接缝找到，替换增加 653 字节。
+守卫测试的 `nativeTitle` 是**从被固定的 harness 树读取**（非硬编码 fixture），因此自适应 —— harness 重钉到 0.1.5 后应当通过。
+
+#### 适配器总进度：3/8 完成
+
+| 状态 | 适配器 | 依据 |
+|---|---|---|
+| **已完成** | `fs-bytes` | 接缝精度修正，守卫 9/9 |
+| **已完成（本就可用）** | `fs-escalation`（目标 `dsh-tool-fs`） | 接缝完整命中 1 次 |
+| **已完成** | `session-title` | 按 `titleInputOf` 重写，653 字节增量 |
+| 待办 | `artifact-links` / `artifact-deliverables` | 需逐条计数 |
+| 待办（需重写） | `conversation` | `turn-tail` 节点与图像工具名消失 |
+| 待办（需重定目标） | `slot-error`（`client-runtime`）/ `session-export`（`apiproxy`） | 包已不存在 |
