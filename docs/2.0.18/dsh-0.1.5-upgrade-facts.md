@@ -1045,4 +1045,49 @@ Round 7 我据"接缝在原文存在 1 次、检查却报 0"推出"存在替换�
 goal 第 (2) 项"重 derive 6 个适配器"的实测规模是**约 68 处接缝重写**，
 且其中 `conversation`(47) 与 `artifact-deliverables`、`artifact-links`(21) 处在 0.1.5 重构过的模块上。
 按已完成 3 条的经验（简单的每轮 1–3 处，结构性的 0 处），**这一项本身就是多轮工作**。
-本轮如实记录规模，不做"已接近完成"的表述。
+本轮如实记录规模，不做"已接近完成"的表述。### 21.19 Round 11：`slot-error` 判定为**废除**（不是重定目标）
+
+#### 适配器原本在做什么
+```js
+const OBSERVE  = '\t\t\tonEntryError(fn) {\n\t\t\t\treturn this._core.onEntryError(fn);\n\t\t\t}'
+const DELEGATE = '\t\t\treportEntryError(key, entry, error, info) {\n\t\t\t\treturn this._core.reportEntryError(key, entry, error, info);\n\t\t\t}'
+const HOST     = '\t\t\t\t\treportEntryError: (key, entry, error, info) => {\n\t\t\t\t\t\tthis._core.reportEntryError(key, entry, error, info);\n\t\t\t\t\t}'
+```
+注释自述目的：**"Expose the existing pinned SlotCore supervision through SlotsService."**
+即 rc.7 里 `SlotsService` 是包装层、转发给 `SlotCore`(`this._core`)，而 e-Mate 需要监督方法在**服务**上可用。
+
+#### 0.1.5 的实际情况
+
+| 检查 | 结果 |
+|---|---|
+| `_core` 在 0.1.5 `dsh-client-ui-slots` 里出现次数 | **0（层次已拍平）** |
+| `onEntryError(fn)` | 直接管理 `this.entryErrorListeners`，不再转发 |
+| `reportEntryError(key, entry, error, info)` | 在**同一个类**上内联实现，遍历 `this.entryErrorListeners` |
+| e-Mate 生产代码是否消费这两个方法 | **零**（唯一引用在适配器自身与其测试里） |
+
+**结论**：适配器的全部目的在 0.1.5 中**由结构本身满足** —— 监督方法本来就在服务类上。
+它不再是"目标包消失需要重定"，而是**问题已经不存在**。
+
+#### 移除方案（待执行，涉及 4 处）
+1. 删除 `scripts/harness-slot-error-adapter.mjs`；
+2. `scripts/harness-runtime-adapters.mjs`：移除 `SLOT_ERROR_PACKAGE` 的 import 与 `applyHarnessRuntimeAdapters` 里的对应块；
+3. `scripts/harness-provenance.mjs`：移除 import 与 `assertOverlayContract` / materialize 路径中的引用；
+4. 两个测试文件（`harness-runtime-adapters.test.mjs`、`harness-provenance.test.mjs`）移除其断言与 `entries` 项。
+
+> 注意：这是**上游吸收**导致的废除（与 schedule 家族的"产品淘汰"、imagegen review 门的"产品淘汰"不同），
+> 因此无需"先删后验"——因为目标包已不存在，旧适配器在 0.1.5 上无论如何都无法工作。
+
+### 21.20 适配器进度（Round 11 末）
+
+| 适配器 | 判定 | 状态 |
+|---|---|---|
+| `fs-bytes` | 精度修正 | **完成** |
+| `fs-escalation` | 本就可用 | **完成** |
+| `session-title` | API 已改，已重写 | **完成** |
+| **`slot-error`** | **上游吸收 → 废除** | **判定完成，待移除** |
+| `artifact-links` | 精度 + 注入点重设计 | 待办 |
+| `artifact-deliverables` | 节点定义重构 | 待办 |
+| `conversation` | 节点定义重构（47 处） | 待办 |
+| `session-export` | 宿主消失 | 待办 |
+
+**3 完成 + 1 判定废除（待移除），剩余 3 条结构性工作 + 1 条重定目标。**
