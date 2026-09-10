@@ -598,3 +598,45 @@ harness 仓库自身钉 `pnpm@11.7.0`，而 e-Mate 根已按决定升到 `11.8.0
 ### 17.3 计数更新
 - 重做：**9 条**（jobs 3 条已完成，剩余 6 条）
 - 淘汰：**12 条**，其中 **3 条**（attachment drop overlay、session draft isolation、session cold list）必须各自用定向验证兜底，未过即回退为"重做"
+
+---
+
+## 18. Round 1 结果：fork 重做到 9/10，host 构建已验证通过
+
+### 18.1 fork 分支状态
+- 分支 `dsh-v0.1.5-rc.1-emate`，工作树 `work/harness-dsh015-emate`
+- **SHA `e522d07f2287f533074166a3cfa3202b2e8c7940`**，含 10 个提交
+- 与 0.1.5-rc.1 的净差异：**22 文件 / +1049 −46**
+- **构建验证：`pnpm run build:lib:host` → HOST_EXIT=0，0 个 TS 错误**（在当前 HEAD 上验证）
+
+| # | 提交 | 结果 |
+|---|---|---|
+| 1 | `e9f59bfdf8` composer frame host | 适配 0.1.5 新结构 |
+| 2 | `b4dcbfbe22` tools 注册来源 | WeakMap 方案，纯增量 |
+| 3 | `35cf3503f4` jobs 跨所有者 kind 准入 | 基座 |
+| 4 | `dd10200769` jobs 排队准入注册 | 契约改 `JobAdmission` |
+| 5 | `aaabedd617` jobs 拆除竞态 | 零冲突（验证了依赖顺序） |
+| 6 | `6de837489d` jobs 测试适配 | `Inbox` → `unsupportedInbox()` |
+| 7 | `306ae92106` models 目录刷新 | 保留 0.1.5 事件名 + 加逐 directory 重载 |
+| 8 | `39e118a4b0` llm 线上变换 | 投影之后接 waterfall |
+| 9 | `63e86715c8` llm 测试适配 | `deepFreeze` 改从 `dsh-util-values` 导入 |
+| 10 | `e522d07f22` settings 分区 id | 零冲突 |
+
+### 18.2 构建暴露的两处真实问题（只靠冲突解决发现不了）
+1. `loader-composition.spec.ts` 用了 0.1.5 已移除的 `Inbox` 值导出 → 0.1.5 自己的 spec 用 `unsupportedInbox()`（来自 `@deepseek-ai/dsh-agent-loop-testkit`）。
+2. `service.spec.ts` 的 `deepFreeze` 在 0.1.5 属于 `@deepseek-ai/dsh-util-values`，不再由 `@deepseek-ai/dsh-llm` 导出。
+
+**这两条印证了一个方法论**：冲突解决只保证"能合并"，**只有构建能证明"能编译"**。每一条重做都必须过构建。
+
+### 18.3 剩余 1 条重做
+`feat(ui-conversation): add declarative hero content slot`（`b469c2b99a`）—— 4 处冲突，性质与其他不同：
+0.1.5 的 `ConversationRoot` 已演化出 `WidthHandle` / `rootResizeRef` / `css.body` / `css.scrollBody` 的全新布局，
+hero 内容槽必须**重新插入 0.1.5 的新结构**（作为 scrollBody 内、composer seat 之前的兄弟节点），
+且 `HeroShell` 签名已变（多了 `renderSlot`）。这是结构性集成，不是解冲突。
+需要在 #1 的 `data-emate-composer-frame-host` 与既有 `conversation.hero.workspace` 座位之间重新定位。
+
+### 18.4 回归防护账（用户新增验收标准）
+见 `docs/2.0.18/regression-ledger.md` / `.json`：
+范围 `6a7f4b9d..3cc4be84` = 411 提交，其中 **236 个 fix**，**218 个自带测试守卫**，去重后 **151 个守卫测试文件**。
+18 个修复无测试，列为必须补齐的缺口。区域分布即升级的回归面：
+shell 42 / profile-core 35 / desktop 55 / enterprise 29 / scripts 59，插件侧 knowledge 21、office-skills 14、mcp-manage 11、canvas 11、skill-hub 10、vision-toolkit 9 等。
