@@ -1269,3 +1269,30 @@ Round 10 记的"`artifact-links` 21 处"是**整个模块**的总数（lib 面 6
 | `artifact-links` | 6 处全失配，**全为签名变化**，待改 + 定注入点 |
 | `artifact-deliverables` | 6 处中 3 命中、3 待改 |
 | `conversation` | 待办（47 处，结构性） |
+
+### 21.31 Round 17：`artifact-links` 的 6 处修改方案（已定稿，未实施）
+
+两侧精确文本已取齐。**方案如下，下一轮按此实施**（本轮脚本中途失败，`writeFileSync` 未执行，文件零改动）：
+
+| # | owner | 修改 |
+|---|---|---|
+| 1 | `renderer/anchor` | 接缝改为 0.1.5 的 `function renderAnchor(url, children, key, glyph = true) {` + 体 `\treturn renderSafeLink(normalizeUri(url), children, key, glyph);`；**替换体签名改为** `(url, children, key, glyph = true, context)`，且其透传必须补回 `glyph` |
+| 2 | `renderer/link` | 接缝改为 `…, key, !anchorWrapsOnlyImages(node.children));`；替换体在其后追加 `, context` |
+| 3 | `renderer/reference` | 接缝改为 `return renderAnchor(definition.url, rendered, key, !anchorWrapsOnlyImages(node.children));` —— **注意 0.1.5 用 `rendered` 变量，不再是 `renderChildren(node.children, …)`**；替换体追加 `, context` |
+| 4 | `renderer/image` | 接缝改为 `function renderImage(url, alt, key, context) {` + `\n\tconst imageSrc`；**替换体无需改** —— 它本来就写的是带 `context` 的签名 |
+| 5 | `renderer/image-node` | **删除** —— 0.1.5 调用点已是 `…, key, context);`，该步成空操作 |
+| 6 | `renderer/image-reference` | **删除** —— 同上 |
+
+**关键设计判断（#4–6）**：0.1.5 **已自行给 `renderImage` 传 `context`** 并在调用点传参，
+所以适配器原本"补 context"的三步中，两步已成空操作、一步只剩"注入 e-Mate 提及处理"。
+因此 e-Mate 的提及注入**直接加在 0.1.5 既有的 `context` 形参上**，不需要再改签名或调用点。
+
+**#1 的行为风险（必须注意）**：替换体的透传若漏掉 `glyph`，会导致链接符号恒显 ——
+0.1.5 新增 `anchorWrapsOnlyImages` 正是为"锚点只含图片时不显示符号"，漏掉即行为回退。
+
+#### vite 面（6 处）
+`adaptHarnessArtifactLinksRendererSource` 作用于 TS 源码 `render.tsx`，与 lib 面一一对应，需同样处理。
+**两面必须同时改**，否则构建产物与浏览器模块表不一致（适配器头部注释已说明该约束）。
+
+#### 状态
+工作区零改动，未留半成品。`artifact-links` 仍是 6/6 失配，但方案已定稿、每处都有精确两侧文本。
