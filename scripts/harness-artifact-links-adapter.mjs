@@ -150,11 +150,11 @@ function emateOfficeDeliverables(native, isAppend) {
 export function adaptHarnessArtifactDeliverablesSource(source) {
   source = replaceOnce(source, 'function selectProducedFiles(owner) {\n\t\t\tconst paths = producedForClosing(owner.turn.data.get("deliverables"), owner.seq);',
     `${emateUniverProduced.toString()}\nfunction selectProducedFiles(owner, sessions) {\n\t\t\tconst paths = producedForClosing({ produced: [...(owner.turn.data.get("deliverables")?.produced ?? []), ...emateUniverProduced(owner, sessions)] }, owner.seq);`, 'deliverables/native-results')
-  source = replaceOnce(source, 'select: selectProducedFiles,', 'select: (owner) => selectProducedFiles(owner, ctx.get("sessions")),', 'deliverables/tail-selector')
+  source = replaceOnce(source, 'select: selectDeliverables,', 'select: (owner) => selectDeliverables(owner, ctx.get("sessions")),', 'deliverables/tail-selector')
   source = replaceOnce(source, 'const paths = selectProducedFiles(owner);', 'const paths = selectProducedFiles(owner, ctx.get("sessions"));', 'deliverables/mention-selector')
-  source = replaceOnce(source, '\t\t\t"connection"\n\t\t];', '\t\t\t"connection",\n\t\t\t"sessions"\n\t\t];', 'deliverables/session-owner')
+  source = replaceOnce(source, '\t\t\t"remote.session"\n\t\t];', '\t\t\t"remote.session",\n\t\t\t"sessions"\n\t\t];', 'deliverables/session-owner')
   source = replaceOnce(source, 'const deliverablesDefinition = {', `${emateOfficeDeliverables.toString()}\nconst deliverablesDefinition = emateOfficeDeliverables({`, 'deliverables/library-definition')
-  return replaceOnce(source, '\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t};', '\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t}, _deepseek_ai_dsh_client_runtime_client.isAppendSurfaceEvent);', 'deliverables/library-close')
+  return replaceOnce(source, '\t\t\t\t\tvalue: {\n\t\t\t\t\t\tproduced: context.state.produced,\n\t\t\t\t\t\t...context.state.presented === void 0 ? {} : { presented: context.state.presented }\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t}\n\t\t};', '\t\t\t\t\tvalue: {\n\t\t\t\t\t\tproduced: context.state.produced,\n\t\t\t\t\t\t...context.state.presented === void 0 ? {} : { presented: context.state.presented }\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t}\n\t\t}, isAppendSurfaceEvent);', 'deliverables/library-close')
 }
 
 // Read the native turn's Tool tree, including Code subcalls. No separate event
