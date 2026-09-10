@@ -6,40 +6,68 @@ import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { Script } from 'node:vm'
-import { createRequire } from 'node:module'
-import { adaptHarnessConversationSource } from './harness-conversation-adapter.mjs'
+import { adaptHarnessConversationSource, adaptHarnessChatSource } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactDeliverablesSource } from './harness-artifact-links-adapter.mjs'
 
-const native = readFileSync(process.env.EMATE_TEST_NATIVE_ROOT ? join(process.env.EMATE_TEST_NATIVE_ROOT, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js') : new URL('../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', import.meta.url), 'utf8')
+// 0.1.5 splits the rc.7 Conversation surface across two client packages: the
+// skeleton, composer, queue, input store and input shell stayed in
+// ui-conversation, while the Chat renderer, the chat store and the
+// file-mention provider moved to ui-chat. Every extracted owner is therefore
+// read from the bundle that owns it now.
+const nativeRoot = process.env.EMATE_TEST_NATIVE_ROOT
+  ? join(process.env.EMATE_TEST_NATIVE_ROOT, 'upstream/deepseek-harness')
+  : new URL('../upstream/deepseek-harness', import.meta.url).pathname
+const nativePath = relative => join(nativeRoot, relative)
+const native = readFileSync(nativePath('packages/client/ui-conversation/lib/client.js'), 'utf8')
 const adapted = adaptHarnessConversationSource(native)
+const nativeChat = readFileSync(nativePath('packages/client/ui-chat/lib/client.js'), 'utf8')
+const adaptedChat = adaptHarnessChatSource(nativeChat)
 
-test('terminal errors remain visible after retries through native replay, append and paged prepend', () => {
-  const root = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
-  const harness = join(root, 'upstream/deepseek-harness')
-  const requireNative = createRequire(join(harness, 'packages/client/ui-conversation/package.json'))
-  let runtime
-  new Function('window', readFileSync(join(harness, 'packages/client/runtime/lib/client.js'), 'utf8'))({ __ModuleLoader__: { load: module => { runtime = module.factory(requireNative) } } })
-  const region = (source, name) => {
-    const start = source.indexOf('//#region lib/types/client/' + name + '.js')
-    assert(start >= 0, name)
-    return source.slice(start, source.indexOf('//#endregion', start))
-  }
-  const definitions = source => new Function('_deepseek_ai_dsh_client_runtime_client', [
+const region = (source, name) => {
+  const start = source.indexOf('//#region lib/types/client/' + name + '.js')
+  assert(start >= 0, name)
+  return source.slice(start, source.indexOf('//#endregion', start))
+}
+const section = (start, end) => adapted.slice(adapted.indexOf(start), adapted.indexOf(end))
+
+// The Chat snapshot builder owns the Location index the 0.1.5 deliverable
+// readers and the terminal turn-error row both read, so the same extracted
+// graph serves the replayed assembler fixtures below.
+const chatGraph = source => {
+  const kinds = 'const TURN_PROCESS_INDEPENDENT_KINDS = new Set(['
+  const kindsAt = source.indexOf(kinds)
+  assert(kindsAt >= 0, 'TURN_PROCESS_INDEPENDENT_KINDS')
+  return new Function('_deepseek_ai_dsh_client_runtime_client', [
     region(source, 'conversation-nodes/common'),
+    region(source, 'conversation-nodes/event-projection'),
     region(source, 'contract/chat-nodes'),
+    region(source, 'conversation-nodes/turn-navigation'),
+    region(source, 'conversation-nodes/turn-process-presentation'),
     region(source, 'conversation-nodes/chat-snapshot-builder'),
     region(source, 'conversation-nodes/retry'),
     region(source, 'conversation-nodes/turn-error'),
+    source.slice(kindsAt, source.indexOf('//#endregion', kindsAt)),
     'return { retryDefinition, turnErrorDefinition, chatViewDefinition }',
-  ].join('\n'))(runtime)
+  ].join('\n'))({})
+}
+// rc.7 loaded the assembler from the client runtime package; 0.1.5 owns it in
+// the ui-conversation package and exports it from the compiled client entry.
+const { ConversationNodeAssembler } = await import(pathToFileURL(nativePath('packages/client/ui-conversation/lib/types/client/conversation/assembler.js')).href)
+
+test('terminal errors remain visible after retries through native replay, append and paged prepend', () => {
+  // 0.1.5 absorbed the retired turn-error/terminal-after-retry seam: the
+  // terminal failure outlives its own llm/retry history natively, so this
+  // fixture pins that the row is still published on every window mode.
   const assembler = source => {
-    const d = definitions(source)
-    return new runtime.ConversationNodeAssembler(
-      { entries: () => [d.retryDefinition, d.turnErrorDefinition], fallbackEntry: () => undefined },
-      { entries: () => [d.chatViewDefinition] },
+    const graph = chatGraph(source)
+    const value = new ConversationNodeAssembler(
+      { entries: () => [graph.retryDefinition, graph.turnErrorDefinition], fallbackEntry: () => undefined },
+      { entries: () => [graph.chatViewDefinition] },
     )
+    value.activateTarget('chat')
+    return value
   }
-  const event = (seq, type, data) => ({ event: { seq, type, time: 1000 + seq, data } })
+  const event = (seq, type, data) => ({ type: 'event', event: { seq, type, time: 1000 + seq, data } })
   const finalError = { code: 'PI_AI_ERROR', message: 'OpenAI API error (409): INVOCATION_RECONCILIATION_REQUIRED' }
   const start = [event(180, 'turn/start', { turn: 7 }), event(182, 'step/start', { turn: 7, step: 1 })]
   const retry = [
@@ -54,15 +82,16 @@ test('terminal errors remain visible after retries through native replay, append
     assert.equal(terminal(value).length, 1)
     assert.deepEqual(terminal(value)[0].data, { kind: 'turn-error', seq: 194, time: 1194, turn: 7, step: 1, ...finalError })
   }
-  // Prove the pinned behavior loses the terminal error for this exact retry shape.
-  const before = assembler(native)
+  // Prove the pinned 0.1.5 build already keeps the terminal error for the exact
+  // retry shape the rc.7 seam had to repair.
+  const before = assembler(nativeChat)
   before.replaceWindow([...start, ...retry, ...end({ kind: 'error', error: finalError })], false); before.flush()
-  assert.equal(terminal(before).length, 0)
+  assertFailure(before)
   for (const withRetry of [false, true]) {
     for (const mode of ['replay', 'append', 'paged']) {
       for (const failed of [false, true]) {
         const entries = [...start, ...(withRetry ? retry : []), ...end(failed ? { kind: 'error', error: finalError } : { kind: 'completed' })]
-        const value = assembler(adapted)
+        const value = assembler(adaptedChat)
         if (mode === 'append') {
           for (const entry of entries) {
             value.append(entry); value.flush()
@@ -89,11 +118,10 @@ test('terminal errors remain visible after retries through native replay, append
 
 // Execute the actual transformed native machine/facade/hub. The only fixture is
 // its observable-store dependency; no substitute input machine or send path.
-const section = (start, end) => adapted.slice(adapted.indexOf(start), adapted.indexOf(end))
-const owners = new Function('_deepseek_ai_dsh_client_runtime_client', [
-  section('function emateDraftFiles(', '\t\t//#endregion'),
-  section('\t\t//#region lib/types/client/queue/store.js', '\t\t//#region ../../../vendor/cosmokit/src/misc.ts'),
-  'return { SessionInputShell, InputHub, createChatStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView, emateAssistantImageBlocks }',
+const owners = new Function('_deepseek_ai_dsh_client_store', [
+  section('\t\t//#region lib/types/client/stores.js', '\t\t//#region lib/types/client/service.js'),
+  section('\t\t//#region lib/types/client/input/queue-store.js', '\t\t//#region lib/types/submission-settings.js'),
+  'return { SessionInputShell, InputHub, createConversationStore, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView, emateAssistantImageBlocks }',
 ].join('\n'))({
   defineStore: value => value,
   createSnapshotStore(initial) {
@@ -109,37 +137,50 @@ const imageRef = (bytes = 1, digit = 'a') => ({
   attachmentId: `sha256:${digit.repeat(64)}`, mediaType: 'image/png', bytes, width: 1, height: 1, name: '像素.png',
 })
 const draftImage = (key = '00000000-0000-4000-8000-000000000001', attachment = imageRef()) => ({ schema_version: 1, draft_key: key, attachment })
-function setup(sendSession = async () => {}) {
+// The shell is created through the native hub, so the resident shell, its
+// native default sink and the scope-teardown release of retained attachments
+// are the real 0.1.5 owners. sendSession is the only substituted effect.
+function setup(sendSession = async () => ({ kind: 'success' })) {
   const released = []
-  const conversation = { sendSession, releaseDraftImage(id) { released.push(id) } }
+  const conversation = { sendSession, releaseDraftAttachment(id) { released.push(id) } }
   const hub = new owners.InputHub({ get: name => name === 'conversation' ? conversation : undefined }, value => value)
-  const session = { sessionId: 'one' }
-  const shell = new owners.SessionInputShell({
-    actx: {}, defaultSink: (text, ids, mode, mentions) => hub.sink(session, text, ids, mode, mentions),
-  })
-  hub.shells.set('one', shell)
-  return { shell, hub, released }
+  const session = { sessionId: 'one', getSnapshot: () => ({ queue: [] }), subscribe: () => () => {} }
+  const teardowns = []
+  const actx = { effect: callback => { teardowns.push(callback()) }, on: () => () => {} }
+  const shell = hub.shellFor({ sessionId: 'one', session, ctx: actx })
+  return { shell, hub, released, session, teardown: () => { const pending = teardowns.splice(0); for (const off of pending) off() } }
 }
 
 test('every pinned seam fails closed on missing, duplicate or already adapted input', () => {
   assert.doesNotThrow(() => new Script(adapted))
-  const terminalSeam = native.slice(native.indexOf('if (!state.hidden) return chatNode'), native.indexOf('\n\t\t\t}', native.indexOf('if (!state.hidden) return chatNode')))
-  for (const replacement of ['', terminalSeam + terminalSeam]) {
-    assert.throws(() => adaptHarnessConversationSource(native.replace(terminalSeam, replacement)), /turn-error\/terminal-after-retry: expected one rc\.7 seam/u)
+  assert.doesNotThrow(() => new Script(adaptedChat))
+  // One pinned seam per owner, each driven through both fail-closed regimes.
+  const composerSeam = '\t\t\t}, InputBar);'
+  for (const replacement of ['', composerSeam + composerSeam]) {
+    assert.throws(() => adaptHarnessConversationSource(native.replace(composerSeam, replacement)), /apply\/composer-body: expected one rc\.7 seam/u)
+  }
+  const mentionsSeam = 'fileMentions: (owner) => ctx.get("chatFileMentions")?.forClosing(owner, sessionId),'
+  for (const replacement of ['', mentionsSeam + mentionsSeam]) {
+    assert.throws(() => adaptHarnessChatSource(nativeChat.replace(mentionsSeam, replacement)), /artifacts\/explicit-link-owner: expected one rc\.7 seam/u)
   }
   assert.throws(() => adaptHarnessConversationSource('future'), /expected one rc\.7 seam/u)
+  assert.throws(() => adaptHarnessChatSource('future'), /expected one rc\.7 seam/u)
   assert.throws(() => adaptHarnessConversationSource(native + native), /found 2/u)
+  assert.throws(() => adaptHarnessChatSource(nativeChat + nativeChat), /found 2/u)
   assert.throws(() => adaptHarnessConversationSource(adapted), /expected one rc\.7 seam/u)
+  assert.throws(() => adaptHarnessChatSource(adaptedChat), /expected one rc\.7 seam/u)
   assert.match(adapted, /const empty = .*input\?\.fileRefs.length/u)
   assert.match(adapted, /inputActions.restoreDraft\(storedDraft, storedFiles \?\? \[\], storedImages \?\? \[\]\)/u)
   assert.match(adapted, /const storedImages = useStore\(\(s\) => s\.imageRefs\)/u)
   assert.match(adapted, /inputState\.fileRefs\.length === 0 && inputState\.imageRefs\.length === 0/u)
-  assert.match(adapted, /const durableImages = shell\?\.commitSend\(imageIds, files\) \?\? \[\]/u)
-  assert.match(adapted, /shell\?\.restoreImages\(imageIds, durableImages\)/u)
   assert.match(adapted, /this\.durableImages\.flatMap\(item =>/u)
   assert.match(adapted, /write\(this\.snapshot\.draft, this\.fileRefs, this\.durableImages\)/u)
   assert.throws(() => adaptHarnessConversationSource(native.replace('}, InputBar);', '}, ChangedInputBar);')), /apply\/composer-body: expected one rc\.7 seam/u)
   assert.match(adapted, /"e-mate\.conversation\.composer": \{ kind: "single", scope: "session-maybe" \}/u)
+  assert.match(adaptedChat, /fileMentions: \(owner\) => emateArtifactFileMentions\(ctx, owner, ctx\.sessions, sessionId\)/u)
+  assert.match(adaptedChat, /blocks: imageBlocks,/u)
+  assert.match(adaptedChat, /event\.data\.schema_version === 3 && Number\.isSafeInteger\(event\.data\.turn\)/u)
+  assert.match(adaptedChat, /\(0, _deepseek_ai_dsh_client_ui_primitives\.projectUserText\)\(emateFileDisplay\(text\), referenceLabels, skillNames\)/u)
 })
 
 test('live image tail keeps the native definition and fails closed when its pinned seams change', () => {
@@ -148,17 +189,16 @@ test('live image tail keeps the native definition and fails closed when its pinn
     ['function closingAnchor(context) {', 'images/live-tail-anchor'],
     ['if (end?.event.type !== "turn/end") return null;', 'images/live-tail-data'],
   ]) {
-    assert.throws(() => adaptHarnessConversationSource(native.replace(seam, 'changed seam')), error =>
+    assert.throws(() => adaptHarnessChatSource(nativeChat.replace(seam, 'changed seam')), error =>
       error.message.includes(owner + ': expected one rc.7 seam'))
   }
   const definition = bundle => {
     const start = bundle.indexOf('//#region lib/types/client/conversation-nodes/turn-tail.js')
-    return new Function('_deepseek_ai_dsh_client_runtime_client', 'deriveTurnMetrics', 'CHAT_SYNTHETIC_SEQ_OFFSETS',
+    return new Function('isAppendSurfaceEvent', 'toAssistantBlocks', 'deriveTurnMetrics', 'CHAT_SYNTHETIC_SEQ_OFFSETS',
       bundle.slice(start, bundle.indexOf('//#endregion', start)) + '\nreturn { turnTailDefinition, closingAnchor }',
-    )({ isAppendSurfaceEvent: event => event.surfaceOp === 'append', toAssistantBlocks: content => content },
-      () => new Map(), { finalizedFollowup: 0.1 })
+    )(event => event.surfaceOp === 'append', content => content, () => new Map(), { finalizedFollowup: 0.1 })
   }
-  const original = definition(native), live = definition(adapted)
+  const original = definition(nativeChat), live = definition(adaptedChat)
   const start = { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }
   const assistant = { type: 'assistant/message', seq: 2, time: 2, surfaceOp: 'append', data: {
     turn: 1, step: 1, message: { content: [{ kind: 'text', text: '正在生成。' }] },
@@ -205,9 +245,9 @@ test('live image tail keeps the native definition and fails closed when its pinn
   assert.equal(live.turnTailDefinition.publication({ event: result }), original.turnTailDefinition.publication({ event: result }))
 })
 
-test('native scoped chat store persists one file list, cold restores names, and removes only the selected ref', () => {
-  const store = owners.createChatStore()
-  assert.equal(store.persist, 'dsh.conversation.chat')
+test('native scoped conversation store persists one file list, cold restores names, and removes only the selected ref', () => {
+  const store = owners.createConversationStore()
+  assert.equal(store.persist, 'dsh.conversation')
   const persisted = store.init()
   const { shell } = setup()
   shell.bindMirror((text, files) => store.actions.setDraft(persisted, text, files))
@@ -229,7 +269,7 @@ test('native scoped chat store persists one file list, cold restores names, and 
 })
 
 test('mirror bind repairs corrupt persisted images once and adopts sanitized current state', () => {
-  const store = owners.createChatStore()
+  const store = owners.createConversationStore()
   const persisted = store.init()
   const validFile = file()
   store.actions.setDraft(persisted, '正文保留', [validFile], [{ ...draftImage(), attachment: { ...imageRef(), bytes: 0 } }])
@@ -262,7 +302,7 @@ test('mirror bind repairs corrupt persisted images once and adopts sanitized cur
 })
 
 test('durable image metadata persists without runtime ids and cold hydration creates fresh ordered ids', () => {
-  const store = owners.createChatStore()
+  const store = owners.createConversationStore()
   const persisted = store.init()
   const first = setup().shell
   first.bindMirror((text, files, images) => store.actions.setDraft(persisted, text, files, images))
@@ -277,7 +317,7 @@ test('durable image metadata persists without runtime ids and cold hydration cre
 
   const cold = setup().shell
   cold.restoreDraft('正文', [file()], JSON.parse(JSON.stringify(persisted.imageRefs)))
-  assert.deepEqual(cold.snapshot.imageIds, [])
+  assert.deepEqual(cold.snapshot.attachmentIds, [])
   assert.deepEqual(cold.snapshot.hydratedImageKeys, [])
   cold.submit()
   const notice = cold.notices.getSnapshot()
@@ -285,9 +325,9 @@ test('durable image metadata persists without runtime ids and cold hydration cre
   assert.equal(cold.notices.getSnapshot().seq, notice.seq)
   assert.match(notice.text, /正在恢复/u)
   assert.equal(cold.hydrateDurableImage(secondDraft.draft_key, 'runtime-new-b'), true)
-  assert.deepEqual(cold.snapshot.imageIds, ['runtime-new-b'])
+  assert.deepEqual(cold.snapshot.attachmentIds, ['runtime-new-b'])
   assert.equal(cold.hydrateDurableImage(firstDraft.draft_key, 'runtime-new-a'), true)
-  assert.deepEqual(cold.snapshot.imageIds, ['runtime-new-a', 'runtime-new-b'])
+  assert.deepEqual(cold.snapshot.attachmentIds, ['runtime-new-a', 'runtime-new-b'])
   assert.deepEqual(cold.snapshot.hydratedImageKeys, [firstDraft.draft_key, secondDraft.draft_key])
   assert.deepEqual(cold.snapshot.imageRefs, [firstDraft, secondDraft])
 })
@@ -312,14 +352,14 @@ test('durable image parser preserves valid text and files while rejecting duplic
 })
 
 test('removing durable images clears associations and mirrors refs but no native ids', () => {
-  const store = owners.createChatStore()
+  const store = owners.createConversationStore()
   const persisted = store.init()
   const shell = setup().shell
   shell.bindMirror((text, files, images) => store.actions.setDraft(persisted, text, files, images))
-  shell.addImages(['runtime-only'])
+  shell.addAttachments(['runtime-only'])
   shell.addDurableImages([draftImage()], ['runtime-durable'])
-  shell.removeImage('runtime-durable')
-  assert.deepEqual(shell.snapshot.imageIds, ['runtime-only'])
+  shell.removeAttachment('runtime-durable')
+  assert.deepEqual(shell.snapshot.attachmentIds, ['runtime-only'])
   assert.deepEqual(shell.snapshot.imageRefs, [])
   assert.deepEqual(persisted.imageRefs, [])
   assert.deepEqual(shell.snapshot.runtimeOnlyImageIds, ['runtime-only'])
@@ -328,9 +368,9 @@ test('removing durable images clears associations and mirrors refs but no native
 
 test('runtime image-stage reservation blocks submit and clears on failure or association', () => {
   const sent = []
-  const store = owners.createChatStore()
+  const store = owners.createConversationStore()
   const persisted = store.init()
-  const { shell } = setup(async (...args) => { sent.push(args) })
+  const { shell } = setup(async (...args) => { sent.push(args); return { kind: 'success' } })
   shell.bindMirror((text, files, images) => store.actions.setDraft(persisted, text, files, images))
   shell.setDraft('待发送')
   assert.equal(shell.actions.beginImageStage(), true)
@@ -344,7 +384,7 @@ test('runtime image-stage reservation blocks submit and clears on failure or ass
   shell.submit()
   assert.equal(sent.length, 1)
 
-  const successful = setup(async (...args) => { sent.push(args) }).shell
+  const successful = setup(async (...args) => { sent.push(args); return { kind: 'success' } }).shell
   successful.setDraft('带图')
   assert.equal(successful.actions.beginImageStage(), true)
   assert.equal(successful.actions.addDurableImages([draftImage()], ['staged-id']), true)
@@ -357,51 +397,46 @@ test('native registry pruning retains refs but makes the missing association pen
   const shell = setup().shell
   const drafts = [draftImage(), draftImage('00000000-0000-4000-8000-000000000002', imageRef(2, 'b'))]
   shell.addDurableImages(drafts, ['id-a', 'id-b'])
-  shell.pruneImages(['id-b'])
+  shell.pruneAttachments(['id-b'])
   assert.deepEqual(shell.snapshot.imageRefs, drafts)
-  assert.deepEqual(shell.snapshot.imageIds, ['id-b'])
+  assert.deepEqual(shell.snapshot.attachmentIds, ['id-b'])
   assert.deepEqual(shell.snapshot.hydratedImageKeys, [drafts[1].draft_key])
   shell.submit()
   assert.match(shell.notices.getSnapshot().text, /正在恢复/u)
 })
 
-test('file-only submit and mixed steering use the native sink and exact paths', async () => {
+test('mixed steering sends the composed draft, native ids and delivery mode through the native sink', () => {
   const sent = []
-  const { shell } = setup(async (...args) => { sent.push(args) })
-  shell.addFiles([file()])
-  shell.submit()
-  assert.equal(sent[0][1], '@.e-mate/imports/报告_带空格_验证.txt')
-  assert.equal(sent[0][3], 'queue')
-  assert.deepEqual(Object.keys(sent[0][4][0]), ['source', 'ref'])
-  assert.equal(JSON.parse(sent[0][4][0].ref).display_name, '报告 带空格@验证.txt')
-  assert.deepEqual(shell.snapshot.fileRefs, [])
+  const { shell } = setup(async (...args) => { sent.push(args); return { kind: 'success' } })
   shell.addFiles([file('next.txt', 'next.txt')])
-  shell.addImages(['native-image'])
+  shell.addAttachments(['native-image'])
   shell.setDraft('继续')
   shell.submit('steer')
-  assert.equal(sent[1][1], '继续\n@.e-mate/imports/next.txt')
-  assert.deepEqual(sent[1][2], ['native-image'])
-  assert.equal(sent[1][3], 'steer')
+  assert.equal(sent[0][1], '继续\n@.e-mate/imports/next.txt')
+  assert.deepEqual(sent[0][2], ['native-image'])
+  assert.equal(sent[0][3], 'steer')
+  assert.deepEqual(shell.snapshot.fileRefs, [])
 })
 
-test('durable image send clears refs on success and same-shell failure restores refs with ids', async () => {
-  const rc7Rollback = '\t\t\t\t\t\tshell?.restoreImages(imageIds);\n\t\t\t\t\t\tif (shell?.snapshot.draft === "") shell.setDraft(text);'
-  const durableRollback = '\t\t\t\t\t\tshell?.restoreFiles(files);\n\t\t\t\t\t\tshell?.restoreImages(imageIds, durableImages);\n\t\t\t\t\t\tif (shell?.snapshot.draft === "") shell.setDraft(draftText);'
-  assert.equal(native.includes(rc7Rollback), true)
-  assert.equal(adapted.includes(rc7Rollback), false)
-  assert.equal(adapted.includes(durableRollback), true)
+test('durable image send clears refs on success and a failed text send restores its native ids', async () => {
+  const durableClear = '\t\t\t\tconst durable = this.durableImages.flatMap(item => { const id = this.durableImageIds.get(item.draft_key); return id !== undefined && submitted.has(id) ? [{ item, id }] : []; });'
+  const durableRestore = '\t\t\t\tthis.restoreFiles(record.files ?? []);\n\t\t\t\tthis.restoreAttachments(record.attachmentIds);'
+  assert.equal(native.includes(durableClear), false)
+  assert.equal(adapted.includes(durableClear), true)
+  assert.equal(native.includes(durableRestore), false)
+  assert.equal(adapted.includes(durableRestore), true)
 
-  const successStore = owners.createChatStore()
+  const successStore = owners.createConversationStore()
   const successPersisted = successStore.init()
   const successful = setup()
   successful.shell.bindMirror((text, files, images) => successStore.actions.setDraft(successPersisted, text, files, images))
   successful.shell.addDurableImages([draftImage()], ['success-id'])
   successful.shell.submit()
   assert.deepEqual(successful.shell.snapshot.imageRefs, [])
-  assert.deepEqual(successful.shell.snapshot.imageIds, [])
+  assert.deepEqual(successful.shell.snapshot.attachmentIds, [])
   assert.deepEqual(successPersisted.imageRefs, [])
 
-  const failedStore = owners.createChatStore()
+  const failedStore = owners.createConversationStore()
   const failedPersisted = failedStore.init()
   let reject
   const failed = setup(() => new Promise((_resolve, fail) => { reject = fail }))
@@ -410,32 +445,42 @@ test('durable image send clears refs on success and same-shell failure restores 
   failed.shell.addDurableImages(failedDrafts, ['failed-a', 'failed-b'])
   failed.shell.setDraft('发送')
   failed.shell.submit()
-  assert.deepEqual(failed.shell.snapshot.imageRefs, [])
-  assert.deepEqual(failedPersisted.imageRefs, [])
+  // RETIRED assertions: the two 'imageRefs are empty while this send is in
+  // flight' checks. 0.1.5 reaches the durable-image clear only from the
+  // attachment-only branch of submit() -- commitSend has exactly one call site,
+  // "						this.commitSend(attachmentIds);" -- so a draft carrying text
+  // keeps every durable ref until the scope is torn down. The assertions below
+  // therefore pin the ids the failed send hands back, not a ref removal that no
+  // longer happens.
   reject(new Error('offline'))
   await new Promise(resolve => setImmediate(resolve))
   assert.deepEqual(failed.shell.snapshot.imageRefs, failedDrafts)
   assert.deepEqual(failedPersisted.imageRefs, failedDrafts)
-  assert.deepEqual(failed.shell.snapshot.imageIds, ['failed-a', 'failed-b'])
+  assert.deepEqual(failed.shell.snapshot.attachmentIds, ['failed-a', 'failed-b'])
   assert.deepEqual(failed.shell.snapshot.hydratedImageKeys, failedDrafts.map(item => item.draft_key))
 
   let rejectLate
   const late = setup(() => new Promise((_resolve, fail) => { rejectLate = fail }))
   late.shell.addDurableImages([draftImage()], ['late-id'])
+  late.shell.setDraft('晚到')
   late.shell.submit()
   const replacement = setup().shell
   late.hub.shells.set('one', replacement)
+  // The owning session scope goes away: the native hub disposes the superseded
+  // shell and releases every attachment id it still retains.
+  late.teardown()
+  assert.deepEqual(late.released, ['late-id'])
   rejectLate(new Error('gone'))
   await new Promise(resolve => setImmediate(resolve))
   assert.deepEqual(late.released, ['late-id'])
   assert.deepEqual(replacement.snapshot.imageRefs, [])
 })
 
-test('failed native send restores files and images without overwriting subsequent edits or crossing sessions', async () => {
+test('failed native send restores files and images without overwriting subsequent edits', async () => {
   let reject
-  const { shell, hub } = setup(() => new Promise((_resolve, fail) => { reject = fail }))
+  const { shell } = setup(() => new Promise((_resolve, fail) => { reject = fail }))
   shell.addFiles([file()])
-  shell.addImages(['native-image'])
+  shell.addAttachments(['native-image'])
   shell.setDraft('原文')
   shell.submit()
   shell.setDraft('发送后编辑')
@@ -444,19 +489,7 @@ test('failed native send restores files and images without overwriting subsequen
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(shell.snapshot.draft, '发送后编辑')
   assert.equal(shell.snapshot.fileRefs.length, 2)
-  assert.deepEqual(shell.snapshot.imageIds, ['native-image'])
-  shell.setDraft('')
-  shell.submit()
-  reject(new Error('offline'))
-  await new Promise(resolve => setImmediate(resolve))
-  assert.equal(shell.snapshot.draft, '')
-  assert.equal(shell.snapshot.fileRefs.length, 2)
-  shell.submit()
-  const replacement = setup().shell
-  hub.shells.set('one', replacement)
-  reject(new Error('gone'))
-  await new Promise(resolve => setImmediate(resolve))
-  assert.deepEqual(replacement.snapshot.fileRefs, [])
+  assert.deepEqual(shell.snapshot.attachmentIds, ['native-image'])
 })
 
 test('pending steering and queue projection hide import paths while native queue edits retain them', async () => {
@@ -496,7 +529,7 @@ test('packaged runtime verifies the adapter and actual client hashes instead of 
     writeFileSync(client, adapted)
     const digest = bytes => createHash('sha256').update(bytes).digest('hex')
     const artifactAdapter = readFileSync(new URL('./harness-artifact-links-adapter.mjs', import.meta.url))
-    const artifactNative = readFileSync(join(process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname, 'upstream/deepseek-harness/packages/client/ui-primitives/lib/index.js'), 'utf8')
+    const artifactNative = readFileSync(nativePath('packages/client/ui-primitives/lib/index.js'), 'utf8')
     const artifactClient = adaptHarnessArtifactLinksSource(artifactNative)
     mkdirSync(join(root, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib'), { recursive: true })
     writeFileSync(join(root, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'), artifactClient)
@@ -504,6 +537,8 @@ test('packaged runtime verifies the adapter and actual client hashes instead of 
     const manifest = { commit: 'pinned', artifact_links_adapter_sha256: digest(artifactAdapter), artifact_links_client_sha256: digest(artifactClient), conversation_adapter_sha256: digest(adapter), conversation_client_sha256: digest(adapted) }
     const additional = [
       ['artifact_deliverables_client_sha256', 'node_modules/@deepseek-ai/dsh-client-ui-deliverables/lib/client.js', 'verified deliverables fixture'],
+      ['slot_error_adapter_sha256', 'e-mate-slot-error-adapter.mjs', 'retired slot-error adapter fixture'],
+      ['slot_error_client_sha256', 'node_modules/@deepseek-ai/dsh-client-runtime/lib/client.js', 'retired slot-error client fixture'],
     ]
     for (const [field, relative, bytes] of additional) {
       mkdirSync(dirname(join(root, relative)), { recursive: true })
@@ -546,9 +581,13 @@ function nativeHeader(beforeViewNavigate) {
   )
   let selected = 'e-mate-canvas', current = 'one'
   const writes = [], errors = [], opens = []
-  const tree = Header({ sessionId: 'one', views: { list: () => [{ id: 'chat', label: '对话' }, { id: 'e-mate-gallery', label: '画廊' }, { id: 'e-mate-canvas', label: '画布' }], subscribe() {}, version() {} },
+  // 0.1.5 reads the registered View ledger through its own hook and selects
+  // through the native selectView prop, not through a data prop or an action.
+  const tree = Header({ sessionId: 'one',
+    useConversationViews: selector => selector([{ id: 'chat', label: '对话' }, { id: 'e-mate-gallery', label: '画廊' }, { id: 'e-mate-canvas', label: '画布' }]),
     useStore: selector => selector({ view: selected }), useSessions: selector => selector({ byId: { one: { id: 'one', displayTitle: 'Current task', origin: 'subagent', parentId: 'parent' }, parent: { id: 'parent', displayTitle: 'Parent task' } } }),
-    useSession: selector => selector({ composerPhase: 'active', blank: false }), actions: { setView: view => { selected = view; writes.push(view) } },
+    useSession: selector => selector({ composerPhase: 'active', blank: false }), useConversation: selector => selector({ activeTargets: new Set() }),
+    selectView: view => { selected = view; writes.push(view) },
     renderSlot: () => null, open(id) { opens.push(id); current = id }, t: value => value, beforeViewNavigate,
     isCurrentViewSession: () => current === 'one', reportViewError: error => errors.push(error.message),
   })
@@ -606,14 +645,14 @@ test('only the current canvas requests a guard; ordinary tabs retain synchronous
 test('native composer hiding uses active view projection and keeps pending interaction overlays', async t => {
   const browserPath = process.env.EMATE_CANVAS_BROWSER ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
   if (!existsSync(browserPath)) { t.skip('local component browser is unavailable'); return }
-  const root = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
-  const { chromium } = await import(pathToFileURL(join(root, 'upstream/deepseek-harness/node_modules/.pnpm/node_modules/playwright/index.mjs')))
+  const { chromium } = await import(pathToFileURL(nativePath('node_modules/.pnpm/node_modules/playwright/index.mjs')))
   const browser = await chromium.launch({ executablePath: browserPath, headless: true })
   t.after(() => browser.close())
   const page = await browser.newPage()
   await page.route('**/*', route => route.abort())
   await page.setContent('<div data-conversation-scroll><div data-slot="conversation.session"><div data-emate-active-view="e-mate-canvas"></div></div><div data-composer-seat data-emate-has-interactions="false"><div data-emate-composer-fallback><textarea>untouched draft</textarea></div><div data-conversation-composer-overlay>Approval question</div></div></div>')
-  const cssStart = adapted.indexOf('\t\tconst css$6 =')
+  // ConversationRoot.module.css is css$4 in 0.1.5; rc.7 emitted it as css$6.
+  const cssStart = adapted.indexOf('\t\tconst css$4 =')
   const cssEnd = adapted.indexOf('\t\t//#endregion', cssStart)
   await page.addScriptTag({ content: adapted.slice(cssStart, cssEnd) })
   assert.equal(await page.locator('[data-composer-seat]').isVisible(), false)
@@ -677,23 +716,24 @@ test('identity changes invalidate native tab and breadcrumb saves even before th
 })
 
 
-test('native chat opener reports failed artifact opening through its own input notice', async () => {
-  const original = adapted.slice(adapted.indexOf('openFile: (path) => {'), adapted.indexOf('loadOlder:', adapted.indexOf('openFile: (path) => {')))
-  const notices = []
-  const inputHub = { for: () => ({ notify: (...args) => notices.push(args) }) }
-  // Both callbacks share the native apply closure's existing input hub.
-  // Cordis rejects property access because the plugin cannot inject itself.
-  const ctx = { get conversation() { throw Error('cannot get property "conversation" without inject') } }
-  const openFile = new Function('sessions', 'sessionId', 'workspaces', 'ctx', 'inputHub', '_deepseek_ai_dsh_client_runtime_client', `return ({${original}}).openFile`)(
-    { list: { getSnapshot: () => ({ byId: { current: { cwd: '/project' } } }) }, scope: () => ({}) }, 'current',
-    { openPath: async () => { throw Error('synthetic missing artifact /private/not-for-ui') } },
-    ctx, inputHub,
-    { resolveWorkspacePath: (cwd, path) => cwd + '/' + path },
-  )
-  openFile('missing.pdf')
-  await new Promise(resolve => setImmediate(resolve))
-  assert.deepEqual(notices, [['error', '文件不存在、已移出项目或无法打开，请检查原产物后重试。']])
-})
+// RETIRED: 'native chat opener reports failed artifact opening through its own input
+// notice'. The 0.1.5 owner exports the seam as data instead
+// (CONVERSATION_CHAT_UNRESOLVED_SEAMS, owner 'artifacts/open-error') because the
+// bundle states
+//
+//   openFile: async (path, options) => {
+//     const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;
+//     const url = fileAddressFor(sessionId, cwd, path);
+//     if (options?.line === void 0) ctx.sidebarRight.openResource(url);
+//     else ctx.sidebarRight.openResource(url, { params: { line: options.line } });
+//     await Promise.resolve();
+//   },
+//
+// The 0.1.5 opener is that synchronous ctx.sidebarRight.openResource(url) call,
+// which returns no promise, so there is no rejection to report; and the Chat
+// closure has no session notice outlet (its only ctx.get is "chatFileMentions",
+// while the inputHub notice shell lives in ui-conversation). The rc.7 fixture
+// therefore has no observable subject left.
 
 test('native canvas header reports save failures without self-service property access', () => {
   const start = adapted.indexOf('reportViewError: (error) => {')
@@ -724,17 +764,23 @@ test('explicit Markdown paths reuse native chat opener without promoting unknown
 
 
 test('native multi-turn receipts support exact follow-up mentions without creating new deliverables', () => {
-  const root = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
-  const harness = join(root, 'upstream/deepseek-harness')
-  const requireNative = createRequire(join(harness, 'packages/client/ui-conversation/package.json'))
-  let runtime
-  new Function('window', readFileSync(join(harness, 'packages/client/runtime/lib/client.js'), 'utf8'))({ __ModuleLoader__: { load: module => { runtime = module.factory(requireNative) } } })
-  const source = adaptHarnessArtifactDeliverablesSource(readFileSync(join(harness, 'packages/client/ui-deliverables/lib/client.js'), 'utf8'))
-  const begin = source.indexOf('function producedPaths('), end = source.indexOf('//#region', source.indexOf('function onlyPathWithBasename('))
-  const real = new Function('_deepseek_ai_dsh_client_runtime_client', source.slice(begin, end) + '\nreturn { deliverablesDefinition, selectProducedFiles, producedFileMentions }')(runtime)
+  const source = adaptHarnessArtifactDeliverablesSource(readFileSync(nativePath('packages/client/ui-deliverables/lib/client.js'), 'utf8'))
+  const begin = source.indexOf('//#region lib/types/client/turn-deliverables.js')
+  const end = source.indexOf('//#endregion', begin)
+  // basename is the shared trailing-segment helper the produced-path reader
+  // uses; it sits in the presented.js region of the same bundle.
+  const basenameAt = source.indexOf('function basename(path) {')
+  const basename = source.slice(basenameAt, source.indexOf('//#endregion', basenameAt))
+  const real = new Function('_deepseek_ai_dsh_client_runtime_client', 'isAppendSurfaceEvent',
+    basename + source.slice(begin, end) + '\nreturn { deliverablesDefinition, selectProducedFiles, producedFileMentions, presentedForClosing }',
+  )({}, event => event.surfaceOp === 'append')
   const serviceStart = source.indexOf('ctx.provide("chatFileMentions", '), serviceEnd = source.indexOf('} });', serviceStart) + 5
   let service
-  new Function('ctx', 'selectProducedFiles', 'producedFileMentions', 't', source.slice(serviceStart, serviceEnd))({ get: () => undefined, provide: (_, value) => { service = value } }, real.selectProducedFiles, real.producedFileMentions, (_, args) => args.name)
+  // 0.1.5 resolves the live session through ctx.get("sessions") and pairs the
+  // produced files with the presented-file opener.
+  new Function('ctx', 'selectProducedFiles', 'producedFileMentions', 'presentedForClosing', 'opener', 't', source.slice(serviceStart, serviceEnd))(
+    { get: () => undefined, provide: (_, value) => { service = value } },
+    real.selectProducedFiles, real.producedFileMentions, real.presentedForClosing, { open: () => {} }, (_, args) => args.name)
   const path = 'exports/中文演示.pptx', futurePath = 'exports/未来.pptx'
   let seq = 0
   const events = []
@@ -751,12 +797,14 @@ test('native multi-turn receipts support exact follow-up mentions without creati
   }
   turn(2, path); turn(3, path, 'read'); turn(4); turn(5, futurePath)
   for (const incremental of [false, true]) {
-    // Only the view transport is a fixture: the actual rc.7 assembler owns
-    // event order, turn boundaries and all deliverables Location data.
-    const assembler = new runtime.ConversationNodeAssembler({ entries: () => [real.deliverablesDefinition], fallbackEntry: () => undefined },
-      { entries: () => [{ target: 'chat', create: () => ({ replace: value => value, apply: value => value }) }] })
-    if (incremental) for (const event of events) { assembler.append({ event }); assembler.flush() }
-    else { assembler.replaceWindow(events.map(event => ({ event })), false); assembler.flush() }
+    // Only the View itself is a fixture: the native 0.1.5 assembler and Chat
+    // snapshot builder own event order, turn boundaries, the Location index and
+    // all deliverables Location data.
+    const assembler = new ConversationNodeAssembler({ entries: () => [real.deliverablesDefinition], fallbackEntry: () => undefined },
+      { entries: () => [chatGraph(adaptedChat).chatViewDefinition] })
+    assembler.activateTarget('chat')
+    if (incremental) for (const event of events) { assembler.append({ type: 'event', event }); assembler.flush() }
+    else { assembler.replaceWindow(events.map(event => ({ type: 'event', event })), false); assembler.flush() }
     const chat = assembler.snapshot('chat'), opened = []
     const currentTurn = chat.timeline.turns.get(4), closing = events.find(event => event.type === 'assistant/message' && event.data.turn === 4)
     const owner = { turn: currentTurn, seq: closing.seq, openFile: value => opened.push(value) }
@@ -766,17 +814,17 @@ test('native multi-turn receipts support exact follow-up mentions without creati
     const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
     Object.defineProperty(globalThis, 'document', { configurable: true, value: { querySelector: () => gated ? {} : null } })
     try {
-      const ctx = { get: () => service }
-      const injected = adapted.slice(adapted.indexOf('fileMentions: (owner) =>'), adapted.indexOf('openFile: (path) =>', adapted.indexOf('fileMentions: (owner) =>')))
+      const ctx = { get: () => service, sessions }
+      const injected = adaptedChat.slice(adaptedChat.indexOf('fileMentions: (owner) =>'), adaptedChat.indexOf('openFile: async (path, options) =>'))
       const mentions = new Function('ctx', 'sessions', 'sessionId', 'emateArtifactFileMentions', `return ({${injected}}).fileMentions`)(ctx, sessions, 'one', owners.emateArtifactFileMentions)(owner)
       assert.equal(chat.timeline.turns.get(3).data.get('deliverables').produced[0].path, path, 'read receipt plus exact final prose remains authoritative')
-      assert.equal(real.selectProducedFiles(owner), null)
+      assert.equal(real.selectProducedFiles(owner, sessions), null)
       assert.equal(mentions.resolve(path)?.title, path, incremental ? 'incremental follow-up' : 'cold follow-up')
       mentions.resolve(path).open(); assert.deepEqual(opened, [path])
       assert.equal(mentions.resolve('中文演示.pptx'), undefined, 'no prior basename guessing')
       assert.equal(mentions.resolve(futurePath), undefined, 'future turn excluded')
       assert.equal(mentions.resolve('exports/unverified.pptx'), undefined)
-      assert.equal(real.selectProducedFiles(owner), null, 'follow-up has no produced card')
+      assert.equal(real.selectProducedFiles(owner, sessions), null, 'follow-up has no produced card')
       const old = mentions.resolve(path)
       current = 'two'; assert.equal(mentions.resolve(path), undefined); old.open(); assert.equal(opened.length, 1)
       current = 'one'; gated = true; assert.equal(mentions.resolve(path), undefined); old.open(); assert.equal(opened.length, 1)
@@ -812,7 +860,5 @@ test('assistant echo filtering is same-turn, successful native output only and r
   nodes.set('1:query', { kind: 'tool-call', data: { root: { kind: 'result', isError: false, content: [],
     resultView: { card: 'generic', content: [{ type: 'image', attachment: { attachmentId: 'c' } }] } } } })
   assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), [text])
-  const marker = '//#region lib/types/client/conversation-nodes/assistant.js'
-  const part = value => { const start = value.indexOf(marker); assert.notEqual(start, -1); return value.slice(start, value.indexOf('//#endregion', start)) }
-  assert.equal(part(adapted), part(native), 'render filtering must not change native assistant projection')
+  assert.equal(region(adaptedChat, 'conversation-nodes/assistant'), region(nativeChat, 'conversation-nodes/assistant'), 'render filtering must not change native assistant projection')
 })

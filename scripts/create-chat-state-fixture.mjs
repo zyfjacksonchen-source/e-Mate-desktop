@@ -139,7 +139,7 @@ const sessionFiber = await ctx.plugin(SessionStore)
 const persistenceFiber = await ctx.plugin(JsonlSessionPersistence, { root, compression: 'zstd' })
 
 try {
-  const existing = (await ctx.sessionPersistence.list()).find(item => item.id === sessionId)
+  const existing = (await ctx.sessionPersistence.list()).find(item => item.header.id === sessionId)
   if (existing === undefined) {
     // 0.1.5 encodes only the current Session format, its header validator
     // requires the seeded flag rc.7 derived, and the returned handle owns the
@@ -154,7 +154,14 @@ try {
       await handle.close()
     }
   }
-  const inspected = await ctx.sessionPersistence.inspect(sessionId)
+  // 0.1.5 reads committed events through an opened handle, not inspect().
+  const readHandle = await ctx.sessionPersistence.open(sessionId, 'read')
+  let inspected
+  try {
+    inspected = await readHandle.read(0)
+  } finally {
+    await readHandle.close()
+  }
   const fixture = inspected.events.slice(0, events.length)
   const observedDigest = digest(fixture)
   if (fixture.length !== events.length || observedDigest !== expectedDigest) {
