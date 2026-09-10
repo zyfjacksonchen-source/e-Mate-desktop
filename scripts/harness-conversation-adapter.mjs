@@ -2,13 +2,18 @@
 // packages: assemblers apply these transforms to their copied client bundles.
 export const CONVERSATION_ADAPTER_PATH = 'scripts/harness-conversation-adapter.mjs'
 export const CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
+// 0.1.5 split the rc.7 Conversation package: the skeleton, composer, queue,
+// input store and input shell stayed in ui-conversation, while the Chat
+// renderer, the chat store and the file-mention provider moved to ui-chat.
+// Each owner therefore keeps its own fail-closed adapter beside the original.
+export const CONVERSATION_CHAT_ADAPTER_PATH = 'scripts/harness-conversation-adapter.mjs'
+export const CONVERSATION_CHAT_PACKAGE = '@deepseek-ai/dsh-client-ui-chat'
 
 function replaceOnce(source, before, after, owner, version = 'rc.7') {
   const count = source.split(before).length - 1
   if (count !== 1) throw new Error(`Harness conversation adapter ${owner}: expected one ${version} seam, found ${count}`)
   return source.replace(before, after)
 }
-
 // This function is embedded unchanged into the native client closure. It is the
 // persistence/public-facade boundary; imported-file RPC validation stays upstream.
 function emateDraftFiles(value) {
@@ -104,8 +109,8 @@ function emateArtifactFileMentions(ctx, owner, sessions, sessionId) {
     if (!current()) return undefined;
     const snapshot = session.getSnapshot();
     if (snapshot.sessionId !== sessionId || snapshot.openState !== "open") return undefined;
-    const timeline = snapshot.chat.timeline;
-    if (timeline.turns.get(owner.turn.turn) !== owner.turn) return undefined;
+    const timeline = snapshot.timeline ?? snapshot.chat?.timeline;
+    if (timeline === undefined || timeline.turns.get(owner.turn.turn) !== owner.turn) return undefined;
     for (const number of timeline.turnOrder) {
       if (number >= owner.turn.turn) continue;
       const turn = timeline.turns.get(number);
@@ -171,8 +176,11 @@ function emateAssistantImageBlocks(snapshot, node) {
     }
     for (const child of block.subCalls ?? []) visit(child);
   };
-  for (const key of snapshot.chat.locations.getTurn(turn.turn)) {
-    const item = snapshot.chat.nodes.get(key);
+  const locations = snapshot.locations ?? snapshot.chat?.locations;
+  const nodes = snapshot.nodes ?? snapshot.chat?.nodes;
+  if (locations === undefined || nodes === undefined) return node.data.blocks;
+  for (const key of locations.getTurn(turn.turn)) {
+    const item = nodes.get(key);
     if (item?.kind === 'tool-call') visit(item.data.root);
     if (item?.kind === 'e-mate-tool-images' && item.visibility === 'hidden') {
       for (const image of item.data.items) if (image.status === 'completed' && image.attachment) ids.add(image.attachment.attachmentId);
@@ -184,192 +192,226 @@ function emateSameAssistantBlocks(left, right) {
   return left.length === right.length && left.every((block, index) => block === right[index]);
 }
 
+// Injected verbatim into each native client closure that owns these seams.
+const EMATE_SEAM_HELPERS = [
+  emateDraftFiles, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview,
+  emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView,
+  emateAssistantImageBlocks, emateSameAssistantBlocks,
+].map(fn => fn.toString()).join('\n')
+
 /** Apply exact compiled seams from packages/client/ui-conversation/src/client. */
 export function adaptHarnessConversationSource(source) {
   const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
 
-  // A retry describes an earlier request, never supersedes the final turn failure.
-  // Keep rc.7's failure projection and renderer; expose its authoritative turn/end.
-  change('if (!state.hidden) return chatNode(context, "turn-error", node.seq, node);\n\t\t\t\tconst current = context.current.get("chat");\n\t\t\t\treturn current === void 0 || current === null ? null : chatNode(context, "turn-error", node.seq, node, { visibility: "hidden" });',
-    'return chatNode(context, "turn-error", node.seq, node);', 'turn-error/terminal-after-retry')
+  // Native Header still commits via its own scoped actions; failed saves do
+  // not change view, and pending work cannot redirect a newer session/click.
+  change('function ConversationSessionHeader({ sessionId, useSession, useSessions, useConversation, useConversationViews, useStore, renderSlot, open, selectView, t }) {',
+    'function ConversationSessionHeader({ sessionId, useSession, useSessions, useConversation, useConversationViews, useStore, renderSlot, open: commitSessionOpen, selectView: nativeSelectView, beforeViewNavigate, isCurrentViewSession, reportViewError, t }) {\n\t\t\tconst navigation = (0, react.useRef)(0);\n\t\t\t(0, react.useEffect)(() => { const invalidate = () => { navigation.current += 1; }; addEventListener("emate:identity-changed", invalidate); return () => { invalidate(); removeEventListener("emate:identity-changed", invalidate); }; }, [sessionId]);\n\t\t\tconst selectView = emateCanvasNavigationRequest(navigation, beforeViewNavigate, isCurrentViewSession, nativeSelectView, reportViewError);\n\t\t\tconst open = emateCanvasNavigationRequest(navigation, () => beforeViewNavigate("chat"), isCurrentViewSession, commitSessionOpen, reportViewError);', 'canvas/header-guard')
 
-  change('fileMentions: (owner) => ctx.get("chatFileMentions")?.forClosing(owner),',
-    'fileMentions: (owner) => emateArtifactFileMentions(ctx, owner, sessions, sessionId),', 'artifacts/explicit-link-owner')
-  // Every native file chip and receipt-derived prose link shares this opener.
-  change('workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => {});',
-    'workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => { const scope = sessions.scope(sessionId); if (scope) inputHub.for(scope).notify("error", "文件不存在、已移出项目或无法打开，请检查原产物后重试。"); });', 'artifacts/open-error')
+  change('onClick: () => {\n\t\t\t\t\t\t\t\t\t\topen(summary.id);\n\t\t\t\t\t\t\t\t\t\t},',
+    'onClick: () => {\n\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);\n\t\t\t\t\t\t\t\t\t\t},', 'canvas/parent-session-action')
 
-  change('function AssistantNodeView({ node, useTurnData, openFile, loadImage, fileMentions, t }) {',
-    'function AssistantNodeView({ node, useSession, useTurnData, openFile, loadImage, fileMentions, t }) {\n const imageBlocks = useSession(snapshot => emateAssistantImageBlocks(snapshot, node), emateSameAssistantBlocks);', 'images/assistant-owner');
-  change('blocks: data.blocks,\n\t\t\t\tstreaming: data.status === "running",',
-    'blocks: imageBlocks,\n\t\t\t\tstreaming: data.status === "running",', 'images/assistant-echo');
+  change('openTitle: () => {\n\t\t\t\t\t\t\t\t\t\topen(summary.id);',
+    'openTitle: () => {\n\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);', 'canvas/parent-session-title-action')
+
+  change('\t\t\t\t\t\t\tselectView(viewTab.id);', '\t\t\t\t\t\t\tvoid selectView(viewTab.id);', 'canvas/tab-action')
+
+  change('\t\t\t\tinject: (sessionId, actions) => ({\n\t\t\t\t\thooks: { conversationViews },\n\t\t\t\t\topen: (id) => {',
+    '\t\t\t\tinject: (sessionId, actions) => ({\n\t\t\t\t\thooks: { conversationViews },\n\t\t\t\t\tbeforeViewNavigate: (view) => emateCanvasBeforeView(ctx, sessionId, view),\n\t\t\t\t\tisCurrentViewSession: () => sessions.list.getSnapshot().current === sessionId && !document.querySelector("[data-emate-identity-gate]"),\n\t\t\t\t\treportViewError: (error) => { const scope = sessions.scope(sessionId); if (scope) inputHub.for(scope).notify("error", error instanceof Error ? error.message : "画布尚未保存，请重试。"); },\n\t\t\t\t\topen: (id) => {', 'canvas/header-inject')
+
+  // Preserve the mounted input/draft and native approval/question overlay.
+  // Only its ordinary fallback is hidden; an elected interaction stays usable.
+  change('\t\t\t\tclassName: clsx(ConversationRoot_module_css_default.composerStack, hero && ConversationRoot_module_css_default.composerHero),\n\t\t\t\t"data-emate-composer-frame-host": "",',
+    '\t\t\t\tclassName: clsx(ConversationRoot_module_css_default.composerStack, hero && ConversationRoot_module_css_default.composerHero),\n\t\t\t\t"data-emate-composer-frame-host": "",\n\t\t\t\t"data-emate-composer-fallback": "",', 'canvas/composer-fallback')
+
+  change('\t\t\t\t"data-composer-seat": "",',
+    '\t\t\t\t"data-composer-seat": "",\n\t\t\t\t"data-emate-has-interactions": pending.length > 0 ? "true" : "false",', 'canvas/interaction-seat')
+
+  change('\t\t\t\tclassName: ConversationRoot_module_css_default.viewArea,',
+    '\t\t\t\tclassName: ConversationRoot_module_css_default.viewArea,\n\t\t\t\t"data-emate-active-view": active?.id ?? "chat",', 'canvas/active-view')
+
+  // ConversationRoot.module.css is css$4 in 0.1.5 (rc.7 emitted it as css$6); the
+  // dataset line pins the seam to that stylesheet instead of another plugin CSS.
+  change('\t\t\ttag.dataset.pluginCss = tagId$4;\n\t\t\ttag.textContent = css$4;',
+    '\t\t\ttag.dataset.pluginCss = tagId$4;\n\t\t\ttag.textContent = css$4 + ' + JSON.stringify(CANVAS_FRAME_CSS) + ';', 'canvas/frame-css')
+
+  // stores.ts: extend the existing per-session dsh.conversation record.
+  change('\t\tfunction createConversationStore() {',
+    EMATE_SEAM_HELPERS + '\n\t\tfunction createConversationStore() {', 'stores/helper')
+
+  change('\t\t\t\t\tdraft: "",\n\t\t\t\t\tview: null,',
+    '\t\t\t\t\tdraft: "",\n\t\t\t\t\tfileRefs: [],\n\t\t\t\t\timageRefs: [],\n\t\t\t\t\tview: null,', 'stores/init')
+
+  change('\t\t\t\t\tsetDraft: (d, text) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t},',
+    '\t\t\t\t\tsetDraft: (d, text, fileRefs = [], imageRefs = []) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t\td.fileRefs = fileRefs;\n\t\t\t\t\t\td.imageRefs = imageRefs;\n\t\t\t\t\t},', 'stores/mirror-action')
+  change('\t\t\tattachmentIds = [];\n\t\t\tdisposed = false;',
+    '\t\t\tattachmentIds = [];\n\t\t\tfileRefs = [];\n\t\t\tdurableImages = [];\n\t\t\tdurableImageIds = new Map();\n\t\t\timageStagePending = false;\n\t\t\tlastFileRefs = this.fileRefs;\n\t\t\tlastDurableImages = this.durableImages;\n\t\t\thydrationNotice = false;\n\t\t\tdisposed = false;', 'facade/state')
+
+  change('\t\t\t\taddAttachments: (ids) => this.addAttachments(ids),',
+    '\t\t\t\taddFiles: (files, draft) => this.addFiles(files, draft),\n\t\t\t\tremoveFile: (path) => this.removeFile(path),\n\t\t\t\trestoreDraft: (text, files, images) => this.restoreDraft(text, files, images),\n\t\t\t\tbeginImageStage: () => this.beginImageStage(),\n\t\t\t\tcancelImageStage: () => this.cancelImageStage(),\n\t\t\t\taddDurableImages: (images, ids) => this.addDurableImages(images, ids),\n\t\t\t\thydrateDurableImage: (key, id) => this.hydrateDurableImage(key, id),\n\t\t\t\tremoveDurableImage: (key) => this.removeDurableImage(key),\n\t\t\t\taddAttachments: (ids) => this.addAttachments(ids),', 'facade/actions')
+
+  // input/facade.ts: files live beside attachment ids, not in another plugin store.
+  change('\t\t\t/** Append ordered attachment ids unless an admission transaction is locked. */',
+    `\t\t\t\t\t\taddFiles(files, draft) {\n\t\t\t\tif (this.disposed || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tconst current = new Set(this.fileRefs.map(file => file.relative_path));\n\t\t\t\tconst added = emateDraftFiles(files).filter(file => !current.has(file.relative_path));\n\t\t\t\tif (this.fileRefs.length + added.length > 64) throw new Error("草稿最多可添加 64 个文件。");\n\t\t\t\tthis.fileRefs = [...this.fileRefs, ...added];\n\t\t\t\tif (draft !== undefined) this.setDraft(draft);\n\t\t\t\telse this.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tremoveFile(path) {\n\t\t\t\tthis.fileRefs = this.fileRefs.filter(file => file.relative_path !== path);\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\trestoreFiles(files) {\n\t\t\t\tconst current = new Set(this.fileRefs.map(file => file.relative_path));\n\t\t\t\tthis.fileRefs = [...files.filter(file => !current.has(file.relative_path)), ...this.fileRefs];\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\tbeginImageStage() {\n\t\t\t\tif (this.disposed || this.imageStagePending || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tthis.imageStagePending = true;\n\t\t\t\tthis.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tcancelImageStage() {\n\t\t\t\tif (!this.imageStagePending) return;\n\t\t\t\tthis.imageStagePending = false;\n\t\t\t\tthis.hydrationNotice = false;\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\taddDurableImages(images, ids) {\n\t\t\t\tif (this.disposed || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tconst added = emateDraftImages(images);\n\t\t\t\tif (added.length !== ids.length || added.some(item => this.durableImages.some(current => current.draft_key === item.draft_key))\n\t\t\t\t\t|| new Set(ids).size !== ids.length || ids.some(id => this.attachmentIds.includes(id))) return false;\n\t\t\t\tthis.durableImages = emateDraftImages([...this.durableImages, ...added... (line truncated to 2000 chars)
+  change('\t\t\tcommitSend(attachmentIds) {\n\t\t\t\tconst submitted = new Set(attachmentIds);',
+    `\t\t\tcommitSend(attachmentIds, files = []) {\n\t\t\t\tconst submittedFiles = new Set(files.map(file => file.relative_path));\n\t\t\t\tthis.fileRefs = this.fileRefs.filter(file => !submittedFiles.has(file.relative_path));\n\t\t\t\tconst submitted = new Set(attachmentIds);\n\t\t\t\tconst durable = this.durableImages.flatMap(item => { const id = this.durableImageIds.get(item.draft_key); return id !== undefined && submitted.has(id) ? [{ item, id }] : []; });\n\t\t\t\tthis.durableImages = this.durableImages.filter(item => !durable.some(sent => sent.item.draft_key === item.draft_key));\n\t\t\t\tfor (const sent of durable) this.durableImageIds.delete(sent.item.draft_key);`, 'facade/commit')
+
+  change('\t\t\t\tthis.dispatchRun({ type: "send-committed" });\n\t\t\t}',
+    '\t\t\t\tthis.dispatchRun({ type: "send-committed" });\n\t\t\t\treturn durable;\n\t\t\t}', 'facade/commit-result')
+
+  // 0.1.5 commits an ordinary text send through the machine's commit-draft
+  // effect, not through commitSend; files must leave the draft on that path too.
+  change('\t\t\tcommitDraft(retainSuffixOf) {\n\t\t\t\tthis.editor.update(() => {',
+    '\t\t\tcommitDraft(retainSuffixOf) {\n\t\t\t\tif (this.fileRefs.length > 0) { this.fileRefs = []; this.publish(); }\n\t\t\t\tthis.editor.update(() => {', 'facade/commit-draft')
+
+  change('\t\t\tsubmit(mode = "queue") {\n\t\t\t\tif (this.snapshot.draft.trim() === "" && this.attachmentIds.length > 0) {',
+    '\t\t\tsubmit(mode = "queue") {\n\t\t\t\tif (this.imageStagePending || this.durableImages.some(item => !this.durableImageIds.has(item.draft_key))) { if (!this.hydrationNotice) { this.hydrationNotice = true; this.notify("info", "图片草稿正在恢复，请稍候。"); } return; }\n\t\t\t\tif (this.snapshot.draft.trim() === "" && this.attachmentIds.length > 0) {', 'facade/hydration-submit')
+
+  change('if (this.snapshot.draft.trim() === "" && this.attachmentIds.length > 0)',
+    'if (this.snapshot.draft.trim() === "" && (this.attachmentIds.length > 0 || this.fileRefs.length > 0))', 'facade/file-only-submit')
+
+  change('\t\t\t\t\tattachmentIds: this.attachmentIds,',
+    '\t\t\t\t\tattachmentIds: this.attachmentIds,\n\t\t\t\t\tfileRefs: this.fileRefs,\n\t\t\t\t\timageRefs: this.durableImages,\n\t\t\t\t\thydratedImageKeys: this.durableImages.filter(item => this.durableImageIds.has(item.draft_key)).map(item => item.draft_key),\n\t\t\t\t\truntimeOnlyImageIds: this.attachmentIds.filter(id => ![...this.durableImageIds.values()].includes(id)),\n\t\t\t\t\timageStagePending: this.imageStagePending,', 'facade/snapshot')
+
+  change('\t\t\t\tthis.mirrorFn = write;\n\t\t\t\treturn () => {',
+    '\t\t\t\tthis.mirrorFn = write;\n\t\t\t\twrite(this.snapshot.draft, this.fileRefs, this.durableImages);\n\t\t\t\treturn () => {', 'facade/mirror-adopt')
+
+  change('if (next.draft !== this.lastMirroredDraft) {\n\t\t\t\t\tthis.lastMirroredDraft = next.draft;\n\t\t\t\t\tthis.mirrorFn?.(next.draft);',
+    'if (next.draft !== this.lastMirroredDraft || next.fileRefs !== this.lastFileRefs || next.imageRefs !== this.lastDurableImages) {\n\t\t\t\t\tthis.lastMirroredDraft = next.draft;\n\t\t\t\t\tthis.lastFileRefs = next.fileRefs;\n\t\t\t\t\tthis.lastDurableImages = next.imageRefs;\n\t\t\t\t\tthis.mirrorFn?.(next.draft, next.fileRefs, next.imageRefs);', 'facade/persistence')
+
+  change('\t\t\tdispose() {\n\t\t\t\tif (this.disposed) return [];',
+    '\t\t\tdispose() {\n\t\t\t\tif (this.disposed) return [];\n\t\t\t\tthis.imageStagePending = false;', 'facade/dispose-stage')
+
+  change('\t\t\tremoveAttachment(id) {\n\t\t\t\tif (this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tconst next = this.attachmentIds.filter((candidate) => candidate !== id);',
+    '\t\t\tremoveAttachment(id) {\n\t\t\t\tconst durableKey = [...this.durableImageIds].find(([, candidate]) => candidate === id)?.[0];\n\t\t\t\tif (durableKey !== undefined) { this.durableImageIds.delete(durableKey); this.durableImages = this.durableImages.filter(item => item.draft_key !== durableKey); }\n\t\t\t\tif (this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tconst next = this.attachmentIds.filter((candidate) => candidate !== id);', 'facade/remove-durable')
+
+  change('\t\t\tpruneAttachments(available) {\n\t\t\t\tconst keep = new Set(available);',
+    '\t\t\tpruneAttachments(available) {\n\t\t\t\tconst keep = new Set(available);\n\t\t\t\tfor (const [key, id] of this.durableImageIds) if (!keep.has(id)) this.durableImageIds.delete(key);', 'facade/prune-durable')
+
+  change('\t\t\trestoreAttachments(attachmentIds) {\n\t\t\t\tif (attachmentIds.length === 0) return;\n\t\t\t\tconst current = new Set(this.attachmentIds);',
+    '\t\t\trestoreAttachments(attachmentIds, durable = []) {\n\t\t\t\tconst restoredDurable = emateDraftImages(durable.map(value => value.item));\n\t\t\t\tconst currentKeys = new Set(this.durableImages.map(item => item.draft_key));\n\t\t\t\tthis.durableImages = emateDraftImages([...restoredDurable.filter(item => !currentKeys.has(item.draft_key)), ...this.durableImages]);\n\t\t\t\tfor (const value of durable) if (!this.durableImageIds.has(value.item.draft_key)) this.durableImageIds.set(value.item.draft_key, value.id);\n\t\t\t\tif (attachmentIds.length === 0) return;\n\t\t\t\tconst current = new Set(this.attachmentIds);', 'facade/restore-durable')
+  // input/hub.ts: retain the native prompt/queue/steer transport and rollback.
+  change(`\t\t\tsinkSerialized(attempt, draft, mode) {\n\t\t\t\tconst attachmentIds = [...this.attachmentIds];\n\t\t\t\tthis.attachmentIds = [];\n\t\t\t\tconst occurrences = this.projection.occurrences;\n\t\t\t\tconst record = {\n\t\t\t\t\tdraft,\n\t\t\t\t\toccurrences,\n\t\t\t\t\tattachmentIds\n\t\t\t};`, `\t\t\tsinkSerialized(attempt, draft, mode) {\n\t\t\t\tconst files = this.fileRefs;\n\t\t\t\tconst draftText = draft;\n\t\t\t\tif (files.length > 0) {\n\t\t\t\t\tdraft = [draft, ...files.map(file => "@" + file.relative_path)].filter(Boolean).join("\n");\n\t\t\t\t}\n\t\t\t\tconst attachmentIds = [...this.attachmentIds];\n\t\t\t\tthis.attachmentIds = [];\n\t\t\t\tconst occurrences = this.projection.occurrences;\n\t\t\t\tconst record = {\n\t\t\t\t\tdraft: draftText,\n\t\t\t\t\tfiles,\n\t\t\t\t\toccurrences,\n\t\t\t\t\tattachmentIds\n\t\t\t};`, 'hub/admission')
+
+  change(`\t\t\tsettleDetachedFailure(attempt, message) {\n\t\t\t\tconst record = this.detachedDrafts.get(attempt.seq);\n\t\t\t\tif (record === void 0) return;\n\t\t\t\tthis.detachedDrafts.delete(attempt.seq);\n\t\t\t\tthis.restoreAttachments(record.attachmentIds);`, `\t\t\tsettleDetachedFailure(attempt, message) {\n\t\t\t\tconst record = this.detachedDrafts.get(attempt.seq);\n\t\t\t\tif (record === void 0) return;\n\t\t\t\tthis.detachedDrafts.delete(attempt.seq);\n\t\t\t\tthis.restoreFiles(record.files ?? []);\n\t\t\t\tthis.restoreAttachments(record.attachmentIds);`, 'hub/rollback')
+
+  // skeleton/ConversationSession.tsx: hydrate the same scoped native store.
+  change('const storedDraft = useStore((s) => s.draft);',
+    'const storedDraft = useStore((s) => s.draft);\n\t\t\tconst storedFiles = useStore((s) => s.fileRefs);\n\t\t\tconst storedImages = useStore((s) => s.imageRefs);', 'session/persisted-files')
+
+  change('if (inputState.draft === "" && storedDraft !== "") inputActions.setDraft(storedDraft);',
+    'if (inputState.draft === "" && inputState.fileRefs.length === 0 && inputState.imageRefs.length === 0) inputActions.restoreDraft(storedDraft, storedFiles ?? [], storedImages ?? []);', 'session/hydrate')
+
+  // skeleton/InputBar.tsx: toolbar/Enter retain native locks and submit policy.
+  change('const empty = draft.trim() === "" && attachments.length === 0;',
+    'const empty = draft.trim() === "" && attachments.length === 0 && (input?.fileRefs.length ?? 0) === 0 && (input?.imageRefs.length ?? 0) === 0;', 'input-bar/empty')
+
+  // apply.ts: the native entry keeps ownership of plan/model and its assembled
+  // renderSlot binding. Product content decorates that body through one child.
+  change('\t\t\t\tname: "conversation.composer.bar",\n\t\t\t\tlocale: NS,\n\t\t\t\tchildren: {',
+    '\t\t\t\tname: "conversation.composer.bar",\n\t\t\t\tlocale: NS,\n\t\t\t\tchildren: {\n\t\t\t\t\t"e-mate.conversation.composer": { kind: "single", scope: "session-maybe" },', 'apply/composer-declaration')
+
+  change('\t\t\t}, InputBar);', `\t\t\t}, function EmateComposer(props) {
+\t\t\t\treturn props.renderSlot("e-mate.conversation.composer", { nativeProps: props, InputBar }, { fallback: (0, react_jsx_runtime.jsx)(InputBar, props) });
+\t\t\t});`, 'apply/composer-body')
+  // queue/QueueDock.tsx: edit the prose while retaining the exact file paths in
+  // the existing edit transaction. Preview text must never become model text.
+  change('children: (0, _deepseek_ai_dsh_client_ui_primitives.projectUserText)(row.preview, [])', 'children: emateQueuePreview(row)', 'queue/preview')
+
+  change('text: row.text\n', '...emateImportedText(row.text)\n', 'queue/begin-edit')
+
+  change('id: row.id,\n\t\t\t\t\t\t\t\t\t\t\t\ttext: event.currentTarget.value',
+    '...editing,\n\t\t\t\t\t\t\t\t\t\t\t\ttext: event.currentTarget.value', 'queue/edit-text')
+
+  change('if (editing === null || editing.text.trim() === "") return;',
+    'if (editing === null || (editing.text.trim() === "" && editing.filePaths.length === 0)) return;', 'queue/save-admission')
+
+  change('text: editing.text\n', 'text: [editing.text, ...editing.filePaths.map(path => "@" + path)].filter(Boolean).join("\n")\n', 'queue/save-model-text')
+
+  change('disabled: busy !== null || editing.text.trim() === "",',
+    'disabled: busy !== null || (editing.text.trim() === "" && editing.filePaths.length === 0),', 'queue/save-button')
+  return source
+}
+
+/**
+ * Apply exact compiled seams from packages/client/ui-chat/src/client — the 0.1.5
+ * owner of the rc.7 Conversation renderer, chat store and file-mention provider.
+ *
+ * Retired seam: turn-error/terminal-after-retry.
+ * rc.7 rendered the terminal Turn failure through a Definition that could be
+ * reached while its own state was still hidden, so a retry could suppress a
+ * final turn failure; the seam pinned the row visible. 0.1.5 absorbed that
+ * outcome natively. Its bundle states it under
+ * //#region lib/types/client/conversation-nodes/turn-error.js:
+ *
+ *   Terminal turn failure Definition. Retries run inside the failing turn, so the
+ *   turn's llm/retry history never suppresses this terminal row; the model-retry
+ *   node renders that history separately.
+ *
+ * with the native buildViewNode
+ *   const state = context.state ?? fallbackState$1(context);
+ *   if (state?.failure === void 0) return null;
+ *   const failure = state.failure;
+ *   const node = { kind: "turn-error", seq: failure.seq, time: failure.time, turn: state.turn, ... };
+ *   return chatNode(context, "turn-error", node.seq, node);
+ * and no hidden/visibility branch left, so keeping the seam would delete native
+ * behavior instead of preserving product behavior.
+ */
+export function adaptHarnessChatSource(source) {
+  const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
+
+  change('fileMentions: (owner) => ctx.get("chatFileMentions")?.forClosing(owner, sessionId),',
+    'fileMentions: (owner) => emateArtifactFileMentions(ctx, owner, ctx.sessions, sessionId),', 'artifacts/explicit-link-owner')
+
+  // 0.1.5 renders each Chat node through a slot whose provided hook face already
+  // carries useChat (the same route TurnTailNodeView uses), so the image
+  // projection reads the live Chat snapshot instead of a session-nested one.
+  change(T+T+'const AssistantNodeView = (0, react.memo)(function AssistantNodeView({ node, useTurnData, turnProcess, openFile, renderMessageImages, fileMentions, t }) {',
+    T+T+'const AssistantNodeView = (0, react.memo)(function AssistantNodeView({ node, useChat, useTurnData, turnProcess, openFile, renderMessageImages, fileMentions, t }) {'+N+T+T+T+'const imageBlocks = useChat(snapshot => emateAssistantImageBlocks(snapshot, node), emateSameAssistantBlocks);', 'images/assistant-owner')
+  change('blocks: data.blocks,'+N+T+T+T+T+'streaming: data.status === "running",',
+    'blocks: imageBlocks,'+N+T+T+T+T+'streaming: data.status === "running",', 'images/assistant-echo')
 
   // Image receipts must reach the existing Turn tail before a later model step
   // ends. Keep its native key, renderer and closed-Turn derivation; ordinary
   // file/text Turns still acquire their footer only on turn/end.
-  change('function closingAnchor(context) {\n\t\t\tlet anchor =',
-    'function closingAnchor(context) {\n\t\t\tif (turnLocation(context)?.status === "open") return (context.matches.at(-1)?.event.seq ?? context.start?.event.seq ?? 0) + CHAT_SYNTHETIC_SEQ_OFFSETS.finalizedFollowup;\n\t\t\tlet anchor =', 'images/live-tail-anchor')
-  change('if (end?.event.type !== "turn/end") return null;\n\t\t\tconst turn = turnLocation(context);\n\t\t\tif (turn === void 0) return null;',
-    `const turn = turnLocation(context);
-\t\t\tif (turn === void 0) return null;
-\t\t\tif (end?.event.type !== "turn/end") {
-\t\t\t\tif (turn.status !== "open") return null;
-\t\t\t\tconst hasImages = context.matches.some(({ event }) => event.type === "tool/call"
-\t\t\t\t\t&& (["generate_image", "edit_image", "get_image_generation_task", "imagegen", "image_batch"].includes(event.data.name))
-\t\t\t\t\t|| event.type === "emate/image-output" && event.data.schema_version === 3
-\t\t\t\t\t|| event.type === "tool/result"
-\t\t\t\t\t&& (0, _deepseek_ai_dsh_client_runtime_client.isAppendSurfaceEvent)(event)
-\t\t\t\t\t&& event.data.message.content.some(part => part.type === "tool-result" && !part.isError
-\t\t\t\t\t\t&& part.content?.some(content => content.type === "image")));
-\t\t\t\tif (!hasImages) return null;
-\t\t\t\tconst latest = context.matches.at(-1)?.event ?? context.start?.event;
-\t\t\t\treturn latest === void 0 ? null : { turn: turn.turn, seq: latest.seq, time: latest.time, closing: null, branchUnavailable: true };
-\t\t\t}`, 'images/live-tail-data')
+  change('function closingAnchor(context) {'+N+T+T+T+'let anchor =',
+    'function closingAnchor(context) {'+N+T+T+T+'if (turnLocation(context)?.status === "open") return (context.matches.at(-1)?.event.seq ?? context.start?.event.seq ?? 0) + CHAT_SYNTHETIC_SEQ_OFFSETS.finalizedFollowup;'+N+T+T+T+'let anchor =', 'images/live-tail-anchor')
+  change('if (end?.event.type !== "turn/end") return null;'+N+T+T+T+'const turn = turnLocation(context);'+N+T+T+T+'if (turn === void 0) return null;',
+    'const turn = turnLocation(context);'+N+T+T+T+'if (turn === void 0) return null;'+N+T+T+T+'if (end?.event.type !== "turn/end") {'+N+T+T+T+T+'if (turn.status !== "open") return null;'+N+T+T+T+T+'const hasImages = context.matches.some(({ event }) => event.type === "tool/call"'+N+T+T+T+T+T+'&& (["generate_image", "edit_image", "get_image_generation_task", "imagegen", "image_batch"].includes(event.data.name))'+N+T+T+T+T+T+'|| event.type === "emate/image-output" && event.data.schema_version === 3'+N+T+T+T+T+T+'|| event.type === "tool/result"'+N+T+T+T+T+T+'&& isAppendSurfaceEvent(event)'+N+T+T+T+T+T+'&& event.data.message.content.some(part => part.type === "tool-result" && !part.isError'+N+T+T+T+T+T+T+'&& part.content?.some(content => content.type === "image")));'+N+T+T+T+T+'if (!hasImages) return null;'+N+T+T+T+T+'const latest = context.matches.at(-1)?.event ?? context.start?.event;'+N+T+T+T+T+'return latest === void 0 ? null : { turn: turn.turn, seq: latest.seq, time: latest.time, closing: null, branchUnavailable: true };'+N+T+T+T+'}', 'images/live-tail-data')
+  change('kind: "turn-tail",'+N+T+T+T+'target: "chat",'+N+T+T+T+'match: (event) => {',
+    'kind: "turn-tail",'+N+T+T+T+'target: "chat",'+N+T+T+T+'match: (event) => {'+N+T+T+T+T+'if (event.type === "emate/image-output" && event.data.schema_version === 3 && Number.isSafeInteger(event.data.turn) && event.data.turn >= 0 && ["generate_image", "edit_image"].includes(event.data.tool_name)) return { id: String(event.data.turn), role: "update" };', 'images/job-tail-match')
 
-  change('kind: "turn-tail",\n\t\t\ttarget: "chat",\n\t\t\tmatch: (event) => {',
-    'kind: "turn-tail",\n\t\t\ttarget: "chat",\n\t\t\tmatch: (event) => {\n\t\t\t\tif (event.type === "emate/image-output" && event.data.schema_version === 3 && Number.isSafeInteger(event.data.turn) && event.data.turn >= 0 && ["generate_image", "edit_image"].includes(event.data.tool_name)) return { id: String(event.data.turn), role: "update" };', 'images/job-tail-match')
+  change(T+T+'function createChatStore() {',
+    EMATE_SEAM_HELPERS + '\n\t\tfunction createChatStore() {', 'stores/helper')
 
-  // Native Header still commits via its own scoped actions; failed saves do
-  // not change view, and pending work cannot redirect a newer session/click.
-  change('function ConversationSessionHeader({ sessionId, useSession, useSessions, useStore, actions, renderSlot, views, open, t }) {',
-    'function ConversationSessionHeader({ sessionId, useSession, useSessions, useStore, actions, renderSlot, views, open: commitSessionOpen, beforeViewNavigate, isCurrentViewSession, reportViewError, t }) {\n\t\t\tconst navigation = (0, react.useRef)(0);\n\t\t\t(0, react.useEffect)(() => { const invalidate = () => { navigation.current += 1; }; addEventListener("emate:identity-changed", invalidate); return () => { invalidate(); removeEventListener("emate:identity-changed", invalidate); }; }, [sessionId]);\n\t\t\tconst selectView = emateCanvasNavigationRequest(navigation, beforeViewNavigate, isCurrentViewSession, actions.setView, reportViewError);\n\t\t\tconst open = emateCanvasNavigationRequest(navigation, () => beforeViewNavigate("chat"), isCurrentViewSession, commitSessionOpen, reportViewError);', 'canvas/header-guard')
-  change('\t\t\t\t\t\t\t\t\t\t\topen(summary.id);', '\t\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);', 'canvas/parent-session-action')
-  change('\t\t\t\t\t\t\tactions.setView(viewTab.id);', '\t\t\t\t\t\t\tvoid selectView(viewTab.id);', 'canvas/tab-action')
-  change('\t\t\t\tinject: () => ({\n\t\t\t\t\tviews,\n\t\t\t\t\topen: (id) => {',
-    '\t\t\t\tinject: (sessionId) => ({\n\t\t\t\t\tviews,\n\t\t\t\t\tbeforeViewNavigate: (view) => emateCanvasBeforeView(ctx, sessionId, view),\n\t\t\t\t\tisCurrentViewSession: () => sessions.list.getSnapshot().current === sessionId && !document.querySelector("[data-emate-identity-gate]"),\n\t\t\t\t\treportViewError: (error) => { const scope = sessions.scope(sessionId); if (scope) inputHub.for(scope).notify("error", error instanceof Error ? error.message : "画布尚未保存，请重试。"); },\n\t\t\t\t\topen: (id) => {', 'canvas/header-inject')
-  // Preserve the mounted input/draft and native approval/question overlay.
-  // Only its ordinary fallback is hidden; an elected interaction stays usable.
-  change('\t\t\t\tclassName: ConversationRoot_module_css_default.composerFallback,', '\t\t\t\tclassName: ConversationRoot_module_css_default.composerFallback,\n\t\t\t\t"data-emate-composer-fallback": "",', 'canvas/composer-fallback')
-  change('\t\t\t\t"data-composer-seat": "",', '\t\t\t\t"data-composer-seat": "",\n\t\t\t\t"data-emate-has-interactions": pending.length > 0 ? "true" : "false",', 'canvas/interaction-seat')
-  change('\t\t\t\tclassName: ConversationRoot_module_css_default.viewArea,', '\t\t\t\tclassName: ConversationRoot_module_css_default.viewArea,\n\t\t\t\t"data-emate-active-view": active?.id ?? "chat",', 'canvas/active-view')
-  change('\t\t\ttag.textContent = css$6;', '\t\t\ttag.textContent = css$6 + ' + JSON.stringify(CANVAS_FRAME_CSS) + ';', 'canvas/frame-css')
+  // chat/MessageItem.tsx: native pending steering has no keyed renderer, and
+  // 0.1.5 projects every user and steering bubble through the shared primitive,
+  // so the display transform belongs on that one projection. Keep its native
+  // actions and show the managed filename until the durable node supplies the
+  // richer file-import card projection.
+  change('(0, _deepseek_ai_dsh_client_ui_primitives.projectUserText)(text, referenceLabels, skillNames)',
+    '(0, _deepseek_ai_dsh_client_ui_primitives.projectUserText)(emateFileDisplay(text), referenceLabels, skillNames)', 'message/pending-steering-display')
 
-  // stores.ts: extend the existing per-session dsh.conversation.chat record.
-  change('\t\tfunction createChatStore() {', `${[emateDraftFiles, emateDraftImages, emateImportedText, emateFileDisplay, emateQueuePreview, emateArtifactFileMentions, emateCanvasNavigationRequest, emateCanvasBeforeView, emateAssistantImageBlocks, emateSameAssistantBlocks].map(fn => fn.toString()).join('\n')}\n\t\tfunction createChatStore() {`, 'stores/helper')
-  change('\t\t\t\t\tdraft: "",\n\t\t\t\t\tview: null,', '\t\t\t\t\tdraft: "",\n\t\t\t\t\tfileRefs: [],\n\t\t\t\t\timageRefs: [],\n\t\t\t\t\tview: null,', 'stores/init')
-  change('\t\t\t\t\tsetDraft: (d, text) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t},', '\t\t\t\t\tsetDraft: (d, text, fileRefs = [], imageRefs = []) => {\n\t\t\t\t\t\td.draft = text;\n\t\t\t\t\t\td.fileRefs = fileRefs;\n\t\t\t\t\t\td.imageRefs = imageRefs;\n\t\t\t\t\t},', 'stores/mirror-action')
-
-  // input/facade.ts: files live beside imageIds, not in another plugin store.
-  change('\t\t\timageIds = [];\n\t\t\tdisposed = false;', '\t\t\timageIds = [];\n\t\t\tfileRefs = [];\n\t\t\tdurableImages = [];\n\t\t\tdurableImageIds = new Map();\n\t\t\timageStagePending = false;\n\t\t\tlastFileRefs = this.fileRefs;\n\t\t\tlastDurableImages = this.durableImages;\n\t\t\thydrationNotice = false;\n\t\t\tdisposed = false;', 'facade/state')
-  change('\t\t\t\taddImages: (ids) => this.addImages(ids),', '\t\t\t\taddFiles: (files, draft) => this.addFiles(files, draft),\n\t\t\t\tremoveFile: (path) => this.removeFile(path),\n\t\t\t\trestoreDraft: (text, files, images) => this.restoreDraft(text, files, images),\n\t\t\t\tbeginImageStage: () => this.beginImageStage(),\n\t\t\t\tcancelImageStage: () => this.cancelImageStage(),\n\t\t\t\taddDurableImages: (images, ids) => this.addDurableImages(images, ids),\n\t\t\t\thydrateDurableImage: (key, id) => this.hydrateDurableImage(key, id),\n\t\t\t\tremoveDurableImage: (key) => this.removeDurableImage(key),\n\t\t\t\taddImages: (ids) => this.addImages(ids),', 'facade/actions')
-  change('\t\t\t/** Append ordered image ids unless an admission transaction is locked. */', `
-\t\t\taddFiles(files, draft) {
-\t\t\t\tif (this.disposed || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;
-\t\t\t\tconst current = new Set(this.fileRefs.map(file => file.relative_path));
-\t\t\t\tconst added = emateDraftFiles(files).filter(file => !current.has(file.relative_path));
-\t\t\t\tif (this.fileRefs.length + added.length > 64) throw new Error("草稿最多可添加 64 个文件。");
-\t\t\t\tthis.fileRefs = [...this.fileRefs, ...added];
-\t\t\t\tif (draft !== undefined) this.setDraft(draft);
-\t\t\t\telse this.publish();
-\t\t\t\treturn true;
-\t\t\t}
-\t\t\tremoveFile(path) {
-\t\t\t\tthis.fileRefs = this.fileRefs.filter(file => file.relative_path !== path);
-\t\t\t\tthis.publish();
-\t\t\t}
-\t\t\trestoreFiles(files) {
-\t\t\t\tconst current = new Set(this.fileRefs.map(file => file.relative_path));
-\t\t\t\tthis.fileRefs = [...files.filter(file => !current.has(file.relative_path)), ...this.fileRefs];
-\t\t\t\tthis.publish();
-\t\t\t}
-\t\t\tbeginImageStage() {\n\t\t\t\tif (this.disposed || this.imageStagePending || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tthis.imageStagePending = true;\n\t\t\t\tthis.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tcancelImageStage() {\n\t\t\t\tif (!this.imageStagePending) return;\n\t\t\t\tthis.imageStagePending = false;\n\t\t\t\tthis.hydrationNotice = false;\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\taddDurableImages(images, ids) {
-\t\t\t\tif (this.disposed || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;
-\t\t\t\tconst added = emateDraftImages(images);
-\t\t\t\tif (added.length !== ids.length || added.some(item => this.durableImages.some(current => current.draft_key === item.draft_key))
-\t\t\t\t\t|| new Set(ids).size !== ids.length || ids.some(id => this.imageIds.includes(id))) return false;
-\t\t\t\tthis.durableImages = emateDraftImages([...this.durableImages, ...added]);
-\t\t\t\tfor (let index = 0; index < added.length; index += 1) this.durableImageIds.set(added[index].draft_key, ids[index]);
-\t\t\t\tthis.imageIds = [...this.imageIds, ...ids];
-\t\t\t\tthis.imageStagePending = false;
-\t\t\t\tthis.hydrationNotice = false;
-\t\t\t\tthis.publish();
-\t\t\t\treturn true;
-\t\t\t}
-\t\t\thydrateDurableImage(key, id) {
-\t\t\t\tif (this.disposed || this.durableImageIds.has(key) || this.imageIds.includes(id)
-\t\t\t\t\t|| !this.durableImages.some(item => item.draft_key === key)) return false;
-\t\t\t\tthis.durableImageIds.set(key, id);
-\t\t\t\tconst durableIds = new Set(this.durableImageIds.values());
-\t\t\t\tconst runtimeOnly = this.imageIds.filter(candidate => !durableIds.has(candidate));
-\t\t\t\tthis.imageIds = [...this.durableImages.flatMap(item => { const candidate = this.durableImageIds.get(item.draft_key); return candidate === undefined ? [] : [candidate]; }), ...runtimeOnly];
-\t\t\t\tif (!this.durableImages.some(item => !this.durableImageIds.has(item.draft_key))) this.hydrationNotice = false;
-\t\t\t\tthis.publish();
-\t\t\t\treturn true;
-\t\t\t}
-\t\t\tremoveDurableImage(key) {
-\t\t\t\tconst id = this.durableImageIds.get(key);
-\t\t\t\tthis.durableImageIds.delete(key);
-\t\t\t\tthis.durableImages = this.durableImages.filter(item => item.draft_key !== key);
-\t\t\t\tif (id !== undefined) this.imageIds = this.imageIds.filter(candidate => candidate !== id);
-\t\t\t\tif (!this.durableImages.some(item => !this.durableImageIds.has(item.draft_key))) this.hydrationNotice = false;
-\t\t\t\tthis.publish();
-\t\t\t\treturn id;
-\t\t\t}
-\t\t\trestoreDraft(text, files = [], images = []) {
-\t\t\t\tlet failure;
-\t\t\t\ttry { this.fileRefs = emateDraftFiles(files); }
-\t\t\t\tcatch { this.fileRefs = []; failure = "附件草稿无法恢复，请重新选择文件。"; }
-\t\t\t\ttry { this.durableImages = emateDraftImages(images); }
-\t\t\t\tcatch { this.durableImages = []; failure = "图片草稿无法恢复，请重新选择图片。"; }
-\t\t\t\tthis.durableImageIds.clear();
-\t\t\t\tthis.imageIds = [];
-\t\t\t\tthis.setDraft(text);
-\t\t\t\tif (failure !== undefined) this.notify("error", failure);
-\t\t\t}
-\t\t\t/** Append ordered image ids unless an admission transaction is locked. */`, 'facade/file-lifecycle')
-  change('\t\t\tcommitSend(imageIds) {\n\t\t\t\tconst submitted = new Set(imageIds);', '\t\t\tcommitSend(imageIds, files = []) {\n\t\t\t\tconst submittedFiles = new Set(files.map(file => file.relative_path));\n\t\t\t\tthis.fileRefs = this.fileRefs.filter(file => !submittedFiles.has(file.relative_path));\n\t\t\t\tconst submitted = new Set(imageIds);\n\t\t\t\tconst durable = this.durableImages.flatMap(item => { const id = this.durableImageIds.get(item.draft_key); return id !== undefined && submitted.has(id) ? [{ item, id }] : []; });\n\t\t\t\tthis.durableImages = this.durableImages.filter(item => !durable.some(sent => sent.item.draft_key === item.draft_key));\n\t\t\t\tfor (const sent of durable) this.durableImageIds.delete(sent.item.draft_key);', 'facade/commit')
-  change('\t\t\t\tthis.run(this.core.dispatch({ type: "send-committed" }));\n\t\t\t}', '\t\t\t\tthis.run(this.core.dispatch({ type: "send-committed" }));\n\t\t\t\treturn durable;\n\t\t\t}', 'facade/commit-result')
-  change('\t\t\tsubmit(mode = "queue") {\n\t\t\t\tthis.clearNotice();', '\t\t\tsubmit(mode = "queue") {\n\t\t\t\tif (this.imageStagePending || this.durableImages.some(item => !this.durableImageIds.has(item.draft_key))) { if (!this.hydrationNotice) { this.hydrationNotice = true; this.notify("info", "图片草稿正在恢复，请稍候。"); } return; }\n\t\t\t\tthis.clearNotice();', 'facade/hydration-submit')
-  change('if (this.snapshot.draft.trim() === "" && this.imageIds.length > 0)', 'if (this.snapshot.draft.trim() === "" && (this.imageIds.length > 0 || this.fileRefs.length > 0))', 'facade/file-only-submit')
-  change('\t\t\t\t\timageIds: this.imageIds,', '\t\t\t\t\timageIds: this.imageIds,\n\t\t\t\t\tfileRefs: this.fileRefs,\n\t\t\t\t\timageRefs: this.durableImages,\n\t\t\t\t\thydratedImageKeys: this.durableImages.filter(item => this.durableImageIds.has(item.draft_key)).map(item => item.draft_key),\n\t\t\t\t\truntimeOnlyImageIds: this.imageIds.filter(id => ![...this.durableImageIds.values()].includes(id)),\n\t\t\t\t\timageStagePending: this.imageStagePending,', 'facade/snapshot')
-  change('\t\t\t\tthis.mirrorFn = write;\n\t\t\t\treturn () => {', '\t\t\t\tthis.mirrorFn = write;\n\t\t\t\twrite(this.snapshot.draft, this.fileRefs, this.durableImages);\n\t\t\t\treturn () => {', 'facade/mirror-adopt')
-  change('if (next.draft !== this.lastDraft) {\n\t\t\t\t\tthis.lastDraft = next.draft;\n\t\t\t\t\tthis.mirrorFn?.(next.draft);', 'if (next.draft !== this.lastDraft || next.fileRefs !== this.lastFileRefs || next.imageRefs !== this.lastDurableImages) {\n\t\t\t\t\tthis.lastDraft = next.draft;\n\t\t\t\t\tthis.lastFileRefs = next.fileRefs;\n\t\t\t\t\tthis.lastDurableImages = next.imageRefs;\n\t\t\t\t\tthis.mirrorFn?.(next.draft, next.fileRefs, next.imageRefs);', 'facade/persistence')
-
-  change('\t\t\tdispose() {\n\t\t\t\tthis.disposed = true;', '\t\t\tdispose() {\n\t\t\t\tthis.disposed = true;\n\t\t\t\tthis.imageStagePending = false;', 'facade/dispose-stage')
-
-  change('\t\t\tremoveImage(id) {\n\t\t\t\tconst next = this.imageIds.filter((candidate) => candidate !== id);', '\t\t\tremoveImage(id) {\n\t\t\t\tconst durableKey = [...this.durableImageIds].find(([, candidate]) => candidate === id)?.[0];\n\t\t\t\tif (durableKey !== undefined) { this.durableImageIds.delete(durableKey); this.durableImages = this.durableImages.filter(item => item.draft_key !== durableKey); }\n\t\t\t\tconst next = this.imageIds.filter((candidate) => candidate !== id);', 'facade/remove-durable')
-
-  change('\t\t\tpruneImages(available) {\n\t\t\t\tconst keep = new Set(available);', '\t\t\tpruneImages(available) {\n\t\t\t\tconst keep = new Set(available);\n\t\t\t\tfor (const [key, id] of this.durableImageIds) if (!keep.has(id)) this.durableImageIds.delete(key);', 'facade/prune-durable')
-
-  change('\t\t\trestoreImages(ids) {\n\t\t\t\tconst current = new Set(this.imageIds);', '\t\t\trestoreImages(ids, durable = []) {\n\t\t\t\tconst restored = emateDraftImages(durable.map(value => value.item));\n\t\t\t\tconst currentKeys = new Set(this.durableImages.map(item => item.draft_key));\n\t\t\t\tthis.durableImages = emateDraftImages([...restored.filter(item => !currentKeys.has(item.draft_key)), ...this.durableImages]);\n\t\t\t\tfor (const value of durable) if (!this.durableImageIds.has(value.item.draft_key)) this.durableImageIds.set(value.item.draft_key, value.id);\n\t\t\t\tconst current = new Set(this.imageIds);', 'facade/restore-durable')
-
-  // input/hub.ts: retain the native prompt/queue/steer transport and rollback.
-  change(`\t\t\t\tif (text === "" && imageIds.length === 0) return;
-\t\t\t\tconst shell = this.shells.get(session.sessionId);
-\t\t\t\tshell?.commitSend(imageIds);`, `\t\t\t\tconst shell = this.shells.get(session.sessionId);
-\t\t\t\tconst files = shell?.snapshot.fileRefs ?? [];
-\t\t\t\tif (text === "" && imageIds.length === 0 && files.length === 0) return;
-\t\t\t\tconst draftText = text;
-\t\t\t\tif (files.length > 0) {
-\t\t\t\t\ttext = [text, ...files.map(file => "@" + file.relative_path)].filter(Boolean).join("\\n");
-\t\t\t\t\tmentions = [...(mentions ?? []), ...files.map(file => ({ source: "e-mate/file-import", ref: JSON.stringify(file) }))];
-\t\t\t\t}
-\t\t\t\tconst durableImages = shell?.commitSend(imageIds, files) ?? [];`, 'hub/admission')
-  change('\t\t\t\t\t\tshell?.restoreImages(imageIds);\n\t\t\t\t\t\tif (shell?.snapshot.draft === "") shell.setDraft(text);', '\t\t\t\t\t\tshell?.restoreFiles(files);\n\t\t\t\t\t\tshell?.restoreImages(imageIds, durableImages);\n\t\t\t\t\t\tif (shell?.snapshot.draft === "") shell.setDraft(draftText);', 'hub/rollback')
-
-  // skeleton/ConversationSession.tsx: hydrate the same scoped native store.
-  change('const storedDraft = useStore((s) => s.draft);', 'const storedDraft = useStore((s) => s.draft);\n\t\t\tconst storedFiles = useStore((s) => s.fileRefs);\n\t\t\tconst storedImages = useStore((s) => s.imageRefs);', 'session/persisted-files')
-  change('if (inputState.draft === "" && storedDraft !== "") inputActions.setDraft(storedDraft);', 'if (inputState.draft === "" && inputState.fileRefs.length === 0 && inputState.imageRefs.length === 0) inputActions.restoreDraft(storedDraft, storedFiles ?? [], storedImages ?? []);', 'session/hydrate')
-
-  // skeleton/InputBar.tsx: toolbar/Enter retain native locks and submit policy.
-  change('const empty = draft.trim() === "" && attachments.length === 0;', 'const empty = draft.trim() === "" && attachments.length === 0 && (input?.fileRefs.length ?? 0) === 0 && (input?.imageRefs.length ?? 0) === 0;', 'input-bar/empty')
-  // apply.ts: the native entry keeps ownership of plan/model and its assembled
-  // renderSlot binding. Product content decorates that body through one child.
-  change('\t\t\t\tname: "conversation.composer.bar",\n\t\t\t\tlocale: NS,\n\t\t\t\tchildren: {', '\t\t\t\tname: "conversation.composer.bar",\n\t\t\t\tlocale: NS,\n\t\t\t\tchildren: {\n\t\t\t\t\t"e-mate.conversation.composer": { kind: "single", scope: "session-maybe" },', 'apply/composer-declaration')
-  change('\t\t\t}, InputBar);', `\t\t\t}, function EmateComposer(props) {
-\t\t\t\treturn props.renderSlot("e-mate.conversation.composer", { nativeProps: props, InputBar }, { fallback: (0, react_jsx_runtime.jsx)(InputBar, props) });
-\t\t\t});`, 'apply/composer-body')
-  // chat/MessageItem.tsx: native pending steering has no keyed renderer. Keep
-  // its native actions and show the managed filename until the durable node
-  // supplies the richer file-import card projection.
-  change('\t\tfunction projectUserText(text) {', '\t\tfunction projectUserText(text) {\n\t\t\ttext = emateFileDisplay(text);', 'message/pending-steering-display')
-  // queue/QueueDock.tsx: edit the prose while retaining the exact file paths in
-  // the existing edit transaction. Preview text must never become model text.
-  change('children: row.preview', 'children: emateQueuePreview(row)', 'queue/preview')
-  change('text: row.text\n', '...emateImportedText(row.text)\n', 'queue/begin-edit')
-  change('id: row.id,\n\t\t\t\t\t\t\t\t\t\t\ttext: event.currentTarget.value', '...editing,\n\t\t\t\t\t\t\t\t\t\t\ttext: event.currentTarget.value', 'queue/edit-text')
-  change('if (editing === null || editing.text.trim() === "") return;', 'if (editing === null || (editing.text.trim() === "" && editing.filePaths.length === 0)) return;', 'queue/save-admission')
-  change('text: editing.text\n', 'text: [editing.text, ...editing.filePaths.map(path => "@" + path)].filter(Boolean).join("\\n")\n', 'queue/save-model-text')
-  change('disabled: busy !== null || editing.text.trim() === "",', 'disabled: busy !== null || (editing.text.trim() === "" && editing.filePaths.length === 0),', 'queue/save-button')
   return source
 }
+
+/**
+ * Dropped seam, listed rather than silently deleted. The rc.7 product behavior
+ * has no 0.1.5 call site; the assembler must re-implement it at its new owner.
+ */
+export const CONVERSATION_CHAT_UNRESOLVED_SEAMS = Object.freeze([
+  Object.freeze({
+    owner: 'artifacts/open-error',
+    rc7: 'workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => {});',
+    native0_1_5: [
+      'openFile: async (path, options) => {',
+      T+T+T+T+T+'const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;',
+      T+T+T+T+T+'const url = fileAddressFor(sessionId, cwd, path);',
+      T+T+T+T+T+'if (options?.line === void 0) ctx.sidebarRight.openResource(url);',
+      T+T+T+T+T+'else ctx.sidebarRight.openResource(url, { params: { line: options.line } });',
+      T+T+T+T+T+'await Promise.resolve();',
+      T+T+T+T+'},',
+    ].join(N),
+    blocker: 'No client bundle declares workspaces.openPath or the runtime namespace any more; resolveWorkspacePath survives only as a bare local in ui-deliverables and ui-tool for a preview title and a terminal cwd label. The 0.1.5 opener is the synchronous ctx.sidebarRight.openResource(url), which returns no promise, so there is no rejection to catch, and the Chat closure has no session notice outlet: its only ctx.get is "chatFileMentions", and the ui-conversation inputHub shell is not reachable from ui-chat.',
+  }),
+])

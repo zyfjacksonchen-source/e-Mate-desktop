@@ -17,7 +17,11 @@ const { LocalFileSystem } = await import(pathToFileURL(join(nativeRoot, 'upstrea
 function owner(source) {
   const start = source.indexOf('//#region lib/types/archive.js')
   const end = source.indexOf('//#endregion', start)
-  return new Function('Zip', 'ZipDeflate', `${source.slice(start, end)}\nreturn { streamSessionLogZip, sessionLogExportDeps };`)(Zip, ZipDeflate)
+  // The archive region consumes the log-filename helper from the format
+  // package outside the slice, so the fixture supplies it explicitly.
+  const { sessionFormatLogFilename } = require('@deepseek-ai/dsh-session-format')
+  const { SESSION_FORMAT_VERSION } = require('@deepseek-ai/dsh-session')
+  return new Function('Zip', 'ZipDeflate', 'sessionFormatLogFilename', 'SESSION_FORMAT_VERSION', `${source.slice(start, end)}\nreturn { streamSessionLogZip, sessionLogExportDeps };`)(Zip, ZipDeflate, sessionFormatLogFilename, SESSION_FORMAT_VERSION)
 }
 const zipOwner = owner(adapted)
 const line = value => JSON.stringify(value) + '\n'

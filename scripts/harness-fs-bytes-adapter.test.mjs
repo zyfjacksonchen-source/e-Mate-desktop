@@ -103,13 +103,17 @@ test('ordinary binary and empty files retain exact bytes through bounded native 
 })
 
 test('hardlinked images deliberately fail; an independent PNG copy still passes native image validation', async t => {
-  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+  // 0.1.5 passes a source through only as single-frame 8-bit sRGB; a
+  // gray+alpha source is re-encoded, so the byte-identity fixture is RGBA.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
   const { directory, filename, target } = await fixture(t, png)
   const { saveImageFile, readImageFile } = await import(pathToFileURL(path.join(nativeRoot, 'upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js')))
   const limits = { maxImageBytes: 1024, maxImagesPerMessage: 2, maxMessageImageBytes: 2048, maxImagePixels: 16, mediaTypes: ['image/png'] }
+  // 0.1.5 splits admission limits from the persisted-normalization policy.
+  const policy = { maxPixels: 16, maxDimension: 16, maxBytes: 1024 }
   const data = await owner().readWholeBytes(target, undefined, 1024)
   const store = path.join(directory, 'dsh-home/attachments/v1')
-  const ref = await saveImageFile(store, { data, mediaType: 'image/png', name: 'pixel.png' }, limits)
+  const ref = await saveImageFile(store, { data, mediaType: 'image/png', name: 'pixel.png' }, limits, policy)
   assert.deepEqual(Buffer.from((await readImageFile(store, ref)).data), png)
   await fs.link(filename, path.join(directory, 'alias.png'))
   await assert.rejects(owner().readWholeBytes(target, undefined, 1024), { code: 'FS_PERMISSION_DENIED' })
@@ -160,7 +164,11 @@ test('the integrated native ZIP producer refuses an imported hardlink through th
   const apiRequire = createRequire(path.join(nativeRoot, 'upstream/deepseek-harness/packages/session-query/session-log-export/package.json'))
   const { Zip, ZipDeflate } = apiRequire('fflate')
   const start = api.indexOf('//#region lib/types/archive.js')
-  const streamZip = new Function('Zip', 'ZipDeflate', `${api.slice(start, api.indexOf('//#endregion', start))}\nreturn streamSessionLogZip;`)(Zip, ZipDeflate)
+  // The archive region consumes the log-filename helper from the format
+  // package outside the slice, so the fixture supplies it explicitly.
+  const { sessionFormatLogFilename } = apiRequire('@deepseek-ai/dsh-session-format')
+  const { SESSION_FORMAT_VERSION } = apiRequire('@deepseek-ai/dsh-session')
+  const streamZip = new Function('Zip', 'ZipDeflate', 'sessionFormatLogFilename', 'SESSION_FORMAT_VERSION', `${api.slice(start, api.indexOf('//#endregion', start))}\nreturn streamSessionLogZip;`)(Zip, ZipDeflate, sessionFormatLogFilename, SESSION_FORMAT_VERSION)
   const { Context } = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')))
   const { LocalFileSystem } = await import(pathToFileURL(path.join(nativeRoot, 'upstream/deepseek-harness/packages/fs/fs-local/lib/index.js')))
   const ctx = new Context()
