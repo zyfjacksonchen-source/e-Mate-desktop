@@ -4,7 +4,6 @@ import { adaptHarnessFsBytesSource, FS_BYTES_PACKAGE } from './harness-fs-bytes-
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, ARTIFACT_LINKS_PACKAGE, adaptHarnessArtifactDeliverablesSource, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
-import { adaptHarnessSlotErrorSource, SLOT_ERROR_PACKAGE } from './harness-slot-error-adapter.mjs'
 
 const FS_OLD = `\tasync resolvePolicy(toolName, args, exec) {
 \t\tvalidateEscalationArgs(args.sandbox_permissions, args.justification);
@@ -71,8 +70,6 @@ export async function applyHarnessRuntimeAdapters(runtimeRoot) {
   await replaceRuntimeFile(artifactTarget, adaptHarnessArtifactLinksSource(await readFile(artifactTarget, 'utf8')))
   const deliverablesTarget = join(runtimeRoot, 'node_modules', ARTIFACT_DELIVERABLES_PACKAGE, 'lib', 'client.js')
   await replaceRuntimeFile(deliverablesTarget, adaptHarnessArtifactDeliverablesSource(await readFile(deliverablesTarget, 'utf8')))
-  const slotTarget = join(runtimeRoot, 'node_modules', SLOT_ERROR_PACKAGE, 'lib', 'client.js')
-  await replaceRuntimeFile(slotTarget, adaptHarnessSlotErrorSource(await readFile(slotTarget, 'utf8')))
   const conversationTarget = join(runtimeRoot, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')
   await replaceRuntimeFile(conversationTarget, adaptHarnessConversationSource(await readFile(conversationTarget, 'utf8')))
   const titleTarget = join(runtimeRoot, 'node_modules', SESSION_TITLE_PACKAGE, 'lib', 'index.js')

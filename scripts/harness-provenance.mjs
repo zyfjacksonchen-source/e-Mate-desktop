@@ -21,7 +21,6 @@ import { adaptHarnessConversationSource, CONVERSATION_ADAPTER_PATH, CONVERSATION
 import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSource, ARTIFACT_LINKS_RENDERER_PATH, ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE, adaptHarnessArtifactDeliverablesSource, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessFsBytesSource, FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
-import { adaptHarnessSlotErrorSource, SLOT_ERROR_PACKAGE, SLOT_ERROR_ADAPTER_PATH } from './harness-slot-error-adapter.mjs'
 
 export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
 export const HARNESS_VERSION = '0.1.0-rc.7'
@@ -330,10 +329,6 @@ export function materializeHarnessDesktopRuntime(root) {
       const entry = join(targetLib, 'index.js')
       writeFileSync(entry, adaptHarnessArtifactLinksSource(readFileSync(entry, 'utf8')))
     }
-    if (manifest.name === SLOT_ERROR_PACKAGE) {
-      const client = join(targetLib, 'client.js')
-      writeFileSync(client, adaptHarnessSlotErrorSource(readFileSync(client, 'utf8')))
-    }
     if (manifest.name === ARTIFACT_DELIVERABLES_PACKAGE) {
       const client = join(targetLib, 'client.js')
       writeFileSync(client, adaptHarnessArtifactDeliverablesSource(readFileSync(client, 'utf8')))
@@ -387,7 +382,6 @@ function desktopProvenance(root, receipt) {
     const overlay = DESKTOP_OVERLAYS.get(manifest.name)
     const adapter = manifest.name === SESSION_TITLE_PACKAGE ? SESSION_TITLE_ADAPTER_PATH
       : manifest.name === ARTIFACT_LINKS_PACKAGE || manifest.name === ARTIFACT_DELIVERABLES_PACKAGE ? ARTIFACT_LINKS_ADAPTER_PATH
-      : manifest.name === SLOT_ERROR_PACKAGE ? SLOT_ERROR_ADAPTER_PATH
       : manifest.name === CONVERSATION_PACKAGE ? CONVERSATION_ADAPTER_PATH
       : manifest.name === SESSION_EXPORT_PACKAGE ? SESSION_EXPORT_ADAPTER_PATH
         : manifest.name === FS_BYTES_PACKAGE ? FS_BYTES_ADAPTER_PATH : null
@@ -398,10 +392,6 @@ function desktopProvenance(root, receipt) {
     if (manifest.name === ARTIFACT_LINKS_PACKAGE && readFileSync(join(targetLib, 'index.js'), 'utf8')
       !== adaptHarnessArtifactLinksSource(readFileSync(join(sourceLib, 'index.js'), 'utf8'))) {
       throw new Error('Desktop artifact links do not match the pinned native renderer plus product adapter')
-    }
-    if (manifest.name === SLOT_ERROR_PACKAGE && readFileSync(join(targetLib, 'client.js'), 'utf8')
-      !== adaptHarnessSlotErrorSource(readFileSync(join(sourceLib, 'client.js'), 'utf8'))) {
-      throw new Error('Desktop slot error reporting does not match the pinned native owner plus product adapter')
     }
     if (manifest.name === ARTIFACT_DELIVERABLES_PACKAGE && readFileSync(join(targetLib, 'client.js'), 'utf8')
       !== adaptHarnessArtifactDeliverablesSource(readFileSync(join(sourceLib, 'client.js'), 'utf8'))) {

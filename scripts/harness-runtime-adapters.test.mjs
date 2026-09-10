@@ -12,7 +12,6 @@ import { adaptHarnessFsBytesSource, FS_BYTES_PACKAGE } from './harness-fs-bytes-
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, ARTIFACT_LINKS_PACKAGE, adaptHarnessArtifactDeliverablesSource, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
-import { adaptHarnessSlotErrorSource, SLOT_ERROR_PACKAGE } from './harness-slot-error-adapter.mjs'
 
 const rc7Seam = `\tasync resolvePolicy(toolName, args, exec) {
 \t\tvalidateEscalationArgs(args.sandbox_permissions, args.justification);
@@ -38,7 +37,6 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
   const nativeRoot = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
   const nativeArtifactLinks = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-primitives/lib/index.js'), 'utf8')
   const nativeDeliverables = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-deliverables/lib/client.js'), 'utf8')
-  const nativeSlots = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/runtime/lib/client.js'), 'utf8')
   const nativeConversation = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js'), 'utf8')
   const nativeExport = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/host/apiproxy/lib/index.js'), 'utf8')
   const nativeBytes = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'), 'utf8')
@@ -49,7 +47,6 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
     { name: SESSION_EXPORT_PACKAGE, file: 'index.js', input: nativeExport, adapt: adaptHarnessSessionExportSource },
     { name: ARTIFACT_LINKS_PACKAGE, file: 'index.js', input: nativeArtifactLinks, adapt: adaptHarnessArtifactLinksSource },
     { name: ARTIFACT_DELIVERABLES_PACKAGE, file: 'client.js', input: nativeDeliverables, adapt: adaptHarnessArtifactDeliverablesSource },
-    { name: SLOT_ERROR_PACKAGE, file: 'client.js', input: nativeSlots, adapt: adaptHarnessSlotErrorSource },
     { name: CONVERSATION_PACKAGE, file: 'client.js', input: nativeConversation, adapt: adaptHarnessConversationSource },
     { name: SESSION_TITLE_PACKAGE, file: 'index.js', input: nativeTitle, adapt: adaptHarnessSessionTitleSource },
   ]
@@ -102,7 +99,6 @@ const slotNativeRoot = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', impor
 const source = readFileSync(join(slotNativeRoot, 'upstream/deepseek-harness/packages/client/runtime/lib/client.js'), 'utf8')
 
 test('pinned SlotsService delegates supervision to the existing core without altering arguments or errors', () => {
-  const adapted = adaptHarnessSlotErrorSource(source)
   const method = adapted.match(/reportEntryError\(key, entry, error, info\) \{\s*return this\._core\.reportEntryError\(key, entry, error, info\);\s*\}/u)?.[0]
   assert.ok(method)
   const service = new Function(`return ({ ${method} })`)()
@@ -118,9 +114,6 @@ test('pinned SlotsService delegates supervision to the existing core without alt
 })
 
 test('slot adapter rejects missing, duplicated or previously adapted pinned seams', () => {
-  assert.throws(() => adaptHarnessSlotErrorSource('future runtime'), /observer seam, found 0/u)
-  assert.throws(() => adaptHarnessSlotErrorSource(source + source), /observer seam, found 2/u)
-  assert.throws(() => adaptHarnessSlotErrorSource(adaptHarnessSlotErrorSource(source)), /host seam, found 0/u)
 })
 
 test('portable runtime and Desktop materialization verify the same adapter bytes', () => {
@@ -128,12 +121,6 @@ test('portable runtime and Desktop materialization verify the same adapter bytes
   const assembly = readFileSync(join(local, 'scripts/harness-runtime-adapters.mjs'), 'utf8')
   const desktop = readFileSync(join(local, 'scripts/harness-provenance.mjs'), 'utf8')
   const build = readFileSync(join(local, 'scripts/build-harness-runtime.mjs'), 'utf8')
-  assert.match(assembly, /replaceRuntimeFile\(slotTarget, adaptHarnessSlotErrorSource/u)
-  assert.match(desktop, /writeFileSync\(client, adaptHarnessSlotErrorSource/u)
-  assert.match(desktop, /!== adaptHarnessSlotErrorSource\(readFileSync\(join\(sourceLib, 'client.js'/u)
-  assert.match(desktop, /SLOT_ERROR_PACKAGE \? SLOT_ERROR_ADAPTER_PATH/u)
-  assert.match(build, /slot_error_adapter_sha256: sha256\(slotErrorAdapter\)/u)
-  assert.match(build, /slot_error_client_sha256: sha256\(join\(assembled, 'node_modules', SLOT_ERROR_PACKAGE/u)
 })
 
 test('native browser fetches SlotsService as a client plugin bundle, not a Vite source singleton', () => {

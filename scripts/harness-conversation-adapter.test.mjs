@@ -504,8 +504,6 @@ test('packaged runtime verifies the adapter and actual client hashes instead of 
     const manifest = { commit: 'pinned', artifact_links_adapter_sha256: digest(artifactAdapter), artifact_links_client_sha256: digest(artifactClient), conversation_adapter_sha256: digest(adapter), conversation_client_sha256: digest(adapted) }
     const additional = [
       ['artifact_deliverables_client_sha256', 'node_modules/@deepseek-ai/dsh-client-ui-deliverables/lib/client.js', 'verified deliverables fixture'],
-      ['slot_error_adapter_sha256', 'e-mate-slot-error-adapter.mjs', 'verified slot adapter fixture'],
-      ['slot_error_client_sha256', 'node_modules/@deepseek-ai/dsh-client-runtime/lib/client.js', 'verified slot client fixture'],
     ]
     for (const [field, relative, bytes] of additional) {
       mkdirSync(dirname(join(root, relative)), { recursive: true })
