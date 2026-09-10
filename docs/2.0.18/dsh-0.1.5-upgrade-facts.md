@@ -767,4 +767,31 @@ shell 42 / profile-core 35 / desktop 55 / enterprise 29 / scripts 59，插件侧
 - 其守卫测试 `scripts/harness-fs-bytes-adapter.test.mjs` **9/9 通过**（在基线树临时覆盖实跑，之后逐字节还原并用 `cmp` 校验）
 - 基线树保持 0 改动，harness 子模块仍在 `4da69d7c3522`
 
-**这一条同时建立了后续 7 条的方法**：先对 0.1.5 产物逐成分统计接缝命中，再判断是"精度问题"还是"语义已变"。
+**这一条同时建立了后续 7 条的方法**：先对 0.1.5 产物逐成分统计接缝命中，再判断是"精度问题"还是"语义已变"。### 21.7 Round 5：其余适配器的接缝普查
+
+方法：从每个适配器模块里抽取用作接缝的字符串字面量，逐个在 0.1.5 的目标 lib 文件里计数。
+
+> **工具局限（必须说明）**：`harness-runtime-adapters.mjs` 一个模块里同时含 `adaptHarnessFsSource` 与 `adaptHarnessSessionTitleSource` 两个适配器，
+> 按模块抽取会把字面量算到两者名下。下表已标注哪些读数是可靠的。
+
+| 适配器 | 抽取到的接缝 | 0.1.5 命中 | 判读 |
+|---|---|---|---|
+| `session-title` | `if (registration.provider.automatic === "all-prompts"...` | **0** | 自动标题接缝已变，需重写 |
+| `conversation` | `kind: "turn-tail", target: "chat", ...` | **0** | **0.1.5 重写了会话节点定义** |
+| `conversation` | `generate_image` / `edit_image` / `get_image_generation_task` / `imagegen` / `image_batch` | **0** | 适配器依赖的图像工具名不在 0.1.5 的该文件里 |
+| `conversation` | `facade/snapshot` | **0** | 已变 |
+| `artifact-links` | — | — | 抽取失败，需人工读适配器 |
+| `artifact-deliverables` | — | — | 抽取失败，需人工读适配器 |
+| `fs-escalation` | （与 session-title 混算，读数不可靠） | — | 需按函数级重查 |
+
+### 21.8 这轮最实质的结论
+**`conversation` 适配器（375 行，8 个里最大的一个）不能靠"调接缝精度"解决。**
+它依赖的 `turn-tail` 节点定义与图像工具名在 0.1.5 的 `ui-conversation` 产物里**完全不存在**：
+0.1.5 已把会话节点定义重构进 `contract/` / `conversation/` / `input/` / `skeleton/` 分层（与 Round 2 移植 hero 槽时观察到的结构变化一致）。
+它的守卫测试 `scripts/harness-conversation-adapter.test.mjs` 属于那 122 个可跑集，因此重写后必须过该测试。
+
+### 21.9 下一步
+1. 按**函数级**（而非模块级）重做抽取，得到 `fs-escalation` 与 `session-title` 的可靠读数；
+2. 人工读 `artifact-links` 与 `artifact-deliverables` 的接缝常量；
+3. 按判读结果分类：**精度问题**（低成本，如 fs-bytes）vs **语义已变**（需重写）；
+4. `conversation` 已确认属后者，单独立项。
