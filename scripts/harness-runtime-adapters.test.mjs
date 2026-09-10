@@ -147,14 +147,20 @@ const titleRequire = createRequire(titleEntry)
 const titleImport = name => import(pathToFileURL(titleRequire.resolve(name)).href)
 
 async function titleHarness(mode = 'first-prompt', generate) {
-  const [{ Context }, { default: SessionStore, SessionId }, { createUserMessage }] = await Promise.all([
-    titleImport('@deepseek-ai/cordis'), titleImport('@deepseek-ai/dsh-session'), titleImport('@deepseek-ai/dsh-llm'),
+  const [
+    { Context }, { default: SessionStore, SessionId }, { createUserMessage }, { default: SessionProjection },
+  ] = await Promise.all([
+    titleImport('@deepseek-ai/cordis'), titleImport('@deepseek-ai/dsh-session'),
+    titleImport('@deepseek-ai/dsh-llm'), titleImport('@deepseek-ai/dsh-session-projection'),
   ])
   const source = adaptHarnessSessionTitleSource(titleNativeSource).replace(/from "([^".][^"]*)"/gu,
     (_match, specifier) => `from ${JSON.stringify(pathToFileURL(titleRequire.resolve(specifier)).href)}`)
   const { default: TitleService } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
   const ctx = new Context()
   await ctx.plugin(SessionStore)
+  // 0.1.5 injects the projection seam, so the title fiber stays pending until
+  // the registry is mounted and would never publish ctx.sessionTitle otherwise.
+  await ctx.plugin(SessionProjection)
   await ctx.plugin(TitleService, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
   const calls = []
   ctx.sessionTitle.register({ id: 'test-title', automatic: mode, generate: async request => {
