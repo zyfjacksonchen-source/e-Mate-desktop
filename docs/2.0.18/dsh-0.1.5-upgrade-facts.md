@@ -188,3 +188,39 @@ git cherry feat/2.0.18/rc7-tidychat <branch>
 
 ### 9.5 不得触碰
 `update-checker.ts` 与 `update-download.ts` 的端点/URL/文件名/校验逻辑**在本次升级中保持零改动**。
+
+---
+
+## 10. desktop 补丁逐条核对（对 0.1.5 真实编译产物实测）
+
+方法：从 `vendor/dsh-runtime/0.1.5-rc.1/*.tgz` 解出四个包的 `lib/*.js`，逐个核对补丁目标站点是否仍存在、0.1.5 是否已自带。
+
+| e-Mate 补丁 | 意图 | 0.1.5 现状 | 裁决 |
+|---|---|---|---|
+| `dsh-app-boot@0.1.0-rc.7.patch` | `parsePatchList` 容忍空/缺省 patch 列表 | `lib/index.js:1199` **仍是** `if (!Array.isArray(parsed)) throw`，无 void 0/null 容忍 | **保留，按 0.1.5 重做**（行号 840→1199） |
+| `dsh-client-ui-workspace@0.1.0-rc.7.patch` | 给工作区浏览器根节点加 `data-dsh-workspace-drop-target` | `lib/client.js:2222` **仍是** `className: clsx(WorkspaceBrowser_module_css_default.root, …)`，**无** 该标记 | **保留，按 0.1.5 重做**（行号 1849→2222） |
+| `dsh-sandbox-windows-acl@0.1.0-rc.7.patch` | `dwFlags: 256→257` + `wShowWindow: 0`，隐藏 Windows 控制台窗口 | **目标代码已搬走**：0.1.5 把 spawn 逻辑抽到新包 `@deepseek-ai/dsh-win32-process`；`sandbox-windows-acl` 只剩转发（`spawnPipedProcess(api, {…options, token})`）。`dwFlags` 现位于 `dsh-win32-process/lib/index.js:392` 与 `:536` | **删除自有补丁，改用上游 `dsh-win32-process@0.1.5-rc.1.patch`** |
+| `.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.0-rc.7-redundant-escalation.patch` | 冗余提权免 justification | `lib/index.js:1189` **仍是** `validateEscalationArgs(args.sandbox_permissions, args.justification)`，**无** `redundantEscalation` | **保留，按 0.1.5 重做**（行号 1117→1189） |
+
+### 10.1 换用上游补丁的证据
+上游 `patches/dsh-win32-process@0.1.5-rc.1.patch` 的改动与 e-Mate 原意图**同义**：
+
+```diff
+@@ spawnPipedProcess   cb: 104, -dwFlags: 256, +dwFlags: 257, +wShowWindow: 0
+@@ spawnJobProcess     cb: 104, -dwFlags: 256, +dwFlags: 257, +wShowWindow: 0
+```
+
+与 e-Mate 原补丁的两处站点（`spawnSandboxed` / `spawnSandboxedInherited`）一一对应；0.1.5 中 `wShowWindow` 的类型条目 `uint16` 也已存在（`lib/index.js:48`）。
+**结论：e-Mate 不再需要维护这个补丁，直接采纳上游版本。**
+
+### 10.2 上游 app-boot 补丁不是同一件事
+上游 `dsh-app-boot@0.1.5-rc.1.patch`（4152 字节）改的是 `healProfilesModuleFallback` / `dependencyClosure` / asar 解析器归属，**与 `parsePatchList` 空列表容忍无关**，不能替代 e-Mate 的补丁。
+
+### 10.3 重做补丁的正确路径
+这些补丁打的是**编译产物 `lib/*.js`**，unified diff 带 blob hash，**不得手工改行号或 hash**。正确顺序：
+1. `desktop/package.json` resolutions 升到 `@0.1.5-rc.1`；
+2. 在 desktop 工作区完成 0.1.5 的 yarn install（lockfile 同步重生）；
+3. 用 `yarn patch <pkg>` → 编辑 → `yarn patch-commit` 重新生成补丁；
+4. 之后才更新 `harness-provenance.mjs` 的 `DESKTOP_OVERLAYS` 路径名。
+
+**顺序不可颠倒**：先改引用名会指向内容已不适用的补丁，形成静默坏构建。
