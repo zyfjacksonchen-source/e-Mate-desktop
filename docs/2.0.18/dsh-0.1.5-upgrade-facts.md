@@ -313,3 +313,79 @@ git cherry feat/2.0.18/rc7-tidychat <branch>
 - `@deepseek-ai/dsh-client-ui-trajectory` 出现在上游 0.1.5 的 desktop 依赖里 —— 与"还原原生工具调用链"直接呼应。
 - 新增项含 client-ui-chat / client-file-upload / mcp-client / tool-skill / jobs-local / session-persistence-jsonl，是"原生优先替换"的候选来源。
 - 改名必须与 harness 子模块重定基同步落地，否则 npm 声明与本地构建 runtime 不一致，`verify-desktop` 会失败。
+
+---
+
+## 12. harness fork 逐提交分诊（严格判据：只统计该提交真正新引入的符号）
+
+方法：取每个提交新增行里的标识符，**排除其父提交中已存在的**，再用剩下的新符号去 0.1.5 里查存在性。
+
+> ⚠️ **这是优先度排序工具，不是裁决。** 尤其当某提交只有 1 个新符号时（如 hero 那条 0/1），信号很弱；
+> 而 6/6 命中（如 composer frame host）则是强信号。每一条最终都要用**它自己的测试**复核。
+
+| 提交 | 新符号命中 | 初判 |
+|---|---|---|
+| `fix(ui): make attachment drop overlay dismissible (#1)` | 0/1 | 0.1.5 完全缺失 → 需重做 |
+| `fix(schedule): make reminder delivery crash safe` | 0/6 | 0.1.5 完全缺失 → 需重做 |
+| `fix(schedule): make delivery rollback fail closed` | 0/6 | 0.1.5 完全缺失 → 需重做 |
+| `test(schedule): make downgrade gate hermetic` | 0/4 | 0.1.5 完全缺失 → 需重做 |
+| `test(schedule): gate built downgrade compatibility` | 0/6 | 0.1.5 完全缺失 → 需重做 |
+| `feat(schedule): gate delivery startup admission` | 0/6 | 0.1.5 完全缺失 → 需重做 |
+| `fix(schedule): honor startup delivery admission` | 0/1 | 0.1.5 完全缺失 → 需重做 |
+| `feat(tools): expose registration provenance` | 0/4 | 0.1.5 完全缺失 → 需重做 |
+| `feat(jobs): add cross-owner kind admission` | 0/6 | 0.1.5 完全缺失 → 需重做 |
+| `fix(jobs): register queued admission jobs` | 0/6 | 0.1.5 完全缺失 → 需重做 |
+| `fix(jobs): close queued owner teardown race` | 0/2 | 0.1.5 完全缺失 → 需重做 |
+| `fix(session): isolate corrupt cold list artifacts` | 0/2 | 0.1.5 完全缺失 → 需重做 |
+| `fix(models): refresh directories after credential commits` | 2/2 | 0.1.5 已具备 → 优先核验后废弃 |
+| `feat(imagegen): gate image edits on native review` | 0/6 | 0.1.5 完全缺失 → 需重做 |
+| `test(client): repair image review fixtures` | 1/1 | 0.1.5 已具备 → 优先核验后废弃 |
+| `docs(imagegen): refresh review contracts` | 1/1 | 0.1.5 已具备 → 优先核验后废弃 |
+| `feat(llm): add registration-bound wire transform` | 0/4 | 0.1.5 完全缺失 → 需重做 |
+| `fix(conversation): expose semantic composer frame host` | 6/6 | 0.1.5 已具备 → 优先核验后废弃 |
+| `fix(settings): expose stable section ids` | 0/1 | 0.1.5 完全缺失 → 需重做 |
+| `feat(ui-conversation): add declarative hero content slot` | 0/1 | 0.1.5 完全缺失 → 需重做 |
+| `fix(conversation): isolate session drafts on workspace switch` | 1/1 | 0.1.5 已具备 → 优先核验后废弃 |
+
+### 12.1 优先核验后可废弃（0.1.5 已具备）
+
+- `fix(models): refresh directories after credential commits`
+- `test(client): repair image review fixtures`
+- `docs(imagegen): refresh review contracts`
+- `fix(conversation): expose semantic composer frame host`
+- `fix(conversation): isolate session drafts on workspace switch`
+
+其中 `fix(conversation): expose semantic composer frame host` 为 **6/6 全命中**，是最有把握的一条 —— e-Mate 外壳依赖它，0.1.5 已自带，无需重做。
+
+### 12.2 产品层面淘汰（非上游吸收，结论来自 e-Mate 自身要求）
+
+`feat(imagegen): gate image edits on native review` —— **应废弃，不得重做**。证据：
+
+- e-Mate 2.0.18 在 `AGENTS.md:7` 与 `docs/target-contract.md:16` **两处明文**要求 `zero image/edit confirmation`；
+- 生图工具代码路径内无任何确认/复核；
+- fork 也未把该门接入任何工具（`packages/tools` 无 `askUserQuestion` 使用）；
+- e-Mate rc7 代码库不引用 `ImageReviewMedia`；唯一提及在 2.0.17 工单，且是反向要求（`绝不提问`）。
+
+0.1.5 保留了通用 `AskUserQuestionIntent`（5 个文件）但**没有** `ImageReviewMedia` / `ImageAttachment`。
+把该门搬到 0.1.5 会**违背产品要求并让已验收交互回退**，因此按淘汰处理。
+
+### 12.3 需重做清单（初判，待逐条用测试复核）
+
+- `fix(ui): make attachment drop overlay dismissible (#1)`
+- `fix(schedule): make reminder delivery crash safe`
+- `fix(schedule): make delivery rollback fail closed`
+- `test(schedule): make downgrade gate hermetic`
+- `test(schedule): gate built downgrade compatibility`
+- `feat(schedule): gate delivery startup admission`
+- `fix(schedule): honor startup delivery admission`
+- `feat(tools): expose registration provenance`
+- `feat(jobs): add cross-owner kind admission`
+- `fix(jobs): register queued admission jobs`
+- `fix(jobs): close queued owner teardown race`
+- `fix(session): isolate corrupt cold list artifacts`
+- `feat(imagegen): gate image edits on native review`
+- `feat(llm): add registration-bound wire transform`
+- `fix(settings): expose stable section ids`
+- `feat(ui-conversation): add declarative hero content slot`
+
+聚焦区域：**schedule 5 条**、**jobs 3 条**、tools 注册来源、session 冷列表隔离、llm 线上变换、settings 分区 id、ui-conversation hero 槽与附件拖放层。
