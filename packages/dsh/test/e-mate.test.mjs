@@ -1607,7 +1607,7 @@ test('enterprise identity provider maps target credentials and the production HT
       })
     }
     if (url.pathname.endsWith('/v1/runtime-models')) {
-      assert.equal(url.search, '?client_version=2.0.18')
+      assert.equal(url.search, '?client_version=2.0.18&capabilities=responses-multimodal')
       return json(runtimeResponse)
     }
     if (url.pathname.endsWith('/v1/authenticated-probe')

@@ -433,7 +433,9 @@ function profileCheck(paths) {
     } catch {
       return false
     }
-    return (emptyBundlePatch(patch) || patch.includes(`name: './node_modules/${name}/${packageManifest.main}'`))
+    const entry = packageManifest.dsh?.client?.platform === 'web'
+      ? `name: '${name}'` : `name: './node_modules/${name}/${packageManifest.main}'`
+    return (emptyBundlePatch(patch) || patch.includes(entry))
       && (packageManifest?.dsh?.client === undefined || existsSync(join(root, 'lib', 'client.js')))
   })
   const expectedBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PLUGIN_PACKAGES]
