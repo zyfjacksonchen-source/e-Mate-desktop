@@ -444,3 +444,47 @@ git cherry feat/2.0.18/rc7-tidychat <branch>
 | `feat(imagegen): gate image edits on native review` | **产品淘汰，不得重做** | e-Mate 2.0.18 在 `AGENTS.md:7` 与 `docs/target-contract.md:16` 两处明文要求 `zero image/edit confirmation`；生图工具路径无确认；fork 未把该门接入任何工具；rc7 不引用 `ImageReviewMedia`，2.0.17 工单反向要求"绝不提问" |
 
 **剩余 19 条**待按 13.1 规则逐条手工裁决。
+
+---
+
+## 14. schedule 家族裁决：整体淘汰（6 条，有完整证据链）
+
+### 14.1 能力锚点核查
+
+| 检查项 | 结果 |
+|---|---|
+| 0.1.5 是否有 `dsh.schedule.*.vN` 命名 | **无**（该命名由 fork 引入） |
+| fork 新增 `packages/schedule/schedule/src/admission.ts` | 有，导出 `ScheduleDeliveryAdmission`（进程内单向闸门，等待 launcher 的启动事务提交后放行投递） |
+| 0.1.5 是否已有 admission 概念 | **有**，在 `runtime.ts` 与测试中 |
+| 0.1.5 是否有 fork 没有的 `src/transaction.ts` | **有**（agent 作用域的读写与持久化变更串行化） |
+
+### 14.2 决定性证据：e-Mate 侧零消费
+
+| 检查项 | 结果 |
+|---|---|
+| `ScheduleDeliveryAdmission` / `scheduleDeliveryAdmission` 消费方 | **零** |
+| `protocol_floor` / `protocolFloor` / `dsh.schedule` 协议引用 | **零** |
+| `probation`（试用期语义） | **已从代码库彻底移除**（0 命中） |
+| e-Mate 的 schedule 集成点 | 仅 `cordis.patch.yml` 里装载 `@deepseek-ai/dsh-schedule` + `emate-schedule-import`，以及 `schedule-import.ts` / `agent-operations.ts` / `target-runtime.ts` |
+
+该闸门的**唯一存在理由**是"首启更新处于 probation 时不得运行 Schedule 投递驱动"（见 `docs/target-contract.md` 的 2.0.13 条款）。
+e-Mate 2.0.18 **已经移除了 probation 语义**，因此闸门、降级门禁与协议 floor 全部失去挂载点。
+
+### 14.3 裁决
+
+| 提交 | 裁决 | 理由 |
+|---|---|---|
+| `feat(schedule): gate delivery startup admission` | **淘汰** | 闸门本身；零消费方 |
+| `fix(schedule): honor startup delivery admission` | **淘汰** | 服从闸门；闸门已无 |
+| `test(schedule): make downgrade gate hermetic` | **淘汰** | 降级门禁，服务于协议 floor |
+| `test(schedule): gate built downgrade compatibility` | **淘汰** | 同上 |
+| `fix(schedule): make delivery rollback fail closed` | **淘汰（待一次确认）** | 作用于 fork 自有的 v2 投递协议；e-Mate 无任何 v2 引用。需确认其是否也修 v1/默认路径的持久化缺陷 |
+| `fix(schedule): make reminder delivery crash safe` | **淘汰（待一次确认）** | 同上 |
+
+**重要**：0.1.5 用 `transaction.ts`（agent 作用域串行化）解决了同类问题，设计不同。
+按 e-Mate 自身章程"删除分歧、把调用方导回被固定的原生所有者"，**不得把 fork 的 `admission.ts` + v2 协议键嫁接上去**。
+
+### 14.4 这条同时修正了 13.2 表的读法
+
+13.2 表里这 6 条大多标着"缺失 N/N"，容易被读成"必须重做"。
+**"0.1.5 缺失"只是必要信息，不是充分结论** —— 还要过 13.1 的第 3 步（e-Mate 是否真的消费）。本例中缺的正是 e-Mate 已经不要的东西。
