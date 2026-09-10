@@ -89,9 +89,11 @@ export function registerComputerUseTrigger(ctx: any): void {
     },
     codec: {
       clipboardText: () => '@电脑操控',
+      // The draft keeps the display label; the model form carries the explicit
+      // selection, which is the only durable evidence the Host gate can read.
       serialize: (_ref, signal) => {
         signal.throwIfAborted()
-        return Promise.resolve('@电脑操控')
+        return Promise.resolve('@[电脑操控](computer-use)')
       },
     },
   }

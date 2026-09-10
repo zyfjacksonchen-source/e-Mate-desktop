@@ -125,19 +125,26 @@ exposure = replaceExactlyOnce(
 )
 await writeFile(exposurePath, exposure)
 
-await writeFile(join(root, 'lib/emate-explicit.js'), `const COMPUTER_USE_MENTION = { source: '电脑操控', ref: 'computer-use' }
+await writeFile(join(root, 'lib/emate-explicit.js'), `const COMPUTER_USE_MENTION = '@[电脑操控](computer-use)'
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
-/** Whether the latest direct user request explicitly selected Computer Use. */
+/**
+ * Whether the latest direct user request explicitly selected Computer Use.
+ * rc.1 retires source.mentions: a reference reaches the Host as its owning
+ * source's serialized model form spliced into the prompt text, so the exact
+ * canonical token is the durable evidence of an explicit selection. A bare
+ * typed @电脑操控 stays a plain sentence and never authorizes the tools.
+ */
 export function hasExplicitComputerUseRequest(session) {
-  for (let index = session.events.length - 1; index >= 0; index -= 1) {
-    const event = session.events[index]
+  const events = session.snapshotEvents()
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
     if (event.type !== 'user/message' || event.data.source.kind !== 'user') continue
-    const mentions = event.data.source.mentions
-    return Array.isArray(mentions) && mentions.some(mention => isRecord(mention)
-      && mention.source === COMPUTER_USE_MENTION.source
-      && mention.ref === COMPUTER_USE_MENTION.ref)
+    const content = event.data.content
+    return Array.isArray(content) && content.some(block => isRecord(block)
+      && block.type === 'text' && typeof block.text === 'string'
+      && block.text.includes(COMPUTER_USE_MENTION))
   }
   return false
 }

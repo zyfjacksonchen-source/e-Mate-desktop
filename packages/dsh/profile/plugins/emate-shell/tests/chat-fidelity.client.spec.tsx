@@ -133,9 +133,9 @@ describe('target conversation fidelity contract', () => {
     const node = toolImagesDefinition.buildViewNode?.({
       key: 'receipt:1', id: 'tool-images:call-1', kind: 'e-mate-tool-images', state,
       start: { event, location: { kind: 'unresolved' } }, matches: [], current: new Map(),
-    } as never, 'chat') as { visibility?: string; data?: { item?: { attachment?: unknown } } }
+    } as never, 'chat') as { visibility?: string; data?: { items?: readonly { attachment?: unknown }[] } }
     expect(node.visibility).toBe('hidden')
-    expect(node.data?.item?.attachment).toEqual(attachment)
+    expect(node.data?.items?.[0]?.attachment).toEqual(attachment)
   })
 
   it('brands only target running statuses without rescanning the document during token streaming', async () => {

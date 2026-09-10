@@ -635,7 +635,7 @@ interface MenuState {
 }
 
 interface InputSnapshot {
-  readonly imageIds: readonly string[]
+  readonly attachmentIds: readonly string[]
   readonly phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'
 }
 
@@ -692,7 +692,7 @@ export function draftImageAdmissionError(
   if (input.phase === 'adjudicating' || input.phase === 'submitting') return '当前正在发送消息，请稍后再添加图片。'
   if (limits === undefined) return '当前会话未启用图片附件。'
   if (!limits.mediaTypes.includes(attachment.mediaType)) return '当前会话不支持这种图片格式。'
-  if (input.imageIds.length + 1 > limits.maxImagesPerMessage) return `最多可添加 ${limits.maxImagesPerMessage} 张图片。`
+  if (input.attachmentIds.length + 1 > limits.maxImagesPerMessage) return `最多可添加 ${limits.maxImagesPerMessage} 张图片。`
   if (attachment.bytes > limits.maxImageBytes) return '这张图片超过单张附件大小上限。'
   if (existingBytes + attachment.bytes > limits.maxMessageImageBytes) return '图片附件总大小超过当前消息上限。'
   if (attachment.width * attachment.height > limits.maxImagePixels) return '这张图片的像素尺寸超过上限。'
@@ -772,7 +772,7 @@ export function ImageGalleryView({
   })
   const pages = Math.max(1, Math.ceil(filtered.length / GALLERY_PAGE_SIZE))
   const shown = filtered.slice(page * GALLERY_PAGE_SIZE, (page + 1) * GALLERY_PAGE_SIZE)
-  const existingBytes = draftBytes(input.imageIds)
+  const existingBytes = draftBytes(input.attachmentIds)
 
   useEffect(() => { setPage(0) }, [sessionId, query, status, operation, datasetKey])
 
@@ -1124,7 +1124,7 @@ function ArtifactTerminalBody({
     [batches, batchChildIds, matched.callIds, matched.childSessionIds, matched.foregroundWindow, nodes, sessionId, sessions, settled, title, turn.turn],
   )
   const seenFailures = useRef(new Set<string>())
-  const existingBytes = draftBytes(input.imageIds)
+  const existingBytes = draftBytes(input.attachmentIds)
   const closeMenu = (restoreFocus = false): void => {
     const origin = menuOrigin.current
     setMenu(null)

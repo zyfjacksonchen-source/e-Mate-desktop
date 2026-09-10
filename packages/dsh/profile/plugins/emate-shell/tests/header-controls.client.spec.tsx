@@ -273,9 +273,11 @@ describe('desktop header controls', () => {
 
   it('hides resident Session header chrome throughout standalone product routes', async () => {
     type RootProps = PropsRenderSlots<'conversation.session.header'>
+    // 0.1.5's SessionProvider takes a plain ReactNode child; the 0.1.0
+    // render-prop function child is no longer accepted.
     const Root = ({ renderSlot, SessionProvider }: RootProps) => (
       <SessionProvider empty={() => null}>
-        {() => renderSlot('conversation.session.header', {})}
+        {renderSlot('conversation.session.header', {})}
       </SessionProvider>
     )
     const runtime = await SlotTestRuntime.create()

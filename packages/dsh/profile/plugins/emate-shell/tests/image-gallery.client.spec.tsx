@@ -202,7 +202,7 @@ function terminalProps(
     openFile: vi.fn(),
     useSession: (selector: (value: unknown) => unknown) => selector({ chat: chatNodeFixture(nodes) }),
     useSessions: (selector: (value: unknown) => unknown) => selector({ byId: { 'session-1': { cwd: '/work' } } }),
-    useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
+    useInput: (selector: (value: unknown) => unknown) => selector({ attachmentIds: [], phase: 'plain' }),
     useProjection: projectionHook(),
     loadImage: vi.fn(async () => 'blob:image'),
     addImageToDraft: vi.fn(async () => {}),
@@ -216,7 +216,7 @@ function terminalProps(
             ? createElement(NativeMessageImage as never, {
                 key: index, image, load: owner.loadImage, variant: 'tile', labels: slotLabels,
               } as never)
-            : mockMessageImage({ key: index, image, labels: slotLabels } as never))
+            : createElement(mockMessageImage as never, { key: index, image, labels: slotLabels } as never))
         : null) as never,
     ...overrides,
   }
@@ -254,7 +254,7 @@ function galleryProps(
     useSessions: (selector: (value: unknown) => unknown) => selector({
       byId: { [sessionId]: {} }, subagentsByParent: {},
     }),
-    useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
+    useInput: (selector: (value: unknown) => unknown) => selector({ attachmentIds: [], phase: 'plain' }),
     useProjection: projectionHook(),
     loadImage: vi.fn(async () => 'blob:image'),
     addImageToDraft: vi.fn(async () => {}),
@@ -268,7 +268,7 @@ function galleryProps(
             ? createElement(NativeMessageImage as never, {
                 key: index, image, load: owner.loadImage, variant: 'tile', labels: slotLabels,
               } as never)
-            : mockMessageImage({ key: index, image, labels: slotLabels } as never))
+            : createElement(mockMessageImage as never, { key: index, image, labels: slotLabels } as never))
         : null) as never,
     ...overrides,
   }
@@ -282,18 +282,18 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
   let phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting' = 'plain'
   let injected: any
   const readAttachment = vi.fn(() => new Promise(resolve => { pendingReads.push(resolve) }))
-  const addImages = vi.fn((ids: readonly string[]) => {
+  const addAttachments = vi.fn((ids: readonly string[]) => {
     if (!acceptImages) return false
     imageIds = [...imageIds, ...ids]
     return true
   })
-  const releaseDraftImages = vi.fn((images: readonly { id: string }[]) => {
-    for (const image of images) drafts.delete(image.id)
+  const releaseDraftAttachments = vi.fn((attachments: readonly { id: string }[]) => {
+    for (const item of attachments) drafts.delete(item.id)
   })
   const shell = {
-    state: { getSnapshot: () => ({ draft, imageIds, phase }) },
+    state: { getSnapshot: () => ({ draft, attachmentIds: imageIds, phase }) },
     setDraft: vi.fn((value: string) => { draft = value }),
-    addImages,
+    addAttachments,
     notify: vi.fn(),
   }
   const notice = vi.fn()
@@ -314,28 +314,29 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
       open: vi.fn(),
     },
     conversation: {
-      resolveImage: vi.fn(async () => 'blob:image'),
       input: { for: () => shell },
-      createDraftImages: vi.fn((files: readonly File[]) => files.map((file) => {
+      createDrafts: vi.fn((_sessionId: string, files: readonly File[]) => files.map((file) => {
         const draft = { id: `draft-${drafts.size + 1}`, file }
         drafts.set(draft.id, draft)
         return draft
       })),
-      draftImages: (ids: readonly string[]) => ids.flatMap(id => {
+      resolveDraftAttachments: (ids: readonly string[]) => ids.flatMap(id => {
         const draft = drafts.get(id)
         return draft === undefined ? [] : [draft]
       }),
-      releaseDraftImages,
+      releaseDraftAttachments,
     },
+    // 0.1.5 moved the session-scoped durable image URL cache to uiConversation.
+    uiConversation: { imageUrl: vi.fn(async () => 'blob:image') },
   }
   registerImageGallery(ctx, notice)
   return {
     injected,
     binding,
     readAttachment,
-    addImages,
-    createDraftImages: ctx.conversation.createDraftImages,
-    releaseDraftImages,
+    addAttachments,
+    createDrafts: ctx.conversation.createDrafts,
+    releaseDraftAttachments,
     shell,
     notice,
     imageIds: () => imageIds,
@@ -706,7 +707,7 @@ describe('completed artifact terminal', () => {
     await adding
 
     expect(harness.binding.mock.calls.map(call => call[0])).toEqual(['session-gallery', 'child-owner'])
-    expect(harness.addImages).toHaveBeenCalledOnce()
+    expect(harness.addAttachments).toHaveBeenCalledOnce()
     expect(harness.notice).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
   })
 
@@ -818,16 +819,16 @@ describe('completed artifact terminal', () => {
     fireEvent.click(add)
     fireEvent.click(add)
     expect(harness.readAttachment).toHaveBeenCalledTimes(2)
-    expect(harness.addImages).not.toHaveBeenCalled()
+    expect(harness.addAttachments).not.toHaveBeenCalled()
     harness.resolveReads()
 
     await waitFor(() => {
       expect(harness.notice).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
       expect(harness.notice).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
     })
-    expect(harness.addImages).toHaveBeenCalledTimes(1)
-    expect(harness.createDraftImages).toHaveBeenCalledTimes(1)
-    expect(harness.createDraftImages.mock.calls[0]?.[0]?.[0]?.name).toBe(name)
+    expect(harness.addAttachments).toHaveBeenCalledTimes(1)
+    expect(harness.createDrafts).toHaveBeenCalledTimes(1)
+    expect(harness.createDrafts.mock.calls[0]?.[1]?.[0]?.name).toBe(name)
     expect(harness.imageIds()).toHaveLength(1)
     expect(harness.notice).toHaveBeenCalledTimes(2)
     expect(harness.shell.notify).not.toHaveBeenCalled()
@@ -841,9 +842,9 @@ describe('completed artifact terminal', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加到聊天：result.png' }))
     harness.resolveReads()
 
-    await waitFor(() => { expect(harness.releaseDraftImages).toHaveBeenCalledTimes(1) })
-    expect(harness.addImages).toHaveBeenCalledTimes(1)
-    expect(harness.releaseDraftImages).toHaveBeenCalledWith(harness.createDraftImages.mock.results[0]?.value)
+    await waitFor(() => { expect(harness.releaseDraftAttachments).toHaveBeenCalledTimes(1) })
+    expect(harness.addAttachments).toHaveBeenCalledTimes(1)
+    expect(harness.releaseDraftAttachments).toHaveBeenCalledWith(harness.createDrafts.mock.results[0]?.value)
     expect(harness.draftCount()).toBe(0)
     expect(harness.notice).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
     expect(harness.shell.notify).not.toHaveBeenCalled()
@@ -1188,7 +1189,7 @@ describe('completed artifact terminal', () => {
   it('fails closed for busy or full drafts', () => {
     const completed = parseImageOutputReceipt(receipt())!
     const busy = terminalProps([hidden(completed)], undefined, {
-      useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'submitting' }),
+      useInput: (selector: (value: unknown) => unknown) => selector({ attachmentIds: [], phase: 'submitting' }),
     })
     render(<ArtifactTerminal {...busy as never} />)
     fireEvent.click(screen.getByRole('button', { name: '图片操作：result.png' }))
@@ -1198,7 +1199,7 @@ describe('completed artifact terminal', () => {
 
     cleanup()
     const full = terminalProps([hidden(completed)], undefined, {
-      useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: Array(20).fill('draft'), phase: 'plain' }),
+      useInput: (selector: (value: unknown) => unknown) => selector({ attachmentIds: Array(20).fill('draft'), phase: 'plain' }),
     })
     render(<ArtifactTerminal {...full as never} />)
     fireEvent.click(screen.getByRole('button', { name: '图片操作：result.png' }))
@@ -1269,7 +1270,7 @@ describe('completed artifact terminal', () => {
     expect(apply).toContain('owner.readAttachment(attachment.attachmentId)')
     expect(apply).not.toMatch(/\bfetch\s*\(/u)
     expect(apply).not.toContain('ctx.conversation.input.for(scope).notify')
-    expect(apply).toContain('releaseDraftImages(images)')
+    expect(apply).toContain('releaseDraftAttachments(drafts)')
   })
 })
 

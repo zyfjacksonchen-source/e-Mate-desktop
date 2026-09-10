@@ -5,7 +5,6 @@ import { Context } from '@deepseek-ai/cordis'
 import { createScope } from '@deepseek-ai/dsh-api-session-controller/client'
 import { InputTriggerController } from '../../../../../../upstream/deepseek-harness/packages/client/ui-input-trigger/src/client/controller.ts'
 import { SessionInputShell } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
-import { deriveDecorations } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/decorations.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from '../src/client/composer-mentions.ts'
 
@@ -290,7 +289,9 @@ it.each(['darwin', 'win32'])('native %s pick inserts and submits a selected CU r
     const ctx = new Context(), scope = createScope(ctx, `cu-${platform}-${state}` as never)
     const controller = new InputTriggerController({ actx: scope.ctx, sessionId: `cu-${platform}-${state}` as never,
       roster: { sources: trigger => sources.filter(source => source.trigger === trigger), all: () => sources } })
-    const sent = vi.fn(), input = new SessionInputShell({ actx: scope.ctx, inputTriggers: () => controller, defaultSink: sent })
+    // The shell's sink is a settlement promise; a bare vi.fn() starves it.
+    const sent = vi.fn(async () => ({ kind: 'success' as const })),
+      input = new SessionInputShell({ actx: scope.ctx, inputTriggers: () => controller, defaultSink: sent })
     const off = scope.ctx.on('slash/input-insert-reference', req => input.insertReference(req.reference, req.span) ? true : undefined)
     const call = vi.fn(async (_channel: string, endpoint: string, _data: unknown, _signal: AbortSignal) => endpoint === 'list'
       ? { ok: true, value: { items: [{ id: 'computer-use', state: state === 'os-setup' ? 'setup-required' : state,
@@ -314,7 +315,7 @@ it.each(['darwin', 'win32'])('native %s pick inserts and submits a selected CU r
         }, expect.any(AbortSignal)))
         else expect(call).toHaveBeenCalledOnce()
         expect(input.state.getSnapshot().draft).toBe(initial.draft)
-        expect(input.state.getSnapshot().imageIds).toEqual(initial.imageIds)
+        expect(input.state.getSnapshot().attachmentIds).toEqual(initial.attachmentIds)
         expect(input.state.getSnapshot().occurrences).toEqual([])
         expect(sent).not.toHaveBeenCalled()
         continue
@@ -323,13 +324,20 @@ it.each(['darwin', 'win32'])('native %s pick inserts and submits a selected CU r
       if (state === 'setup-required') expect(candidate.description).toContain('实际操作仍需原生应用授权')
       controller.pick('电脑操控', 0)
       const selected = input.state.getSnapshot()
-      expect(selected.draft).toBe('请保留正文 \ufffc 后续文字')
-      expect(selected.imageIds).toEqual(['attachment-image', 'attachment-file'])
-      expect(selected.occurrences).toMatchObject([{ source: '电脑操控', ref: 'computer-use', selected: true }])
-      expect(deriveDecorations(selected).chips).toMatchObject([{ label: '@电脑操控', invalid: false }])
+      // 0.1.5 keeps the draft as the clipboard projection: a chip expands to
+      // its canonical text and the display label lives in the chip decorator.
+      expect(selected.draft).toBe('请保留正文 @电脑操控 后续文字')
+      expect(selected.attachmentIds).toEqual(['attachment-image', 'attachment-file'])
+      expect(selected.occurrences).toMatchObject([{ source: '电脑操控', ref: 'computer-use', label: '@电脑操控' }])
+      // rc.1 renders the chip from the occurrence itself; the 0.1.0
+      // decoration derivation is gone and an unresolved owner flips `invalid`.
+      expect(selected.occurrences[0]?.invalid).toBeUndefined()
       input.actions.submit()
       await vi.waitFor(() => expect(sent).toHaveBeenCalledOnce())
-      expect(sent).toHaveBeenCalledWith('请保留正文 @电脑操控 后续文字', ['attachment-image', 'attachment-file'], 'queue', [{ source: '电脑操控', ref: 'computer-use' }])
+      // rc.1 splices the owning source's serialized model form into the prompt
+      // text; the retired mentions channel no longer rides the sink.
+      expect(sent).toHaveBeenCalledWith('请保留正文 @[电脑操控](computer-use) 后续文字',
+        ['attachment-image', 'attachment-file'], 'queue', expect.any(AbortSignal))
       expect(call.mock.calls).toHaveLength(1) // insertion is intent; no grant/settings action was requested
 
       // Verify the delivered source/ref against the actual Host explicit gate,
@@ -338,10 +346,12 @@ it.each(['darwin', 'win32'])('native %s pick inserts and submits a selected CU r
       const start = builder.indexOf('`const COMPUTER_USE_MENTION') + 1
       const end = builder.indexOf('const DIRECT_AUTOMATION', start)
       const gate = new Function('session', builder.slice(start, end).replaceAll('export function ', 'function ') + '\nreturn hasExplicitComputerUseRequest(session)')
-      const event = { type: 'user/message', data: { source: { kind: 'user', mentions: sent.mock.calls[0][3] } } }
-      expect(gate({ events: [event] })).toBe(true)
-      expect(gate({ events: [{ type: 'user/message', data: { source: { kind: 'user' }, content: '@电脑操控' } }] })).toBe(false)
-      expect(gate({ events: [event, { type: 'user/message', data: { source: { kind: 'user' } } }] })).toBe(false)
+      const userMessage = (text: string) => ({ type: 'user/message',
+        data: { source: { kind: 'user' }, content: [{ type: 'text', text }] } })
+      const event = userMessage(sent.mock.calls[0]![0] as string)
+      expect(gate({ snapshotEvents: () => [event] })).toBe(true)
+      expect(gate({ snapshotEvents: () => [userMessage('@电脑操控 读取当前应用')] })).toBe(false)
+      expect(gate({ snapshotEvents: () => [event, userMessage('下一轮普通请求')] })).toBe(false)
     } finally { off(); input.dispose(); controller.dispose(); await scope.fiber.dispose() }
   }
 })

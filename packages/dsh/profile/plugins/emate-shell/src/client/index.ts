@@ -62,8 +62,8 @@ import { ThinkingStatusBranding } from './thinking-status.tsx'
 import { registerPetTaskDetails } from './task-details.tsx'
 
 export const inject = [
-  'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
-  'sessionLogDownload', 'inputTriggers', 'remote', 'remote.commands', 'settingsScope',
+  'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'uiConversation', 'conversationEvents',
+  'theme', 'sessionLogDownload', 'inputTriggers', 'remote', 'remote.commands', 'settingsScope',
 ]
 
 const desktopUpdateBridge = (): DesktopUpdateTriggerBridge | undefined =>
@@ -81,11 +81,11 @@ export function registerSessionShare(ctx: any): void {
 type GalleryNotice = (level: 'info' | 'error', text: string) => void
 
 function imageGalleryInjected(ctx: any, sessionId: string, notice: GalleryNotice) {
-  const draftBytes = (ids: readonly string[]) => ctx.conversation.draftImages(ids)
+  const draftBytes = (ids: readonly string[]) => ctx.conversation.resolveDraftAttachments(ids)
     .reduce((sum: number, image: any) => sum + image.file.size, 0)
   return {
     loadImage: (attachment: any, ownerSessionId = sessionId) =>
-      ctx.conversation.resolveImage(ownerSessionId, attachment),
+      ctx.uiConversation.imageUrl(ownerSessionId, attachment),
     addImageToCanvas: async (attachment: any, ownerSessionId = sessionId) => {
       const canvas = ctx.get('emateCanvas')
       if (!canvas) throw new Error('画布尚未就绪，请稍后重试。')
@@ -109,17 +109,17 @@ function imageGalleryInjected(ctx: any, sessionId: string, notice: GalleryNotice
       const shell = ctx.conversation.input.for(scope)
       const input = shell.state.getSnapshot()
       const limits = target.projections.faceOf('imageLimits').getSnapshot()
-      const error = draftImageAdmissionError(attachment, input, limits, draftBytes(input.imageIds))
+      const error = draftImageAdmissionError(attachment, input, limits, draftBytes(input.attachmentIds))
       if (error !== undefined) throw new Error(error)
-      const images = ctx.conversation.createDraftImages([
+      const drafts = ctx.conversation.createDrafts(sessionId, [
         new File([bytes.buffer], galleryAttachmentName(attachment), { type: attachment.mediaType }),
       ])
       try {
-        if (!shell.addImages(images.map((image: any) => image.id))) {
+        if (!shell.addAttachments(drafts.map((draft: any) => draft.id))) {
           throw new Error('当前正在发送消息，请稍后再添加图片。')
         }
       } catch (error) {
-        ctx.conversation.releaseDraftImages(images)
+        ctx.conversation.releaseDraftAttachments(drafts)
         throw error
       }
       notice('info', '图片已添加到聊天草稿。')

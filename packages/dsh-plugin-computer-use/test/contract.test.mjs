@@ -171,26 +171,30 @@ test('Computer Use projects cached native readiness and permission actions throu
 })
 
 test('Computer Use authorization expires before the next direct user request', () => {
-  const message = (text, mentions) => ({
+  const history = events => ({ snapshotEvents: () => events })
+  const message = text => ({
     type: 'user/message',
-    data: { source: { kind: 'user', ...(mentions === undefined ? {} : { mentions }) }, content: [{ type: 'text', text }] },
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text }] },
   })
-  const selected = [{ source: '电脑操控', ref: 'computer-use' }]
-  assert.equal(hasExplicitComputerUseRequest({ events: [] }), false)
-  assert.equal(hasExplicitComputerUseRequest({ events: [message('普通请求')] }), false)
-  assert.equal(hasExplicitComputerUseRequest({ events: [message('@电脑操控 读取当前应用')] }), false)
-  assert.equal(hasExplicitComputerUseRequest({ events: [message('请解释文本 @电脑操控 的含义')] }), false)
-  assert.equal(hasExplicitComputerUseRequest({ events: [message('@电脑操控 读取当前应用', selected)] }), true)
-  assert.equal(hasExplicitComputerUseRequest({ events: [message('引用历史 @电脑操控')] }), false)
+  // rc.1 retires source.mentions: the selected reference reaches the Host as the
+  // owning source's serialized model form inside the prompt text.
+  const selected = '@[电脑操控](computer-use)'
+  assert.equal(hasExplicitComputerUseRequest(history([])), false)
+  assert.equal(hasExplicitComputerUseRequest(history([message('普通请求')])), false)
+  assert.equal(hasExplicitComputerUseRequest(history([message('@电脑操控 读取当前应用')])), false)
+  assert.equal(hasExplicitComputerUseRequest(history([message('请解释文本 @电脑操控 的含义')])), false)
+  assert.equal(hasExplicitComputerUseRequest(history([message(`${selected} 读取当前应用`)])), true)
+  assert.equal(hasExplicitComputerUseRequest(history([message('引用历史 @电脑操控')])), false)
   assert.equal(hasExplicitComputerUseRequest({
-    events: [{ type: 'user/message', data: { source: { kind: 'plugin', mentions: selected }, content: [] } }],
+    snapshotEvents: () => [{ type: 'user/message', data: { source: { kind: 'plugin' }, content: [{ type: 'text', text: selected }] } }],
   }), false)
   assert.equal(hasExplicitComputerUseRequest({
-    events: [
-      message('@电脑操控 读取当前应用', selected),
-      message('下一轮普通请求'),
-    ],
+    snapshotEvents: () => [{ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'image', attachment: {} }] } }],
   }), false)
+  assert.equal(hasExplicitComputerUseRequest(history([
+    message(`${selected} 读取当前应用`),
+    message('下一轮普通请求'),
+  ])), false)
 })
 
 test('desktop automation bypass guard is narrow', () => {
