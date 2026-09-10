@@ -2,8 +2,8 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ProjectionValueStore } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/projection-store.ts'
-import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
+import { ProjectionValueStore } from '../../../../../../upstream/deepseek-harness/packages/api/session-controller/src/client/sessions/projection-store.ts'
+import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import { createImageBatchProjectionSelector, useImageBatchProjection } from '../src/client/image-batch-client.ts'
 import { selectArtifactTerminal } from '../src/client/image-gallery.tsx'
 

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createScope } from '@deepseek-ai/dsh-client-runtime/client'
+import { createScope } from '@deepseek-ai/dsh-api-session-controller/client'
 import { InputTriggerController } from '../../../../../../upstream/deepseek-harness/packages/client/ui-input-trigger/src/client/controller.ts'
 import { SessionInputShell } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
 import { deriveDecorations } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/decorations.ts'

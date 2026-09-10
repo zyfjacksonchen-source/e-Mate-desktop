@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { AssistantMarkdown } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/chat/AssistantMarkdown.tsx'
+import { AssistantMarkdown } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx'
 import { installDomFenceRenderer } from '../../../../../../upstream/plugins/dsh-genui/src/client/dom-fence.tsx'
 import { toolImagesDefinition } from '../src/client/image-gallery.tsx'
 import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
@@ -24,9 +24,9 @@ const chatCss = readFileSync(resolve('src/client/chat-chrome.module.css'), 'utf8
 const thinkingCss = readFileSync(resolve('src/client/thinking-status.module.css'), 'utf8')
 const homeCss = readFileSync(resolve('src/client/home.module.css'), 'utf8')
 const targetRoot = resolve('../../../../../upstream/deepseek-harness/packages/client')
-const targetMessage = readFileSync(resolve(targetRoot, 'ui-conversation/src/client/chat/MessageItem.tsx'), 'utf8')
-const targetAssistant = readFileSync(resolve(targetRoot, 'ui-conversation/src/client/chat/AssistantMarkdown.tsx'), 'utf8')
-const targetChat = readFileSync(resolve(targetRoot, 'ui-conversation/src/client/chat/ChatView.tsx'), 'utf8')
+const targetMessage = readFileSync(resolve(targetRoot, 'ui-chat/src/client/chat/MessageItem.tsx'), 'utf8')
+const targetAssistant = readFileSync(resolve(targetRoot, 'ui-chat/src/client/chat/AssistantMarkdown.tsx'), 'utf8')
+const targetChat = readFileSync(resolve(targetRoot, 'ui-chat/src/client/chat/ChatView.tsx'), 'utf8')
 const targetTool = readFileSync(resolve(targetRoot, 'ui-tool/src/client/tool/components/ToolRow.tsx'), 'utf8')
 const targetImages = readFileSync(resolve(targetRoot, 'ui-attachment/src/MessageImage.tsx'), 'utf8')
 const targetLightbox = readFileSync(resolve(targetRoot, 'ui-attachment/src/ImageLightbox.tsx'), 'utf8')

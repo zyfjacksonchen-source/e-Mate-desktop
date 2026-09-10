@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
-import { ConversationNodeAssembler } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/conversation-assembler.ts'
+import { ConversationNodeAssembler } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation/assembler.ts'
 import { toolDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/tool.ts'
 import { turnTailDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/turn-tail.ts'
 import { chatViewDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/chat-snapshot-builder.ts'

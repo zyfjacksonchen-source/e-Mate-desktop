@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import * as SessionLogExport from '../../../../../../upstream/deepseek-harness/packages/session-query/session-log-export/src/client/index.ts'
 import { inject, registerSessionShare } from '../src/client/index.ts'
 import { HiddenSessionLogExport, SessionShareAction } from '../src/client/session-share.tsx'

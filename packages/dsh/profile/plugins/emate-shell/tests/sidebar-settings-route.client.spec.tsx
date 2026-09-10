@@ -291,6 +291,11 @@ function nativePetSettingsSidebar(beforeNavigate?: () => Promise<void> | undefin
     return <NativeSettingsRoot wide
       useSections={select => select([{ id: 'profile', label: '个人资料' }, { id: 'appearance-motion', label: '小芯与动态效果' }, { id: 'general', label: '通用设置' }])}
       useOnboardingSteps={select => select([])} useSessions={select => select(sessionState as never)}
+      useConnectionState={select => select('connected' as never)}
+      // 0.1.5 SettingsRoot also reads the locale seat and the reconnect action.
+      // This spec asserts sidebar navigation, not connection copy.
+      reconnect={() => {}}
+      t={(key: string) => key}
       renderSlot={(name, _props, options) => name === 'settings.trigger' ? <SettingsTrigger wide SettingsIcon={Icon} beforeNavigate={beforeNavigate} />
         : name === 'settings.header' ? <SettingsChrome /> : name === 'settings.close' ? <SettingsCloseLabel />
           : name === 'settings.section' ? <p data-native-section={options?.only}>{options?.only} 内容</p> : null} />
