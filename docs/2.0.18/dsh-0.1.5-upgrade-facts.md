@@ -224,3 +224,92 @@ git cherry feat/2.0.18/rc7-tidychat <branch>
 4. 之后才更新 `harness-provenance.mjs` 的 `DESKTOP_OVERLAYS` 路径名。
 
 **顺序不可颠倒**：先改引用名会指向内容已不适用的补丁，形成静默坏构建。
+
+---
+
+## 11. desktop 依赖面迁移图（rc.7 → 0.1.5，实测生成）
+
+来源：`desktop/e-mate-desktop/package.json` 的依赖 vs `vendor/dsh-runtime/0.1.5-rc.1/manifest.json` 供应 vs 上游 `dsh-plugin-desktop/package.json`。
+
+| 项 | 数量 |
+|---|---|
+| e-Mate desktop 声明的 dsh 依赖 | 101 |
+| 上游 0.1.5 desktop 声明的 dsh 依赖 | 135 |
+| 0.1.5 供应包总数 | 265 |
+
+### 11.1 必须改名或删除（e-Mate 声明，0.1.5 已无此包）
+
+| 包 | 上游 0.1.5 的对应物 |
+|---|---|
+| `@deepseek-ai/dsh-client-runtime` | 疑似 @deepseek-ai/dsh-client-store（待按实际消费确认） |
+| `@deepseek-ai/dsh-client-schema-form` | 0.1.5 无同名包（疑似并入 client-ui-primitives） |
+| `@deepseek-ai/dsh-client-web-react` | 疑似 @deepseek-ai/dsh-client-web |
+| `@deepseek-ai/dsh-host-apiproxy` | 疑似 @deepseek-ai/dsh-http-proxy |
+
+### 11.2 e-Mate 独有、上游 desktop 未声明（5 个）
+
+- `@deepseek-ai/dsh-client-runtime`
+- `@deepseek-ai/dsh-client-schema-form`
+- `@deepseek-ai/dsh-client-web-react`
+- `@deepseek-ai/dsh-host-apiproxy`
+- `@deepseek-ai/dsh-schedule`
+
+### 11.3 0.1.5 新增、e-Mate 尚未声明（39 个）
+
+- `@deepseek-ai/dsh-agent-instructions`
+- `@deepseek-ai/dsh-agent-loop`
+- `@deepseek-ai/dsh-api-session-controller`
+- `@deepseek-ai/dsh-api-settings-controller`
+- `@deepseek-ai/dsh-api-workspace-controller`
+- `@deepseek-ai/dsh-authorization`
+- `@deepseek-ai/dsh-client-file-upload`
+- `@deepseek-ai/dsh-client-store`
+- `@deepseek-ai/dsh-client-ui-approval`
+- `@deepseek-ai/dsh-client-ui-chat`
+- `@deepseek-ai/dsh-client-ui-renderer`
+- `@deepseek-ai/dsh-client-ui-session`
+- `@deepseek-ai/dsh-client-ui-trajectory`
+- `@deepseek-ai/dsh-deepseek-llm-api-extensions`
+- `@deepseek-ai/dsh-file-reference`
+- `@deepseek-ai/dsh-goal-round-driver`
+- `@deepseek-ai/dsh-hook-protocol`
+- `@deepseek-ai/dsh-http-proxy`
+- `@deepseek-ai/dsh-jobs-local`
+- `@deepseek-ai/dsh-llm-deepseek`
+- `@deepseek-ai/dsh-mcp-client`
+- `@deepseek-ai/dsh-native-command`
+- `@deepseek-ai/dsh-sandbox-local`
+- `@deepseek-ai/dsh-sdk-protocol`
+- `@deepseek-ai/dsh-session-persistence-jsonl`
+- `@deepseek-ai/dsh-session-reference`
+- `@deepseek-ai/dsh-subprocess-local`
+- `@deepseek-ai/dsh-terminal-bash`
+- `@deepseek-ai/dsh-tool-bash`
+- `@deepseek-ai/dsh-tool-goal`
+- `@deepseek-ai/dsh-tool-jobs`
+- `@deepseek-ai/dsh-tool-pwsh-persistent`
+- `@deepseek-ai/dsh-tool-skill`
+- `@deepseek-ai/dsh-tool-todo`
+- `@deepseek-ai/dsh-util-crypto`
+- `@deepseek-ai/dsh-util-time`
+- `@deepseek-ai/dsh-util-values`
+- `@deepseek-ai/dsh-util-workspace-path`
+- `@deepseek-ai/dsh-webhook`
+
+### 11.4 框架版本（必须跟上游）
+
+| 包 | e-Mate 现用 | 上游 0.1.5 |
+|---|---|---|
+| `@deepseek-ai/cordis` | 4.0.1 | 4.0.2 |
+| `@deepseek-ai/cordis-plugin-group` | 1.0.1 | 1.0.2 |
+| `@deepseek-ai/cordis-plugin-include` | 1.0.6 | 1.0.7 |
+| `@deepseek-ai/cordis-plugin-loader` | 1.0.2 | 1.0.3 |
+| `@deepseek-ai/cordis-plugin-timer` | 1.1.3 | 1.1.4 |
+| `@deepseek-ai/schemastery` | 3.18.1 | ^3.18.2 |
+
+### 11.5 结论
+
+- 依赖面不是"改个版本号"：**4 个包要改名/删除，39 个包要新增**。
+- `@deepseek-ai/dsh-client-ui-trajectory` 出现在上游 0.1.5 的 desktop 依赖里 —— 与"还原原生工具调用链"直接呼应。
+- 新增项含 client-ui-chat / client-file-upload / mcp-client / tool-skill / jobs-local / session-persistence-jsonl，是"原生优先替换"的候选来源。
+- 改名必须与 harness 子模块重定基同步落地，否则 npm 声明与本地构建 runtime 不一致，`verify-desktop` 会失败。
