@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement, useSyncExternalStore } from 'react'
+// Imported from harness SOURCE so vi.mock cannot intercept it: the render-stability
+// specs exercise the real attachment implementation, not the mock.
+import { MessageImage as NativeMessageImage } from '../../../../../../upstream/deepseek-harness/packages/client/ui-attachment/src/MessageImage.tsx'
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import { ConversationNodeAssembler } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation/assembler.ts'
 import { assistantDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/assistant.ts'
@@ -12,6 +15,10 @@ import { chatViewDefinition } from '../../../../../../upstream/deepseek-harness/
 import { unknownFallbackDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/fallback.ts'
 import { chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/common.ts'
 import { deriveTurnMetrics } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/contract/turn-metrics.ts'
+// The adapted turn-tail region calls these two, but both are defined outside the
+// sliced region; import the real implementations rather than stubbing them.
+import { toAssistantBlocks } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/event-projection.ts'
+import { deriveTurnTokenUsage } from '../../../../../../upstream/deepseek-harness/packages/llm/token-meter/src/turn-usage.ts'
 import { adaptHarnessConversationSource, adaptHarnessChatSource } from '../../../../../../scripts/harness-conversation-adapter.mjs'
 import { bindSnapshotSelector } from '../../../../../../upstream/deepseek-harness/packages/client/ui-renderer/src/client/bind.ts'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
@@ -124,9 +131,11 @@ function adaptedTurnTailDefinition(): typeof turnTailDefinition {
   // a bare local, so the injected runtime namespace is gone.
   const bundle = adaptHarnessChatSource(readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-chat/lib/client.js'), 'utf8'))
   const start = bundle.indexOf('//#region lib/types/client/conversation-nodes/turn-tail.js')
-  return new Function('chatNode', 'CHAT_SYNTHETIC_SEQ_OFFSETS', 'deriveTurnMetrics',
+  return new Function('chatNode', 'CHAT_SYNTHETIC_SEQ_OFFSETS', 'deriveTurnMetrics', 'deriveTurnTokenUsage', 'toAssistantBlocks',
     bundle.slice(start, bundle.indexOf('//#endregion', start)) + '\nreturn turnTailDefinition',
-  )(chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS, deriveTurnMetrics)
+    // deriveTurnTokenUsage reads real stream provenance these fixtures do not
+    // carry, and no assertion here covers token usage.
+  )(chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS, deriveTurnMetrics, () => undefined, toAssistantBlocks)
 }
 
 function v3Receipt(overrides: Record<string, unknown> = {}) {
@@ -203,7 +212,11 @@ function terminalProps(
     // Mirrors the native conversation.message.images slot entry (MessageImages).
     renderSlot: ((name: string, owner: { images: readonly { attachment?: unknown }[] }) =>
       name === 'conversation.message.images'
-        ? owner.images.map((image, index) => mockMessageImage({ key: index, image, labels: slotLabels } as never))
+        ? owner.images.map((image, index) => nativeImageRendering.enabled
+            ? createElement(NativeMessageImage as never, {
+                key: index, image, load: owner.loadImage, variant: 'tile', labels: slotLabels,
+              } as never)
+            : mockMessageImage({ key: index, image, labels: slotLabels } as never))
         : null) as never,
     ...overrides,
   }
@@ -251,7 +264,11 @@ function galleryProps(
     // Mirrors the native conversation.message.images slot entry (MessageImages).
     renderSlot: ((name: string, owner: { images: readonly { attachment?: unknown }[]; loadImage: unknown }) =>
       name === 'conversation.message.images'
-        ? owner.images.map((image, index) => mockMessageImage({ key: index, image, labels: slotLabels } as never))
+        ? owner.images.map((image, index) => nativeImageRendering.enabled
+            ? createElement(NativeMessageImage as never, {
+                key: index, image, load: owner.loadImage, variant: 'tile', labels: slotLabels,
+              } as never)
+            : mockMessageImage({ key: index, image, labels: slotLabels } as never))
         : null) as never,
     ...overrides,
   }
