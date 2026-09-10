@@ -1,0 +1,3132 @@
+{
+ "base": "6a7f4b9d59a1d8970345638946fb6564e2f5f93e",
+ "head": "3cc4be844607d4f11a4aa5d832a41c9c2dc33825",
+ "total": 411,
+ "fixes": 236,
+ "withGuard": 218,
+ "withoutGuard": 18,
+ "guardFiles": [
+  "desktop/e-mate-desktop/scripts/candidate-promotion-worker.test.mjs",
+  "desktop/e-mate-desktop/scripts/candidate-update-worker.test.mjs",
+  "desktop/e-mate-desktop/scripts/prepare-calc-runtime.spec.mjs",
+  "desktop/e-mate-desktop/scripts/prepare-python-runtime.spec.mjs",
+  "desktop/e-mate-desktop/scripts/verify-update-acceptance.test.mjs",
+  "desktop/e-mate-desktop/tests/agent-update.spec.ts",
+  "desktop/e-mate-desktop/tests/client-environment.spec.ts",
+  "desktop/e-mate-desktop/tests/desktop-release-manifest.spec.ts",
+  "desktop/e-mate-desktop/tests/desktop-runtime-environment.spec.ts",
+  "desktop/e-mate-desktop/tests/e-mate-profile-win.spec.ts",
+  "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts",
+  "desktop/e-mate-desktop/tests/electron-runtime.spec.ts",
+  "desktop/e-mate-desktop/tests/file-viewer.spec.ts",
+  "desktop/e-mate-desktop/tests/mac-update-installer.spec.ts",
+  "desktop/e-mate-desktop/tests/package.spec.ts",
+  "desktop/e-mate-desktop/tests/profile-release.spec.ts",
+  "desktop/e-mate-desktop/tests/relaunch-arguments.spec.ts",
+  "desktop/e-mate-desktop/tests/shutdown.spec.ts",
+  "desktop/e-mate-desktop/tests/update-checker.spec.ts",
+  "desktop/e-mate-desktop/tests/update-download.spec.ts",
+  "desktop/e-mate-desktop/tests/updates.spec.ts",
+  "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts",
+  "desktop/e-mate-desktop/tests/visualize.spec.ts",
+  "desktop/e-mate-desktop/tests/window-options.spec.ts",
+  "desktop/e-mate-desktop/tests/windows-update-installer.spec.ts",
+  "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts",
+  "enterprise/apps/admin/tests/api.test.ts",
+  "enterprise/apps/analytics-api/tests/admin-management.test.ts",
+  "enterprise/apps/analytics-api/tests/knowledge-client.test.ts",
+  "enterprise/apps/analytics-api/tests/postgres-integration.test.ts",
+  "enterprise/apps/analytics-api/tests/production.test.ts",
+  "enterprise/apps/auth-gateway/tests/crypto.test.ts",
+  "enterprise/apps/auth-gateway/tests/identity-ownership.test.ts",
+  "enterprise/apps/auth-gateway/tests/postgres-integration.test.ts",
+  "enterprise/apps/auth-gateway/tests/production.test.ts",
+  "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+  "enterprise/apps/model-gateway/tests/model-smoke.test.ts",
+  "enterprise/apps/model-gateway/tests/postgres-integration.test.ts",
+  "enterprise/apps/model-gateway/tests/postgres-usage-store.test.ts",
+  "enterprise/apps/model-gateway/tests/production-configuration.test.ts",
+  "enterprise/apps/share-service/tests/service.test.ts",
+  "enterprise/apps/share-worker/tests/index.test.mjs",
+  "enterprise/apps/skill-hub-service/tests/service.test.ts",
+  "enterprise/apps/skill-hub-worker/tests/index.test.mjs",
+  "enterprise/packages/admin-contract/tests/admin-contract.test.ts",
+  "packages/dsh-plugin-canvas/test/browser-entry.tsx",
+  "packages/dsh-plugin-canvas/test/browser.test.mjs",
+  "packages/dsh-plugin-canvas/test/editor.client.spec.tsx",
+  "packages/dsh-plugin-canvas/test/lifecycle.client.spec.tsx",
+  "packages/dsh-plugin-canvas/test/project.test.mjs",
+  "packages/dsh-plugin-canvas/test/rpc.test.mjs",
+  "packages/dsh-plugin-cdp/test/contract.test.mjs",
+  "packages/dsh-plugin-computer-use/test/contract.test.mjs",
+  "packages/dsh-plugin-computer-use/test/windows-source.test.mjs",
+  "packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx",
+  "packages/dsh-plugin-find-skill/test/contract.test.mjs",
+  "packages/dsh-plugin-genui/test/client-bundle.test.mjs",
+  "packages/dsh-plugin-genui/test/package.test.mjs",
+  "packages/dsh-plugin-glass-composer/test/contracts.test.mjs",
+  "packages/dsh-plugin-knowledge/test/agent-tools.test.mjs",
+  "packages/dsh-plugin-knowledge/test/host.test.mjs",
+  "packages/dsh-plugin-knowledge/test/imports.client.spec.tsx",
+  "packages/dsh-plugin-knowledge/test/page.client.spec.tsx",
+  "packages/dsh-plugin-knowledge/test/recovery.test.mjs",
+  "packages/dsh-plugin-knowledge/test/ui-operations.test.mjs",
+  "packages/dsh-plugin-knowledge/test/ui-read.test.mjs",
+  "packages/dsh-plugin-knowledge/test/workflow.test.mjs",
+  "packages/dsh-plugin-mcp-manage/test/contract.test.mjs",
+  "packages/dsh-plugin-memory-evolve/test/store.test.mjs",
+  "packages/dsh-plugin-office-skills/skills/documents/tests/test_emate_docx.py",
+  "packages/dsh-plugin-office-skills/skills/ppt-master/scripts/tests/test_native_export_guards.py",
+  "packages/dsh-plugin-office-skills/test/calc-runtime.test.mjs",
+  "packages/dsh-plugin-office-skills/test/fixtures/pdf-empty-glyf.pdf",
+  "packages/dsh-plugin-office-skills/test/package.test.mjs",
+  "packages/dsh-plugin-office-skills/test/preview.client.spec.tsx",
+  "packages/dsh-plugin-office-skills/test/preview.test.mjs",
+  "packages/dsh-plugin-pet/test/contracts.test.mjs",
+  "packages/dsh-plugin-pet/test/native-projection.test.mjs",
+  "packages/dsh-plugin-pet/test/pet.client.spec.tsx",
+  "packages/dsh-plugin-pet/test/resources.test.mjs",
+  "packages/dsh-plugin-skill-hub/test/capabilities-layout.test.mjs",
+  "packages/dsh-plugin-skill-hub/test/capabilities.client.spec.tsx",
+  "packages/dsh-plugin-skill-hub/test/skill-hub.test.mjs",
+  "packages/dsh-plugin-tidychat/test/folding.test.mjs",
+  "packages/dsh-plugin-tidychat/test/navigation.client.spec.tsx",
+  "packages/dsh-plugin-tool-search/test/tool-search.test.mjs",
+  "packages/dsh-plugin-vision-toolkit/test/attachment-source.test.mjs",
+  "packages/dsh-plugin-vision-toolkit/test/contract.test.mjs",
+  "packages/dsh/profile/plugins/emate-shell/tests/account-home.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/activity-fold.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/chat-context.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/chat-fidelity.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/composer-mentions.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/connection-status.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/enterprise-model-recovery.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/header-controls.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/image-batch-client.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/image-batch-progress.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/native-tool-image-output.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/quick-templates.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/session-share.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/sidebar-settings-route.client.spec.tsx",
+  "packages/dsh/profile/plugins/emate-shell/tests/task-details.client.spec.tsx",
+  "packages/dsh/test/e-mate.test.mjs",
+  "packages/dsh/test/http-response.test.mjs",
+  "packages/dsh/test/identity-lifecycle.test.mjs",
+  "packages/dsh/test/image-batch-recovery.test.mjs",
+  "packages/dsh/test/image-batch-worker-stress.test.mjs",
+  "packages/dsh/test/image-model-policy.test.mjs",
+  "packages/dsh/test/native-image-task-runner.test.mjs",
+  "packages/dsh/test/request-size.test.mjs",
+  "packages/dsh/test/share.test.mjs",
+  "scripts/change-impact.test.mjs",
+  "scripts/component-release.test.mjs",
+  "scripts/desktop-admission.test.mjs",
+  "scripts/harness-artifact-links-adapter.test.mjs",
+  "scripts/harness-conversation-adapter.test.mjs",
+  "scripts/harness-fs-bytes-adapter.test.mjs",
+  "scripts/harness-provenance.test.mjs",
+  "scripts/harness-runtime-adapters.test.mjs",
+  "scripts/harness-session-export-adapter.test.mjs",
+  "scripts/local-flow.test.mjs",
+  "scripts/performance-acceptance-probe.test.mjs",
+  "scripts/performance-acceptance.test.mjs",
+  "scripts/performance-parity.test.mjs",
+  "scripts/profile-release.test.mjs",
+  "scripts/release-coordinator.test.mjs",
+  "scripts/release.test.mjs",
+  "scripts/verify-desktop-update-reader.test.mjs",
+  "tests/performance/image-batch/RUNNING.md",
+  "tests/performance/image-batch/mixed-admission.mjs",
+  "tests/performance/image-batch/project-release-evidence.mjs",
+  "tests/performance/image-batch/real-provider-benchmark.mjs",
+  "tests/performance/image-batch/real-provider-benchmark.test.mjs",
+  "tests/performance/image-batch/release-evidence-protocol.mjs",
+  "tests/performance/image-batch/release-evidence-protocol.test.mjs",
+  "tests/performance/image-batch/release-identity.mjs",
+  "tests/performance/image-batch/stress.test.mjs",
+  "tests/performance/image-single/benchmark.mjs",
+  "tests/performance/image-single/contract.test.mjs",
+  "tests/performance/image-single/project-evidence.mjs",
+  "tests/performance/image-single/protocol.mjs",
+  "tests/performance/image-single/worker.mjs",
+  "tests/quality/image-batch/noninferiority-protocol.mjs",
+  "tests/quality/image-batch/noninferiority.test.mjs",
+  "tests/quality/image-batch/real-study.mjs",
+  "tests/quality/image-batch/real-study.test.mjs"
+ ],
+ "entries": [
+  {
+   "hash": "dc741b432e1361fbe28edc240575bb2081d7d906",
+   "subject": "fix: verify emitted component runtime ABI (#45)",
+   "files": 10,
+   "guards": [
+    "packages/dsh-plugin-vision-toolkit/test/contract.test.mjs",
+    "scripts/component-release.test.mjs",
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "plugin:glass-composer",
+    "plugin:skill-hub",
+    "plugin:vision-toolkit",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "4d7a98deeca7732bd07ea668a8a33bb0fa2d3d20",
+   "subject": "fix: enforce enterprise admin boundary (#47)",
+   "files": 10,
+   "guards": [
+    "enterprise/apps/admin/tests/api.test.ts",
+    "enterprise/apps/analytics-api/tests/production.test.ts"
+   ],
+   "areas": [
+    "other",
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "8247f83810bea5be045a6f2869fdda92f3da307a",
+   "subject": "fix: preserve enterprise runtime closure ownership (#48)",
+   "files": 3,
+   "guards": [
+    "enterprise/apps/analytics-api/tests/production.test.ts"
+   ],
+   "areas": [
+    "other",
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "9fbc70ad56c4f263dfa0aa0085f19eded134e32d",
+   "subject": "fix: preserve accepted profile release evidence (#50)",
+   "files": 2,
+   "guards": [
+    "scripts/change-impact.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "5bef129c6177de371aea2a3ae5ed262a5a0d0967",
+   "subject": "fix(shell): wait for workspace baseline on home (#54)",
+   "files": 7,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx"
+   ],
+   "areas": [
+    "other",
+    "shell"
+   ]
+  },
+  {
+   "hash": "100a670f283e6b9fcb1d032b086b37a45d9279c4",
+   "subject": "fix(release): admit legacy profile migration (#57)",
+   "files": 4,
+   "guards": [
+    "desktop/e-mate-desktop/tests/e-mate-profile-win.spec.ts",
+    "desktop/e-mate-desktop/tests/profile-release.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "eb372d715c9355fcca16fdc61c615867490e34f1",
+   "subject": "fix(release): close 2.0.13 update and performance evidence (#58)",
+   "files": 25,
+   "guards": [
+    "desktop/e-mate-desktop/tests/desktop-release-manifest.spec.ts",
+    "desktop/e-mate-desktop/tests/mac-update-installer.spec.ts",
+    "desktop/e-mate-desktop/tests/update-checker.spec.ts",
+    "desktop/e-mate-desktop/tests/updates.spec.ts",
+    "scripts/desktop-admission.test.mjs",
+    "scripts/performance-parity.test.mjs",
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "desktop",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "9b96035819e691739a4599ffa3f69512112b796a",
+   "subject": "fix: resolve desktop release version path (#64)",
+   "files": 5,
+   "guards": [
+    "scripts/desktop-admission.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "d4444475e4dfb77ecba3c9919d1153a4e08ef576",
+   "subject": "fix: normalize Windows ProductVersion for updates (#66)",
+   "files": 3,
+   "guards": [
+    "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "6d38ea56594fb5684c6b3695ce8337a0f163b2c9",
+   "subject": "fix(image): close edit upload and child session projection (#67)",
+   "files": 6,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "shell",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "3be5826b3b7f7aedd3da0d76780e92c73ab05fef",
+   "subject": "fix(windows): admit manual update receipts (#68)",
+   "files": 2,
+   "guards": [],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "f0c974f8fecca1a6ab82451f0e29515502f3be7a",
+   "subject": "fix(windows): normalize versions throughout update transaction (#69)",
+   "files": 3,
+   "guards": [
+    "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "93f485e52d334fc1ee50d31e9eefc68a7e8289fc",
+   "subject": "fix(windows): bound atomic update paths (#70)",
+   "files": 3,
+   "guards": [
+    "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "4a6783a7afe63b5154fcd9edc1e219208bdd0bf0",
+   "subject": "fix(desktop): release Windows candidate before swap (#71)",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "dd8637954f542d6443b9139fa63261fee77b9aca",
+   "subject": "fix(desktop): run Windows apply from system temp (#72)",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "141825825bd5ee1717d2ed162fd0ead83203edd3",
+   "subject": "fix(windows): align candidate update path contract (#73)",
+   "files": 3,
+   "guards": [
+    "desktop/e-mate-desktop/tests/windows-update-installer.spec.ts",
+    "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "a9632e787e8843c189cbb79a9725c72461982dcd",
+   "subject": "fix(windows): allow current-user update mailbox setup (#74)",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "4530b373a6652c2ae909e460112be985232ac02c",
+   "subject": "fix(release): unblock formal performance admission (#75)",
+   "files": 11,
+   "guards": [
+    "desktop/e-mate-desktop/tests/client-environment.spec.ts",
+    "packages/dsh/profile/plugins/emate-shell/tests/header-controls.client.spec.tsx",
+    "scripts/desktop-admission.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "desktop",
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "724800e379df754b66b96bd58ecf7b04dd38463f",
+   "subject": "fix(ci): keep pre-bootstrap plugins in base lane (#77)",
+   "files": 5,
+   "guards": [
+    "scripts/change-impact.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "9f229900081e03d088012d28edfc1f5b8bb1ced1",
+   "subject": "fix(shell): keep subagents out of top-level sessions (#76)",
+   "files": 9,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-settings-route.client.spec.tsx"
+   ],
+   "areas": [
+    "other",
+    "shell"
+   ]
+  },
+  {
+   "hash": "433fec4d734e681b87f20ef17fe79ed2220eefa9",
+   "subject": "fix(release): recover formal 2.0.13 publication (#78)",
+   "files": 15,
+   "guards": [
+    "desktop/e-mate-desktop/tests/client-environment.spec.ts",
+    "packages/dsh/profile/plugins/emate-shell/tests/header-controls.client.spec.tsx",
+    "scripts/desktop-admission.test.mjs",
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "desktop",
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "bc2f739924cc1d5d89ff751728527089465d98c2",
+   "subject": "fix(performance): pass one-shot owner to probe (#79)",
+   "files": 3,
+   "guards": [
+    "scripts/performance-acceptance.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "1a98ffc05ed1fe23c43564715b984ad1653c0fb2",
+   "subject": "fix: preserve performance probe failure evidence (#80)",
+   "files": 3,
+   "guards": [
+    "scripts/performance-acceptance-probe.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "6f63b5238d5874a1973a5ce0c1c9f832d277c865",
+   "subject": "fix(release): pin token-authority publication action (#83)",
+   "files": 7,
+   "guards": [
+    "scripts/desktop-admission.test.mjs",
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "5f8c54db7b76276c14f1938c970df155f4e6fd80",
+   "subject": "fix: restore 2.0.14 runtime and update contracts",
+   "files": 74,
+   "guards": [
+    "desktop/e-mate-desktop/tests/client-environment.spec.ts",
+    "desktop/e-mate-desktop/tests/desktop-runtime-environment.spec.ts",
+    "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts",
+    "desktop/e-mate-desktop/tests/electron-runtime.spec.ts",
+    "desktop/e-mate-desktop/tests/mac-update-installer.spec.ts",
+    "desktop/e-mate-desktop/tests/window-options.spec.ts",
+    "packages/dsh-plugin-computer-use/test/contract.test.mjs",
+    "packages/dsh-plugin-find-skill/test/contract.test.mjs",
+    "packages/dsh-plugin-mcp-manage/test/contract.test.mjs",
+    "packages/dsh-plugin-tool-search/test/tool-search.test.mjs",
+    "packages/dsh-plugin-vision-toolkit/test/contract.test.mjs",
+    "packages/dsh/test/e-mate.test.mjs",
+    "scripts/change-impact.test.mjs",
+    "scripts/desktop-admission.test.mjs",
+    "scripts/release-coordinator.test.mjs",
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "desktop",
+    "plugin:better-sidebar",
+    "plugin:cdp",
+    "plugin:computer-use",
+    "plugin:file-import",
+    "plugin:find-skill",
+    "plugin:genui",
+    "plugin:glass-composer",
+    "plugin:mcp-manage",
+    "plugin:memory-evolve",
+    "plugin:office-skills",
+    "plugin:schedules",
+    "plugin:skill-hub",
+    "plugin:tool-search",
+    "plugin:vision-toolkit",
+    "profile-core",
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "90c3a1fae3124536bb62f5ee215c74fe510e5e63",
+   "subject": "fix(updater): acknowledge legacy mac helper before validation (#86)",
+   "files": 5,
+   "guards": [
+    "desktop/e-mate-desktop/tests/mac-update-installer.spec.ts",
+    "scripts/change-impact.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "desktop",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "d0603b731ac8da36783c19e9715a60bec44b1635",
+   "subject": "fix: partition desktop package typecheck programs (#88)",
+   "files": 2,
+   "guards": [],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "d54574b716b7c18db8db8575721d52643eb39011",
+   "subject": "fix(ci): keep Profile composition reachable",
+   "files": 3,
+   "guards": [
+    "scripts/change-impact.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+   "subject": "fix(admission): bind Profile jobs to CI producer (#90)",
+   "files": 3,
+   "guards": [
+    "scripts/desktop-admission.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "5df5a6651a60ecc86335c2e1e22f85a68569b572",
+   "subject": "fix(desktop): preserve typed update check failures",
+   "files": 10,
+   "guards": [
+    "desktop/e-mate-desktop/tests/agent-update.spec.ts",
+    "desktop/e-mate-desktop/tests/electron-runtime.spec.ts",
+    "desktop/e-mate-desktop/tests/update-checker.spec.ts",
+    "desktop/e-mate-desktop/tests/updates.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "7378b05cd793c640c9a65a0e8682fcd35cabcc53",
+   "subject": "fix(updater): preserve body-read cancellation",
+   "files": 4,
+   "guards": [
+    "desktop/e-mate-desktop/tests/update-checker.spec.ts",
+    "desktop/e-mate-desktop/tests/updates.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "f1d894fa59e3abf5d07cfc0776a5703d1530908f",
+   "subject": "fix(shell): preserve project session routes",
+   "files": 6,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/quick-templates.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "9a332d75d8a461770ab4be30f1abc517348d1121",
+   "subject": "fix(release): verify formal RC evidence once",
+   "files": 10,
+   "guards": [
+    "scripts/change-impact.test.mjs",
+    "scripts/desktop-admission.test.mjs",
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "1e65a68ad54df9ddb34d309be270666f4d28b892",
+   "subject": "fix(updater): preserve upstream relaunch arguments (#101)",
+   "files": 6,
+   "guards": [
+    "desktop/e-mate-desktop/tests/relaunch-arguments.spec.ts",
+    "desktop/e-mate-desktop/tests/shutdown.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87",
+   "subject": "fix(dsh): contain credential helper stdin EPIPE (#102)",
+   "files": 3,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "207d0cfff9e41786ec4a688ac487f456645448dd",
+   "subject": "fix(vision): stage attachments inside agent workspace",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-vision-toolkit/test/attachment-source.test.mjs"
+   ],
+   "areas": [
+    "plugin:vision-toolkit"
+   ]
+  },
+  {
+   "hash": "5188cd81c08275d8131af94486842aa77fc076f3",
+   "subject": "fix(model-gateway): project matching search credential",
+   "files": 2,
+   "guards": [
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "fd213a6972866c9eeff4cd65645fda7889dea019",
+   "subject": "fix(desktop): keep settings and titlebar surfaces stable",
+   "files": 8,
+   "guards": [
+    "desktop/e-mate-desktop/tests/client-environment.spec.ts",
+    "packages/dsh/profile/plugins/emate-shell/tests/header-controls.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-settings-route.client.spec.tsx"
+   ],
+   "areas": [
+    "desktop",
+    "shell"
+   ]
+  },
+  {
+   "hash": "7fc32a0d17c64470c63f704dad97023ae49bca8c",
+   "subject": "fix: harden local candidate build dispatch",
+   "files": 2,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "5e59a68020099ff8a08713d001a8c262efe26434",
+   "subject": "fix: skip Harness hooks in local candidate builds",
+   "files": 2,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "5be248eddc5e66e6c8ae850f92dfb16a672d0211",
+   "subject": "fix: route shell tokens through client CSS modules",
+   "files": 7,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/account-home.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/header-controls.client.spec.tsx"
+   ],
+   "areas": [
+    "other",
+    "shell"
+   ]
+  },
+  {
+   "hash": "16daefa5f544f73255a401207d3c96f95925eb5d",
+   "subject": "fix: hand off Windows candidates through Codex Remote",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "e89a57ed3187ad1e41c44a56543013df0d882aeb",
+   "subject": "fix: preserve mixed local flow checks",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "b68d0fa9c4a6fd03567122f93dcb35ba41212ad5",
+   "subject": "fix(shell): align settings header controls",
+   "files": 2,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/header-controls.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "aa36333d0ca59a9cd772eb20bb634a274b4fe38a",
+   "subject": "fix(flow): require update relaunch and rollback evidence",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "3aec9ecb13aae4a00f61157f9cba10d70274bc7a",
+   "subject": "fix(imagegen): stream settled child receipts",
+   "files": 4,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "4c5fcc20b9ca827b7caeb7466e533ec11ab8261e",
+   "subject": "fix(ui): await native goal command claim",
+   "files": 3,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/composer-mentions.client.spec.tsx"
+   ],
+   "areas": [
+    "other",
+    "shell"
+   ]
+  },
+  {
+   "hash": "2fd06d4375f2493badf68c5bb12017471ecb9b7d",
+   "subject": "fix(skill-hub): allow authenticated Host fetch metadata",
+   "files": 3,
+   "guards": [
+    "enterprise/apps/skill-hub-worker/tests/index.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "3060f6f932f942badb368ccacb83ff83155088e5",
+   "subject": "fix(audit): lock terminal task scenarios",
+   "files": 5,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "enterprise",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "479cf0aba9d72219784857abb860c0593b59ecbe",
+   "subject": "fix(skill-hub): restore installed state on cold open",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-skill-hub/test/capabilities.client.spec.tsx"
+   ],
+   "areas": [
+    "other",
+    "plugin:skill-hub"
+   ]
+  },
+  {
+   "hash": "c951a1708284af4d549454d9a08b326cfbad679f",
+   "subject": "fix(local-flow): inherit pinned package managers",
+   "files": 5,
+   "guards": [
+    "scripts/harness-provenance.test.mjs",
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "44001d7f1ad94945f663975ed69e98e2932119e0",
+   "subject": "fix(harness): bypass npm build wrappers",
+   "files": 2,
+   "guards": [
+    "scripts/harness-provenance.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "8f7b4a61cd7945a942262851afe81efbe711e748",
+   "subject": "fix(T26): align Shell emitted Base ABI",
+   "files": 22,
+   "guards": [
+    "scripts/change-impact.test.mjs",
+    "scripts/profile-release.test.mjs"
+   ],
+   "areas": [
+    "desktop",
+    "other",
+    "plugin:better-sidebar",
+    "plugin:cdp",
+    "plugin:computer-use",
+    "plugin:file-import",
+    "plugin:find-skill",
+    "plugin:genui",
+    "plugin:glass-composer",
+    "plugin:mcp-manage",
+    "plugin:memory-evolve",
+    "plugin:office-skills",
+    "plugin:schedules",
+    "plugin:skill-hub",
+    "plugin:tool-search",
+    "plugin:vision-toolkit",
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "cad965ab55a6e192d27ebe22a47b978b394a92ed",
+   "subject": "fix(local-flow): fail fast before packaging",
+   "files": 7,
+   "guards": [
+    "scripts/harness-provenance.test.mjs",
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "0112f9379dce33b77be08e566736be626d9f2d63",
+   "subject": "fix(local-flow): normalize pnpm script delimiter",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "3d44a419d64c26abae640375b3ad8e8d96249489",
+   "subject": "fix(skill-hub): keep capabilities on native overlay",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-skill-hub/test/capabilities.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:skill-hub"
+   ]
+  },
+  {
+   "hash": "6564724b1dc46eab257e9265bc1dc7d0e7c8503b",
+   "subject": "fix(model-gateway): isolate native search credential route",
+   "files": 9,
+   "guards": [
+    "enterprise/apps/auth-gateway/tests/production.test.ts",
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+    "enterprise/apps/model-gateway/tests/model-smoke.test.ts",
+    "enterprise/apps/model-gateway/tests/production-configuration.test.ts"
+   ],
+   "areas": [
+    "other",
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "fb90ab94d88c1c2a9cb2354db17a3a17497899fc",
+   "subject": "fix(skill-hub): align emitted Base ABI",
+   "files": 2,
+   "guards": [],
+   "areas": [
+    "other",
+    "plugin:skill-hub"
+   ]
+  },
+  {
+   "hash": "4f545c21e6ca18840a4f31f48a058adb7736d8b2",
+   "subject": "fix(local-flow): verify Desktop npm collector carrier",
+   "files": 4,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "bfcaafb9f9291b6e6713e1021dd1e24b0e1bfd5c",
+   "subject": "fix(local-flow): accept npm CLI CRLF shebang",
+   "files": 2,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "202235c84e8955671b8d3db70f9d0f6bf07d3382",
+   "subject": "fix(skill-hub): preserve sidebar beside capabilities",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-skill-hub/test/capabilities-layout.test.mjs"
+   ],
+   "areas": [
+    "desktop",
+    "plugin:skill-hub"
+   ]
+  },
+  {
+   "hash": "d735b31a5f6d6e2cede333d2950bdc3a3a1accb2",
+   "subject": "fix(imagegen): promote nested child receipts",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "f6c2683e47d6c4b791494261555041fc6454b984",
+   "subject": "fix(desktop): keep image actions renderer scoped",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/electron-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "5ad0732b2ca3644d1fce3875d723454efb8bf16a",
+   "subject": "fix(release): make desktop pointers transactional",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "4cf60ae217523d35c59d2f71bdf5c5ee7a0b0ed2",
+   "subject": "fix(ui): bind glass effect to semantic composer host",
+   "files": 6,
+   "guards": [
+    "packages/dsh-plugin-glass-composer/test/contracts.test.mjs",
+    "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx"
+   ],
+   "areas": [
+    "other",
+    "plugin:glass-composer",
+    "shell"
+   ]
+  },
+  {
+   "hash": "48746a1bfaf38508500ff2eea935a5b3709d2aee",
+   "subject": "fix(release): close rollback owner receipt loop",
+   "files": 4,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "e96051af822bc0ad811f3860a7121b7adc2eb5b4",
+   "subject": "fix(release): bind R2 transactions to version choice",
+   "files": 4,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "870d3085ee507038f74e5f68c98f82e463b6e3e3",
+   "subject": "fix(release): bind local manifest inputs to candidate runs",
+   "files": 2,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "87b52813f6fb96673354f7e8708f56cf735915ea",
+   "subject": "fix: carry pinned pnpm into child lifecycles",
+   "files": 4,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "38a71b67b29d5c489b3290b8974a7062b059378e",
+   "subject": "fix(release): stage only Profile runtime files",
+   "files": 3,
+   "guards": [
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "27454633dd4b134c01bc371bbd35490577314e35",
+   "subject": "fix: run changed verifier tests before lane checks",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "d938be8c1b74b5164132a57b39670e5b6b9ba0fb",
+   "subject": "fix(local-flow): prepare harness before base dev checks",
+   "files": 2,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "dcd3411eedc0bb04856b05ac5c3cf5a30342e626",
+   "subject": "fix(release): attest actual 2.0.15 update reader",
+   "files": 14,
+   "guards": [
+    "scripts/local-flow.test.mjs",
+    "scripts/release.test.mjs",
+    "scripts/verify-desktop-update-reader.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "7b1c664e4f748edd27836011b28c2fdd99309ddf",
+   "subject": "fix(release): bind Windows SSH-first host transport",
+   "files": 6,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "53eaaea50b63a490f3193d16caba4aeeca14d65e",
+   "subject": "fix(desktop): retry transient Python runtime downloads",
+   "files": 3,
+   "guards": [
+    "desktop/e-mate-desktop/scripts/prepare-python-runtime.spec.mjs"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "fadb25a4aae5d568db6b48d29361c4d0f8844dff",
+   "subject": "fix(local-flow): select native Windows npm command",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "8dd4a99494fd1877f68504c06d8da2901e47f541",
+   "subject": "fix(components): emulate portable package scripts",
+   "files": 3,
+   "guards": [
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "eeaeb3b8dc6d22740ccfff7067ad2ec6519bbbf2",
+   "subject": "fix(local-flow): emulate profile lifecycle shell",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "f4c4c81e934a8c6713bc46f0075fec9fd8b9384a",
+   "subject": "fix(release): keep tar archives local on Windows",
+   "files": 3,
+   "guards": [
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "34b8386f1ea4e57b44fd5e342c9e85c5ae7ebe72",
+   "subject": "fix(local-flow): select executable Python on Windows",
+   "files": 3,
+   "guards": [
+    "scripts/local-flow.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "db5083f297ca49732686d2c5bd42fa3245a47648",
+   "subject": "fix(base): isolate CSS virtual module paths",
+   "files": 41,
+   "guards": [
+    "packages/dsh-plugin-cdp/test/contract.test.mjs",
+    "packages/dsh-plugin-genui/test/package.test.mjs",
+    "packages/dsh-plugin-glass-composer/test/contracts.test.mjs",
+    "packages/dsh/test/e-mate.test.mjs",
+    "scripts/change-impact.test.mjs",
+    "scripts/component-release.test.mjs",
+    "scripts/local-flow.test.mjs",
+    "scripts/profile-release.test.mjs",
+    "scripts/release.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "desktop",
+    "plugin:better-sidebar",
+    "plugin:cdp",
+    "plugin:computer-use",
+    "plugin:file-import",
+    "plugin:find-skill",
+    "plugin:genui",
+    "plugin:glass-composer",
+    "plugin:mcp-manage",
+    "plugin:memory-evolve",
+    "plugin:office-skills",
+    "plugin:schedules",
+    "plugin:skill-hub",
+    "plugin:tool-search",
+    "plugin:vision-toolkit",
+    "profile-core",
+    "shell",
+    "scripts",
+    "harness-submodule"
+   ]
+  },
+  {
+   "hash": "588c80ccbee572077f47c0ad3a904c8c00cfa004",
+   "subject": "fix(desktop): close native updater trust boundary (#117)",
+   "files": 10,
+   "guards": [
+    "desktop/e-mate-desktop/tests/electron-runtime.spec.ts",
+    "desktop/e-mate-desktop/tests/mac-update-installer.spec.ts",
+    "desktop/e-mate-desktop/tests/update-download.spec.ts",
+    "desktop/e-mate-desktop/tests/windows-update-transaction.spec.ts"
+   ],
+   "areas": [
+    "other",
+    "desktop"
+   ]
+  },
+  {
+   "hash": "4295c6f6d5175adb57b0f52478d25ea0aca8caf2",
+   "subject": "fix: close 2.0.17 final acceptance gaps (#123)",
+   "files": 13,
+   "guards": [
+    "packages/dsh-plugin-computer-use/test/contract.test.mjs",
+    "packages/dsh-plugin-computer-use/test/windows-source.test.mjs",
+    "packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx"
+   ],
+   "areas": [
+    "desktop",
+    "plugin:computer-use",
+    "plugin:file-import",
+    "plugin:tool-search"
+   ]
+  },
+  {
+   "hash": "9a78fe6a50f7d24c1b88960aa636c22bb6b22ff4",
+   "subject": "fix(gateway): preserve legacy runtime model contracts (#125)",
+   "files": 6,
+   "guards": [
+    "enterprise/apps/auth-gateway/tests/production.test.ts",
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+    "enterprise/apps/model-gateway/tests/production-configuration.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "17b0c3bceef3e878290ff434b27f2103123f4620",
+   "subject": "fix(profile): preserve rollback-readable model policy (#126)",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "fcd31f19a06a215116ff3ffac710760a13bec8c0",
+   "subject": "fix(desktop): parent update dialogs to live window (#127)",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/electron-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "9b16fc677bf9c5ca22b7e360a0643eb0c0ab4c72",
+   "subject": "fix(images): isolate batch failures and migrate 2.0.18 evidence",
+   "files": 19,
+   "guards": [
+    "packages/dsh/test/native-image-task-runner.test.mjs",
+    "tests/performance/image-batch/RUNNING.md",
+    "tests/performance/image-batch/project-release-evidence.mjs",
+    "tests/performance/image-batch/real-provider-benchmark.mjs",
+    "tests/performance/image-batch/real-provider-benchmark.test.mjs",
+    "tests/performance/image-batch/release-evidence-protocol.mjs",
+    "tests/performance/image-batch/release-evidence-protocol.test.mjs",
+    "tests/performance/image-batch/release-identity.mjs",
+    "tests/performance/image-batch/stress.test.mjs",
+    "tests/performance/image-single/benchmark.mjs",
+    "tests/performance/image-single/contract.test.mjs",
+    "tests/performance/image-single/project-evidence.mjs",
+    "tests/performance/image-single/protocol.mjs",
+    "tests/performance/image-single/worker.mjs",
+    "tests/quality/image-batch/noninferiority-protocol.mjs",
+    "tests/quality/image-batch/noninferiority.test.mjs",
+    "tests/quality/image-batch/real-study.mjs",
+    "tests/quality/image-batch/real-study.test.mjs"
+   ],
+   "areas": [
+    "profile-core",
+    "other"
+   ]
+  },
+  {
+   "hash": "4fb3e06b611df65c4c99a8b455cadf72c8986293",
+   "subject": "fix: keep bulk policy controls visible for large selections",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "b6f340331cee11855226575584144187eccea70e",
+   "subject": "fix: align native image guidance with reference and edit workflows",
+   "files": 6,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "bbec22ec790b04004538f0fb51b8d4626214741d",
+   "subject": "fix(images): preserve admission for waiting single requests",
+   "files": 7,
+   "guards": [
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+    "enterprise/apps/model-gateway/tests/postgres-usage-store.test.ts",
+    "packages/dsh/test/e-mate.test.mjs",
+    "tests/performance/image-batch/mixed-admission.mjs"
+   ],
+   "areas": [
+    "enterprise",
+    "profile-core",
+    "other"
+   ]
+  },
+  {
+   "hash": "577e4a84ae767749c769825f57fc93af7dcc9b7b",
+   "subject": "fix(skill-hub): verify recovery and isolate health probes",
+   "files": 7,
+   "guards": [
+    "enterprise/apps/skill-hub-service/tests/service.test.ts"
+   ],
+   "areas": [
+    "other",
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "7cf82e2cd5b97aba1c4549d18baffa0e03c6c768",
+   "subject": "fix: pin Node 24 for restricted Skill Hub snapshot imports",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "6ac9d586cbe50ecf04baa3a5985a6dbe21cea95d",
+   "subject": "fix(skill-hub): migrate verified legacy version sort keys",
+   "files": 6,
+   "guards": [
+    "enterprise/apps/skill-hub-service/tests/service.test.ts",
+    "enterprise/apps/skill-hub-worker/tests/index.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "5793e06dab2a1531ecfb88cd967b41f2b96a5cd0",
+   "subject": "fix(canvas): bundle private archive dependency for native Desktop boot",
+   "files": 2,
+   "guards": [],
+   "areas": [
+    "other",
+    "plugin:canvas"
+   ]
+  },
+  {
+   "hash": "94d49a34eec07f41c6d2321cee210de4eb7954ae",
+   "subject": "fix(pet): verify settings writes and recover office animations",
+   "files": 7,
+   "guards": [
+    "packages/dsh-plugin-pet/test/native-projection.test.mjs",
+    "packages/dsh-plugin-pet/test/pet.client.spec.tsx",
+    "packages/dsh-plugin-pet/test/resources.test.mjs"
+   ],
+   "areas": [
+    "plugin:pet"
+   ]
+  },
+  {
+   "hash": "a18afb87525af58f39815679fc2a8f7571c0210e",
+   "subject": "fix(pet): keep delayed details on the current task and preserve official art",
+   "files": 4,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/task-details.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:pet",
+    "shell"
+   ]
+  },
+  {
+   "hash": "96930303999d67042c65106479226af5550537a1",
+   "subject": "fix(desktop): require pet and canvas assets in packaged runtime",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "f971d8fcaeff7e0741b445913ce6310278105b66",
+   "subject": "fix(canvas): preserve edits and native identities across navigation",
+   "files": 6,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/editor.client.spec.tsx",
+    "packages/dsh-plugin-canvas/test/lifecycle.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:canvas"
+   ]
+  },
+  {
+   "hash": "5de6a482422f042c583e75d660e812004861dedd",
+   "subject": "fix(share): accept decoded responses and coalesce in-flight publication",
+   "files": 4,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/session-share.client.spec.tsx",
+    "packages/dsh/test/share.test.mjs"
+   ],
+   "areas": [
+    "shell",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "523586da5d6eb766d6210e3b0d9b7f3f1dc48f42",
+   "subject": "fix(http): validate decoded responses without comparing compressed lengths",
+   "files": 6,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs",
+    "packages/dsh/test/http-response.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "08f7ad439d5cf6de8ec134855c80eb2301365a2a",
+   "subject": "fix(share): preserve legacy archive downloads and prepare native service deployment",
+   "files": 6,
+   "guards": [
+    "enterprise/apps/share-worker/tests/index.test.mjs"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "e79134f67ac66f0015a136efd72d7b1b285f730a",
+   "subject": "fix(share): collect abandoned upload files without touching active stages",
+   "files": 3,
+   "guards": [
+    "enterprise/apps/share-service/tests/service.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "bdd3234fefb8b2a031b09ef8dc8be9e4a20a0c55",
+   "subject": "fix(share): prevent replacing an activated migration manifest",
+   "files": 2,
+   "guards": [
+    "enterprise/apps/share-service/tests/service.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "be0cdd025c0c370b07ff7de236d6f4fd82e3f640",
+   "subject": "fix(share): use the verified enterprise archive service by default",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "4406b3f7dc2b01c6bbc0294115e4a4aaa2b0b90b",
+   "subject": "fix(skill-hub): verify writable canonical directories before readiness",
+   "files": 2,
+   "guards": [
+    "enterprise/apps/skill-hub-service/tests/service.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "e67628afa55195fe770bc2e2633c7bebbeac3476",
+   "subject": "fix(share): export submitted attachments without private image drafts",
+   "files": 5,
+   "guards": [
+    "scripts/harness-runtime-adapters.test.mjs",
+    "scripts/harness-session-export-adapter.test.mjs"
+   ],
+   "areas": [
+    "profile-core",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "f900b94d8e94fc6f303291679ecd3f5701fe37b0",
+   "subject": "fix(desktop): materialize and verify safe native session archives",
+   "files": 4,
+   "guards": [
+    "scripts/harness-provenance.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "2acddd2d626554f98288fec1d344720d39a1f6f7",
+   "subject": "fix(fs): guard binary reads with one verified file descriptor",
+   "files": 4,
+   "guards": [
+    "scripts/harness-fs-bytes-adapter.test.mjs",
+    "scripts/harness-runtime-adapters.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "f74e13548545674d3e6cb7e12fdce44837f26c90",
+   "subject": "fix(fs): avoid blocking opens after binary target replacement",
+   "files": 2,
+   "guards": [
+    "scripts/harness-fs-bytes-adapter.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "b1ef48872e7abe12e0cc3e652054d53198ebcba1",
+   "subject": "fix(desktop): verify the native binary read guard in packaged runtimes",
+   "files": 3,
+   "guards": [
+    "scripts/harness-provenance.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "a248d9cb212b23112dd6e983d76bfe007eab82cd",
+   "subject": "fix(ui): restore artifact menu focus on keyboard dismissal",
+   "files": 2,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "4b579b4065cea77b43ca73fba1c90bdd6ee61e39",
+   "subject": "fix(pet): stabilize movement and add persistent context controls",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-pet/test/pet.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:pet"
+   ]
+  },
+  {
+   "hash": "e83a5956773ba018d134cdc6d8af9013ff8efe6b",
+   "subject": "fix(image-tests): precommit unique executions and serialize quality controls",
+   "files": 5,
+   "guards": [
+    "tests/performance/image-batch/RUNNING.md",
+    "tests/performance/image-batch/real-provider-benchmark.mjs",
+    "tests/performance/image-batch/real-provider-benchmark.test.mjs",
+    "tests/quality/image-batch/real-study.mjs",
+    "tests/quality/image-batch/real-study.test.mjs"
+   ],
+   "areas": [
+    "other"
+   ]
+  },
+  {
+   "hash": "7670e56230194a8d1944c920843ab3761b518765",
+   "subject": "fix(canvas): guard native page navigation and hide the chat composer",
+   "files": 2,
+   "guards": [
+    "scripts/harness-conversation-adapter.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "c3ec64ae4509ca2abfca1e3fd36e27480101330e",
+   "subject": "fix(gallery): keep carousel controls clear of image canvas actions",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "03764b8fe34e699a6aac766450a3ff6c0ae06523",
+   "subject": "fix(identity): require login after logout and signed-out restart",
+   "files": 4,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/enterprise-model-recovery.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "a6dc87b1482f0b77ba02b63dba8c118f6e6ec0f7",
+   "subject": "fix(identity): notify native route projections of authentication transitions",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "shell",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "9d86ba2c45053f2ce41f73a8c52152faa41cd358",
+   "subject": "fix(identity): invalidate pending workspace navigation on identity changes",
+   "files": 7,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-settings-route.client.spec.tsx",
+    "scripts/harness-conversation-adapter.test.mjs"
+   ],
+   "areas": [
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "6e0ce88e09359cf3e538c11f0926669d3a75558a",
+   "subject": "fix(pet): preserve settings section through native route remount",
+   "files": 2,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-settings-route.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "81258ebc1eff67a610872d72455f784c650273d2",
+   "subject": "fix(xin): use real consent and revoke authorization when forgetting a connection",
+   "files": 6,
+   "guards": [
+    "packages/dsh-plugin-mcp-manage/test/contract.test.mjs",
+    "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/connection-status.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:mcp-manage",
+    "shell"
+   ]
+  },
+  {
+   "hash": "8b05a61e098a6ef9dd0e95c20cfea1abf19d98e2",
+   "subject": "fix(canvas): place native canvas tab directly after gallery",
+   "files": 4,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/lifecycle.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:canvas",
+    "shell"
+   ]
+  },
+  {
+   "hash": "a25512df84ab8b1f5356e681d142c8b25cec65f7",
+   "subject": "fix(knowledge): preserve original identities and cancel disposed reads",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/host.test.mjs",
+    "packages/dsh-plugin-knowledge/test/page.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "747b091ea07d0e3cddf7db26393f9594e3a85c59",
+   "subject": "fix(xin): retain uncertain grant changes and verify revocation receipts",
+   "files": 8,
+   "guards": [
+    "packages/dsh-plugin-mcp-manage/test/contract.test.mjs",
+    "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/connection-status.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:mcp-manage",
+    "shell"
+   ]
+  },
+  {
+   "hash": "57a63038f1abe719fbef674568e62d0d66c156ab",
+   "subject": "fix(knowledge): bind public intent and recover durable create requests",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/workflow.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "cd2cd574e600f92691db338d1187d69c12d33662",
+   "subject": "fix(xin): cancel captured calls when authorized business identity changes",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-mcp-manage/test/contract.test.mjs"
+   ],
+   "areas": [
+    "plugin:mcp-manage"
+   ]
+  },
+  {
+   "hash": "9a5e45f6f4312b6cb6b1b3ec1b0e653ad6ddcfc3",
+   "subject": "fix(knowledge): render frozen chunks and project benchmark selections",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/workflow.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "b114785f65cfd8b87e4f05202f7072fe14fbc703",
+   "subject": "fix(xin): invalidate old turns and operations across business account changes",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-mcp-manage/test/contract.test.mjs"
+   ],
+   "areas": [
+    "plugin:mcp-manage"
+   ]
+  },
+  {
+   "hash": "75300519ea73203a2507c6d9768fce8018e4874f",
+   "subject": "fix(knowledge): freeze native provider selection for compilation recovery",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/workflow.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "2589ca63c907fa924fb5eefec1a06ba5dacb6c09",
+   "subject": "fix(pet): expose a readable companion switch in native settings",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-pet/test/pet.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:pet"
+   ]
+  },
+  {
+   "hash": "f9b4732f979e48b0121e96dbff60f20cd5052532",
+   "subject": "fix(knowledge): freeze import batches and persist canonical user controls",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/workflow.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "fb6db5d701fc787bf390c0d9a529eca6d0c696c9",
+   "subject": "fix(artifacts): open explicit local Markdown links through native Host",
+   "files": 10,
+   "guards": [
+    "scripts/harness-artifact-links-adapter.test.mjs",
+    "scripts/harness-conversation-adapter.test.mjs",
+    "scripts/harness-provenance.test.mjs",
+    "scripts/harness-runtime-adapters.test.mjs"
+   ],
+   "areas": [
+    "profile-core",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "8299c4561fc4b68a81eccbf7330e34587ec7fe39",
+   "subject": "fix(knowledge): retain native reasoning levels during recovery",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/recovery.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "39af8e177d5e817cbf27b3e2537e85d8c107ec32",
+   "subject": "fix(knowledge): preserve native effort and precise workflow failures",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/agent-tools.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "46c44bc73fff641ffe871c43f1eb73b8e6ff1a6c",
+   "subject": "fix(knowledge): stop local jobs before remote status checks",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/workflow.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "06ad2e5eaf33ff2a931fe01d405262bb2a218743",
+   "subject": "fix(pet): slow actions and play each animation once",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-pet/test/pet.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:pet"
+   ]
+  },
+  {
+   "hash": "06c4abfa2adf3311c37780d73534b4b3649b07a7",
+   "subject": "fix(knowledge): preserve canonical operation session ownership",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/workflow.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "9ac7d9a5bb012401c04ecc5bea1a23a9c78dc1a5",
+   "subject": "fix(knowledge): retain authorized shared project citations",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/ui-read.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "8c58a94faac00f92191b2ac606772f093b409826",
+   "subject": "fix(knowledge): finish recovered parses without replaying frozen plans",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/ui-operations.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "7497dc446144f5b37334a0ff794983f81df9c9fc",
+   "subject": "fix(knowledge): freeze file admission while import setup is pending",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/imports.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "f25c27c7be69165b6211f34e5ee0d00256ae00b6",
+   "subject": "fix(knowledge): bind live UI reads to the canonical Xin operation",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "4375325503a0b0664ae2ef8885c2e97f1ed34bd3",
+   "subject": "fix(knowledge): preserve native Xin subject across cold recovery",
+   "files": 8,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/host.test.mjs",
+    "packages/dsh-plugin-knowledge/test/workflow.test.mjs",
+    "packages/dsh-plugin-mcp-manage/test/contract.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge",
+    "plugin:mcp-manage"
+   ]
+  },
+  {
+   "hash": "8daee0cecb4f87a1a2b393e8d9d798a69bc3969e",
+   "subject": "fix(knowledge): recover imports beyond the recent UI window",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/ui-operations.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "322d5a8b65df0471e3626f6c2fc343ab9d6c045f",
+   "subject": "fix(artifacts): build and verify adapted native frontend bytes",
+   "files": 5,
+   "guards": [
+    "scripts/harness-artifact-links-adapter.test.mjs",
+    "scripts/harness-provenance.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "9c419af00b2e0fb1c6dba8c449b470ba5a5ad002",
+   "subject": "fix(gateway): bound vision request bodies and retain typed size failures",
+   "files": 2,
+   "guards": [
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "0a4a78cac9f57d35f9a9705c55dc7d8cba5781d5",
+   "subject": "fix(models): compact oversized native image history before submission",
+   "files": 6,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs",
+    "packages/dsh/test/request-size.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "77a9d50bdced3a7ed0838f8395dd934aad329f26",
+   "subject": "fix(desktop): bind the native compaction module in installed profiles",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "daa44ef80ade50e8e1594ef4eaa9128a6a46e5f6",
+   "subject": "fix(canvas): restore actions on native image batch result cards",
+   "files": 4,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/image-batch-progress.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "680b6895014e0d3eb0dfb7d8175fc5caae4e80d6",
+   "subject": "fix(canvas): reveal batch image actions on hover and focus",
+   "files": 2,
+   "guards": [],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "3e98c59babd9c80043e0940f3607f8fd63185b2a",
+   "subject": "fix(image-tests): use current release identity in single evidence errors",
+   "files": 2,
+   "guards": [
+    "tests/performance/image-single/contract.test.mjs",
+    "tests/performance/image-single/protocol.mjs"
+   ],
+   "areas": [
+    "other"
+   ]
+  },
+  {
+   "hash": "ab3ba1421586ccebb2199ce6a46b87fef86651e2",
+   "subject": "fix(desktop): rebuild product profile before packaging",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "6ea183e24d627f1ad54c53bff8ede5217e269023",
+   "subject": "fix(knowledge): exhaust revision pages before freezing import plans",
+   "files": 8,
+   "guards": [
+    "enterprise/apps/analytics-api/tests/knowledge-client.test.ts",
+    "packages/dsh-plugin-knowledge/test/host.test.mjs",
+    "packages/dsh-plugin-knowledge/test/ui-operations.test.mjs",
+    "packages/dsh-plugin-knowledge/test/ui-read.test.mjs"
+   ],
+   "areas": [
+    "enterprise",
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "accb5e16f1063ff98cd22140e82158fdc1009e7f",
+   "subject": "fix(canvas): fit images and focus edit instructions after arrows",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/editor.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:canvas"
+   ]
+  },
+  {
+   "hash": "2ba3b0941692381c17b1376cb3f96cb28f2cc915",
+   "subject": "fix(desktop): materialize every product component before packaging",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "fb363e66a843c0346bb1deaecce4070b44b952f9",
+   "subject": "fix(knowledge): refresh public corpus while preserving active snapshots",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/page.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "ad43c6b2dff4faecfe9ed83b836905ce8d4a9ae2",
+   "subject": "fix(shell): preserve native image previews across unrelated renders",
+   "files": 2,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "770ffc3f44666f0b71b78f5cfd53ba4575816f47",
+   "subject": "fix(knowledge): serialize import status polling and pause inactive reads",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/imports.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "41076fe3b828d7685683001423da7ea0530b6adc",
+   "subject": "fix(knowledge): finish independent recovery passes without repeated scans",
+   "files": 4,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/host.test.mjs",
+    "packages/dsh-plugin-knowledge/test/ui-operations.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "2ed157de342bec119f1c6add2328bebe9ba7065c",
+   "subject": "fix(canvas): ignore unrelated session output refreshes",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/lifecycle.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:canvas"
+   ]
+  },
+  {
+   "hash": "45d6481ffca2c0f9db3ce5c2ce74926e39c20d4a",
+   "subject": "fix(canvas): wait for native viewport and resolve overlapping arrow targets",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/editor.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:canvas"
+   ]
+  },
+  {
+   "hash": "bab0b756c1183e80b378c4b0eac8c33aafd8e2ee",
+   "subject": "fix(desktop): validate runtime exports without packaged type declarations",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "8c467672629b43ebd83f3ffa6d1da83d06d1328c",
+   "subject": "fix(genui): adapt folded asset route length after package rename",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-genui/test/package.test.mjs"
+   ],
+   "areas": [
+    "plugin:genui"
+   ]
+  },
+  {
+   "hash": "d18a072c2b175d7f33ef604da8aab0f4140ceadf",
+   "subject": "fix(canvas): synchronize live scene before React publication",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/editor.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:canvas"
+   ]
+  },
+  {
+   "hash": "d7352bcd08c441c19695e3b2a93ae40bfb9f31b2",
+   "subject": "fix(composer): settle edge animation after focus cue",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-glass-composer/test/contracts.test.mjs"
+   ],
+   "areas": [
+    "plugin:glass-composer"
+   ]
+  },
+  {
+   "hash": "820267ca3d032b6ea504429397602bfaaa4f0f36",
+   "subject": "fix(shell): keep canvas hover action legible on light images",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "143c25e21cc7c03462fbe52245578da52f5525df",
+   "subject": "fix(models): rank Astra first in client catalogs",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "88ab06b1aba22090e8896bf92d73b2364b746a17",
+   "subject": "fix(admin): display Astra first in model routes",
+   "files": 2,
+   "guards": [
+    "enterprise/apps/admin/tests/api.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "d0152d7862e8eb2c962c73d689bc11142409dfed",
+   "subject": "fix(office): describe Word runtime requirements and source provenance",
+   "files": 6,
+   "guards": [
+    "packages/dsh-plugin-office-skills/test/package.test.mjs"
+   ],
+   "areas": [
+    "plugin:office-skills"
+   ]
+  },
+  {
+   "hash": "a3cb5724e0286da57b6ff3c4883906bfc526cee9",
+   "subject": "fix(office): preserve Word non-text XML during replacements",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-office-skills/skills/documents/tests/test_emate_docx.py"
+   ],
+   "areas": [
+    "plugin:office-skills"
+   ]
+  },
+  {
+   "hash": "c0bb8ddb5c725fb56ffb42ddae1af5ed8e324912",
+   "subject": "fix(office): preserve PPT export permissions and Windows ACLs",
+   "files": 4,
+   "guards": [
+    "packages/dsh-plugin-office-skills/skills/ppt-master/scripts/tests/test_native_export_guards.py"
+   ],
+   "areas": [
+    "plugin:office-skills"
+   ]
+  },
+  {
+   "hash": "fa6e98a44e0168d4652ab6f67a16ea1c78ab7224",
+   "subject": "fix(office): retain successful PPT publication after backup cleanup errors",
+   "files": 4,
+   "guards": [
+    "packages/dsh-plugin-office-skills/skills/ppt-master/scripts/tests/test_native_export_guards.py"
+   ],
+   "areas": [
+    "plugin:office-skills"
+   ]
+  },
+  {
+   "hash": "d1012e633b8ef53cb4eaa5013d085bc528d9f1ca",
+   "subject": "fix(build): preserve original source companion bytes across checkouts",
+   "files": 2,
+   "guards": [],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "3aa78749bac2c81dceba3509ae4cbf3d79295f44",
+   "subject": "fix(office): distinguish optional PPT review from default workflow gates",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "plugin:office-skills"
+   ]
+  },
+  {
+   "hash": "79ec77ded7032631edc856eeefa13c1cf7fa95f2",
+   "subject": "fix(enterprise): order audit ledger locks to prevent concurrent ingest deadlocks",
+   "files": 2,
+   "guards": [
+    "enterprise/apps/model-gateway/tests/postgres-integration.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "c568214574fb4b92682b00509ab744f5fbda3344",
+   "subject": "fix(pet): label killed native Jobs as cancelled",
+   "files": 2,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/task-details.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "fad45ed2d1d1a717d5aa22e1b2d5805708b2e48e",
+   "subject": "fix(desktop): preserve hidden Python dylibs in universal Mac packages",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/package.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "06e940012d440bce945546d63fc8ded9e7c6b126",
+   "subject": "fix(office): retain active Calc profiles and preserve web hyperlinks",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-office-skills/test/calc-runtime.test.mjs"
+   ],
+   "areas": [
+    "plugin:office-skills"
+   ]
+  },
+  {
+   "hash": "c57d7ecb5184692fe995c1e94279de52860683ef",
+   "subject": "fix(knowledge): forward versioned Wiki import bindings",
+   "files": 2,
+   "guards": [
+    "enterprise/apps/analytics-api/tests/knowledge-client.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "fa00a1748a41824e45124620e3a67103b48c5093",
+   "subject": "fix(knowledge): preserve original graph paths through native imports",
+   "files": 8,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/agent-tools.test.mjs",
+    "packages/dsh-plugin-knowledge/test/ui-operations.test.mjs",
+    "packages/dsh-plugin-knowledge/test/ui-read.test.mjs",
+    "packages/dsh-plugin-knowledge/test/workflow.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "cb5490055651623498b3ec210de1f786665ecfd8",
+   "subject": "fix(audit): expose account-bound turn ownership for native restoration",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "8b06b2ef48a0f763913074438e00682254688812",
+   "subject": "fix(knowledge): distinguish stable batches within one native request",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-knowledge/test/agent-tools.test.mjs"
+   ],
+   "areas": [
+    "plugin:knowledge"
+   ]
+  },
+  {
+   "hash": "5d3750cd50d510925b9d2828816e34b093d9fc4f",
+   "subject": "fix(office): restore native PPT preview leases after restart",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-office-skills/test/preview.client.spec.tsx",
+    "packages/dsh-plugin-office-skills/test/preview.test.mjs"
+   ],
+   "areas": [
+    "plugin:office-skills"
+   ]
+  },
+  {
+   "hash": "9c4b03f3f71c6ad667f64eac92450c835289d234",
+   "subject": "fix(release): bind Calc source companion to native acceptance and promotion",
+   "files": 7,
+   "guards": [
+    "desktop/e-mate-desktop/scripts/candidate-promotion-worker.test.mjs",
+    "desktop/e-mate-desktop/scripts/candidate-update-worker.test.mjs",
+    "desktop/e-mate-desktop/scripts/verify-update-acceptance.test.mjs"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "3a4d2c71a424798b8baea31b0333040e8756b66d",
+   "subject": "fix(desktop): retain pinned Calc empty directories during packaging",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "74f7334f8c7cac240607c24ee077418199a4a263",
+   "subject": "fix(calc): validate link escapes with platform path separators",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/scripts/prepare-calc-runtime.spec.mjs"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "0213779f7e3a9b1c42099dff353547b37bbdff41",
+   "subject": "fix(desktop): preserve pinned Calc metadata in universal packages",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "674e49781e15ab0883566d6b65b727f2c1f1efa9",
+   "subject": "fix(genui): preserve native rc7 DOM fence rendering in product bundle",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-genui/test/client-bundle.test.mjs",
+    "packages/dsh-plugin-genui/test/package.test.mjs"
+   ],
+   "areas": [
+    "plugin:genui"
+   ]
+  },
+  {
+   "hash": "de4b7c81b4954dd037993b9ab03401737d31c64b",
+   "subject": "fix(mcp): bind OAuth callback issuer to discovery and expire consumed callbacks",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-mcp-manage/test/contract.test.mjs"
+   ],
+   "areas": [
+    "plugin:mcp-manage"
+   ]
+  },
+  {
+   "hash": "5208d987748a9b116a778b647766883515a915c5",
+   "subject": "fix(shell): keep process fold active after atomic tool view errors",
+   "files": 9,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/activity-fold.client.spec.tsx",
+    "scripts/harness-runtime-adapters.test.mjs"
+   ],
+   "areas": [
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "666e9d13adb9e1c426372ad762c85736e0725bb7",
+   "subject": "fix(artifacts): restore verified Office files in final turn vocabulary",
+   "files": 4,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+    "scripts/harness-artifact-links-adapter.test.mjs"
+   ],
+   "areas": [
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "fdf9008c693380bb14a8d7f2e748d9578c6aadc9",
+   "subject": "fix(artifacts): target runtime deliverables bundle without unused Vite adapter",
+   "files": 2,
+   "guards": [
+    "scripts/harness-artifact-links-adapter.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "59f6ea659300c00fcc81192b67be00ecb73d0dbe",
+   "subject": "fix(runtime): materialize and verify final artifact and slot adapters",
+   "files": 6,
+   "guards": [
+    "scripts/harness-conversation-adapter.test.mjs",
+    "scripts/harness-runtime-adapters.test.mjs"
+   ],
+   "areas": [
+    "profile-core",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "1703c6367a5b5a5d373b62c942d8926539ef6819",
+   "subject": "fix(canvas): retry missing image hydration after output persistence",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/editor.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:canvas"
+   ]
+  },
+  {
+   "hash": "dbefa84bb9e4d96d8dacde24d8ecc46284aa18b4",
+   "subject": "fix(profile): declare pinned web-react runtime import for tool boundaries",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "7cdc14259f5e73711ae8cdec0d89de57ebe42a2e",
+   "subject": "fix(computer-use): explain Windows blocked input accurately",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-computer-use/test/windows-source.test.mjs"
+   ],
+   "areas": [
+    "plugin:computer-use"
+   ]
+  },
+  {
+   "hash": "7ecbb19edca68d4977b3f63076504624a96e7c6c",
+   "subject": "fix(models): attach byte pressure to native compaction scope",
+   "files": 3,
+   "guards": [
+    "packages/dsh/test/request-size.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "9d260ea97e62d22ea76f0adf4a657db0ccacdee3",
+   "subject": "fix(shell): restore native computer-use mentions on both platforms",
+   "files": 2,
+   "guards": [
+    "packages/dsh/profile/plugins/emate-shell/tests/composer-mentions.client.spec.tsx"
+   ],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "d08b6b16db623007efc152891fb842afbc5d8a40",
+   "subject": "fix(artifacts): resolve verified paths in follow-up turns",
+   "files": 2,
+   "guards": [
+    "scripts/harness-conversation-adapter.test.mjs"
+   ],
+   "areas": [
+    "scripts"
+   ]
+  },
+  {
+   "hash": "cd9b01de1cf201ed2f150ff312823cd1ac726d49",
+   "subject": "fix(desktop): separate startup and PTY smoke budgets",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "254136cc700b98aa0aac15d2cd1b440a1ad468fb",
+   "subject": "fix(images): ignore explicitly negated implicit source references",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "ac1bec9dac563d91a3fcfd32cd33a40fa50fb9a8",
+   "subject": "fix(cdp): expose valid raw parameter schemas to native tools",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-cdp/test/contract.test.mjs"
+   ],
+   "areas": [
+    "plugin:cdp"
+   ]
+  },
+  {
+   "hash": "7b9e64a8646cc9386b78e02cca7ac44097c38408",
+   "subject": "fix: package vision dependencies and add session expert mode",
+   "files": 13,
+   "guards": [
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts",
+    "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "desktop",
+    "profile-core",
+    "shell"
+   ]
+  },
+  {
+   "hash": "39ba5204a71221d913ec531da2e250594da67017",
+   "subject": "fix: add native Windows Calc extraction target",
+   "files": 3,
+   "guards": [
+    "desktop/e-mate-desktop/scripts/prepare-calc-runtime.spec.mjs"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "d7023dd390ed2708addf1e71c67ab7f2fa8f7620",
+   "subject": "fix: resolve batch image receipts in parent image catalog",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/image-batch-recovery.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "3ff00c46168c2bcf599b10703ddc3e52b97c7481",
+   "subject": "fix: retain original image for poster text removal edits",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/project.test.mjs",
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "plugin:canvas",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "75e82ab814103b35fd8ccf4f18b12cf636596a99",
+   "subject": "fix: retire Doubao from enterprise model grants and invocation",
+   "files": 9,
+   "guards": [
+    "enterprise/apps/admin/tests/api.test.ts",
+    "enterprise/apps/analytics-api/tests/admin-management.test.ts",
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+    "enterprise/packages/admin-contract/tests/admin-contract.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "a5afbd682b81be1e880b7c61e4bd2586aff8849e",
+   "subject": "fix: remove Doubao runtime catalog and migrate cached policies",
+   "files": 5,
+   "guards": [
+    "enterprise/apps/model-gateway/tests/model-smoke.test.ts",
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "enterprise",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "58e033897eead9bc994cd1a18a24eb07757148da",
+   "subject": "fix: preserve cross-turn image references and historical vision inputs",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-vision-toolkit/test/attachment-source.test.mjs",
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "plugin:vision-toolkit",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "78a338efe7a7d51b2d6ec1a00d8be08fc33099c9",
+   "subject": "fix: return image evidence to the native agent loop and remove lexical routing",
+   "files": 7,
+   "guards": [
+    "packages/dsh-plugin-vision-toolkit/test/contract.test.mjs",
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "plugin:vision-toolkit",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "e71412f18053ddf051706668b6d6590fb6fdedfe",
+   "subject": "fix: preserve memory tool locators for native agent follow-up",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-memory-evolve/test/store.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "plugin:memory-evolve"
+   ]
+  },
+  {
+   "hash": "7a97935df4c8e517fc2b3d0cf2caeecba15887fa",
+   "subject": "fix(plugins): preserve opener outcomes and enforce UTF-8 preview bounds",
+   "files": 7,
+   "guards": [
+    "desktop/e-mate-desktop/tests/file-viewer.spec.ts",
+    "desktop/e-mate-desktop/tests/visualize.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "987725f7e0497b50519acd2fc2f65a9e568c0225",
+   "subject": "fix(shell): stop nested shimmer when activity turn closes",
+   "files": 2,
+   "guards": [],
+   "areas": [
+    "other",
+    "shell"
+   ]
+  },
+  {
+   "hash": "3b6002f6a4960df06df9783ae5885814ef249c5f",
+   "subject": "fix(profile): reuse current packages during targeted repair",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/e-mate-profile-win.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "1ed415a71699a2afa675f4ba6ea6f969a86db2f6",
+   "subject": "fix(desktop): restore native unpacked archive mirror verification",
+   "files": 3,
+   "guards": [
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "d5e93a2de075df9561725d369b268cb1a355c64b",
+   "subject": "fix(desktop): unpack the product baseline contract with native payload",
+   "files": 3,
+   "guards": [
+    "desktop/e-mate-desktop/tests/package.spec.ts"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "c4ddb072fcd239ca0741dabfe8b049a9405489d8",
+   "subject": "fix(desktop): restore native chat and address installed acceptance regressions",
+   "files": 33,
+   "guards": [
+    "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts",
+    "packages/dsh-plugin-canvas/test/editor.client.spec.tsx",
+    "packages/dsh-plugin-canvas/test/rpc.test.mjs",
+    "packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx",
+    "packages/dsh-plugin-pet/test/contracts.test.mjs",
+    "packages/dsh-plugin-vision-toolkit/test/contract.test.mjs",
+    "packages/dsh/profile/plugins/emate-shell/tests/activity-fold.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/chat-context.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/chat-fidelity.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "desktop",
+    "other",
+    "plugin:canvas",
+    "plugin:file-import",
+    "plugin:pet",
+    "plugin:vision-toolkit",
+    "shell",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "5dd480154099e4611fec8f5b3fb3301dd0933a13",
+   "subject": "fix(desktop): expose native image outputs and runtime contracts",
+   "files": 11,
+   "guards": [
+    "desktop/e-mate-desktop/tests/desktop-runtime-environment.spec.ts",
+    "packages/dsh-plugin-office-skills/test/package.test.mjs",
+    "packages/dsh/profile/plugins/emate-shell/tests/image-batch-client.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/native-tool-image-output.client.spec.tsx"
+   ],
+   "areas": [
+    "desktop",
+    "plugin:office-skills",
+    "plugin:tool-search",
+    "shell"
+   ]
+  },
+  {
+   "hash": "2a894dc100f1f55e0274d82905e517bb27dc26f3",
+   "subject": "fix(desktop): repair native vision, Office and packaged connector runtime",
+   "files": 143,
+   "guards": [
+    "desktop/e-mate-desktop/tests/desktop-runtime-environment.spec.ts",
+    "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts",
+    "desktop/e-mate-desktop/tests/package.spec.ts",
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts",
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+    "enterprise/apps/model-gateway/tests/model-smoke.test.ts",
+    "packages/dsh-plugin-mcp-manage/test/contract.test.mjs",
+    "packages/dsh-plugin-office-skills/test/calc-runtime.test.mjs",
+    "packages/dsh-plugin-office-skills/test/fixtures/pdf-empty-glyf.pdf",
+    "packages/dsh-plugin-office-skills/test/package.test.mjs",
+    "packages/dsh-plugin-office-skills/test/preview.test.mjs",
+    "packages/dsh-plugin-vision-toolkit/test/contract.test.mjs",
+    "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/connection-status.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "desktop",
+    "enterprise",
+    "plugin:mcp-manage",
+    "plugin:office-skills",
+    "plugin:vision-toolkit",
+    "shell",
+    "profile-core",
+    "scripts",
+    "other"
+   ]
+  },
+  {
+   "hash": "d0e026624f19af2045cc5dd7b34b763f0e51b6b7",
+   "subject": "fix(desktop): pass native lipo input before architecture checks",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "ee61a8615b6e0917a0a43f1f432dad3c6e12e396",
+   "subject": "fix(desktop): allow native macOS cold validation for Feishu CLI",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "f9c59bbd85ecdd50434f7cd8a081bd454974072b",
+   "subject": "fix(office): invoke markers through the managed native Node entry",
+   "files": 3,
+   "guards": [
+    "packages/dsh-plugin-office-skills/test/package.test.mjs"
+   ],
+   "areas": [
+    "plugin:office-skills"
+   ]
+  },
+  {
+   "hash": "5e39bddc3dfd8542b6663065fa16eb594d28fc7d",
+   "subject": "fix(canvas): keep native annotations readable within image bounds",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-canvas/test/browser-entry.tsx",
+    "packages/dsh-plugin-canvas/test/browser.test.mjs",
+    "packages/dsh-plugin-canvas/test/editor.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:canvas"
+   ]
+  },
+  {
+   "hash": "901812a885fe3553e3bffa2cc00fbdad719edc1f",
+   "subject": "fix(desktop): validate native packaged Calc directory pruning",
+   "files": 4,
+   "guards": [
+    "desktop/e-mate-desktop/scripts/prepare-calc-runtime.spec.mjs",
+    "desktop/e-mate-desktop/tests/verify-packaged-runtime.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "dfa9aef17aa881c7c5d8dd275e041274198f6f79",
+   "subject": "fix(ui): hide internal context and optional chart attribution reminders",
+   "files": 5,
+   "guards": [
+    "packages/dsh-plugin-office-skills/test/package.test.mjs"
+   ],
+   "areas": [
+    "plugin:office-skills",
+    "shell"
+   ]
+  },
+  {
+   "hash": "16ff8dff0f1614f4c726844401918b7381fe93c9",
+   "subject": "fix(models): apply Astra low reasoning across managed sessions",
+   "files": 10,
+   "guards": [
+    "enterprise/apps/admin/tests/api.test.ts",
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+    "enterprise/apps/model-gateway/tests/model-smoke.test.ts",
+    "packages/dsh/test/e-mate.test.mjs",
+    "packages/dsh/test/identity-lifecycle.test.mjs"
+   ],
+   "areas": [
+    "enterprise",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "9e2ea1e2887adea2b2a034b5cc0831184a1643ed",
+   "subject": "fix(release): bind source companion to bundled runtime dependencies",
+   "files": 5,
+   "guards": [
+    "desktop/e-mate-desktop/scripts/candidate-promotion-worker.test.mjs",
+    "desktop/e-mate-desktop/scripts/candidate-update-worker.test.mjs",
+    "desktop/e-mate-desktop/scripts/verify-update-acceptance.test.mjs"
+   ],
+   "areas": [
+    "desktop",
+    "other"
+   ]
+  },
+  {
+   "hash": "077f524469dd89c193dcd30dc7f88af72b7cecb6",
+   "subject": "fix(ui): show an orange dot when expert mode is enabled",
+   "files": 1,
+   "guards": [],
+   "areas": [
+    "shell"
+   ]
+  },
+  {
+   "hash": "26b2f789ecd758388187d962c568235b4bf57c8c",
+   "subject": "fix: use supported image wrapper with native server model mapping",
+   "files": 2,
+   "guards": [],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "bdb9e67f14731ca9e3f60a37851635a355303f58",
+   "subject": "fix: restore rc7 native flow with tidychat and verified image plugins",
+   "files": 57,
+   "guards": [
+    "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts",
+    "enterprise/apps/admin/tests/api.test.ts",
+    "enterprise/apps/auth-gateway/tests/crypto.test.ts",
+    "enterprise/apps/auth-gateway/tests/postgres-integration.test.ts",
+    "enterprise/apps/auth-gateway/tests/production.test.ts",
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+    "enterprise/apps/model-gateway/tests/model-smoke.test.ts",
+    "enterprise/apps/model-gateway/tests/postgres-integration.test.ts",
+    "enterprise/apps/model-gateway/tests/postgres-usage-store.test.ts",
+    "enterprise/apps/model-gateway/tests/production-configuration.test.ts",
+    "enterprise/packages/admin-contract/tests/admin-contract.test.ts",
+    "packages/dsh-plugin-find-skill/test/contract.test.mjs",
+    "packages/dsh-plugin-tidychat/test/folding.test.mjs",
+    "packages/dsh-plugin-tidychat/test/navigation.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/image-batch-progress.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+    "packages/dsh/test/e-mate.test.mjs",
+    "packages/dsh/test/identity-lifecycle.test.mjs",
+    "packages/dsh/test/image-batch-recovery.test.mjs",
+    "packages/dsh/test/image-batch-worker-stress.test.mjs",
+    "packages/dsh/test/image-model-policy.test.mjs",
+    "packages/dsh/test/native-image-task-runner.test.mjs",
+    "scripts/harness-conversation-adapter.test.mjs",
+    "scripts/harness-provenance.test.mjs"
+   ],
+   "areas": [
+    "other",
+    "desktop",
+    "enterprise",
+    "plugin:find-skill",
+    "plugin:mcp-manage",
+    "plugin:tidychat",
+    "profile-core",
+    "shell",
+    "scripts"
+   ]
+  },
+  {
+   "hash": "4c2545378a2944754d4c0498b4156712b0c5d6cb",
+   "subject": "fix: preserve frozen native model requests in enterprise policy",
+   "files": 2,
+   "guards": [
+    "packages/dsh/test/e-mate.test.mjs"
+   ],
+   "areas": [
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "51a68010561366c78e4e6fc4bb1f543d948b4b08",
+   "subject": "fix: preserve released image client grants on the single Flare route",
+   "files": 14,
+   "guards": [
+    "enterprise/apps/analytics-api/tests/admin-management.test.ts",
+    "enterprise/apps/analytics-api/tests/postgres-integration.test.ts",
+    "enterprise/apps/auth-gateway/tests/crypto.test.ts",
+    "enterprise/apps/auth-gateway/tests/postgres-integration.test.ts",
+    "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+    "enterprise/packages/admin-contract/tests/admin-contract.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "0abddba720a194ac7b11e429c742099636635eed",
+   "subject": "fix: simplify tidychat navigation to monochrome reading ticks",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-tidychat/test/navigation.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:tidychat"
+   ]
+  },
+  {
+   "hash": "aed4a18a58398a794998c28f98b096f5c543ff29",
+   "subject": "fix: release deleted user login identities without reusing historical ownership",
+   "files": 5,
+   "guards": [
+    "enterprise/apps/auth-gateway/tests/identity-ownership.test.ts"
+   ],
+   "areas": [
+    "enterprise"
+   ]
+  },
+  {
+   "hash": "68235afc066bfbc7c5358ef14094820894d6db24",
+   "subject": "fix(skill-hub): preserve terminal authentication errors and truthful empty states",
+   "files": 6,
+   "guards": [
+    "packages/dsh-plugin-skill-hub/test/capabilities.client.spec.tsx",
+    "packages/dsh-plugin-skill-hub/test/skill-hub.test.mjs",
+    "packages/dsh/test/identity-lifecycle.test.mjs"
+   ],
+   "areas": [
+    "plugin:skill-hub",
+    "profile-core"
+   ]
+  },
+  {
+   "hash": "1e5a3f66376943f467a9b205313bf11f6c08cd79",
+   "subject": "fix: refresh bundled profile files on same-version replacement",
+   "files": 2,
+   "guards": [
+    "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts"
+   ],
+   "areas": [
+    "desktop"
+   ]
+  },
+  {
+   "hash": "94f63e7a217105a93d47af339c4edcc28f64b912",
+   "subject": "fix: make Skill Hub search form submit from the interface",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-skill-hub/test/capabilities.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:skill-hub"
+   ]
+  },
+  {
+   "hash": "3a3150c0b76092658e93a44d6b10438a4dde3d5f",
+   "subject": "fix(tidychat): restore compact navigation dimensions",
+   "files": 2,
+   "guards": [
+    "packages/dsh-plugin-tidychat/test/navigation.client.spec.tsx"
+   ],
+   "areas": [
+    "plugin:tidychat"
+   ]
+  }
+ ]
+}
