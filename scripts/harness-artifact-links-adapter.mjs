@@ -31,16 +31,14 @@ function emateArtifactMention(url, context) {
 
 export function adaptHarnessArtifactLinksSource(source) {
   const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
-  change('function renderAnchor(url, children, key) {\n\treturn renderSafeLink(normalizeUri(url), children, key);\n}',
-    `${emateArtifactMention.toString()}\nfunction renderAnchor(url, children, key, context) {\n\tconst mention = emateArtifactMention(url, context);\n\tif (mention) return jsx("button", { type: "button", className: MarkdownText_module_css_default.fileMention, style: { margin: 0, padding: 0, border: 0, background: "none", font: "inherit", color: "var(--dsw-alias-state-business-primary, LinkText)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: "3px" }, title: mention.title, "aria-label": mention.label, onClick: mention.open, children }, key);\n\treturn renderSafeLink(normalizeUri(url), children, key);\n}`, 'renderer/anchor')
-  change('case "link": return renderAnchor(node.url, renderChildren(node.children, {\n\t\t\t...context,\n\t\t\tinLink: true\n\t\t}), key);',
-    'case "link": return renderAnchor(node.url, renderChildren(node.children, {\n\t\t\t...context,\n\t\t\tinLink: true\n\t\t}), key, context);', 'renderer/link')
-  change('return renderAnchor(definition.url, renderChildren(node.children, {\n\t\t...context,\n\t\tinLink: true\n\t}), key);',
-    'return renderAnchor(definition.url, renderChildren(node.children, {\n\t\t...context,\n\t\tinLink: true\n\t}), key, context);', 'renderer/reference')
-  change('function renderImage(url, alt, key) {\n\tconst imageSrc',
+  change('function renderAnchor(url, children, key, glyph = true) {\n\treturn renderSafeLink(normalizeUri(url), children, key, glyph);\n}',
+    `${emateArtifactMention.toString()}\nfunction renderAnchor(url, children, key, glyph = true, context) {\n\tconst mention = emateArtifactMention(url, context);\n\tif (mention) return jsx("button", { type: "button", className: MarkdownText_module_css_default.fileMention, style: { margin: 0, padding: 0, border: 0, background: "none", font: "inherit", color: "var(--dsw-alias-state-business-primary, LinkText)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: "3px" }, title: mention.title, "aria-label": mention.label, onClick: mention.open, children }, key);\n\treturn renderSafeLink(normalizeUri(url), children, key, glyph);\n}`, 'renderer/anchor')
+  change('case "link": return renderAnchor(node.url, renderChildren(node.children, {\n\t\t\t...context,\n\t\t\tinLink: true\n\t\t}), key, !anchorWrapsOnlyImages(node.children));',
+    'case "link": return renderAnchor(node.url, renderChildren(node.children, {\n\t\t\t...context,\n\t\t\tinLink: true\n\t\t}), key, !anchorWrapsOnlyImages(node.children), context);', 'renderer/link')
+  change('return renderAnchor(definition.url, rendered, key, !anchorWrapsOnlyImages(node.children));',
+    'return renderAnchor(definition.url, rendered, key, !anchorWrapsOnlyImages(node.children), context);', 'renderer/reference')
+  change('function renderImage(url, alt, key, context) {\n\tconst imageSrc',
     'function renderImage(url, alt, key, context) {\n\tconst mention = emateArtifactMention(url, context);\n\tif (mention) return jsx("button", { type: "button", className: MarkdownText_module_css_default.fileMention, style: { margin: 0, padding: 0, border: 0, background: "none", font: "inherit", color: "var(--dsw-alias-state-business-primary, LinkText)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: "3px" }, title: mention.title, "aria-label": mention.label, onClick: mention.open, children: alt || mention.label }, key);\n\tconst imageSrc', 'renderer/image')
-  change('case "image": return renderImage(node.url, node.alt ?? "", key);', 'case "image": return renderImage(node.url, node.alt ?? "", key, context);', 'renderer/image-node')
-  change('return renderImage(definition.url, node.alt ?? "", key);', 'return renderImage(definition.url, node.alt ?? "", key, context);', 'renderer/image-reference')
   return source
 }
 
