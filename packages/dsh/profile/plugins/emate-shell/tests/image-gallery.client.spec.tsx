@@ -13,7 +13,7 @@ import { unknownFallbackDefinition } from '../../../../../../upstream/deepseek-h
 import { chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/common.ts'
 import { deriveTurnMetrics } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/contract/turn-metrics.ts'
 import { adaptHarnessConversationSource, adaptHarnessChatSource } from '../../../../../../scripts/harness-conversation-adapter.mjs'
-import { bindSnapshotSelector } from '../../../../../../upstream/deepseek-harness/packages/client/web-react/src/bind.ts'
+import { bindSnapshotSelector } from '../../../../../../upstream/deepseek-harness/packages/client/ui-renderer/src/client/bind.ts'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseImageOutputReceipt, parseImageOutputGroup } from '../src/client/image-gallery-contract.ts'
@@ -44,17 +44,43 @@ vi.mock('@deepseek-ai/dsh-client-ui-attachment', async () => {
       : mockMessageImage(props),
   }
 })
-const mockMessageImage = ({ attachment, labels }: {
-    attachment: { name?: string }
+// 0.1.5 passes a MessageImageSpec ({ attachment } | { preview }), not a bare attachment.
+const mockMessageImage = ({ image, labels }: {
+    image: { attachment?: { name?: string } }
     labels: { open: string; openNamed: (label: string) => string }
-  }) => (
-    <button
-      type="button"
-      data-variant="tile"
-      title={labels.open}
-      aria-label={labels.openNamed(attachment.name ?? 'image')}
-    >{attachment.name ?? 'image'}</button>
-  )
+  }) => {
+    const name = image.attachment?.name ?? 'image'
+    return (
+      <button
+        type="button"
+        data-variant="tile"
+        title={labels.open}
+        aria-label={labels.openNamed(name)}
+      >{name}</button>
+    )
+  }
+
+// The native conversation dictionary's zh entries, which the registered
+// conversation.message.images slot resolves its labels from.
+const CONVERSATION_ZH: Record<string, string> = {
+  'image.label': '图片',
+  'image.openOriginal': '查看原图',
+  'image.openOriginalLabel': '{label}，点击查看原图',
+  'image.loading': '正在加载图像…',
+  'image.loadFailed': '图像加载失败，点击重试',
+  'image.preview': '原图预览',
+  'image.closePreview': '关闭原图预览',
+}
+const zh = (key: string, params?: { label?: string }) =>
+  (CONVERSATION_ZH[key] ?? key).replace('{label}', params?.label ?? '')
+const slotLabels = {
+  image: zh('image.label'),
+  open: zh('image.openOriginal'),
+  openNamed: (label: string) => zh('image.openOriginalLabel', { label }),
+  loading: zh('image.loading'),
+  loadFailed: zh('image.loadFailed'),
+  lightbox: { dialog: zh('image.preview'), close: zh('image.closePreview') },
+}
 
 afterEach(() => { cleanup(); nativeImageRendering.enabled = false })
 
@@ -217,6 +243,11 @@ function galleryProps(
     draftBytes: () => 0,
     notify: vi.fn(),
     runResource: vi.fn(async () => {}),
+    // Mirrors the native conversation.message.images slot entry (MessageImages).
+    renderSlot: ((name: string, owner: { images: readonly { attachment?: unknown }[]; loadImage: unknown }) =>
+      name === 'conversation.message.images'
+        ? owner.images.map((image, index) => mockMessageImage({ key: index, image, labels: slotLabels } as never))
+        : null) as never,
     ...overrides,
   }
 }
@@ -715,7 +746,7 @@ describe('completed artifact terminal', () => {
     expect(props.loadImage).not.toHaveBeenCalled()
 
     expect(screen.getByRole('article', { name })).toBeTruthy()
-    expect(screen.getByRole('button', { name: `查看原图：${name}` })).toBeTruthy()
+    expect(screen.getByRole('button', { name: `${name}，点击查看原图` })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: `复制图像：${name}` }))
     await waitFor(() => { expect(props.runResource).toHaveBeenCalledWith({
       action: 'copy-image',
@@ -953,7 +984,7 @@ describe('completed artifact terminal', () => {
     })
     const view = render(<ArtifactTerminal {...props as never} />)
     expect(screen.getAllByRole('button', { name: /图片操作/u })).toHaveLength(1)
-    expect(screen.getByRole('button', { name: /查看原图：.*子任务01-生成/u })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /子任务01-生成.*点击查看原图/u })).toBeTruthy()
     expect(view.container.textContent).not.toContain('sha256:')
     fireEvent.contextMenu(screen.getByRole('button', { name: /查看原图/u }))
     fireEvent.click(screen.getByRole('menuitem', { name: '下载副本' }))
@@ -1313,24 +1344,24 @@ describe('indexed terminal projection', () => {
       return terminalProps(nodes, matched, { turn: currentTurn, seq })
     }
     const view = render(<ArtifactTerminal {...props() as any} />)
-    expect(screen.queryByRole('button', { name: '查看原图：result.png' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'result.png，点击查看原图' })).toBeNull()
     nodes = [hidden(item)]
     seq = 4
     view.rerender(<ArtifactTerminal {...props() as any} />)
-    const image = screen.getByRole('button', { name: '查看原图：result.png' })
+    const image = screen.getByRole('button', { name: 'result.png，点击查看原图' })
     // A later verification failure and model retry do not revoke produced bytes.
     nodes = [...nodes, { key: 'verify', kind: 'tool-call', location: { kind: 'turn', turn: currentTurn }, data: { root: { kind: 'tool-result', isError: true } } }]
     seq = 6
     view.rerender(<ArtifactTerminal {...props() as any} />)
-    expect(screen.getByRole('button', { name: '查看原图：result.png' })).toBe(image)
+    expect(screen.getByRole('button', { name: 'result.png，点击查看原图' })).toBe(image)
     nodes = [...nodes, { key: 'retry', kind: 'retry', location: { kind: 'turn', turn: currentTurn }, data: {} }]
     seq = 7
     view.rerender(<ArtifactTerminal {...props() as any} />)
-    expect(screen.getAllByRole('button', { name: '查看原图：result.png' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'result.png，点击查看原图' })).toHaveLength(1)
     currentTurn = { ...turn(data), end: { type: 'turn/end', seq: 8, time: 8, data: { turn: 1, reason: { kind: ending } } } } as any
     seq = 8
     view.rerender(<ArtifactTerminal {...props() as any} />)
-    expect(screen.getAllByRole('button', { name: '查看原图：result.png' })).toEqual([image])
+    expect(screen.getAllByRole('button', { name: 'result.png，点击查看原图' })).toEqual([image])
   })
 
   it('reads only its turn and no child receipts across unrelated updates, while a live reader still applies revisions and removals', () => {
@@ -1347,7 +1378,7 @@ describe('indexed terminal projection', () => {
     const sessions = { byId: { 'session-1': {}, child: { get projectionValues() { return childProjection() } } }, subagentsByParent: { 'session-1': { entries: [{ kind: 'child', id: 'child', mode: 'one-shot' }] } } }
     const props = terminalProps([], undefined, {useSession, useSessions: (select: any) => select(sessions)})
     render(<ArtifactTerminal {...props as any} />)
-    expect(screen.getByRole('button', {name: '查看原图：result.png'})).toBeTruthy()
+    expect(screen.getByRole('button', {name: 'result.png，点击查看原图'})).toBeTruthy()
     get.mockClear()
     for(let i = 0; i < 20; i++) act(() => { snapshot = {chat}; listeners.forEach(fn => fn()) })
     expect(values).not.toHaveBeenCalled()
@@ -1357,7 +1388,7 @@ describe('indexed terminal projection', () => {
       rows.set('receipt', hidden({...original, revision: 3, attachment: {...attachment, name: 'updated.png'}}))
       snapshot = {chat}; listeners.forEach(fn => fn())
     })
-    expect(screen.getByRole('button', {name: '查看原图：updated.png'})).toBeTruthy()
+    expect(screen.getByRole('button', {name: 'updated.png，点击查看原图'})).toBeTruthy()
     act(() => { rows.clear(); snapshot = {chat}; listeners.forEach(fn => fn()) })
     expect(screen.queryByRole('button', {name: /查看原图/})).toBeNull()
   })
@@ -1499,7 +1530,7 @@ describe('dsh-imagegen native receipt integration', () => {
     expect(terminalImageItems(nodes, matched.callIds, 1).map(item => item.attachment?.attachmentId)).toEqual(images.map(image => image.attachmentId))
     const loadImage = vi.fn(async () => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=')
     const view = render(<ArtifactTerminal {...terminalProps(nodes, matched, { turn: tail.location.turn, loadImage }) as any} />)
-    const buttons = screen.getAllByRole('button', { name: /^查看原图：/ })
+    const buttons = screen.getAllByRole('button', { name: /，点击查看原图$/ })
     expect(buttons).toHaveLength(4)
     await waitFor(() => expect(loadImage).toHaveBeenCalledTimes(4))
     // Code child output has no presentationMeta; the v3 event supplies all four native cards.
@@ -1514,7 +1545,7 @@ describe('dsh-imagegen native receipt integration', () => {
     expect(closed.location.turn.status).toBe('closed')
     matched = selectArtifactTerminal({ turn: closed.location.turn, nodes, seq: closed.data.seq } as never)!
     view.rerender(<ArtifactTerminal {...terminalProps(nodes, matched, { turn: closed.location.turn, loadImage }) as any} />)
-    expect(screen.getAllByRole('button', { name: /^查看原图：/ })).toEqual(buttons)
+    expect(screen.getAllByRole('button', { name: /，点击查看原图$/ })).toEqual(buttons)
     const nextTurn = (assembler.snapshot('chat') as any).timeline.turns.get(2)
     expect(selectArtifactTerminal({ turn: nextTurn, nodes, seq: events.length } as never)).toBeNull()
     const cold = createAssembler(); cold.replaceWindow(events.map(event => ({ event, view: undefined })), false); cold.flush()
