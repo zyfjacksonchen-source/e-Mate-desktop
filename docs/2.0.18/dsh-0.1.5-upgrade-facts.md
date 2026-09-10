@@ -1200,3 +1200,25 @@ async function* sessionLogZipEntries(deps, rootContent, sessionId, includeDescen
 #### 进度
 `session-export`：**4/6 处已解决**（含重定目标）。剩 2 处形状已查明。
 适配器总账：**4 条收口 + 1 条进行中（4/6）+ 3 条待办**。
+### 21.28 Round 15：`session-export` 收口（第 5 条完成的适配器）
+
+剩余 2 处接缝已按 0.1.5 的新形状重推，**全部接缝通过**（8184 字节增量）：
+
+| # | owner | 0.1.5 的变化 | 处理 |
+|---|---|---|---|
+| 5 | `root` | 根内容作为**参数 `rootContent`** 传入（不再内联读取）；`rememberMedia`→`rememberAttachments`；`root.filename`→常量 `SESSION_LOG_FILENAME` | 已改 |
+| 6 | `descendants` | 同上；子日志现为局部常量 `content` | 已改 |
+
+**一个必须注意的细节**：e-Mate 的变换要写成 `const emateRootContent = emateExportContent(rootContent)` ——
+**不能沿用原名 `rootContent`**，否则在自己的初始化式里遮蔽参数（TDZ 错误）。
+
+### 21.29 适配器总账（Round 15 末）
+
+| 适配器 | 状态 |
+|---|---|
+| `fs-bytes` / `fs-escalation` / `session-title` / `slot-error` / `session-export` | **收口（5）** |
+| `artifact-links` | 待办（21 处，精度 + 注入点重设计） |
+| `artifact-deliverables` | 待办（节点定义重构） |
+| `conversation` | 待办（**47 处**，结构性重写） |
+
+5/8 收口。剩余 3 条中 2 条同根因（0.1.5 重构会话节点定义层），建议一起设计。
