@@ -1090,4 +1090,39 @@ const HOST     = '\t\t\t\t\treportEntryError: (key, entry, error, info) => {\n\t
 | `conversation` | 节点定义重构（47 处） | 待办 |
 | `session-export` | 宿主消失 | 待办 |
 
-**3 完成 + 1 判定废除（待移除），剩余 3 条结构性工作 + 1 条重定目标。**
+**3 完成 + 1 判定废除（待移除），剩余 3 条结构性工作 + 1 条重定目标。**### 21.21 `slot-error` 移除的真实范围（Round 12 实测，8 处）
+
+移除不是"删一个文件"，实测涉及 **6 个文件 / 8 处**：
+
+| 文件 | 处数 | 内容 |
+|---|---|---|
+| `scripts/harness-slot-error-adapter.mjs` | 整文件 | 删除 |
+| `scripts/harness-provenance.mjs` | 4 | import；adapter 选择三元链；`SLOT_ERROR_PACKAGE` 校验分支；materialize 写入块 |
+| `scripts/harness-runtime-adapters.mjs` | 2 | import；`replaceRuntimeFile(slotTarget, …)` 块 |
+| `scripts/harness-runtime-adapters.test.mjs` | 5 | import；`entries` 项；4 条 `assert.match` |
+| `scripts/build-harness-runtime.mjs` | 5 | import；写适配器文件；**回执两字段**；`slotErrorAdapter` 常量 |
+| `scripts/harness-conversation-adapter.test.mjs` | 1 | `additional` fixture 列表两项 |
+
+### 21.22 为什么本轮不做：它改动的是**构建回执契约**
+
+`build-harness-runtime.mjs` 把适配器写入组装产物，并把两个 sha 记入回执：
+```js
+slot_error_adapter_sha256: sha256(slotErrorAdapter),
+slot_error_client_sha256: sha256(join(assembled, 'node_modules', SLOT_ERROR_PACKAGE, 'lib', 'client.js')),
+```
+而 `harness-provenance` 的 `desktopProvenance` **校验该回执**。删除字段即修改验收链契约，
+不是普通代码清理；仓促改动可能让构建验收静默失真。
+
+### 21.23 同时确认：这是**必须做**的，不是可选清理
+
+0.1.5 不存在 `@deepseek-ai/dsh-client-runtime`，因此上面那行 `sha256(join(assembled, ...))`
+会在构建时**直接抛错**（路径不存在），`build-harness-runtime.mjs` 无法完成。
+
+> 结论：`slot-error` 的移除是 **desktop 构建的前置条件**，必须完成，且必须连同回执结构一起改并验证。
+> 本轮只做范围测量与契约影响判定，不留下半成品；下一轮连同验证一起做完。
+
+### 21.24 对整体节奏的诚实说明
+
+截至本轮：fork 重做已完成并验证；适配器 3 条完成、1 条判定废除（待移除）、另有 1 条已定精度方案、
+3 条为结构性重写（`conversation` 47 处、`artifact-deliverables`、`session-export`）。
+Round 10 已量化适配器总面约 74 处。**剩余工作仍以"多轮"计**，不表述为接近完成。
