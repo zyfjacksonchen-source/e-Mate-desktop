@@ -1422,3 +1422,46 @@ conversation 适配器**不能**用「注册贡献」整体替代：
 - 约 27 处状态/持久化 → 必须逐处源码适配，是剩余工作的大头
 
 artifact-deliverables 则**整条都是呈现性质**（产出文件的呈现与打开），因此它有望被完整替换为一次 slot 贡献注册。
+
+---
+
+## 第 33 轮：0.1.5 asar 内置插件的 client 纯度门
+
+`component-run check` 在 emate-shell 构建处失败：
+
+```
+[plugin dsh-client-bundle-purity]
+Error: client bundle purity: "@deepseek-ai/dsh-client-ui-attachment" is not in the default
+client externals or @deepseek-ai/dsh-client-ui-sidebar's dsh.client.external ... (type-only imports
+are erased and never reach this gate)
+```
+
+根因：`emate-shell` 的 `src/client/image-gallery.tsx:14` 与 `src/client/image-batch-progress.tsx:4`
+**值导入**了 `import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'`。0.1.5 起
+跨插件值导入被禁，且客户端契约明确规定**不得**用 `dsh.client.external` 绕开：
+
+> A feature plugin MUST NOT runtime-import or re-export another feature plugin's values, and
+> MUST NOT declare `dsh.client.external` to obtain them.
+
+**正确的 0.1.5 入口**是与 `MessageImage` 等价的、由 owner prop 下传的 slot 渲染器：
+
+```ts
+// packages/client/ui-conversation/src/client/contract/slots.ts:99-111
+export type RenderMessageImages = (owner: Omit<MessageImagesOwnerProps, 'loadImage'>) => ReactNode
+// MessageImagesOwnerProps: { images: readonly MessageImageSource[]; loadImage; align: 'start'|'end'; compact?: boolean }
+```
+
+原生先例（照抄其形状）：`packages/client/ui-chat/src/client/chat/MessageItem.tsx:194` 与
+`AssistantMarkdown.tsx:112`，形如
+`renderMessageImages({ images: [{ attachment }], align: 'start', compact: true })`。
+
+替换映射（等价，非近似）：
+- 旧：`<MessageImage attachment={stableAttachment} load={load} variant="tile" labels={imageLabels} />`
+- 新：`renderMessageImages({ images: [{ attachment: stableAttachment }], align: 'start', compact: true })`
+
+`loadImage` 由该渲染器内部提供（类型即为 `Omit<..., 'loadImage'>`），因此 shell 自带的
+session 级 `loadImage` 管线可一并删除——这也消除了与原生的一处分歧。
+
+**待做**：`ImageGalleryViewProps`（`image-gallery.tsx:668`）当前没有 `renderMessageImages`，
+需从注册点把 `ChatNodeOwnerProps.renderMessageImages`（`ui-chat/src/client/contract/slots.ts:92`）
+穿下去，再改 `GalleryMessageImage`（`image-gallery.tsx:941`）与 `image-batch-progress.tsx:124`。
