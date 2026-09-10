@@ -183,7 +183,7 @@ test('the integrated native ZIP producer refuses an imported hardlink through th
   await fs.link(outside, path.join(directory, refs.relative_path))
   const content = JSON.stringify({ type: 'user/message', data: { role: 'user', source: { kind: 'user', mentions: [{ source: 'e-mate/file-import', ref: JSON.stringify(refs) }] }, content: [{ type: 'text', text: `Read @${refs.relative_path}` }] } }) + '\n'
   const deps = { emateExportFs: ctx.fs, emateExportWorkspaces: { list: () => [{ path: directory, sessionIds: ['root'] }] } }
-  const stream = streamZip(deps, { filename: 'session.jsonl', content }, 'root', false, 6, new AbortController().signal)
+  const stream = streamZip(deps, content, 'root', false, 6, new AbortController().signal)
   await assert.rejects(new Response(stream).arrayBuffer(), { code: 'FS_PERMISSION_DENIED' })
   assert.equal(measured.counts.read, 0)
   assert.equal(measured.counts.closed, 1)
