@@ -1,4 +1,4 @@
-import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 
 /** Collect Sessions owned by the native Subagent tree, including partial list projections. */
 export function collectInternalSubagentIds(state: SessionListState): ReadonlySet<string> {

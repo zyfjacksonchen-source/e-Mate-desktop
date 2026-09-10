@@ -1,6 +1,5 @@
-import type {
-  ChatConversationViewNode, ConversationNodeDefinition,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { ConversationNodeDefinition } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { FileIcon } from '../../../../../../dsh-plugin-file-import/src/client/file-icons.tsx'
 import { allowedMediaType, extensionOf } from '../../../../../../dsh-plugin-file-import/src/contract.ts'

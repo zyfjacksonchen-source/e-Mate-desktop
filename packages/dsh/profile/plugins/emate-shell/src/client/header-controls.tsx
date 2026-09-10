@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore, type ComponentType } from 'react'
-import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { DesktopUpdateTriggerBridge } from '../../../../../../../desktop/e-mate-desktop/src/desktop-update-trigger-contract.ts'
 import { SessionShareAction, type SessionShareActionProps } from './session-share.tsx'
 import { collectInternalSubagentIds, highlightedProductSessionId, isTopLevelProductSession } from './session-visibility.ts'

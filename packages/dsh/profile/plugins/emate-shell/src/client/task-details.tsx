@@ -1,4 +1,5 @@
-import type { ConversationSnapshot, UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import css from './task-details.module.css'
 import { openNativePetSettings } from './settings-chrome.tsx'
 import { createPetWorkFactsReader } from './pet-image-facts.ts'

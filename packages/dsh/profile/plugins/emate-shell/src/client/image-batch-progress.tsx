@@ -1,5 +1,5 @@
 import { memo, useCallback, useRef, useState } from 'react'
-import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import { IconEditOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'

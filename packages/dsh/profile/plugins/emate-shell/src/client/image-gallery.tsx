@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject, RefObject } from 'react'
+import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {
-  ChatConversationViewNode,
   ConversationLocation,
   ConversationNodeContext,
   ConversationNodeDefinition,
   ConversationSnapshot,
-  SessionListState,
   ToolCallBlock,
-  UseProjection,
-  UseConversationSession,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+  TurnTailOwnerProps,
+  UseConversation,
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { SessionListState, UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import {
@@ -87,7 +86,7 @@ declare module '@deepseek-ai/dsh-session/types' {
   }
 }
 
-declare module '@deepseek-ai/dsh-client-runtime/client' {
+declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ConversationTurnDataMap {
     /** Ordered direct ImageGen call identities for this engine-owned Turn. */
     'e-mate-image-calls': ImageCallsTurnData
@@ -653,7 +652,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
   readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly matched: ArtifactTerminalMatch
   readonly sessionId: string
-  readonly useSession: UseConversationSession
+  readonly useSession: UseConversation
   readonly useSessions: <T>(
     selector: (snapshot: SessionListState) => T, equal?: (left: T, right: T) => boolean
   ) => T
@@ -669,7 +668,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
 interface ImageGalleryViewProps {
   readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly sessionId: string
-  readonly useSession: UseConversationSession
+  readonly useSession: UseConversation
   readonly useSessions: <T>(
     selector: (snapshot: SessionListState) => T, equal?: (left: T, right: T) => boolean
   ) => T

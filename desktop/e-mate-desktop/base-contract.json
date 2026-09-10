@@ -13,10 +13,13 @@
   "runtime_imports": {
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/dsh-agent": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.5-rc.1",
     "@deepseek-ai/dsh-attachment": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-locale": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-ui-attachment": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-chat": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-input-trigger": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-ui-settings": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.5-rc.1",

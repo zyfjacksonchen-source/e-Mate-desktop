@@ -56,7 +56,7 @@
       "@deepseek-ai/dsh-skill"
     ]
   },
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "pnpm@11.8.0",
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-skill": "0.1.5-rc.1"
