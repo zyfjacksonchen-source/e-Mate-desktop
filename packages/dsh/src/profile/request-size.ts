@@ -42,7 +42,7 @@ export function requestSizeFailure(options, failure) {
 function surfaceRange(session, header, pairing) {
   const nodes = session.surface.nodes
   const entries = nodes.map(seq => {
-    const event = session.events[seq]
+    const event = session.eventAt(seq)
     const message = session.deriveEventMessage(event)
     return { seq, event, message, bytes: message ? messageBytes(message) : 0 }
   })

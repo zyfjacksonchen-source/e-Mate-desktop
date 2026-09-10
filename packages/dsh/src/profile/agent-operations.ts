@@ -6,8 +6,9 @@ class ExpertModeRpcError extends Error {
 }
 
 export function expertModeActive(session) {
-  for (let index = session.events.length - 1; index >= 0; index--) {
-    const event = session.events[index]
+  const events = session.snapshotEvents()
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index]
     if (event.type === 'emate/expert-mode') return event.data?.active === true
   }
   return false
@@ -70,7 +71,7 @@ export function apply(ctx) {
       const session = context.agent?.session
       if (session === undefined) return ''
       if (expertModeActive(session)) return '用户已在当前会话开启专家模式。处理后续问题时使用 enterprise-knowledge Skill；尚未加载时先通过原生 skill 工具加载。按该 Skill 查询企业知识库原文和 Wiki，并依据实际返回的来源回答。没有检索结果或服务不可用时明确说明，不能冒充已查询。该模式不授予额外数据权限。'
-      return session.events.some(event => event.type === 'emate/expert-mode')
+      return session.snapshotEvents().some(event => event.type === 'emate/expert-mode')
         ? '用户已关闭当前会话的专家模式。后续消息不再因先前开启过专家模式而自动查询企业知识库；用户明确要求查询时仍可使用现有企业知识能力。' : ''
     } })
   ctx.effect(() => ctx.connection.rpc.handle('/emate.expert-mode', async (endpoint, payload) => {

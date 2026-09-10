@@ -108,7 +108,7 @@ export function sessionImageRefs(session: any): ImageAttachmentRef[] {
       } else if (isRecord(block) && block.type === 'tool-result' && block.isError !== true) collect(block.content)
     }
   }
-  for (const event of session.events ?? []) {
+  for (const event of session.snapshotEvents()) {
     if (['user/message', 'assistant/message', 'emate/image-draft-staged'].includes(event.type)) {
       collect(event.data?.content); collect(event.data?.message?.content)
     }
@@ -209,7 +209,7 @@ export function createImageHost(ctx: any, root: URL): { runtime: ImageGeneration
     return { channels: [managedChannel(root, scopedTransport(ctx, root, scope, request.clientRequestId!))], defaultChannelId: CHANNEL }
   }, { append: async () => [] })
   const append = (scope: Scope, status: ImageOutputReceipt['status'], error?: string) => {
-    const rootCall = scope.owner.session.events.find((event: any) => event.type === 'tool/call' && event.data?.callId === String(scope.exec.rootCallId))
+    const rootCall = scope.owner.session.snapshotEvents().find((event: any) => event.type === 'tool/call' && event.data?.callId === String(scope.exec.rootCallId))
     const receipt: ImageOutputReceipt = { schema_version: 3, revision: status === 'running' ? 1 : 2,
       call_id: String(scope.exec.callId), root_call_id: String(scope.exec.rootCallId),
       ...(Number.isSafeInteger(rootCall?.data?.turn) ? { turn: rootCall.data.turn } : {}),
@@ -271,7 +271,7 @@ export function createImageHost(ctx: any, root: URL): { runtime: ImageGeneration
     const owner = ownerOf(exec)
     const scope = scopes.get(id)
     if (scope && scope.owner.session.header.id !== owner.session.header.id) throw new Error('图像任务不属于当前会话。')
-    const receipt = [...owner.session.events].reverse().find((event: any) => event.type === 'emate/image-output'
+    const receipt = [...owner.session.snapshotEvents()].reverse().find((event: any) => event.type === 'emate/image-output'
       && event.data?.schema_version === 3 && event.data.task_id === id && event.data.parent_session_id === owner.session.header.id)?.data as ImageOutputReceipt | undefined
     if (receipt?.revision === 2) {
       remember(receipt, receipt.content.map(block => readRef(block.attachment)).filter((ref): ref is ImageAttachmentRef => ref !== undefined))
@@ -300,7 +300,7 @@ export function createImageHost(ctx: any, root: URL): { runtime: ImageGeneration
       request = { ...request, size }
       await ctx.emateModelPolicy.assertModel(IMAGE_MODEL)
       exec.signal.throwIfAborted()
-      if (owner.session.events.some((event: any) => event.type === 'emate/image-output' && event.data?.call_id === String(exec.callId))) {
+      if (owner.session.snapshotEvents().some((event: any) => event.type === 'emate/image-output' && event.data?.call_id === String(exec.callId))) {
         throw new Error('此图片调用已经有持久回执，不会重复提交。')
       }
       const correlation = `image-${createHash('sha256').update(String(owner.session.header.id)).update('\0').update(String(exec.callId)).digest('hex').slice(0, 32)}`

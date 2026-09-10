@@ -770,7 +770,7 @@ export function createXinConnection(ctx: Context, operations: {
     if (!binding || binding.subjectSignal?.aborted) return undefined
     const callId = exec.rootCallId ?? exec.callId
     if (callId === undefined) return undefined
-    const events = exec.agent.session.events
+    const events = exec.agent.session.snapshotEvents()
     const call = events.findLast(event => event.type === 'tool/call' && String(event.data.callId) === String(callId))
     return call?.type === 'tool/call' && call.data.turn === binding.turn ? binding.owner : undefined
   }

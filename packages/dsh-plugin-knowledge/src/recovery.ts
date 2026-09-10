@@ -103,7 +103,7 @@ export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Work
     }
   }
   const busy = (expected: string) => ctx.agents.list().some((agent: any) => {
-    const own = agent.session.events.some((event: any) => event.type === EVENT && event.data?.kind === 'compilation-session' && event.data.owner === expected)
+    const own = agent.session.snapshotEvents().some((event: any) => event.type === EVENT && event.data?.kind === 'compilation-session' && event.data.owner === expected)
     return own && ctx.jobs.list(agent).some((job: any) => job.kind === 'knowledge' && ['running', 'stopping'].includes(job.status))
   })
   async function run(expected: string, signal: AbortSignal): Promise<KnowledgeRecoveryResult> {

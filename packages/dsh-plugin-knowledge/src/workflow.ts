@@ -85,7 +85,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { bindXin?: Bind
     const markers = events(exec.agent).filter(event => event.kind === 'operation-session' || event.kind === 'compilation-session')
     if (markers.some(marker => marker.owner !== owner)) fail('scope-changed')
     if (exec.rootCallId) {
-      const call = exec.agent.session.events.find((event: any) => event.type === 'tool/call' && event.data.callId === exec.rootCallId)
+      const call = exec.agent.session.snapshotEvents().find((event: any) => event.type === 'tool/call' && event.data.callId === exec.rootCallId)
       if (!call || turns.get(exec.agent)?.get(call.data.turn) !== owner) fail('scope-changed')
     } else if (!markers.length) fail('scope-changed')
   }
@@ -366,7 +366,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { bindXin?: Bind
     const sessionId = value.checkpoint.session_id
     if (!sessionId) fail('invalid-recovery-session', '缺少冻结模型的原生回执，请从原知识任务恢复。')
     const live = ctx.agents.get(sessionId)
-    const stored = live ? { events: live.session.events } : await ctx.sessionPersistence.readFrom(sessionId, 0)
+    const stored = live ? { events: [...live.session.snapshotEvents()] } : await ctx.sessionPersistence.readFrom(sessionId, 0)
     exec.signal?.throwIfAborted(); assertExecution(exec, owner)
     const marker = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.compilationId === value.id && event.data.owner === owner)?.data
     if (!marker) fail('invalid-recovery-session')
@@ -444,7 +444,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { bindXin?: Bind
         if (!binding) {
           const id = value.checkpoint.session_id ?? exec.agent.id
           const live = ctx.agents.get(id)
-          const stored = live ? { events: live.session.events } : await ctx.sessionPersistence.readFrom(id, 0, exec.signal)
+          const stored = live ? { events: [...live.session.snapshotEvents()] } : await ctx.sessionPersistence.readFrom(id, 0, exec.signal)
           assertExecution(exec, owner)
           binding = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.compilationId === value.id && event.data.owner === owner)?.data
         }

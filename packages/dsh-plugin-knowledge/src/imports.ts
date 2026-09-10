@@ -76,7 +76,7 @@ export async function persist(ctx: any, agent: any, data: Record<string, unknown
   agent.session.append('knowledge/workflow', { schema_version: 1, ...data }, { ignorable: true })
   if (!await ctx.sessions.flush(agent.session)) fail('durability-unavailable', '知识任务需要原生会话持久化。')
 }
-export function events(agent: any): any[] { return agent.session.events.filter((event: any) => event.type === 'knowledge/workflow').map((event: any) => event.data) }
+export function events(agent: any): any[] { return agent.session.snapshotEvents().filter((event: any) => event.type === 'knowledge/workflow').map((event: any) => event.data) }
 export function createKnowledgeTransport(identity: any) {
   let lifetime = new AbortController(); let owner = ownerOf(identity); let disposed = false
   const changed = () => { const next = ownerOf(identity); if (next !== owner) { owner = next; lifetime.abort(); lifetime = new AbortController() } }
@@ -250,7 +250,7 @@ export function createKnowledgeImports(ctx: any, transport: KnowledgeTransport, 
   }
   const recordUserPublicIntent = async (exec: Execution, paths: string[]) => {
     const owner = await transport.capture(); assertExecution(exec, owner)
-    const log = exec.agent.session.events
+    const log = exec.agent.session.snapshotEvents()
     const call = log.find((event: any) => event.type === 'tool/call' && event.data.callId === exec.rootCallId)
     const start = call && log.find((event: any) => event.type === 'turn/start' && event.data.turn === call.data.turn)
     const message = start && log.findLast((event: any) => event.seq > start.seq && event.seq < call.seq && event.type === 'user/message' && event.data.source.kind === 'user')

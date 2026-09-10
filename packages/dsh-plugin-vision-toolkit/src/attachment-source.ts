@@ -81,7 +81,7 @@ function currentSessionImages(exec: VisionExecution): Map<string, ImageRef> {
   if (Array.isArray(messages)) {
     for (const value of messages) collectBlocks(record(value)?.content, refs)
   }
-  for (const value of session.events ?? []) {
+  for (const value of session.snapshotEvents()) {
     const event = record(value)
     const data = record(event?.data)
     if (event?.type === 'user/message') collectBlocks(data?.content, refs)

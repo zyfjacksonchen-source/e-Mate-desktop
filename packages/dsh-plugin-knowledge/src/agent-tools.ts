@@ -58,14 +58,15 @@ assertSupportedJsonSchema(parameters)
 /** Identity and message provenance come only from the actual native root call. */
 function nativeCall(ctx: any, exec: any) {
   if (!exec.agent || typeof exec.rootCallId !== 'string' || ctx.agents.get(exec.agent.id) !== exec.agent) fail('unauthorized')
-  const call = exec.agent.session.events.findLast((event: any) => event.type === 'tool/call' && event.data.callId === exec.rootCallId)
+  const call = exec.agent.session.snapshotEvents().findLast((event: any) => event.type === 'tool/call' && event.data.callId === exec.rootCallId)
   if (!call) fail('unauthorized')
   return call
 }
 function operationId(exec: any, call: any, action: 'import' | 'compile', owner: string, batchKey?: string) {
   const session = exec.agent.session
-  const start = session.events.find((event: any) => event.type === 'turn/start' && event.data.turn === call.data.turn)
-  const message = start && session.events.findLast((event: any) => event.seq > start.seq && event.seq < call.seq && event.type === 'user/message' && event.data.source?.kind === 'user')
+  const events = session.snapshotEvents()
+  const start = events.find((event: any) => event.type === 'turn/start' && event.data.turn === call.data.turn)
+  const message = start && events.findLast((event: any) => event.seq > start.seq && event.seq < call.seq && event.type === 'user/message' && event.data.source?.kind === 'user')
   if (typeof session.header.id !== 'string' || !session.header.id || typeof message?.data.id !== 'string' || !message.data.id) fail('invalid-request')
   const identity = ['enterprise_knowledge', owner, session.header.id, message.data.id, action]
   if (batchKey !== undefined) identity.push(batchKey)

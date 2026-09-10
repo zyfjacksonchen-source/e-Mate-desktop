@@ -1,15 +1,20 @@
 import { imageRef, intentMarker, record, reject, sessionId, type CanvasAsset, type CanvasIntent, type ImageRef } from './contract.ts'
 
 export interface NativeEvent { seq: number; type: string; data: any }
+/** The kernel Session face this package reads; rc.1 publishes snapshotEvents(), not an events array. */
+export interface NativeKernelSession {
+  header: NativeSession['header']
+  snapshotEvents(): readonly NativeEvent[]
+}
 export interface NativeSession { header: { id: string; parentSession?: string }; events: readonly NativeEvent[] }
 export interface SessionContext {
-  sessions: { get(id: string): NativeSession | undefined }
+  sessions: { get(id: string): NativeKernelSession | undefined }
   sessionPersistence: { load(id: string): Promise<{ meta: NativeSession['header']; events: readonly NativeEvent[] }> }
 }
 export async function inspectSession(ctx: SessionContext, id: string): Promise<NativeSession> {
   sessionId(id)
   const live = ctx.sessions.get(id)
-  if (live) return live
+  if (live) return { header: live.header, events: live.snapshotEvents() }
   const persisted = await ctx.sessionPersistence.load(id)
   if (persisted.meta.id !== id) reject('会话身份不一致。', 'scope')
   return { header: persisted.meta, events: persisted.events }

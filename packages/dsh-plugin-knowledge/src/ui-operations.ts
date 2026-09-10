@@ -85,7 +85,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
       model: { id: marker.selection.model, reasoning_effort: marker.selection.reasoningEffort ?? 'none' },
       phase: stopped && state.phase !== 'complete' ? entry ? 'stopping' : 'stopped' : state.phase === 'prepared' && (entry || ['start', 'resume'].includes(control(agent, marker))) ? entry ? 'importing' : 'paused' : state.phase,
       sources: state.sources ?? [], compiled_count: state.compiled_count ?? 0, ...(manifest ? { file_count: manifest.files.length } : {}),
-      ...(entry ? { job_id: entry.jobId } : {}), ...(UUID.test(state.compilation_session_id ?? '') ? { compilation_session_id: state.compilation_session_id } : {}), ...(state.reason ? { reason: state.reason } : {}), updated_at: agent.session.events.at(-1)?.time ?? Date.now() }
+      ...(entry ? { job_id: entry.jobId } : {}), ...(UUID.test(state.compilation_session_id ?? '') ? { compilation_session_id: state.compilation_session_id } : {}), ...(state.reason ? { reason: state.reason } : {}), updated_at: agent.session.snapshotEvents().at(-1)?.time ?? Date.now() }
     if (owner === marker.owner) { recent.set(marker.operationId, view); if (recent.size > 50) recent.delete([...recent.values()].sort((a, b) => a.updated_at - b.updated_at)[0].operation_id) }
     return structuredClone(view)
   }
