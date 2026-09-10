@@ -569,3 +569,32 @@ harness 新工作树起初无 `node_modules`，`lefthook` 的 `lint (staged)` �
 ### 16.5 发现的一处版本不一致（进 G2 前处理）
 harness 仓库自身钉 `pnpm@11.7.0`，而 e-Mate 根已按决定升到 `11.8.0`、上游 desktop 用 patch 过的 `11.8.0`。
 `harness-provenance.mjs` 用 e-Mate 根的 `packageManager` 版本号调用 pnpm，跨目录（desktop / harness）时可能对不上，需在首次构建前确认。
+
+---
+
+## 17. 重做进度更新与第三处"随宿主消失而淘汰"
+
+### 17.1 jobs 三条已全部完成（依赖顺序得到验证）
+新 fork 分支 `dsh-v0.1.5-rc.1-emate`：
+
+| 顺序 | 提交 | 结果 |
+|---|---|---|
+| 1 | `35cf3503f4 feat(jobs): add cross-owner kind admission` | 冲突仅 docs/i18n（取 0.1.5）+ `jobs-local/src/invariant.ts`（0.1.5 已删除，接受删除） |
+| 2 | `dd10200769 fix(jobs): register queued admission jobs` | 同上策略；抽象契约更新为 `startWhenAvailable(...): JobAdmission` |
+| 3 | `aaabedd617 fix(jobs): close queued owner teardown race` | **零冲突自动落上** |
+
+第 3 条零冲突这一事实，**反证了必须按依赖顺序重放**：先挑它时冲突不可解，前两条到位后自然成立。
+
+### 17.2 `fix(session): isolate corrupt cold list artifacts` → 淘汰（待定向验证）
+该提交改两个宿主，其中 `packages/host/apiproxy` **在 0.1.5 里整个包都不存在了** —— 职责被拆到 `packages/api/session-controller` 与一组 `api-*-controller`。这不是"解冲突"，是宿主消失。
+
+而 0.1.5 **已用同样的守卫实现过同一意图**：
+- `packages/api/session-controller/src/list.ts:290`：`catch (error) → logger.warn('api-session.list: projection column for "<id>" failed; serving the row without it') → return undefined`
+- `packages/session/session-persistence-jsonl/src/index.ts`：多处 try/catch（388/397/448/480/621/648/742/950/966）
+
+**诚实边界**：fork 那条针对"冷探测 locate 失败"，0.1.5 那条针对"投影列失败"，两者相邻但**未证明完全等价**。
+因此裁决为**淘汰，但必须做一次定向验证**：构造"一个损坏的冷会话不拖垮整个列表"的用例，在 0.1.5 上跑通后才算成立。这是第三处"先删后验"。
+
+### 17.3 计数更新
+- 重做：**9 条**（jobs 3 条已完成，剩余 6 条）
+- 淘汰：**12 条**，其中 **3 条**（attachment drop overlay、session draft isolation、session cold list）必须各自用定向验证兜底，未过即回退为"重做"
