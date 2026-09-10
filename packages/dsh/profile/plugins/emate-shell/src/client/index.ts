@@ -166,6 +166,11 @@ export function registerImageGallery(
     id: 'e-mate-gallery',
     order: 18,
     label: '画廊',
+    // The Gallery renders message images through the native slot rather than
+    // value-importing the attachment plugin, which the 0.1.5 purity gate rejects.
+    children: {
+      'conversation.message.images': { kind: 'single', scope: 'session' },
+    },
     inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, notice),
   }, ImageGalleryView))
 }

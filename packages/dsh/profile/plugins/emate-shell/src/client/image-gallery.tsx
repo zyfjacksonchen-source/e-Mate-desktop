@@ -11,7 +11,7 @@ import type {
   UseConversation,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionListState, UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
-import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
+import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import {
   IconChevronLeftOutline14,
@@ -624,15 +624,6 @@ function snapshotHasImageBatchCall(snapshot: ConversationSnapshot): boolean {
   return (data?.batchCalls?.length ?? 0) > 0
 }
 
-const imageLabels = {
-  image: '图像',
-  open: '查看原图',
-  openNamed: (label: string) => `查看原图：${label}`,
-  loading: '正在加载图像…',
-  loadFailed: '图像加载失败，点击重试',
-  lightbox: { dialog: '原图预览', close: '关闭原图预览' },
-}
-
 type MenuTarget =
   | { readonly kind: 'image'; readonly item: ImageGalleryItem }
   | { readonly kind: 'file'; readonly path: string }
@@ -679,6 +670,7 @@ interface ImageGalleryViewProps {
   readonly draftBytes: (ids: readonly string[]) => number
   readonly notify: (level: 'info' | 'error', text: string) => void
   readonly runResource: (request: DesktopResourceRequest) => Promise<void>
+  readonly renderSlot: PropsRenderSlots<'conversation.message.images'>['renderSlot']
 }
 
 function fileName(path: string): string {
@@ -740,7 +732,7 @@ function galleryItemIdentity(item: ImageGalleryItem): string {
 
 /** Native conversation.view reader over the same durable receipts used by the Turn tail. */
 export function ImageGalleryView({
-  sessionId, useSession, useSessions, useInput, useProjection, loadImage, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource,
+  sessionId, useSession, useSessions, useInput, useProjection, loadImage, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource, renderSlot,
 }: ImageGalleryViewProps) {
   const snapshot = useSession(value => value)
   const sessions = useSessions(value => value)
@@ -847,7 +839,7 @@ export function ImageGalleryView({
               : <>
                 <div className={css.galleryPreview}>
                   <GalleryMessageImage attachment={attachment}
-                    loadImage={loadImage} ownerSessionId={item.source?.sessionId} />
+                    loadImage={loadImage} ownerSessionId={item.source?.sessionId} renderSlot={renderSlot} />
                   {item.status === 'review-required' && <span className={css.status}>待确认</span>}
                 </div>
                 <div className={css.galleryMeta}>
@@ -935,13 +927,16 @@ function Menu({ state, menuRef, buttonRefs, close, activate }: {
   </div>
 }
 
-/** Bind the native renderer to immutable metadata, not fresh projection objects.
- * URL ownership, retry and release remain with native MessageImage/conversation.
+/** Render into the native message-images slot. 0.1.5's client bundle-purity gate
+ * forbids value-importing another feature plugin's component, and the slot is the
+ * sanctioned route; URL ownership, retry and release stay with the registered
+ * attachment implementation.
  */
-function GalleryMessageImage({ attachment, ownerSessionId, loadImage }: {
+function GalleryMessageImage({ attachment, ownerSessionId, loadImage, renderSlot }: {
   readonly attachment: ImageAttachmentRef
   readonly ownerSessionId?: string
   readonly loadImage: ImageGalleryViewProps['loadImage']
+  readonly renderSlot: ImageGalleryViewProps['renderSlot']
 }) {
   const { attachmentId, mediaType, bytes, width, height, name } = attachment
   const stableAttachment = useMemo(
@@ -952,7 +947,9 @@ function GalleryMessageImage({ attachment, ownerSessionId, loadImage }: {
     (value: ImageAttachmentRef) => loadImage(value, ownerSessionId),
     [loadImage, ownerSessionId],
   )
-  return <MessageImage attachment={stableAttachment} load={load} variant="tile" labels={imageLabels} />
+  return renderSlot('conversation.message.images', {
+    images: [{ attachment: stableAttachment }], loadImage: load, align: 'start', compact: true,
+  })
 }
 
 function ImageTerminal({ items, loadImage, openMenu, addToCanvas }: {
@@ -988,7 +985,7 @@ function ImageTerminal({ items, loadImage, openMenu, addToCanvas }: {
           onContextMenu={event => { event.preventDefault(); openMenu({ kind: 'image', item }, event) }}
         >
           <GalleryMessageImage attachment={item.attachment}
-            loadImage={loadImage} ownerSessionId={item.source?.sessionId} />
+            loadImage={loadImage} ownerSessionId={item.source?.sessionId} renderSlot={renderSlot} />
           {item.status === 'review-required' && <span className={css.status}>待确认</span>}
           {addToCanvas && <button type="button" className={`${css.imageAction} ${css.imageCanvasAction}`}
             disabled={item.status === 'review-required'} aria-label={`加入画布：${galleryAttachmentName(item.attachment)}`}
@@ -1211,6 +1208,7 @@ function ArtifactTerminalBody({
       batches={batches}
       useSessions={useSessions}
       loadImage={loadImage}
+      renderSlot={renderSlot}
       {...addImageToCanvas === undefined ? {} : { addImageToCanvas }}
     />}
     <ImageTerminal items={items} loadImage={loadImage} openMenu={openMenu}

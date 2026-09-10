@@ -1,7 +1,7 @@
 import { memo, useCallback, useRef, useState } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import { IconEditOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
+import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { ImageBatchClientBatch, ImageBatchClientTask, ImageBatchClientTaskState } from './image-batch-client.ts'
 import { parseImageOutputReceipt } from './image-gallery-contract.ts'
@@ -16,6 +16,7 @@ interface ImageBatchProgressProps {
   readonly useSessions: UseSessions
   readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
   readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId: string) => Promise<void>
+  readonly renderSlot: PropsRenderSlots<'conversation.message.images'>['renderSlot']
 }
 
 interface ExactPreview {
@@ -54,15 +55,6 @@ function batchLiveSummary(tasks: readonly ImageBatchClientTask[]): string {
   ].join('，')
 }
 
-const imageLabels = {
-  image: '图像',
-  open: '查看原图',
-  openNamed: (label: string) => '查看原图：' + label,
-  loading: '正在加载图像…',
-  loadFailed: '图像加载失败，点击重试',
-  lightbox: { dialog: '原图预览', close: '关闭原图预览' },
-}
-
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -95,11 +87,12 @@ function samePreview(left: ExactPreview | undefined, right: ExactPreview | undef
     && a.width === b.width && a.height === b.height && a.name === b.name
 }
 
-const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, useSessions, loadImage, addImageToCanvas }: {
+const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, useSessions, loadImage, addImageToCanvas, renderSlot }: {
   readonly task: ImageBatchClientTask
   readonly useSessions: UseSessions
   readonly loadImage: ImageBatchProgressProps['loadImage']
   readonly addImageToCanvas?: ImageBatchProgressProps['addImageToCanvas']
+  readonly renderSlot: ImageBatchProgressProps['renderSlot']
 }) {
   const preview = useSessions(sessions => exactPreview(sessions, task), samePreview)
   const loadPreview = useCallback(
@@ -121,12 +114,9 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, useSessions,
     <div className={css.preview}>
       {preview === undefined
         ? <div className={css.placeholder} aria-hidden="true"><span /></div>
-        : <MessageImage
-            attachment={preview.attachment}
-            load={loadPreview}
-            variant="tile"
-            labels={imageLabels}
-          />}
+        : renderSlot('conversation.message.images', {
+            images: [{ attachment: preview.attachment }], loadImage: loadPreview, align: 'start', compact: true,
+          })}
     </div>
     <div className={css.meta}>
       <strong>图片 {task.ordinal}</strong>
@@ -152,7 +142,7 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, useSessions,
  * @returns the live batch cards, or null until an exact parent batch is projected.
  */
 export function ImageBatchProgress({
-  batches, useSessions, loadImage, addImageToCanvas,
+  batches, useSessions, loadImage, addImageToCanvas, renderSlot,
 }: ImageBatchProgressProps) {
   if (batches.length === 0) return null
   return <div className={css.root} aria-label="图片批次进度">
@@ -179,6 +169,7 @@ export function ImageBatchProgress({
               useSessions={useSessions}
               loadImage={loadImage}
               addImageToCanvas={addImageToCanvas}
+              renderSlot={renderSlot}
             />
           </div>)}
         </div>
