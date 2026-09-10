@@ -208,11 +208,11 @@ export function adaptHarnessConversationSource(source) {
   change('function ConversationSessionHeader({ sessionId, useSession, useSessions, useConversation, useConversationViews, useStore, renderSlot, open, selectView, t }) {',
     'function ConversationSessionHeader({ sessionId, useSession, useSessions, useConversation, useConversationViews, useStore, renderSlot, open: commitSessionOpen, selectView: nativeSelectView, beforeViewNavigate, isCurrentViewSession, reportViewError, t }) {\n\t\t\tconst navigation = (0, react.useRef)(0);\n\t\t\t(0, react.useEffect)(() => { const invalidate = () => { navigation.current += 1; }; addEventListener("emate:identity-changed", invalidate); return () => { invalidate(); removeEventListener("emate:identity-changed", invalidate); }; }, [sessionId]);\n\t\t\tconst selectView = emateCanvasNavigationRequest(navigation, beforeViewNavigate, isCurrentViewSession, nativeSelectView, reportViewError);\n\t\t\tconst open = emateCanvasNavigationRequest(navigation, () => beforeViewNavigate("chat"), isCurrentViewSession, commitSessionOpen, reportViewError);', 'canvas/header-guard')
 
-  change('onClick: () => {\n\t\t\t\t\t\t\t\t\t\topen(summary.id);\n\t\t\t\t\t\t\t\t\t\t},',
-    'onClick: () => {\n\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);\n\t\t\t\t\t\t\t\t\t\t},', 'canvas/parent-session-action')
+  change('onClick: () => {\n\t\t\t\t\t\t\t\t\t\t\topen(summary.id);\n\t\t\t\t\t\t\t\t\t\t},',
+    'onClick: () => {\n\t\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);\n\t\t\t\t\t\t\t\t\t\t},', 'canvas/parent-session-action')
 
-  change('openTitle: () => {\n\t\t\t\t\t\t\t\t\t\topen(summary.id);',
-    'openTitle: () => {\n\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);', 'canvas/parent-session-title-action')
+  change('openTitle: () => {\n\t\t\t\t\t\t\t\t\t\t\topen(summary.id);',
+    'openTitle: () => {\n\t\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);', 'canvas/parent-session-title-action')
 
   change('\t\t\t\t\t\t\tselectView(viewTab.id);', '\t\t\t\t\t\t\tvoid selectView(viewTab.id);', 'canvas/tab-action')
 
@@ -252,7 +252,7 @@ export function adaptHarnessConversationSource(source) {
 
   // input/facade.ts: files live beside attachment ids, not in another plugin store.
   change('\t\t\t/** Append ordered attachment ids unless an admission transaction is locked. */',
-    `\t\t\t\t\t\taddFiles(files, draft) {\n\t\t\t\tif (this.disposed || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tconst current = new Set(this.fileRefs.map(file => file.relative_path));\n\t\t\t\tconst added = emateDraftFiles(files).filter(file => !current.has(file.relative_path));\n\t\t\t\tif (this.fileRefs.length + added.length > 64) throw new Error("草稿最多可添加 64 个文件。");\n\t\t\t\tthis.fileRefs = [...this.fileRefs, ...added];\n\t\t\t\tif (draft !== undefined) this.setDraft(draft);\n\t\t\t\telse this.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tremoveFile(path) {\n\t\t\t\tthis.fileRefs = this.fileRefs.filter(file => file.relative_path !== path);\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\trestoreFiles(files) {\n\t\t\t\tconst current = new Set(this.fileRefs.map(file => file.relative_path));\n\t\t\t\tthis.fileRefs = [...files.filter(file => !current.has(file.relative_path)), ...this.fileRefs];\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\tbeginImageStage() {\n\t\t\t\tif (this.disposed || this.imageStagePending || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tthis.imageStagePending = true;\n\t\t\t\tthis.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tcancelImageStage() {\n\t\t\t\tif (!this.imageStagePending) return;\n\t\t\t\tthis.imageStagePending = false;\n\t\t\t\tthis.hydrationNotice = false;\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\taddDurableImages(images, ids) {\n\t\t\t\tif (this.disposed || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tconst added = emateDraftImages(images);\n\t\t\t\tif (added.length !== ids.length || added.some(item => this.durableImages.some(current => current.draft_key === item.draft_key))\n\t\t\t\t\t|| new Set(ids).size !== ids.length || ids.some(id => this.attachmentIds.includes(id))) return false;\n\t\t\t\tthis.durableImages = emateDraftImages([...this.durableImages, ...added... (line truncated to 2000 chars)
+    `\t\t\t\t\t\taddFiles(files, draft) {\n\t\t\t\tif (this.disposed || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tconst current = new Set(this.fileRefs.map(file => file.relative_path));\n\t\t\t\tconst added = emateDraftFiles(files).filter(file => !current.has(file.relative_path));\n\t\t\t\tif (this.fileRefs.length + added.length > 64) throw new Error("草稿最多可添加 64 个文件。");\n\t\t\t\tthis.fileRefs = [...this.fileRefs, ...added];\n\t\t\t\tif (draft !== undefined) this.setDraft(draft);\n\t\t\t\telse this.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tremoveFile(path) {\n\t\t\t\tthis.fileRefs = this.fileRefs.filter(file => file.relative_path !== path);\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\trestoreFiles(files) {\n\t\t\t\tconst current = new Set(this.fileRefs.map(file => file.relative_path));\n\t\t\t\tthis.fileRefs = [...files.filter(file => !current.has(file.relative_path)), ...this.fileRefs];\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\tbeginImageStage() {\n\t\t\t\tif (this.disposed || this.imageStagePending || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tthis.imageStagePending = true;\n\t\t\t\tthis.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tcancelImageStage() {\n\t\t\t\tif (!this.imageStagePending) return;\n\t\t\t\tthis.imageStagePending = false;\n\t\t\t\tthis.hydrationNotice = false;\n\t\t\t\tthis.publish();\n\t\t\t}\n\t\t\taddDurableImages(images, ids) {\n\t\t\t\tif (this.disposed || this.snapshot.phase === "adjudicating" || this.snapshot.phase === "submitting") return false;\n\t\t\t\tconst added = emateDraftImages(images);\n\t\t\t\tif (added.length !== ids.length || added.some(item => this.durableImages.some(current => current.draft_key === item.draft_key))\n\t\t\t\t\t|| new Set(ids).size !== ids.length || ids.some(id => this.attachmentIds.includes(id))) return false;\n\t\t\t\tthis.durableImages = emateDraftImages([...this.durableImages, ...added]);\n\t\t\t\tfor (let index = 0; index < added.length; index += 1) this.durableImageIds.set(added[index].draft_key, ids[index]);\n\t\t\t\tthis.attachmentIds = [...this.attachmentIds, ...ids];\n\t\t\t\tthis.imageStagePending = false;\n\t\t\t\tthis.hydrationNotice = false;\n\t\t\t\tthis.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\thydrateDurableImage(key, id) {\n\t\t\t\tif (this.disposed || this.durableImageIds.has(key) || this.attachmentIds.includes(id)\n\t\t\t\t\t|| !this.durableImages.some(item => item.draft_key === key)) return false;\n\t\t\t\tthis.durableImageIds.set(key, id);\n\t\t\t\tconst durableIds = new Set(this.durableImageIds.values());\n\t\t\t\tconst runtimeOnly = this.attachmentIds.filter(candidate => !durableIds.has(candidate));\n\t\t\t\tthis.attachmentIds = [...this.durableImages.flatMap(item => { const candidate = this.durableImageIds.get(item.draft_key); return candidate === undefined ? [] : [candidate]; }), ...runtimeOnly];\n\t\t\t\tif (!this.durableImages.some(item => !this.durableImageIds.has(item.draft_key))) this.hydrationNotice = false;\n\t\t\t\tthis.publish();\n\t\t\t\treturn true;\n\t\t\t}\n\t\t\tremoveDurableImage(key) {\n\t\t\t\tconst id = this.durableImageIds.get(key);\n\t\t\t\tthis.durableImageIds.delete(key);\n\t\t\t\tthis.durableImages = this.durableImages.filter(item => item.draft_key !== key);\n\t\t\t\tif (id !== undefined) this.attachmentIds = this.attachmentIds.filter(candidate => candidate !== id);\n\t\t\t\tif (!this.durableImages.some(item => !this.durableImageIds.has(item.draft_key))) this.hydrationNotice = false;\n\t\t\t\tthis.publish();\n\t\t\t\treturn id;\n\t\t\t}\n\t\t\trestoreDraft(text, files = [], images = []) {\n\t\t\t\tlet failure;\n\t\t\t\ttry { this.fileRefs = emateDraftFiles(files); }\n\t\t\t\tcatch { this.fileRefs = []; failure = "附件草稿无法恢复，请重新选择文件。"; }\n\t\t\t\ttry { this.durableImages = emateDraftImages(images); }\n\t\t\t\tcatch { this.durableImages = []; failure = "图片草稿无法恢复，请重新选择图片。"; }\n\t\t\t\tthis.durableImageIds.clear();\n\t\t\t\tthis.attachmentIds = [];\n\t\t\t\tthis.setDraft(text);\n\t\t\t\tif (failure !== undefined) this.notify("error", failure);\n\t\t\t}\n\t\t\t/** Append ordered attachment ids unless an admission transaction is locked. */`, 'facade/file-lifecycle')
   change('\t\t\tcommitSend(attachmentIds) {\n\t\t\t\tconst submitted = new Set(attachmentIds);',
     `\t\t\tcommitSend(attachmentIds, files = []) {\n\t\t\t\tconst submittedFiles = new Set(files.map(file => file.relative_path));\n\t\t\t\tthis.fileRefs = this.fileRefs.filter(file => !submittedFiles.has(file.relative_path));\n\t\t\t\tconst submitted = new Set(attachmentIds);\n\t\t\t\tconst durable = this.durableImages.flatMap(item => { const id = this.durableImageIds.get(item.draft_key); return id !== undefined && submitted.has(id) ? [{ item, id }] : []; });\n\t\t\t\tthis.durableImages = this.durableImages.filter(item => !durable.some(sent => sent.item.draft_key === item.draft_key));\n\t\t\t\tfor (const sent of durable) this.durableImageIds.delete(sent.item.draft_key);`, 'facade/commit')
 
@@ -291,7 +291,7 @@ export function adaptHarnessConversationSource(source) {
   change('\t\t\trestoreAttachments(attachmentIds) {\n\t\t\t\tif (attachmentIds.length === 0) return;\n\t\t\t\tconst current = new Set(this.attachmentIds);',
     '\t\t\trestoreAttachments(attachmentIds, durable = []) {\n\t\t\t\tconst restoredDurable = emateDraftImages(durable.map(value => value.item));\n\t\t\t\tconst currentKeys = new Set(this.durableImages.map(item => item.draft_key));\n\t\t\t\tthis.durableImages = emateDraftImages([...restoredDurable.filter(item => !currentKeys.has(item.draft_key)), ...this.durableImages]);\n\t\t\t\tfor (const value of durable) if (!this.durableImageIds.has(value.item.draft_key)) this.durableImageIds.set(value.item.draft_key, value.id);\n\t\t\t\tif (attachmentIds.length === 0) return;\n\t\t\t\tconst current = new Set(this.attachmentIds);', 'facade/restore-durable')
   // input/hub.ts: retain the native prompt/queue/steer transport and rollback.
-  change(`\t\t\tsinkSerialized(attempt, draft, mode) {\n\t\t\t\tconst attachmentIds = [...this.attachmentIds];\n\t\t\t\tthis.attachmentIds = [];\n\t\t\t\tconst occurrences = this.projection.occurrences;\n\t\t\t\tconst record = {\n\t\t\t\t\tdraft,\n\t\t\t\t\toccurrences,\n\t\t\t\t\tattachmentIds\n\t\t\t};`, `\t\t\tsinkSerialized(attempt, draft, mode) {\n\t\t\t\tconst files = this.fileRefs;\n\t\t\t\tconst draftText = draft;\n\t\t\t\tif (files.length > 0) {\n\t\t\t\t\tdraft = [draft, ...files.map(file => "@" + file.relative_path)].filter(Boolean).join("\n");\n\t\t\t\t}\n\t\t\t\tconst attachmentIds = [...this.attachmentIds];\n\t\t\t\tthis.attachmentIds = [];\n\t\t\t\tconst occurrences = this.projection.occurrences;\n\t\t\t\tconst record = {\n\t\t\t\t\tdraft: draftText,\n\t\t\t\t\tfiles,\n\t\t\t\t\toccurrences,\n\t\t\t\t\tattachmentIds\n\t\t\t};`, 'hub/admission')
+  change(`\t\t\tsinkSerialized(attempt, draft, mode) {\n\t\t\t\tconst attachmentIds = [...this.attachmentIds];\n\t\t\t\tthis.attachmentIds = [];\n\t\t\t\tconst occurrences = this.projection.occurrences;\n\t\t\t\tconst record = {\n\t\t\t\t\tdraft,\n\t\t\t\t\toccurrences,\n\t\t\t\t\tattachmentIds\n\t\t\t\t};`, `\t\t\tsinkSerialized(attempt, draft, mode) {\n\t\t\t\tconst files = this.fileRefs;\n\t\t\t\tconst draftText = draft;\n\t\t\t\tif (files.length > 0) {\n\t\t\t\t\tdraft = [draft, ...files.map(file => "@" + file.relative_path)].filter(Boolean).join("\\n");\n\t\t\t\t}\n\t\t\t\tconst attachmentIds = [...this.attachmentIds];\n\t\t\t\tthis.attachmentIds = [];\n\t\t\t\tconst occurrences = this.projection.occurrences;\n\t\t\t\tconst record = {\n\t\t\t\t\tdraft: draftText,\n\t\t\t\t\tfiles,\n\t\t\t\t\toccurrences,\n\t\t\t\t\tattachmentIds\n\t\t\t\t};`, 'hub/admission')
 
   change(`\t\t\tsettleDetachedFailure(attempt, message) {\n\t\t\t\tconst record = this.detachedDrafts.get(attempt.seq);\n\t\t\t\tif (record === void 0) return;\n\t\t\t\tthis.detachedDrafts.delete(attempt.seq);\n\t\t\t\tthis.restoreAttachments(record.attachmentIds);`, `\t\t\tsettleDetachedFailure(attempt, message) {\n\t\t\t\tconst record = this.detachedDrafts.get(attempt.seq);\n\t\t\t\tif (record === void 0) return;\n\t\t\t\tthis.detachedDrafts.delete(attempt.seq);\n\t\t\t\tthis.restoreFiles(record.files ?? []);\n\t\t\t\tthis.restoreAttachments(record.attachmentIds);`, 'hub/rollback')
 
@@ -326,13 +326,37 @@ export function adaptHarnessConversationSource(source) {
   change('if (editing === null || editing.text.trim() === "") return;',
     'if (editing === null || (editing.text.trim() === "" && editing.filePaths.length === 0)) return;', 'queue/save-admission')
 
-  change('text: editing.text\n', 'text: [editing.text, ...editing.filePaths.map(path => "@" + path)].filter(Boolean).join("\n")\n', 'queue/save-model-text')
+  change('text: editing.text\n', 'text: [editing.text, ...editing.filePaths.map(path => "@" + path)].filter(Boolean).join("\\n")\n', 'queue/save-model-text')
 
   change('disabled: busy !== null || editing.text.trim() === "",',
     'disabled: busy !== null || (editing.text.trim() === "" && editing.filePaths.length === 0),', 'queue/save-button')
   return source
 }
 
+/**
+ * Apply exact compiled seams from packages/client/ui-chat/src/client — the 0.1.5
+ * owner of the rc.7 Conversation renderer, chat store and file-mention provider.
+ *
+ * Retired seam: turn-error/terminal-after-retry.
+ * rc.7 rendered the terminal Turn failure through a Definition that could be
+ * reached while its own state was still hidden, so a retry could suppress a
+ * final turn failure; the seam pinned the row visible. 0.1.5 absorbed that
+ * outcome natively. Its bundle states it under
+ * //#region lib/types/client/conversation-nodes/turn-error.js:
+ *
+ *   Terminal turn failure Definition. Retries run inside the failing turn, so the
+ *   turn's llm/retry history never suppresses this terminal row; the model-retry
+ *   node renders that history separately.
+ *
+ * with the native buildViewNode
+ *   const state = context.state ?? fallbackState$1(context);
+ *   if (state?.failure === void 0) return null;
+ *   const failure = state.failure;
+ *   const node = { kind: "turn-error", seq: failure.seq, time: failure.time, turn: state.turn, ... };
+ *   return chatNode(context, "turn-error", node.seq, node);
+ * and no hidden/visibility branch left, so keeping the seam would delete native
+ * behavior instead of preserving product behavior.
+ */
 /**
  * Apply exact compiled seams from packages/client/ui-chat/src/client — the 0.1.5
  * owner of the rc.7 Conversation renderer, chat store and file-mention provider.
@@ -366,22 +390,22 @@ export function adaptHarnessChatSource(source) {
   // 0.1.5 renders each Chat node through a slot whose provided hook face already
   // carries useChat (the same route TurnTailNodeView uses), so the image
   // projection reads the live Chat snapshot instead of a session-nested one.
-  change(T+T+'const AssistantNodeView = (0, react.memo)(function AssistantNodeView({ node, useTurnData, turnProcess, openFile, renderMessageImages, fileMentions, t }) {',
-    T+T+'const AssistantNodeView = (0, react.memo)(function AssistantNodeView({ node, useChat, useTurnData, turnProcess, openFile, renderMessageImages, fileMentions, t }) {'+N+T+T+T+'const imageBlocks = useChat(snapshot => emateAssistantImageBlocks(snapshot, node), emateSameAssistantBlocks);', 'images/assistant-owner')
-  change('blocks: data.blocks,'+N+T+T+T+T+'streaming: data.status === "running",',
-    'blocks: imageBlocks,'+N+T+T+T+T+'streaming: data.status === "running",', 'images/assistant-echo')
+  change('\t\tconst AssistantNodeView = (0, react.memo)(function AssistantNodeView({ node, useTurnData, turnProcess, openFile, renderMessageImages, fileMentions, t }) {',
+    '\t\tconst AssistantNodeView = (0, react.memo)(function AssistantNodeView({ node, useChat, useTurnData, turnProcess, openFile, renderMessageImages, fileMentions, t }) {\n\t\t\tconst imageBlocks = useChat(snapshot => emateAssistantImageBlocks(snapshot, node), emateSameAssistantBlocks);', 'images/assistant-owner')
+  change('blocks: data.blocks,\n\t\t\t\tstreaming: data.status === "running",',
+    'blocks: imageBlocks,\n\t\t\t\tstreaming: data.status === "running",', 'images/assistant-echo')
 
   // Image receipts must reach the existing Turn tail before a later model step
   // ends. Keep its native key, renderer and closed-Turn derivation; ordinary
   // file/text Turns still acquire their footer only on turn/end.
-  change('function closingAnchor(context) {'+N+T+T+T+'let anchor =',
-    'function closingAnchor(context) {'+N+T+T+T+'if (turnLocation(context)?.status === "open") return (context.matches.at(-1)?.event.seq ?? context.start?.event.seq ?? 0) + CHAT_SYNTHETIC_SEQ_OFFSETS.finalizedFollowup;'+N+T+T+T+'let anchor =', 'images/live-tail-anchor')
-  change('if (end?.event.type !== "turn/end") return null;'+N+T+T+T+'const turn = turnLocation(context);'+N+T+T+T+'if (turn === void 0) return null;',
-    'const turn = turnLocation(context);'+N+T+T+T+'if (turn === void 0) return null;'+N+T+T+T+'if (end?.event.type !== "turn/end") {'+N+T+T+T+T+'if (turn.status !== "open") return null;'+N+T+T+T+T+'const hasImages = context.matches.some(({ event }) => event.type === "tool/call"'+N+T+T+T+T+T+'&& (["generate_image", "edit_image", "get_image_generation_task", "imagegen", "image_batch"].includes(event.data.name))'+N+T+T+T+T+T+'|| event.type === "emate/image-output" && event.data.schema_version === 3'+N+T+T+T+T+T+'|| event.type === "tool/result"'+N+T+T+T+T+T+'&& isAppendSurfaceEvent(event)'+N+T+T+T+T+T+'&& event.data.message.content.some(part => part.type === "tool-result" && !part.isError'+N+T+T+T+T+T+T+'&& part.content?.some(content => content.type === "image")));'+N+T+T+T+T+'if (!hasImages) return null;'+N+T+T+T+T+'const latest = context.matches.at(-1)?.event ?? context.start?.event;'+N+T+T+T+T+'return latest === void 0 ? null : { turn: turn.turn, seq: latest.seq, time: latest.time, closing: null, branchUnavailable: true };'+N+T+T+T+'}', 'images/live-tail-data')
-  change('kind: "turn-tail",'+N+T+T+T+'target: "chat",'+N+T+T+T+'match: (event) => {',
-    'kind: "turn-tail",'+N+T+T+T+'target: "chat",'+N+T+T+T+'match: (event) => {'+N+T+T+T+T+'if (event.type === "emate/image-output" && event.data.schema_version === 3 && Number.isSafeInteger(event.data.turn) && event.data.turn >= 0 && ["generate_image", "edit_image"].includes(event.data.tool_name)) return { id: String(event.data.turn), role: "update" };', 'images/job-tail-match')
+  change('function closingAnchor(context) {\n\t\t\tlet anchor =',
+    'function closingAnchor(context) {\n\t\t\tif (turnLocation(context)?.status === "open") return (context.matches.at(-1)?.event.seq ?? context.start?.event.seq ?? 0) + CHAT_SYNTHETIC_SEQ_OFFSETS.finalizedFollowup;\n\t\t\tlet anchor =', 'images/live-tail-anchor')
+  change('if (end?.event.type !== "turn/end") return null;\n\t\t\tconst turn = turnLocation(context);\n\t\t\tif (turn === void 0) return null;',
+    'const turn = turnLocation(context);\n\t\t\tif (turn === void 0) return null;\n\t\t\tif (end?.event.type !== "turn/end") {\n\t\t\t\tif (turn.status !== "open") return null;\n\t\t\t\tconst hasImages = context.matches.some(({ event }) => event.type === "tool/call"\n\t\t\t\t\t&& (["generate_image", "edit_image", "get_image_generation_task", "imagegen", "image_batch"].includes(event.data.name))\n\t\t\t\t\t|| event.type === "emate/image-output" && event.data.schema_version === 3\n\t\t\t\t\t|| event.type === "tool/result"\n\t\t\t\t\t&& isAppendSurfaceEvent(event)\n\t\t\t\t\t&& event.data.message.content.some(part => part.type === "tool-result" && !part.isError\n\t\t\t\t\t\t&& part.content?.some(content => content.type === "image")));\n\t\t\t\tif (!hasImages) return null;\n\t\t\t\tconst latest = context.matches.at(-1)?.event ?? context.start?.event;\n\t\t\t\treturn latest === void 0 ? null : { turn: turn.turn, seq: latest.seq, time: latest.time, closing: null, branchUnavailable: true };\n\t\t\t}', 'images/live-tail-data')
+  change('kind: "turn-tail",\n\t\t\ttarget: "chat",\n\t\t\tmatch: (event) => {',
+    'kind: "turn-tail",\n\t\t\ttarget: "chat",\n\t\t\tmatch: (event) => {\n\t\t\t\tif (event.type === "emate/image-output" && event.data.schema_version === 3 && Number.isSafeInteger(event.data.turn) && event.data.turn >= 0 && ["generate_image", "edit_image"].includes(event.data.tool_name)) return { id: String(event.data.turn), role: "update" };', 'images/job-tail-match')
 
-  change(T+T+'function createChatStore() {',
+  change('\t\tfunction createChatStore() {',
     EMATE_SEAM_HELPERS + '\n\t\tfunction createChatStore() {', 'stores/helper')
 
   // chat/MessageItem.tsx: native pending steering has no keyed renderer, and
@@ -405,13 +429,14 @@ export const CONVERSATION_CHAT_UNRESOLVED_SEAMS = Object.freeze([
     rc7: 'workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => {});',
     native0_1_5: [
       'openFile: async (path, options) => {',
-      T+T+T+T+T+'const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;',
-      T+T+T+T+T+'const url = fileAddressFor(sessionId, cwd, path);',
-      T+T+T+T+T+'if (options?.line === void 0) ctx.sidebarRight.openResource(url);',
-      T+T+T+T+T+'else ctx.sidebarRight.openResource(url, { params: { line: options.line } });',
-      T+T+T+T+T+'await Promise.resolve();',
-      T+T+T+T+'},',
-    ].join(N),
+      '\t\t\t\t\tconst cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;',
+      '\t\t\t\t\tconst url = fileAddressFor(sessionId, cwd, path);',
+      '\t\t\t\t\tif (options?.line === void 0) ctx.sidebarRight.openResource(url);',
+      '\t\t\t\t\telse ctx.sidebarRight.openResource(url, { params: { line: options.line } });',
+      '\t\t\t\t\tawait Promise.resolve();',
+      '\t\t\t},',
+    ].join('\n'),
     blocker: 'No client bundle declares workspaces.openPath or the runtime namespace any more; resolveWorkspacePath survives only as a bare local in ui-deliverables and ui-tool for a preview title and a terminal cwd label. The 0.1.5 opener is the synchronous ctx.sidebarRight.openResource(url), which returns no promise, so there is no rejection to catch, and the Chat closure has no session notice outlet: its only ctx.get is "chatFileMentions", and the ui-conversation inputHub shell is not reachable from ui-chat.',
   }),
 ])
+

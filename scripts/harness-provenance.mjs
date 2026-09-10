@@ -17,7 +17,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
 import { adaptHarnessSessionTitleSource, SESSION_TITLE_PACKAGE, SESSION_TITLE_ADAPTER_PATH } from './harness-runtime-adapters.mjs'
-import { adaptHarnessConversationSource, CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
+import { adaptHarnessConversationSource, CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE, adaptHarnessChatSource, CONVERSATION_CHAT_ADAPTER_PATH, CONVERSATION_CHAT_PACKAGE } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSource, ARTIFACT_LINKS_RENDERER_PATH, ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE, adaptHarnessArtifactDeliverablesSource, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessFsBytesSource, FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
@@ -35,7 +35,9 @@ export function assertNativeAgentLoop(packages) {
 }
 export const HARNESS_FRONTEND_PACKAGE = '@deepseek-ai/dsh-web-frontend'
 
-const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/reference-updated", refresh);'
+// The published 0.1.5-rc.1 build registers one inline listener per source; the
+// Desktop resolves that build, so the pin names the shape it actually ships.
+const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/reference-updated", () => {'
 const BUILD_RECEIPT = '.release-cache/harness-build.json'
 const DESKTOP_RECEIPT = 'desktop/e-mate-desktop/build/harness-runtime-provenance.json'
 export const DESKTOP_OVERLAYS = new Map([
@@ -229,7 +231,7 @@ export function assertHarnessSource(root) {
     throw new Error(`pinned Harness drifted (version=${String(version)}, commit=${commit})`)
   }
   const listener = readFileSync(join(harnessRoot, 'packages', 'client', 'ui-model-selection', 'src', 'client', 'service.ts'), 'utf8')
-  assertExactOccurrence(listener, "ctx.remote.$on('credentials/updated', refresh)", 'native model-directory refresh listener')
+  assertExactOccurrence(listener, "ctx.remote.$on('credentials/reference-updated', refresh)", 'native model-directory refresh listener')
   return harnessRoot
 }
 
@@ -336,6 +338,10 @@ export function materializeHarnessDesktopRuntime(root) {
       const client = join(targetLib, 'client.js')
       writeFileSync(client, adaptHarnessConversationSource(readFileSync(client, 'utf8')))
     }
+    if (manifest.name === CONVERSATION_CHAT_PACKAGE) {
+      const client = join(targetLib, 'client.js')
+      writeFileSync(client, adaptHarnessChatSource(readFileSync(client, 'utf8')))
+    }
     if (manifest.name === SESSION_EXPORT_PACKAGE) {
       const entry = join(targetLib, 'index.js')
       writeFileSync(entry, adaptHarnessSessionExportSource(readFileSync(entry, 'utf8')))
@@ -382,6 +388,7 @@ function desktopProvenance(root, receipt) {
     const adapter = manifest.name === SESSION_TITLE_PACKAGE ? SESSION_TITLE_ADAPTER_PATH
       : manifest.name === ARTIFACT_LINKS_PACKAGE || manifest.name === ARTIFACT_DELIVERABLES_PACKAGE ? ARTIFACT_LINKS_ADAPTER_PATH
       : manifest.name === CONVERSATION_PACKAGE ? CONVERSATION_ADAPTER_PATH
+      : manifest.name === CONVERSATION_CHAT_PACKAGE ? CONVERSATION_CHAT_ADAPTER_PATH
       : manifest.name === SESSION_EXPORT_PACKAGE ? SESSION_EXPORT_ADAPTER_PATH
         : manifest.name === FS_BYTES_PACKAGE ? FS_BYTES_ADAPTER_PATH : null
     if (manifest.name === SESSION_TITLE_PACKAGE && readFileSync(join(targetLib, 'index.js'), 'utf8')
@@ -399,6 +406,10 @@ function desktopProvenance(root, receipt) {
     if (manifest.name === CONVERSATION_PACKAGE && readFileSync(join(targetLib, 'client.js'), 'utf8')
       !== adaptHarnessConversationSource(readFileSync(join(sourceLib, 'client.js'), 'utf8'))) {
       throw new Error('Desktop conversation package does not match the pinned native owner plus product adapter')
+    }
+    if (manifest.name === CONVERSATION_CHAT_PACKAGE && readFileSync(join(targetLib, 'client.js'), 'utf8')
+      !== adaptHarnessChatSource(readFileSync(join(sourceLib, 'client.js'), 'utf8'))) {
+      throw new Error('Desktop chat package does not match the pinned native owner plus product adapter')
     }
     if (manifest.name === SESSION_EXPORT_PACKAGE && readFileSync(join(targetLib, 'index.js'), 'utf8')
       !== adaptHarnessSessionExportSource(readFileSync(join(sourceLib, 'index.js'), 'utf8'))) {

@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
-import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
+import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE, CONVERSATION_CHAT_PACKAGE } from './harness-conversation-adapter.mjs'
 import { ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { HARNESS_COMMIT, HARNESS_VERSION, verifyHarnessBuildReceipt, materializeFrontendDist, HARNESS_FRONTEND_PACKAGE } from './harness-provenance.mjs'
 
@@ -181,6 +181,7 @@ async function main() {
       artifact_deliverables_client_sha256: sha256(join(assembled, 'node_modules', ARTIFACT_DELIVERABLES_PACKAGE, 'lib', 'client.js')),
       conversation_adapter_sha256: sha256(conversationAdapter),
       conversation_client_sha256: sha256(join(assembled, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')),
+      conversation_chat_client_sha256: sha256(join(assembled, 'node_modules', CONVERSATION_CHAT_PACKAGE, 'lib', 'client.js')),
       package_manager: `pnpm@${PNPM_VERSION}`,
       assembly: 'harness-pnpm-deploy-and-release-pack',
     })

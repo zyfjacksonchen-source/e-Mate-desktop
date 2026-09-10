@@ -10,7 +10,7 @@ import test from 'node:test'
 import { adaptHarnessFsSource, adaptHarnessSessionTitleSource, SESSION_TITLE_PACKAGE, applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 import { adaptHarnessFsBytesSource, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
-import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
+import { adaptHarnessConversationSource, CONVERSATION_PACKAGE, adaptHarnessChatSource, CONVERSATION_CHAT_PACKAGE } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, ARTIFACT_LINKS_PACKAGE, adaptHarnessArtifactDeliverablesSource, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
 
 const rc7Seam = `\tasync resolvePolicy(toolName, args, exec) {
@@ -38,6 +38,7 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
   const nativeArtifactLinks = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-primitives/lib/index.js'), 'utf8')
   const nativeDeliverables = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-deliverables/lib/client.js'), 'utf8')
   const nativeConversation = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js'), 'utf8')
+  const nativeChat = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-chat/lib/client.js'), 'utf8')
   const nativeExport = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/session-query/session-log-export/lib/index.js'), 'utf8')
   const nativeBytes = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'), 'utf8')
   const nativeTitle = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/session/session-title/lib/index.js'), 'utf8')
@@ -48,6 +49,7 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
     { name: ARTIFACT_LINKS_PACKAGE, file: 'index.js', input: nativeArtifactLinks, adapt: adaptHarnessArtifactLinksSource },
     { name: ARTIFACT_DELIVERABLES_PACKAGE, file: 'client.js', input: nativeDeliverables, adapt: adaptHarnessArtifactDeliverablesSource },
     { name: CONVERSATION_PACKAGE, file: 'client.js', input: nativeConversation, adapt: adaptHarnessConversationSource },
+    { name: CONVERSATION_CHAT_PACKAGE, file: 'client.js', input: nativeChat, adapt: adaptHarnessChatSource },
     { name: SESSION_TITLE_PACKAGE, file: 'index.js', input: nativeTitle, adapt: adaptHarnessSessionTitleSource },
   ]
   for (const entry of entries) {

@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import { join } from 'node:path'
 import { adaptHarnessFsBytesSource, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
-import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
+import { adaptHarnessConversationSource, CONVERSATION_PACKAGE, adaptHarnessChatSource, CONVERSATION_CHAT_PACKAGE } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, ARTIFACT_LINKS_PACKAGE, adaptHarnessArtifactDeliverablesSource, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
 
 const FS_OLD = `\tasync resolvePolicy(toolName, args, exec) {
@@ -72,6 +72,9 @@ export async function applyHarnessRuntimeAdapters(runtimeRoot) {
   await replaceRuntimeFile(deliverablesTarget, adaptHarnessArtifactDeliverablesSource(await readFile(deliverablesTarget, 'utf8')))
   const conversationTarget = join(runtimeRoot, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')
   await replaceRuntimeFile(conversationTarget, adaptHarnessConversationSource(await readFile(conversationTarget, 'utf8')))
+  // 0.1.5 moved the Chat renderer, chat store and file-mention provider here.
+  const conversationChatTarget = join(runtimeRoot, 'node_modules', CONVERSATION_CHAT_PACKAGE, 'lib', 'client.js')
+  await replaceRuntimeFile(conversationChatTarget, adaptHarnessChatSource(await readFile(conversationChatTarget, 'utf8')))
   const titleTarget = join(runtimeRoot, 'node_modules', SESSION_TITLE_PACKAGE, 'lib', 'index.js')
   await replaceRuntimeFile(titleTarget, adaptHarnessSessionTitleSource(await readFile(titleTarget, 'utf8')))
 }

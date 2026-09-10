@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Context } from '../upstream/deepseek-harness/vendor/cordis/lib/index.js'
-import SessionStore from '../upstream/deepseek-harness/packages/core/session/lib/index.js'
+import SessionStore, { SESSION_FORMAT_VERSION } from '../upstream/deepseek-harness/packages/core/session/lib/index.js'
 import JsonlSessionPersistence from '../upstream/deepseek-harness/packages/session/session-persistence-jsonl/lib/index.js'
 
 const DEFAULT_SESSION_ID = 'e-mate-chat-states-v1'
@@ -141,8 +141,18 @@ const persistenceFiber = await ctx.plugin(JsonlSessionPersistence, { root, compr
 try {
   const existing = (await ctx.sessionPersistence.list()).find(item => item.id === sessionId)
   if (existing === undefined) {
-    await ctx.sessionPersistence.create({ version: 0, id: sessionId, createdAt: BASE_TIME, cwd })
-    await ctx.sessionPersistence.append(sessionId, events)
+    // 0.1.5 encodes only the current Session format, its header validator
+    // requires the seeded flag rc.7 derived, and the returned handle owns the
+    // append/flush/close lifecycle instead of a persistence-level append.
+    const handle = await ctx.sessionPersistence.create({
+      version: SESSION_FORMAT_VERSION, id: sessionId, createdAt: BASE_TIME, cwd, isSeeded: false,
+    })
+    try {
+      await handle.append(events)
+      await handle.flush()
+    } finally {
+      await handle.close()
+    }
   }
   const inspected = await ctx.sessionPersistence.inspect(sessionId)
   const fixture = inspected.events.slice(0, events.length)
