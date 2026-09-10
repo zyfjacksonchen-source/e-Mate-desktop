@@ -330,6 +330,7 @@ describe('live image batch progress', () => {
       useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
       useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
       addImageToDraft: vi.fn(async () => {}), addImageToCanvas: vi.fn(async () => {}), draftBytes: () => 0, notify: vi.fn(), runResource: vi.fn(async () => {}),
+      renderSlot: (() => null) as never,
     }
     const openMatch = { callIds: [], batchCallIds: [parentCallId], paths: [], childSessionIds: [] }
     const view = render(<ArtifactTerminal {...common as never} matched={openMatch} turn={{
@@ -383,6 +384,7 @@ describe('live image batch progress', () => {
       useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
       useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
       addImageToDraft: vi.fn(async () => {}), draftBytes: () => 0, notify: vi.fn(), runResource: vi.fn(async () => {}),
+      renderSlot: (() => null) as never,
     }
     render(<ArtifactTerminal {...props as never} />)
     const count = () => document.querySelectorAll('[data-attachment-id]').length

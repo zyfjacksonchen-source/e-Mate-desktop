@@ -654,6 +654,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
   readonly draftBytes: (ids: readonly string[]) => number
   readonly notify: (level: 'info' | 'error', text: string) => void
   readonly runResource: (request: DesktopResourceRequest) => Promise<void>
+  readonly renderSlot: ImageGalleryViewProps['renderSlot']
 }
 
 interface ImageGalleryViewProps {
@@ -952,11 +953,12 @@ function GalleryMessageImage({ attachment, ownerSessionId, loadImage, renderSlot
   })
 }
 
-function ImageTerminal({ items, loadImage, openMenu, addToCanvas }: {
+function ImageTerminal({ items, loadImage, openMenu, addToCanvas, renderSlot }: {
   readonly addToCanvas?: (item: ImageGalleryItem) => void
   readonly items: readonly ImageGalleryItem[]
   readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
   readonly openMenu: (target: MenuTarget, source: HTMLElement | { clientX: number; clientY: number }) => void
+  readonly renderSlot: ImageGalleryViewProps['renderSlot']
 }) {
   const railRef = useRef<HTMLDivElement>(null)
   const [canBack, setCanBack] = useState(false)
@@ -1078,7 +1080,7 @@ export function ArtifactTerminal(props: ArtifactTerminalProps) {
 /** Render hidden image receipts, native deliverables, and optional exact batch progress. */
 function ArtifactTerminalBody({
   matched, sessionId, turn, useSession, useSessions, useInput, useProjection,
-  openFile, loadImage, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource,
+  openFile, loadImage, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource, renderSlot,
   batches, batchChildIds,
 }: ArtifactTerminalBodyProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -1211,7 +1213,7 @@ function ArtifactTerminalBody({
       renderSlot={renderSlot}
       {...addImageToCanvas === undefined ? {} : { addImageToCanvas }}
     />}
-    <ImageTerminal items={items} loadImage={loadImage} openMenu={openMenu}
+    <ImageTerminal items={items} loadImage={loadImage} openMenu={openMenu} renderSlot={renderSlot}
       {...addImageToCanvas ? { addToCanvas: (item: ImageGalleryItem) => {
         if (!item.attachment || item.status === 'review-required') return
         void addImageToCanvas(item.attachment, item.source?.sessionId).catch(() => {

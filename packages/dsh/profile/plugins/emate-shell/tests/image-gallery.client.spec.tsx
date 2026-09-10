@@ -200,6 +200,11 @@ function terminalProps(
     draftBytes: () => 0,
     notify: vi.fn(),
     runResource: vi.fn(async () => {}),
+    // Mirrors the native conversation.message.images slot entry (MessageImages).
+    renderSlot: ((name: string, owner: { images: readonly { attachment?: unknown }[] }) =>
+      name === 'conversation.message.images'
+        ? owner.images.map((image, index) => mockMessageImage({ key: index, image, labels: slotLabels } as never))
+        : null) as never,
     ...overrides,
   }
 }

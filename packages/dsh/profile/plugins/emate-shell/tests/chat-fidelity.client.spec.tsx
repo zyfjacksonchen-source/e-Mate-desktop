@@ -113,7 +113,9 @@ describe('target conversation fidelity contract', () => {
     expect(targetImages).toContain('<MessageImage')
     expect(targetImages).toContain('<ImageLightbox')
     expect(targetLightbox).toContain('role="dialog"')
-    expect(gallery).toContain('<MessageImage')
+    // 0.1.5 forbids value-importing another feature plugin's component, so the
+    // Gallery renders the registered message-images slot instead.
+    expect(gallery).toContain("renderSlot('conversation.message.images'")
     expect(gallery).toContain("visibility: 'hidden'")
     expect(galleryCss).toContain('scroll-snap-type: x mandatory')
   })
