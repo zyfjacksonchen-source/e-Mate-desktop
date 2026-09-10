@@ -701,4 +701,46 @@ shell 42 / profile-core 35 / desktop 55 / enterprise 29 / scripts 59，插件侧
 
 ### 20.4 另一个需要注意的耦合
 `harness-provenance.mjs:233` 会读取 `packages/client/ui-model-selection/src/client/service.ts` 作为 **listener 证据**，
-而 fork 分支上「models 目录刷新」的修复已移植进该文件。**适配器证迹与 fork 改动存在交叉**，重 derive 适配器时必须同时验证这条。
+而 fork 分支上「models 目录刷新」的修复已移植进该文件。**适配器证迹与 fork 改动存在交叉**，重 derive 适配器时必须同时验证这条。---
+
+## 21. Round 4：8 个适配器函数对 0.1.5 编译产物的实测判决
+
+### 21.1 方法
+适配器作用的是 harness **编译产物的 `lib/*.js`**（不是 TS 源码）——
+`materializeHarnessDesktopRuntime` 先把构建好的 lib 复制进 desktop node_modules，再对特定包改写 `lib/index.js` / `lib/client.js`。
+因此判决方式：把 0.1.5 的 tgz 解出、取对应 lib 文件、直接喂给适配器函数，看是否抛错。
+
+### 21.2 实测结果：8/8 全部失败
+
+| 适配器函数 | 目标包 | 结果 |
+|---|---|---|
+| `adaptHarnessSessionTitleSource` | `dsh-session-title` | 抛错：`automatic-title` 接缝 0 命中 |
+| `adaptHarnessArtifactLinksSource` | `ui-primitives` | 抛错：`renderer/anchor` 接缝 0 命中 |
+| `adaptHarnessArtifactDeliverablesSource` | `ui-deliverables` | 抛错：`deliverables/tail-selector` 接缝 0 命中 |
+| `adaptHarnessConversationSource` | `ui-conversation` | 抛错：`turn-error/terminal-after-retry` 接缝 0 命中 |
+| `adaptHarnessFsBytesSource` | `dsh-fs-local` | 抛错：`readWholeBytes` 接缝已漂移 |
+| `adaptHarnessFsSource` | `dsh-fs` | 抛错：`escalation` 接缝 0 命中 |
+| `adaptHarnessSlotErrorSource` | `dsh-client-runtime` | **包不存在 → 必须重定目标** |
+| `adaptHarnessSessionExportSource` | `dsh-host-apiproxy` | **包不存在 → 必须重定目标** |
+
+**接缝没有一条能直接沿用**：0.1.5 的编译产物与 rc.7 在这些点上都不相同。
+
+### 21.3 适配器的实际用途（据实现与注释）
+
+**`fs-bytes` 承载的是一条安全措施**，不是可选的便利：
+> 注释原文：二进制读取（含 `read_image`）**故意拒绝多重链接的文件**——workspace 路径不得静默授予外部硬链接的发布权限。
+
+实现上把 `readWholeBytes` 整体替换为 e-Mate 版本，其中 `opened.nlink !== 1n` → `FS_PERMISSION_DENIED`。
+守卫测试也在 122 个可跑集中：`hardlinked images deliberately fail; an independent PNG copy still passes native image validation`。
+**因此这条适配器无论如何必须保住，不能因为重做成本高就丢掉。**
+
+`slot-error` 则是纯委托：把 `SlotCore.reportEntryError` 通过 `SlotsService` 暴露，机制小但同样失败即关闭。
+
+### 21.4 失败即关闭是优点，也是工作量的证明
+这些适配器找不到接缝就抛错，所以 **harness 构建会直接拒绝**，不会静默产出一个行为不完整的二进制。
+但反面是：8 个函数全部要按 0.1.5 的真实产物重写接缝，这是 Round 5 起的实质性工作。
+
+### 21.5 一个架构观察（供后续决策，不在本轮实施）
+适配器做的是"对编译产物做字符串手术"。由于 e-Mate 本来就从自己的 fork 构建 harness，
+**这些改动原则上可作为 fork 源码提交存在**，比手术编译产物更稳、更可测。
+但改变这一架构超出本次升级范围，本轮不实施；仅记录为后续可评估项。
