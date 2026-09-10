@@ -640,3 +640,29 @@ hero 内容槽必须**重新插入 0.1.5 的新结构**（作为 scrollBody 内�
 范围 `6a7f4b9d..3cc4be84` = 411 提交，其中 **236 个 fix**，**218 个自带测试守卫**，去重后 **151 个守卫测试文件**。
 18 个修复无测试，列为必须补齐的缺口。区域分布即升级的回归面：
 shell 42 / profile-core 35 / desktop 55 / enterprise 29 / scripts 59，插件侧 knowledge 21、office-skills 14、mcp-manage 11、canvas 11、skill-hub 10、vision-toolkit 9 等。
+
+---
+
+## 19. Round 2：fork 重做 10/10 完成 + 双构建面 + 包测试通过
+
+### 19.1 最后一条重做完成
+`feat(ui-conversation): add declarative hero content slot` 已移植。**过程中引入并修正了一次真实回归**，过程值得记录：
+
+1. 按 fork 的设计把 `HeroShell` **挪出** composer stack，放进新的 hero 内容槽 fallback。
+2. 实跑包测试 → 20 通过 / **3 失败**，其中两条是 **0.1.5 自己的 hero 测试**。
+3. 判定：**0.1.5 的排布就是契约**。恢复原生 `HeroShell` 留在 composer stack，`conversation.hero.content` 改为**纯增量座位**（未被占用时不渲染任何东西）。
+4. 重跑 → **23/23 全部通过**。
+
+### 19.2 一个必须记住的教训（第二次同类错误）
+此前有一条重做提交里加的测试写成了 `sessionSnapshotOf({ composerPhase: 'blank' })`，而 `SessionSnapshot` **没有该字段** —— 它从未编译过。
+**原因是当时只构建了 host 面**。`build:lib:host` **不编译 client 包**，所以 client 侧的语法/类型错误完全不可见。
+
+**规则**：每条重做必须同时过
+- `pnpm run build:lib:host`
+- `tsc -b tsconfig.client.json`
+- 该包自带的测试
+
+### 19.3 当前 fork 分支
+- 分支 `dsh-v0.1.5-rc.1-emate`，**11 个提交**，头部 SHA 见仓库
+- 双构建面 0 错误；`ui-conversation` 23/23 通过
+- 与 0.1.5 的净差异见 `git diff --stat 183f08e9 HEAD`
