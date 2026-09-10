@@ -45,10 +45,13 @@ function readWholeBytesSource() {
 
 export function adaptHarnessFsBytesSource(source) {
   const begin = 'async function readWholeBytes(target, signal, maxBytes, internals = {}) {'
+  // Only the opening line must be globally unique: it identifies the function.
+  // The end marker is resolved from `start` below, so an identical ending in a
+  // neighbouring function must not reject an unambiguous seam.
   const ending = '\treturn Buffer.concat(chunks, bytes);\n}'
-  if (source.split(begin).length !== 2 || source.split(ending).length !== 2
+  if (source.split(begin).length !== 2
     || !source.includes('\tconst info = await statRegularFile(target, "read", signal);\n')) {
-    throw new Error('Harness binary-read adapter expected one unmodified rc.7 readWholeBytes seam')
+    throw new Error('Harness binary-read adapter expected one unmodified readWholeBytes seam')
   }
   const imports = 'import { createReadStream } from "node:fs";'
   if (source.split(imports).length !== 2) throw new Error('Harness binary-read adapter expected one rc.7 node:fs import')
