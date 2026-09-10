@@ -1462,6 +1462,50 @@ export type RenderMessageImages = (owner: Omit<MessageImagesOwnerProps, 'loadIma
 `loadImage` 由该渲染器内部提供（类型即为 `Omit<..., 'loadImage'>`），因此 shell 自带的
 session 级 `loadImage` 管线可一并删除——这也消除了与原生的一处分歧。
 
-**待做**：`ImageGalleryViewProps`（`image-gallery.tsx:668`）当前没有 `renderMessageImages`，
-需从注册点把 `ChatNodeOwnerProps.renderMessageImages`（`ui-chat/src/client/contract/slots.ts:92`）
-穿下去，再改 `GalleryMessageImage`（`image-gallery.tsx:941`）与 `image-batch-progress.tsx:124`。
+**已完成**（本条原「待做」已落地）：最终采用的入口不是 `renderMessageImages`，而是
+`conversation.message.images` 这个 **slot**（`{ kind: 'single'; scope: 'session' }`，
+由 `ui-attachment/src/client/index.ts:20` 注册，原生在 `ui-chat/.../ChatView.tsx:299` 渲染）。
+`conversation.view` 的贡献者被授权渲染它（`PropsRenderSlots<'conversation.chat.node' |
+'conversation.message.images'>`），因此：
+- `emate-shell` 的 `conversation.view` 注册补上 `children: { 'conversation.message.images': { kind: 'single', scope: 'session' } }`；
+- `ImageGalleryViewProps` / `ArtifactTerminalProps` / `ImageTerminal` 增加 `renderSlot` 座位；
+- `GalleryMessageImage` 改为 `renderSlot('conversation.message.images', { images: [{ attachment }], loadImage, align: 'start', compact: true })`。
+
+**可见文案变化（需确认接受）**：改走原生 slot 后标签由原生 `conversation` 命名空间提供，
+zh 的 `image.openOriginalLabel` 是 `{label}，点击查看原图`，而 shell 旧文案是 `查看原图：{label}`。
+即无障碍标签措辞发生变化（仍是中文，文案来源由两份合成一份）。
+
+---
+
+## 第 39/40 轮：shell 测试层在 0.1.5 上的现状（可续做）
+
+**已达成**：`pnpm run test:fast` 绿（EXIT=0，68/68 + 5/5）。
+shell 套件从 97 → **128 通过 / 13 失败**（21 个 spec 文件中 13 个通过）。
+未解析导入从 5 处降到 **1 处**。
+
+**本轮修掉的根因**（按价值排序）：
+1. `packages/dsh/profile/plugins/emate-shell/vitest.config.ts` 里仍有两条指向**已删除包**的 alias：
+   `@deepseek-ai/dsh-client-runtime/client` → `packages/client/runtime/src/client/index.ts`（已不存在）、
+   `@deepseek-ai/dsh-client-web-react` → `packages/client/web-react/src/index.ts`（已不存在）。
+   坏 alias 会让整条传递导入解析失败，报成 `Cannot read properties of undefined (reading 'load')`
+   ——真凶路径其实是 `packages/**packages**/typert/protocol/lib/index.js`（`packages` 被重复）。
+   删除这两条 alias 后一次性多通过 3 个测试。
+2. 九个 plugin submodule 在本 worktree **未初始化**（`git submodule status` 前缀 `-`），
+   导致 `upstream/plugins/dsh-genui/src/client/dom-fence.tsx` 之类导入失败——非迁移问题。
+   已 `git submodule update --init --recursive upstream/plugins` 全部检出。
+3. 全部 `conversation-nodes/*` 由 `ui-conversation` 迁到 `ui-chat`（`ui-conversation` 下该目录已空）。
+4. `emate-shell` 的 `renderSlot` 座位已贯穿 `ImageGalleryViewProps` → `ArtifactTerminalProps`
+   → `ImageTerminal` / `ImageBatchProgress`，各 spec 的 props 也补齐。
+
+**仍未解决（逐个已定性）**：
+| 文件 | 现状 |
+| --- | --- |
+| `sidebar-home-fidelity` | 唯一剩余未解析导入。规格驱动 `new SessionRuntime(...).handleHostEnvelope({type:'host/session-added'})`，而 0.1.5 **完全没有** `handleHostEnvelope` 与 `host/session-added`；后继 `ClientSessions`(service.ts:182) / `SessionManager`(manager.ts:95) **构造签名都不匹配**。需要围绕 Remote/Connection 代际模型重写，属真实设计工作。 |
+| `composer-mentions` / `session-share` | 仍有 `reading 'load'`（alias 修复后性质待重新判定）。 |
+| `native-tool-image-output` | `conversation Context 9:turn-tail3 received a transient start Match` —— turn-tail 定义的行为变化。 |
+| `chat-fidelity` | 一处 `expected undefined to deeply equal { …(6) }`。 |
+| `image-batch-progress` | 两条断言依赖真实图片渲染（`[data-attachment-id]` 计数、loader 调用次数），当前 stub 返回 null，需换成会真正渲染该 slot 的 stub。 |
+| `header-controls` / `image-gallery` | 错误行未捕获，需单独取栈。 |
+
+**另需注意**：`emate-shell` 没有 `tsconfig.json`，`tsdown` 只转译不做类型检查，
+所以该包的组件门禁**从不做类型检查**——测试转绿并不等于类型成立。
