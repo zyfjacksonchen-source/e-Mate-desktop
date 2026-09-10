@@ -1342,3 +1342,43 @@ Round 10 记的"`artifact-links` 21 处"是**整个模块**的总数（lib 面 6
 允许多贡献 → e-Mate 可与原生 Deliverables 并列注册，成本低；
 单一占用（抢占式） → e-Mate 必须替换该 slot 并自行渲染原生内容，成本与风险高得多。
 本轮未能读到 slots 实现（解包目录已被系统清理），这是下一轮的第一个动作。
+
+### 21.36 Round 24 决定性结论：最后两条适配器可用「注册贡献」替代「打补丁」
+
+#### slot 的多贡献语义（读 dsh-client-ui-slots 实现）
+
+slot 有四种 kind，注册行为各不相同：
+
+- single：同优先级只能一个，重复注册直接抛错；不同优先级可 shadow，最低者渲染
+- keyed：每个 key 一个（同优先级内）
+- list：每个 id 一个（同优先级内）
+- chain：允许多个条目，且必须提供 select 参数
+
+register 的实现里，single/keyed/list 都会在发现同优先级占用者时抛错，错误信息还提示换优先级来 shadow。
+entriesOfSlot 对 chain 直接返回全部条目，对其它 kind 做去重后取 head。
+
+#### 关键事实：conversation.chat.turnTail 是 chain
+
+位置：packages/client/ui-chat/src/client/contract/slots.ts 第 207 行（0.1.5 的新包 dsh-client-ui-chat）。
+声明为 kind 为 chain、scope 为 session、owner 为 TurnTailOwnerProps。
+
+这解释了为什么 0.1.5 的 deliverables 注册要传 select：chain 是唯一强制要求 select 的 kind。
+
+#### 对 e-Mate 的意义
+
+适配器存在的理由是「把 e-Mate 的 Univer/Office 产出与图像呈现注入会话尾巴」。
+而该注入点在 0.1.5 上是 chain 类型，因此**允许 e-Mate 与原生 Deliverables 并列注册自己的贡献** ——
+不需要替换、不需要抢占、更不需要打补丁改编译产物。
+
+因此最后两条适配器的正确解法是：
+
+- artifact-deliverables：改为注册一个 chain 贡献（select 命中含 Univer/Office 产出的回合），替代打补丁改 selectProducedFiles
+- conversation 的图像呈现：e-Mate 插件已在用 ctx.conversationEvents 注册定义，需核对该契约在 0.1.5 的形态
+
+这同时满足仓库章程两条：优先删除包装；呈现归原生 slot 宿主所有。
+
+#### 一个必须注意的边界
+
+以上只解决了「呈现注入点」。适配器里还有与呈现无关的部分（例如 conversation 的 47 处中包含 stores、facade、hub、queue 等状态与持久化逻辑），
+那些**不能**用 slot 贡献替代，仍需按源码逐处适配。
+因此本轮**不宣称**最后两条的成本已大幅下降，只确认「呈现部分找到了正规入口」。
