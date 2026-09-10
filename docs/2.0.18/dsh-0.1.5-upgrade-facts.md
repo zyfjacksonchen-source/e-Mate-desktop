@@ -389,3 +389,58 @@ git cherry feat/2.0.18/rc7-tidychat <branch>
 - `feat(ui-conversation): add declarative hero content slot`
 
 聚焦区域：**schedule 5 条**、**jobs 3 条**、tools 注册来源、session 冷列表隔离、llm 线上变换、settings 分区 id、ui-conversation hero 槽与附件拖放层。
+
+---
+
+## 13. 分诊方法的两轮证伪与最终裁决规则
+
+两种自动探针都被实测证伪，**都只能当排序工具，不能当裁决**：
+
+| 探针 | 判据 | 证伪方式 |
+|---|---|---|
+| 符号探针 | 该提交新引入的标识符是否出现在 0.1.5 | 对**纯增量标记型**提交必然误判：`data-emate-composer-frame-host` 这类新增不产生新标识符，于是被判成"0.1.5 已具备"，实际 0.1.5 完全没有 |
+| 字面量探针 | 新增的任意字符串是否出现在 0.1.5 | 把**测试名与散文**也算进去（如 `"candidate worktree: clean"`），于是 21 条全部被判成"需重做"，同样错误 |
+
+### 13.1 最终裁决规则
+
+对每条提交，**按能力（capability）裁决**，而不是按文本匹配：
+
+1. 找出该提交引入的**能力锚点**（DOM 契约属性、协议键、错误码、导出 API）——见 13.2 表；
+2. 直接在 0.1.5 源码里读该能力是否以**任何形态**存在；
+3. 检查 e-Mate 是否**真的消费**它（消费方存在 → 不得删；无消费方 → 可删）；
+4. 用该提交**自带的测试**做最终确认。
+
+### 13.2 能力锚点表（手工核验清单）
+
+| 提交 | 能力锚点 | 0.1.5 缺失 |
+|---|---|---|
+| fix(ui): make attachment drop overlay dismissible (#1) | \`image.closeDrop\` | 1/1 |
+| fix(schedule): make reminder delivery crash safe | \`schedule-occurrence-v2-\` \`schedule-delivery-v2-\` \`schedule-message-v2-\` \`dsh.schedule.occurrence.v2\` | 7/8 |
+| fix(schedule): make delivery rollback fail closed | \`schedule-reserved-0\` \`schedule-reserved-1\` \`schedule-reserved-2\` \`gate.json\` | 4/4 |
+| test(schedule): make downgrade gate hermetic | \`(无能力类字面量)\` | 否 |
+| test(schedule): gate built downgrade compatibility | \`(无能力类字面量)\` | 否 |
+| feat(schedule): gate delivery startup admission | \`scheduleDeliveryAdmission\` | 1/1 |
+| fix(schedule): honor startup delivery admission | \`(无能力类字面量)\` | 否 |
+| feat(tools): expose registration provenance | \`first.mjs\` \`second.mjs\` \`third-party-search-v1\` \`third-party-search-v2\` | 4/4 |
+| feat(jobs): add cross-owner kind admission | \`emate-image-2\` | 1/1 |
+| fix(jobs): register queued admission jobs | \`emate-image-3\` | 1/1 |
+| fix(jobs): close queued owner teardown race | \`(无能力类字面量)\` | 否 |
+| fix(session): isolate corrupt cold list artifacts | \`(无能力类字面量)\` | 否 |
+| fix(models): refresh directories after credential commits | \`E_MATE_ENTERPRISE_SESSION\` | 1/1 |
+| feat(imagegen): gate image edits on native review | \`image.loadError\` \`image.output\` \`image.source\` | 3/3 |
+| test(client): repair image review fixtures | \`(无能力类字面量)\` | 否 |
+| docs(imagegen): refresh review contracts | \`(无能力类字面量)\` | 否 |
+| feat(llm): add registration-bound wire transform | \`INVALID_WIRE_REQUEST\` | 1/1 |
+| fix(conversation): expose semantic composer frame host | \`data-emate-composer-frame-host\` | 1/1 |
+| fix(settings): expose stable section ids | \`data-settings-section-id\` | 1/1 |
+| feat(ui-conversation): add declarative hero content slot | \`conversation.hero.content\` | 1/1 |
+| fix(conversation): isolate session drafts on workspace switch | \`(无能力类字面量)\` | 否 |
+
+### 13.3 已完成的手工裁决（有证据）
+
+| 提交 | 裁决 | 证据 |
+|---|---|---|
+| `fix(conversation): expose semantic composer frame host` | **必须重做** | 0.1.5 无 `data-emate-composer-frame-host`（0 命中）；e-Mate 侧重度消费：`emate-shell/src/client/home.module.css:41,67` 的 `:global([data-emate-composer-frame-host])` 样式 + `tests/composer-205.client.spec.tsx` 七条以上断言。0.1.5 的 `ConversationRoot.tsx:347` 结构相同（composer stack + hero workspace row），是**一行属性增量的重做** |
+| `feat(imagegen): gate image edits on native review` | **产品淘汰，不得重做** | e-Mate 2.0.18 在 `AGENTS.md:7` 与 `docs/target-contract.md:16` 两处明文要求 `zero image/edit confirmation`；生图工具路径无确认；fork 未把该门接入任何工具；rc7 不引用 `ImageReviewMedia`，2.0.17 工单反向要求"绝不提问" |
+
+**剩余 19 条**待按 13.1 规则逐条手工裁决。
