@@ -8,10 +8,6 @@ import { installDomFenceRenderer } from '../../../../../../upstream/plugins/dsh-
 import { toolImagesDefinition } from '../src/client/image-gallery.tsx'
 import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
 
-vi.mock('@deepseek-ai/dsh-client-runtime/client', () => ({
-  isAppendSurfaceEvent: (event: { surfaceOp?: string }) => event.surfaceOp === 'append',
-}))
-
 vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
   ImageGallery: ({ images }: { images: unknown[] }) => <div data-target-image-gallery="">{images.length} images</div>,
 }))

@@ -4,16 +4,15 @@ import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement, useSyncExternalStore } from 'react'
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
-import * as nativeRuntime from '@deepseek-ai/dsh-client-runtime/client'
 import { ConversationNodeAssembler } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation/assembler.ts'
-import { assistantDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/assistant.ts'
-import { toolDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/tool.ts'
-import { turnTailDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/turn-tail.ts'
-import { chatViewDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/chat-snapshot-builder.ts'
-import { unknownFallbackDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/fallback.ts'
-import { chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/common.ts'
+import { assistantDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/assistant.ts'
+import { toolDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/tool.ts'
+import { turnTailDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/turn-tail.ts'
+import { chatViewDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts'
+import { unknownFallbackDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/fallback.ts'
+import { chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/conversation-nodes/common.ts'
 import { deriveTurnMetrics } from '../../../../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/contract/turn-metrics.ts'
-import { adaptHarnessConversationSource } from '../../../../../../scripts/harness-conversation-adapter.mjs'
+import { adaptHarnessConversationSource, adaptHarnessChatSource } from '../../../../../../scripts/harness-conversation-adapter.mjs'
 import { bindSnapshotSelector } from '../../../../../../upstream/deepseek-harness/packages/client/web-react/src/bind.ts'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -95,11 +94,13 @@ function event(data: Record<string, unknown>, seq = 8) {
 }
 
 function adaptedTurnTailDefinition(): typeof turnTailDefinition {
-  const bundle = adaptHarnessConversationSource(readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js'), 'utf8'))
+  // 0.1.5 moved the turn-tail node to ui-chat and emits isAppendSurfaceEvent as
+  // a bare local, so the injected runtime namespace is gone.
+  const bundle = adaptHarnessChatSource(readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-chat/lib/client.js'), 'utf8'))
   const start = bundle.indexOf('//#region lib/types/client/conversation-nodes/turn-tail.js')
-  return new Function('_deepseek_ai_dsh_client_runtime_client', 'chatNode', 'CHAT_SYNTHETIC_SEQ_OFFSETS', 'deriveTurnMetrics',
+  return new Function('chatNode', 'CHAT_SYNTHETIC_SEQ_OFFSETS', 'deriveTurnMetrics',
     bundle.slice(start, bundle.indexOf('//#endregion', start)) + '\nreturn turnTailDefinition',
-  )(nativeRuntime, chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS, deriveTurnMetrics)
+  )(chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS, deriveTurnMetrics)
 }
 
 function v3Receipt(overrides: Record<string, unknown> = {}) {
