@@ -35,14 +35,13 @@ export function assertNativeAgentLoop(packages) {
 }
 export const HARNESS_FRONTEND_PACKAGE = '@deepseek-ai/dsh-web-frontend'
 
-const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/updated", refresh);'
+const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/reference-updated", refresh);'
 const BUILD_RECEIPT = '.release-cache/harness-build.json'
 const DESKTOP_RECEIPT = 'desktop/e-mate-desktop/build/harness-runtime-provenance.json'
 export const DESKTOP_OVERLAYS = new Map([
   ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.5-rc.1.patch'],
   ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.5-rc.1.patch'],
   ['@deepseek-ai/dsh-win32-process', 'desktop/patches/dsh-win32-process@0.1.5-rc.1.patch'],
-  ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch'],
 ])
 
 function compareText(left, right) {
@@ -472,11 +471,17 @@ export function verifyHarnessDesktopRuntime(root) {
 
 export function harnessFrontendViteConfig(root) {
   const harnessRoot = join(root, 'upstream', 'deepseek-harness')
+  const primitivesRoot = join(harnessRoot, 'packages', 'client', 'ui-primitives')
+  // 0.1.5 resolves workspace packages through their built lib exports, so the
+  // frontend would bundle an unadapted primitives copy. e-Mate restores the
+  // source resolution the artifact-link transform owns and keeps it ahead of
+  // every native plugin, exactly as the pinned rc.7 config did.
   return [
     `import nativeConfig from ${JSON.stringify(pathToFileURL(join(harnessRoot, 'apps/web/vite.config.ts')).href)}`,
     `import { realpathSync } from 'node:fs'`,
     `import { artifactLinksVitePlugin } from ${JSON.stringify(pathToFileURL(join(root, ARTIFACT_LINKS_ADAPTER_PATH)).href)}`,
-    `export default { ...nativeConfig, plugins: [artifactLinksVitePlugin(realpathSync(${JSON.stringify(join(harnessRoot, ARTIFACT_LINKS_RENDERER_PATH))})), ...(nativeConfig.plugins ?? [])] }`,
+    `const primitivesSource = realpathSync(${JSON.stringify(join(primitivesRoot, 'src', 'index.ts'))})`,
+    `export default { ...nativeConfig, resolve: { ...nativeConfig.resolve, alias: [...(nativeConfig.resolve?.alias ?? []), { find: /^@deepseek-ai\\/dsh-client-ui-primitives$/, replacement: primitivesSource }] }, plugins: [artifactLinksVitePlugin(realpathSync(${JSON.stringify(join(harnessRoot, ARTIFACT_LINKS_RENDERER_PATH))})), ...(nativeConfig.plugins ?? [])] }`,
   ].join('\n')
 }
 

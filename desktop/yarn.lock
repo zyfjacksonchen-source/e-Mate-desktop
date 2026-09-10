@@ -982,7 +982,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-app-boot@npm:0.1.5-rc.1, @deepseek-ai/dsh-app-boot@npm:^0.1.5-rc.1":
+"@deepseek-ai/dsh-app-boot@npm:0.1.5-rc.1":
   version: 0.1.5-rc.1
   resolution: "@deepseek-ai/dsh-app-boot@npm:0.1.5-rc.1"
   dependencies:
@@ -1003,6 +1003,30 @@ __metadata:
     "@deepseek-ai/cordis-plugin-hmr":
       optional: true
   checksum: 10c0/13ceafee6c36804eead128ad867104dfb78a17fb00cfd311ea0cddc68fbf0a6cca140d41d14c35e7423dfd263d0d7376ed0b77587adc973c26e7b8037e80bf84
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.5-rc.1#./patches/dsh-app-boot@0.1.5-rc.1.patch::locator=%40e-mate%2Fdesktop-workspace%40workspace%3A.":
+  version: 0.1.5-rc.1
+  resolution: "@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.5-rc.1#./patches/dsh-app-boot@0.1.5-rc.1.patch::version=0.1.5-rc.1&hash=a5aa5b&locator=%40e-mate%2Fdesktop-workspace%40workspace%3A."
+  dependencies:
+    "@deepseek-ai/dsh-atomic-write": "npm:^0.1.5-rc.1"
+    "@deepseek-ai/dsh-package-manifest": "npm:^0.1.5-rc.1"
+    js-yaml: "npm:^4.2.0"
+    resolve.exports: "npm:^2.0.3"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.2
+    "@deepseek-ai/cordis-plugin-group": ^1.0.2
+    "@deepseek-ai/cordis-plugin-hmr": ^1.0.17
+    "@deepseek-ai/cordis-plugin-include": ^1.0.7
+    "@deepseek-ai/cordis-plugin-loader": ^1.0.3
+    "@deepseek-ai/dsh-home-paths": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-launch-environment": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-system-prompt": ^0.1.5-rc.1
+  peerDependenciesMeta:
+    "@deepseek-ai/cordis-plugin-hmr":
+      optional: true
+  checksum: 10c0/db85f45d36d4dec8d6993360fa0fadc20ce6933d454882f41f0ec61ea3849d36d3d794288ca14749c3d1b0169daadde590470d9b5d0f1aed302e81200b8e0b40
   languageName: node
   linkType: hard
 
@@ -1657,12 +1681,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-client-ui-workspace@npm:0.1.5-rc.1, @deepseek-ai/dsh-client-ui-workspace@npm:^0.1.5-rc.1":
+"@deepseek-ai/dsh-client-ui-workspace@npm:0.1.5-rc.1":
   version: 0.1.5-rc.1
   resolution: "@deepseek-ai/dsh-client-ui-workspace@npm:0.1.5-rc.1"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.2
   checksum: 10c0/7704751900ccdc3eda0b74ea7ba0df6706442d674e1d69e8715c4990f55ad90fa2cdb49d0568f83c1d4808d0d67c57e61f59103a0bb45d28b58adca79103525d
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-client-ui-workspace@patch:@deepseek-ai/dsh-client-ui-workspace@npm%3A0.1.5-rc.1#./patches/dsh-client-ui-workspace@0.1.5-rc.1.patch::locator=%40e-mate%2Fdesktop-workspace%40workspace%3A.":
+  version: 0.1.5-rc.1
+  resolution: "@deepseek-ai/dsh-client-ui-workspace@patch:@deepseek-ai/dsh-client-ui-workspace@npm%3A0.1.5-rc.1#./patches/dsh-client-ui-workspace@0.1.5-rc.1.patch::version=0.1.5-rc.1&hash=16cf8a&locator=%40e-mate%2Fdesktop-workspace%40workspace%3A."
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.2
+  checksum: 10c0/6e6651e059ba88d24cc021cc9745319dab595540db127c6d8e86693df29f724ec995f42e73f4afc28456f37c7d0fe9249992c0d5673a55a5e2a5022ebeef427b
   languageName: node
   linkType: hard
 

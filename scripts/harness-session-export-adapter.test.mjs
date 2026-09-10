@@ -8,14 +8,14 @@ import test from 'node:test'
 import { adaptHarnessSessionExportSource, emateExportContent, emateExportFileRefs, emateExportMediaPath } from './harness-session-export-adapter.mjs'
 
 const nativeRoot = process.env.EMATE_TEST_NATIVE_ROOT ?? resolve(import.meta.dirname, '..')
-const native = await readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/host/apiproxy/lib/index.js'), 'utf8')
+const native = await readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/session-query/session-log-export/lib/index.js'), 'utf8')
 const adapted = adaptHarnessSessionExportSource(native)
-const require = createRequire(join(nativeRoot, 'upstream/deepseek-harness/packages/host/apiproxy/package.json'))
+const require = createRequire(join(nativeRoot, 'upstream/deepseek-harness/packages/session-query/session-log-export/package.json'))
 const { Zip, ZipDeflate, unzipSync } = require('fflate')
 const { Context } = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')))
 const { LocalFileSystem } = await import(pathToFileURL(join(nativeRoot, 'upstream/deepseek-harness/packages/fs/fs-local/lib/index.js')))
 function owner(source) {
-  const start = source.indexOf('//#region lib/types/session-export.js')
+  const start = source.indexOf('//#region lib/types/archive.js')
   const end = source.indexOf('//#endregion', start)
   return new Function('Zip', 'ZipDeflate', `${source.slice(start, end)}\nreturn { streamSessionLogZip, sessionLogExportDeps };`)(Zip, ZipDeflate)
 }

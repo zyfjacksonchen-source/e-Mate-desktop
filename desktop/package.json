@@ -12,20 +12,24 @@
     "e-mate-desktop"
   ],
   "resolutions": {
-    "@electron/osx-sign@npm:1.3.3": "patch:@electron/osx-sign@npm%3A1.3.3#./.yarn/patches/@electron-osx-sign-npm-1.3.3-sequential-walk.patch",
-    "app-builder-lib@npm:26.15.7": "patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch",
-    "@deepseek-ai/dsh-win32-process@npm:0.1.5-rc.1": "patch:@deepseek-ai/dsh-win32-process@npm%3A0.1.5-rc.1#./patches/dsh-win32-process@0.1.5-rc.1.patch",
-    "@deepseek-ai/dsh-win32-process@npm:^0.1.5-rc.1": "patch:@deepseek-ai/dsh-win32-process@npm%3A0.1.5-rc.1#./patches/dsh-win32-process@0.1.5-rc.1.patch",
-    "@deepseek-ai/dsh-session@npm:^0.1.5-rc.1": "npm:0.1.5-rc.1",
-    "@deepseek-ai/dsh-session-persistence@npm:^0.1.5-rc.1": "npm:0.1.5-rc.1",
-    "@deepseek-ai/dsh-tool-bash@npm:^0.1.5-rc.1": "npm:0.1.5-rc.1",
-    "@deepseek-ai/dsh-tool-pwsh@npm:^0.1.5-rc.1": "npm:0.1.5-rc.1",
+    "@deepseek-ai/dsh-app-boot@npm:0.1.5-rc.1": "patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.5-rc.1#./patches/dsh-app-boot@0.1.5-rc.1.patch",
+    "@deepseek-ai/dsh-app-boot@npm:^0.1.5-rc.1": "patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.5-rc.1#./patches/dsh-app-boot@0.1.5-rc.1.patch",
+    "@deepseek-ai/dsh-client-ui-workspace@npm:0.1.5-rc.1": "patch:@deepseek-ai/dsh-client-ui-workspace@npm%3A0.1.5-rc.1#./patches/dsh-client-ui-workspace@0.1.5-rc.1.patch",
+    "@deepseek-ai/dsh-client-ui-workspace@npm:^0.1.5-rc.1": "patch:@deepseek-ai/dsh-client-ui-workspace@npm%3A0.1.5-rc.1#./patches/dsh-client-ui-workspace@0.1.5-rc.1.patch",
     "@deepseek-ai/dsh-credentials@npm:0.1.5-rc.1": "npm:0.1.5-rc.1",
     "@deepseek-ai/dsh-launch-environment@npm:0.1.5-rc.1": "npm:0.1.5-rc.1",
+    "@deepseek-ai/dsh-session-persistence@npm:^0.1.5-rc.1": "npm:0.1.5-rc.1",
+    "@deepseek-ai/dsh-session@npm:^0.1.5-rc.1": "npm:0.1.5-rc.1",
     "@deepseek-ai/dsh-settings@npm:0.1.5-rc.1": "npm:0.1.5-rc.1",
+    "@deepseek-ai/dsh-tool-bash@npm:^0.1.5-rc.1": "npm:0.1.5-rc.1",
+    "@deepseek-ai/dsh-tool-pwsh@npm:^0.1.5-rc.1": "npm:0.1.5-rc.1",
     "@deepseek-ai/dsh-web@npm:0.1.5-rc.1": "npm:0.1.5-rc.1",
-    "node-pty@npm:1.2.0-beta.15": "patch:node-pty@npm%3A1.2.0-beta.15#./.yarn/patches/node-pty-npm-1.2.0-beta.15-asar-unpacked-path.patch",
-    "koffi@npm:^3.1.0": "3.1.5"
+    "@deepseek-ai/dsh-win32-process@npm:0.1.5-rc.1": "patch:@deepseek-ai/dsh-win32-process@npm%3A0.1.5-rc.1#./patches/dsh-win32-process@0.1.5-rc.1.patch",
+    "@deepseek-ai/dsh-win32-process@npm:^0.1.5-rc.1": "patch:@deepseek-ai/dsh-win32-process@npm%3A0.1.5-rc.1#./patches/dsh-win32-process@0.1.5-rc.1.patch",
+    "@electron/osx-sign@npm:1.3.3": "patch:@electron/osx-sign@npm%3A1.3.3#./.yarn/patches/@electron-osx-sign-npm-1.3.3-sequential-walk.patch",
+    "app-builder-lib@npm:26.15.7": "patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch",
+    "koffi@npm:^3.1.0": "3.1.5",
+    "node-pty@npm:1.2.0-beta.15": "patch:node-pty@npm%3A1.2.0-beta.15#./.yarn/patches/node-pty-npm-1.2.0-beta.15-asar-unpacked-path.patch"
   },
   "dependenciesMeta": {
     "@deepseek-ai/dsh-subprocess-local": {

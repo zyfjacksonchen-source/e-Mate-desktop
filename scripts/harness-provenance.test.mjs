@@ -56,7 +56,7 @@ test('pins one clean native model-directory refresh owner', () => {
     harnessRoot,
     'packages/client/ui-model-selection/src/client/service.ts',
   ), 'utf8')
-  assertExactOccurrence(source, "ctx.remote.$on('credentials/updated', refresh)", 'native model listener')
+  assertExactOccurrence(source, "ctx.remote.$on('credentials/reference-updated', refresh)", 'native model listener')
 })
 
 test('Desktop session archives use the same native export adapter and record its file-import contract', () => {
@@ -125,12 +125,11 @@ test('runs manager-free Harness build scripts in order through inherited pnpm an
   }
 })
 
-test('keeps exactly the four pinned Desktop overlays', () => {
+test('keeps exactly the three pinned Desktop overlays', () => {
   assert.deepEqual([...DESKTOP_OVERLAYS], [
     ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.5-rc.1.patch'],
     ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.5-rc.1.patch'],
     ['@deepseek-ai/dsh-win32-process', 'desktop/patches/dsh-win32-process@0.1.5-rc.1.patch'],
-    ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch'],
   ])
 
   const appBoot = readFileSync(join(harnessRoot, 'packages/boot/app-boot/src/index.ts'), 'utf8')
@@ -139,31 +138,27 @@ test('keeps exactly the four pinned Desktop overlays', () => {
   assert.ok(appBoot.includes('if (!Array.isArray(parsed))'))
   assert.ok(appBootPatch.includes('+	if (parsed === void 0 || parsed === null) return [];'))
 
-  const workspace = readFileSync(join(harnessRoot, 'packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx'), 'utf8')
+  const workspace = readFileSync(join(harnessRoot, 'packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx'), 'utf8')
   const workspacePatch = readFileSync(join(root, DESKTOP_OVERLAYS.get('@deepseek-ai/dsh-client-ui-workspace')), 'utf8')
   assert.doesNotMatch(workspace, /data-dsh-workspace-drop-target/u)
   assert.match(workspacePatch, /data-dsh-workspace-drop-target/u)
 
-  const windows = readFileSync(join(harnessRoot, 'packages/sandbox/sandbox-windows-acl/src/spawn.ts'), 'utf8')
-  const windowsPatch = readFileSync(join(root, DESKTOP_OVERLAYS.get('@deepseek-ai/dsh-sandbox-windows-acl')), 'utf8')
+  const windows = readFileSync(join(harnessRoot, 'packages/subprocess/win32-process/src/process.ts'), 'utf8')
+  const windowsPatch = readFileSync(join(root, DESKTOP_OVERLAYS.get('@deepseek-ai/dsh-win32-process')), 'utf8')
   assert.equal(windows.match(/dwFlags: abi\.STARTF_USESTDHANDLES/gu)?.length, 2)
   assert.doesNotMatch(windows, /wShowWindow/u)
   assert.equal(windowsPatch.match(/^\+\s*wShowWindow: 0,/gmu)?.length, 2)
 
-  const source = readFileSync(join(harnessRoot, 'packages/fs/tool-fs/src/sandbox.ts'), 'utf8')
-  assertExactOccurrence(
-    source,
-    'validateEscalationArgs(args.sandbox_permissions, args.justification)',
-    'native filesystem escalation validation',
-  )
-  assert.doesNotMatch(source, /redundantEscalation/u)
-
+  // 0.1.5 absorbed the former redundant-escalation overlay: each escalation
+  // owner now runs the single native pairing validation, so no patch remains.
   for (const path of [
+    'packages/fs/tool-fs/src/sandbox.ts',
     'packages/shell/tool-bash/src/index.ts',
     'packages/shell/tool-pwsh/src/index.ts',
   ]) {
     const native = readFileSync(join(harnessRoot, path), 'utf8')
-    assert.match(native, /const redundantEscalation =/u)
+    assert.equal(native.match(/validateEscalationArgs\(args\.sandbox_permissions, args\.justification\)/gu)?.length, 1)
+    assert.doesNotMatch(native, /redundantEscalation/u)
   }
 })
 

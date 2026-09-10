@@ -29,8 +29,8 @@ const vocabulary = await import('data:text/javascript;base64,' + Buffer.from(str
 const conversation = adaptHarnessConversationSource(await readFile(join(harness, 'packages/client/ui-conversation/lib/client.js'), 'utf8'))
 const mentionsCode = conversation.slice(conversation.indexOf('function emateArtifactFileMentions('), conversation.indexOf('function emateCanvasNavigationRequest('))
 const fileLinkOwner = new Function(mentionsCode + '\nreturn emateArtifactFileMentions')()
-const { resolveWorkspacePath } = await import(pathToFileURL(join(harness, 'packages/client/runtime/src/client/workspaces/path.ts')).href)
-const { openNativePath } = await import(pathToFileURL(join(harness, 'packages/host/apiproxy/src/native-path-opener.ts')).href)
+const { resolveWorkspacePath } = await import(pathToFileURL(join(harness, 'upstream/deepseek-harness/packages/util/workspace-path/src/index.ts')).href)
+const { openNativePath } = await import(pathToFileURL(join(harness, 'upstream/deepseek-harness/packages/util/native-command/src/path-opener.ts')).href)
 
 test('all renderer seams fail closed on drift, duplication and already adapted output', () => {
   assert.throws(() => adaptHarnessArtifactLinksSource('future'), /expected one rc.7 seam/)

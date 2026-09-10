@@ -38,7 +38,7 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
   const nativeArtifactLinks = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-primitives/lib/index.js'), 'utf8')
   const nativeDeliverables = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-deliverables/lib/client.js'), 'utf8')
   const nativeConversation = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js'), 'utf8')
-  const nativeExport = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/host/apiproxy/lib/index.js'), 'utf8')
+  const nativeExport = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/session-query/session-log-export/lib/index.js'), 'utf8')
   const nativeBytes = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'), 'utf8')
   const nativeTitle = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/session/session-title/lib/index.js'), 'utf8')
   const entries = [
@@ -95,47 +95,48 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
   }
 })
 
+// 0.1.5 retires the slot-error adapter with the package it patched: the
+// harness no longer ships @deepseek-ai/dsh-client-runtime and SlotsService
+// supervision is native, so only the dynamic-bundle guarantee remains here.
 const slotNativeRoot = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
-const source = readFileSync(join(slotNativeRoot, 'upstream/deepseek-harness/packages/client/runtime/lib/client.js'), 'utf8')
 
-test('pinned SlotsService delegates supervision to the existing core without altering arguments or errors', () => {
-  const method = adapted.match(/reportEntryError\(key, entry, error, info\) \{\s*return this\._core\.reportEntryError\(key, entry, error, info\);\s*\}/u)?.[0]
-  assert.ok(method)
-  const service = new Function(`return ({ ${method} })`)()
-  const args = ['tool.call.toolview', {}, new Error('tool crashed'), { abdicate: true }]
-  const sentinel = {}
-  service._core = { reportEntryError: (...actual) => { assert.deepEqual(actual, args); return sentinel } }
-  assert.equal(service.reportEntryError(...args), sentinel)
-  const failure = new Error('native supervision failed')
-  service._core.reportEntryError = () => { throw failure }
-  assert.throws(() => service.reportEntryError(...args), error => error === failure)
-  assert.match(adapted, /reportEntryError: \(key, entry, error, info\) => \{\s*this\.reportEntryError\(key, entry, error, info\);/u)
-  assert.equal(readFileSync(join(slotNativeRoot, 'upstream/deepseek-harness/packages/client/runtime/lib/client.js'), 'utf8'), source)
-})
-
-test('slot adapter rejects missing, duplicated or previously adapted pinned seams', () => {
-})
-
-test('portable runtime and Desktop materialization verify the same adapter bytes', () => {
+test('portable runtime and Desktop materialization apply the same adapter set', () => {
   const local = new URL('..', import.meta.url).pathname
   const assembly = readFileSync(join(local, 'scripts/harness-runtime-adapters.mjs'), 'utf8')
   const desktop = readFileSync(join(local, 'scripts/harness-provenance.mjs'), 'utf8')
   const build = readFileSync(join(local, 'scripts/build-harness-runtime.mjs'), 'utf8')
+  const shared = [
+    'adaptHarnessFsBytesSource',
+    'adaptHarnessSessionExportSource',
+    'adaptHarnessArtifactLinksSource',
+    'adaptHarnessArtifactDeliverablesSource',
+    'adaptHarnessConversationSource',
+    'adaptHarnessSessionTitleSource',
+  ]
+  for (const name of shared) {
+    assert.match(desktop, new RegExp(`${name}\\(readFileSync`, 'u'), `${name} must adapt the Desktop materialization source`)
+    assert.match(assembly, new RegExp(`${name}\\(await readFile`, 'u'), `${name} must adapt the portable runtime source`)
+  }
+  // The escalation adapter owns the copied tool-fs lib only; the Desktop
+  // materialization resolves the same bytes through its own tree.
+  assert.match(assembly, /adaptHarnessFsSource\(await readFile\(fsTarget/u)
+  assert.match(build, /adapters_sha256: sha256\(adaptersPath\)/u)
+  assert.match(build, /conversation_client_sha256/u)
 })
 
 test('native browser fetches SlotsService as a client plugin bundle, not a Vite source singleton', () => {
   const native = join(slotNativeRoot, 'upstream/deepseek-harness')
-  const runtime = JSON.parse(readFileSync(join(native, 'packages/client/runtime/package.json'), 'utf8'))
+  const runtime = JSON.parse(readFileSync(join(native, 'packages/client/ui-renderer/package.json'), 'utf8'))
   assert.equal(runtime.exports['./client'].default, './lib/client.js')
   assert.equal(runtime.dsh.client.immediately, true)
   const seed = readFileSync(join(native, 'packages/client/web/src/seed.ts'), 'utf8')
   assert.doesNotMatch(seed, /@deepseek-ai\/dsh-client-runtime/u)
   const vite = readFileSync(join(native, 'apps/web/vite.config.ts'), 'utf8')
-  assert.doesNotMatch(vite, /packages\/client\/runtime\/src/u)
+  assert.doesNotMatch(vite, /packages\/client\/ui-renderer\/src/u)
   const loader = readFileSync(join(native, 'packages/client/modules/src/client/system.ts'), 'utf8')
-  assert.match(loader, /const task = this\.loadBundle\(url\)/u)
-  const route = readFileSync(join(native, 'packages/client/modules/src/index.ts'), 'utf8')
-  assert.match(route, /const bundleSuffix = '\/client\.js'/u)
+  assert.match(loader, /transport = this\.loadBundle\(url\)/u)
+  const manifest = readFileSync(join(native, 'packages/client/modules/src/client/manifest.ts'), 'utf8')
+  assert.match(manifest, /export function stripClientSuffix/u)
 })
 
 
