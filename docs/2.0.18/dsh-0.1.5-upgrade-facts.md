@@ -536,3 +536,36 @@ e-Mate 2.0.18 **已经移除了 probation 语义**，因此闸门、降级门禁
 - 重做集中在 jobs(3)、conversation/UI 契约(3)、tools/models/llm/settings(4)。
 - 淘汰最大一块是 **schedule 6 条**（probation 已移除）与 **imagegen review 3 条**（产品要求零确认）。
 - 与 `AGENTS.md` 中"fork 只多了 session-draft 隔离"的说法相比，真实 fork delta 为 21 提交；其中近半因产品演进已自然失效。
+
+---
+
+## 16. 重做（10 条）的执行记录与依赖顺序
+
+### 16.1 新 fork 分支
+- 分支：`dsh-v0.1.5-rc.1-emate`，工作树 `work/harness-dsh015-emate`，基于 `183f08e9c6dde7e36cd2318eaee70b0da08fb35e`。
+- 目前进度：**2/10**。
+  - `e9f59bfdf8` composer frame host —— 保留 0.1.5 新结构（无 `HeroGlow`、`HeroShell` 带 `renderSlot`），只加 e-Mate 需要的属性；测试改用 0.1.5 的 `sessionSnapshotOf`，两个测试都保留。
+  - `b4dcbfbe22` tools 注册来源 —— **改用 WeakMap 方案**：fork 原用 `RegisteredTool {definition, provenance}` 包装，而 0.1.5 的 `visible`/`known`/`layers` 存裸 `ToolDefinition`；引入包装会改动所有消费者的类型契约。改为按定义对象做 WeakMap 记录，**公开 API 完全一致**（`provenance(name, scope?) → {moduleSpecifier, pluginName}`），纯增量 46 行、0 删除。
+    e-Mate 的唯一消费点是 `packages/dsh/src/profile/audit.ts:110`，用于判定调用工具是否为第一方 —— **安全相关，不可省**。
+
+### 16.2 关键结构性变更：0.1.5 把 code* 改名为 ptc*
+移植 tools 时冲突暴露：`codeTransport` → `ptcTransport`、`RegisteredTool` → `ToolDefinition`、mode 名 `'code'` → `'ptc'`。
+**后续每一条移植都必须按 0.1.5 的词汇表重写，不能照抄 fork。**
+
+### 16.3 jobs 三条必须按依赖顺序重放
+三条不是并列的，`85b1b4a7f1` 建立在前两条之上（其冲突区已出现 `TaskPhase.state:'waiting'`、`admissionQueues`、`createTask`、`drainAdmissions`，而 0.1.5 侧只有 `const hooks = spec.run()`）。正确顺序：
+
+| 顺序 | 提交 | 文件数 | 作用 |
+|---|---|---|---|
+| 1 | `6a2e586aac` | 25 | 新增跨所有者同 kind 准入 |
+| 2 | `7e3d63e385` | 22 | 改为立即注册 Job、仅延迟生产者执行 |
+| 3 | `85b1b4a7f1` | 2 | 关闭队列所有者拆除竞态 |
+
+单独挑第 3 条必然冲突 —— 这是正确顺序的证据，不是跳过它的理由。
+
+### 16.4 待验证项（不可省）
+harness 新工作树起初无 `node_modules`，`lefthook` 的 `lint (staged)` 与 `third-party notices (staged)` 因缺少 `node_modules/.bin/tsx` 报 exit 127。已用 `--no-verify` 推进，**依赖就绪后必须补做 tsc / lint / 各条自带测试**（见 G0-e9）。已提交的两条均已在其提交信息里标注 "NOT YET VERIFIED"。
+
+### 16.5 发现的一处版本不一致（进 G2 前处理）
+harness 仓库自身钉 `pnpm@11.7.0`，而 e-Mate 根已按决定升到 `11.8.0`、上游 desktop 用 patch 过的 `11.8.0`。
+`harness-provenance.mjs` 用 e-Mate 根的 `packageManager` 版本号调用 pnpm，跨目录（desktop / harness）时可能对不上，需在首次构建前确认。
