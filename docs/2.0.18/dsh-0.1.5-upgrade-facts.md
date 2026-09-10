@@ -861,4 +861,53 @@ if (registration.provider.automatic === "all-prompts" || session.header.parentSe
 | **已完成** | `session-title` | 按 `titleInputOf` 重写，653 字节增量 |
 | 待办 | `artifact-links` / `artifact-deliverables` | 需逐条计数 |
 | 待办（需重写） | `conversation` | `turn-tail` 节点与图像工具名消失 |
-| 待办（需重定目标） | `slot-error`（`client-runtime`）/ `session-export`（`apiproxy`） | 包已不存在 |
+| 待办（需重定目标） | `slot-error`（`client-runtime`）/ `session-export`（`apiproxy`） | 包已不存在 |### 21.14 Round 7：artifact 两个适配器的插桩读数
+
+方法改进：不解析适配器源码，而是**劫持 `String.prototype.split` 插桩**，让适配器自己报出它在找的接缝，再逐个计数。
+这避免了上一轮"按模块抽取导致串台"的问题。
+
+#### `artifact-links`（目标 `ui-primitives` lib/index.js）
+第一个失配接缝：`function renderAnchor(url, children, key) {` → **0 命中**。
+
+实测 0.1.5 的对应实现（`lib/index.js:8395`）与 rc.7 源码（`render.tsx:452`）：
+
+```js
+// rc.7 (TS)
+function renderAnchor(url: string, children: ReactNode[], key: Key): ReactNode {
+  return renderSafeLink(normalizeUri(url), children, key)
+}
+// 0.1.5 (编译产物)
+function renderAnchor(url, children, key, glyph = true) {
+  return renderSafeLink(normalizeUri(url), children, key, glyph);
+}
+```
+
+**0.1.5 新增 `glyph` 形参并透传给 `renderSafeLink`** → 与 `fs-bytes` / `session-title` 同类：**精度问题**，不是重写。
+
+#### `artifact-deliverables`（目标 `ui-deliverables` lib/client.js）
+报错为 `deliverables/tail-selector: found 0`，但插桩显示该接缝在**原始源码里命中 1 次**：
+
+```
+结果: 失败 — deliverables/tail-selector: expected one rc.7 seam, found 0
+不同接缝数: 2
+   1x  "function selectProducedFiles(owner) {\n\t\t\tconst paths = ..."   ← 原始源码里存在
+   0x  "select: selectProducedFiles,"
+```
+
+**矛盾本身是线索**：接缝在原文存在，却在检查时报 0，说明它已被**更早的替换消费或改写**，
+即该适配器内部存在**替换顺序依赖**。这不是接缝正确性问题，而是执行顺序问题，需单独查。
+
+### 21.15 适配器进度（Round 7 末）
+
+| 适配器 | 分类 | 状态 |
+|---|---|---|
+| `fs-bytes` | 精度 | **已完成**（守卫 9/9） |
+| `fs-escalation` | 本就可用 | **已完成**（接缝命中 1） |
+| `session-title` | API 已改 | **已完成**（按 `titleInputOf` 重写） |
+| `artifact-links` | **精度**（`glyph` 形参） | 待修，成本低 |
+| `artifact-deliverables` | **执行顺序问题** | 待查（非接缝问题） |
+| `conversation` | 重写 | 待办 |
+| `slot-error` | 重定目标 | 待办 |
+| `session-export` | 重定目标 | 待办 |
+
+**3/8 完成，2 条已定成本（低成本），3 条待重写/重定目标。**
