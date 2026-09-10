@@ -21,7 +21,8 @@ it('replays the actual QR result through native projection and native generic to
   ]
   const start = { type: 'turn/start', seq: 2000, time: 1788882660000, data: { turn: 3 } }
   const assembler = new ConversationNodeAssembler({ entries: () => [toolDefinition, turnTailDefinition, imageCallsDefinition, toolImagesDefinition], fallbackEntry: () => unknownFallbackDefinition }, { entries: () => [chatViewDefinition] })
-  assembler.replaceWindow([start, ...events].map(event => ({ event, view: undefined })), false)
+  // 0.1.5 requires the coarse transport discriminator on every entry.
+  assembler.replaceWindow([start, ...events].map(event => ({ type: 'event', event })), false)
   assembler.flush()
   const chat = assembler.snapshot('chat') as any
   const nodes = [...chat.nodes.values()]

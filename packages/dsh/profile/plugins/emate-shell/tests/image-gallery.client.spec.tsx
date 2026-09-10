@@ -1517,7 +1517,7 @@ describe('dsh-imagegen native receipt integration', () => {
     const append = (type: string, data: unknown, surfaceOp?: 'append') => {
       const next = { type, data, seq: events.length + 1, time: 1_789_005_000_000 + events.length, ...surfaceOp === undefined ? {} : { surfaceOp } }
       events.push(next)
-      if (assembler.append({ event: next } as never) !== 'none') assembler.flush()
+      if (assembler.append({ type: 'event', event: next } as never) !== 'none') assembler.flush()
     }
     append('turn/start', { turn: 1 }); append('step/start', { turn: 1, step: 1 })
     append('tool/call', { turn: 1, step: 1, callId: rootCallId, name, arguments: '{}' })
@@ -1554,7 +1554,7 @@ describe('dsh-imagegen native receipt integration', () => {
     expect(screen.getAllByRole('button', { name: /，点击查看原图$/ })).toEqual(buttons)
     const nextTurn = (assembler.snapshot('chat') as any).timeline.turns.get(2)
     expect(selectArtifactTerminal({ turn: nextTurn, nodes, seq: events.length } as never)).toBeNull()
-    const cold = createAssembler(); cold.replaceWindow(events.map(event => ({ event, view: undefined })), false); cold.flush()
+    const cold = createAssembler(); cold.replaceWindow(events.map(event => ({ type: 'event', event })), false); cold.flush()
     expect(galleryImageItems([...(cold.snapshot('chat') as any).nodes.values()])).toEqual(galleryImageItems(nodes))
     expect(galleryImageItems(nodes)).toHaveLength(4)
     view.unmount()
