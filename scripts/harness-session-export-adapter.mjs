@@ -1,6 +1,6 @@
 import { ALLOWED_MEDIA_BY_EXTENSION, MAX_FILE_BYTES, normalizedSafeFileName } from '../packages/dsh-plugin-file-import/src/contract.ts'
 
-export const SESSION_EXPORT_PACKAGE = '@deepseek-ai/dsh-host-apiproxy'
+export const SESSION_EXPORT_PACKAGE = '@deepseek-ai/dsh-session-log-export'
 export const SESSION_EXPORT_ADAPTER_PATH = 'scripts/harness-session-export-adapter.mjs'
 
 const MEDIA_TYPE_EXTENSIONS = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
@@ -125,7 +125,7 @@ export function adaptHarnessSessionExportSource(source) {
   change('function sessionLogExportDeps(ctx) {', `const ALLOWED_MEDIA_BY_EXTENSION = ${JSON.stringify(ALLOWED_MEDIA_BY_EXTENSION)};\nconst MAX_FILE_BYTES = ${MAX_FILE_BYTES};\n${normalizedSafeFileName.toString()}\n${emateExportContent.toString()}\n${emateExportFileRefs.toString()}\n${emateExportFiles.toString()}\nfunction sessionLogExportDeps(ctx) {`, 'helpers')
   change('function mediaEntryPath(ref) {\n\treturn `media/${String(ref.attachmentId)}.${MEDIA_TYPE_EXTENSIONS[ref.mediaType]}`;\n}', emateExportMediaPath.toString().replace('function emateExportMediaPath', 'function mediaEntryPath'), 'media-name')
   change('\t\tattachments: ctx.get("attachments"),\n\t\tsessions: ctx.get("sessions")', '\t\tattachments: ctx.get("attachments"),\n\t\temateExportFs: ctx.get("fs"),\n\t\temateExportWorkspaces: ctx.get("workspaceRegistry"),\n\t\tsessions: ctx.get("sessions")', 'dependencies')
-  change('\t\t\t\tsessions: deps.sessions\n', '\t\t\t\tsessions: deps.sessions,\n\t\t\t\temateExportFs: deps.emateExportFs,\n\t\t\t\temateExportWorkspaces: deps.emateExportWorkspaces\n', 'ready-services')
+  change('\t\tsessions: deps.sessions\n', '\t\tsessions: deps.sessions,\n\t\temateExportFs: deps.emateExportFs,\n\t\temateExportWorkspaces: deps.emateExportWorkspaces\n', 'ready-services')
   change('\trememberMedia(root.content);\n\tyield {\n\t\tpath: root.filename,\n\t\tcontent: root.content\n\t};', '\tconst rootContent = emateExportContent(root.content);\n\trememberMedia(rootContent);\n\tyield {\n\t\tpath: root.filename,\n\t\tcontent: rootContent\n\t};\n\tyield* emateExportFiles(deps, rootContent, sessionId, "", signal);', 'root')
   change('\t\t\t\trememberMedia(raw.content);\n\t\t\t\tyield {\n\t\t\t\t\tpath: `subagents/${safeSessionIdSegment(id)}/${raw.filename}`,\n\t\t\t\t\tcontent: raw.content\n\t\t\t\t};', '\t\t\t\tconst childContent = emateExportContent(raw.content);\n\t\t\t\trememberMedia(childContent);\n\t\t\t\tyield {\n\t\t\t\t\tpath: `subagents/${safeSessionIdSegment(id)}/${raw.filename}`,\n\t\t\t\t\tcontent: childContent\n\t\t\t\t};\n\t\t\t\tyield* emateExportFiles(deps, childContent, id, `subagents/${safeSessionIdSegment(id)}/`, signal);', 'descendants')
   return source

@@ -1156,4 +1156,47 @@ Round 10 已量化适配器总面约 74 处。**剩余工作仍以"多轮"计**�
 | `session-export` | 宿主消失（6 处） | 待办 |
 
 **4 条已收口，4 条待办（含 1 条 47 处的结构性重写）。**
-注意：本轮移除**不改变"约 74 处接缝"的总量口径** —— 移除的是 2 处，剩余待重写仍约 68 处。
+注意：本轮移除**不改变"约 74 处接缝"的总量口径** —— 移除的是 2 处，剩余待重写仍约 68 处。### 21.27 Round 14：`session-export` 重定目标成功 4/6，剩 2 处需按新形状重推
+
+#### 新宿主找到了
+`dsh-host-apiproxy` 在 0.1.5 已被拆解，而会话日志导出变成了**独立包 `@deepseek-ai/dsh-session-log-export`**。
+把这 6 处接缝喂给它实测：**3 处直接命中**。
+
+#### 已完成
+| # | owner | 处理 |
+|---|---|---|
+| — | 目标包 | `@deepseek-ai/dsh-host-apiproxy` → **`@deepseek-ai/dsh-session-log-export`** |
+| 1 | helpers | 接缝 `function sessionLogExportDeps(ctx) {` **命中**，无需改 |
+| 2 | media-name | 接缝 `function mediaEntryPath(ref) {` **命中**，无需改 |
+| 3 | dependencies | 接缝 `attachments: ctx.get("attachments"),` **命中**，无需改 |
+| 4 | ready-services | **已修**：0.1.5 用 2 个 tab 且**无尾逗号**（适配器原为 4 tab + 逗号） |
+
+第 4 处的实际差异：
+```js
+// 适配器原接缝
+'\t\t\t\tsessions: deps.sessions\n'
+// 0.1.5 实际（lib/index.js:512-516）
+"		sessions: deps.sessions"    // 2 个 tab，无逗号，后接 "};"
+```
+
+#### 剩余 2 处需按新形状重推（0.1.5 重构了导出层）
+
+| # | owner | 0.1.5 的变化 |
+|---|---|---|
+| 5 | `root` | 根内容被**提到函数参数**：`sessionLogZipEntries(deps, rootContent, sessionId, includeDescendants, signal)`；`rememberMedia` **改名为 `rememberAttachments`** |
+| 6 | `descendants` | 同源变化 |
+
+0.1.5 的形状：
+```js
+async function* sessionLogZipEntries(deps, rootContent, sessionId, includeDescendants, signal) {
+  ...
+  rememberAttachments(rootContent);
+  ... content: rootContent ...
+```
+
+**有趣的巧合**：0.1.5 把根内容预序列化为参数，而这正是 e-Mate 适配器原本想做的事（它计算 `rootContent = emateExportContent(root.content)` 再 yield）。
+所以第 5/6 处的移植方向是清晰的 —— 把 e-Mate 的内容变换接到 `rootContent` 参数上，并把文件导出 yield 加在其后。
+
+#### 进度
+`session-export`：**4/6 处已解决**（含重定目标）。剩 2 处形状已查明。
+适配器总账：**4 条收口 + 1 条进行中（4/6）+ 3 条待办**。
