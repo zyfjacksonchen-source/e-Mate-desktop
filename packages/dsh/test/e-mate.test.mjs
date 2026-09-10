@@ -43,7 +43,6 @@ import {
   createOsCredentialBackend,
   runCommand,
 } from '../profile/plugins/credentials-os.js'
-import { apply as applyImageGeneration, resolveBatchSources } from '../profile/plugins/image-generation.js'
 import {
   apply as applyModelPolicy,
   createQuotaService,
@@ -246,6 +245,8 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-schedules',
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-tidychat',
+      '@e-mate/dsh-plugin-imagegen',
+      '@e-mate/dsh-plugin-univer-office',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
@@ -321,7 +322,7 @@ test('managed profile installation is idempotent', () => {
       name: '@deepseek-ai/dsh-client-ui-trajectory',
       disabled: true,
     })
-    assert.equal(patchById.get('agent-presets').config.default, 'standard')
+    assert.equal(patchById.get('agent-presets').config.default, 'code')
     assert.equal(patchById.get('sandbox-policy').config.mode, 'danger-full-access')
     assert.equal(patchById.get('approval').config.policy, 'never')
     assert.equal(patchById.get('permission').config.defaultPreset, 'danger-full-access')
@@ -386,12 +387,9 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, tools, emateModelPolicy, emateIdentity\]/)
-    assert.deepEqual(patchById.get('emate-image-generation').inject, [
-      'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
-      'sessionProjectionCache', 'sessionPersistence', 'sessions', 'agents', 'subagents',
-      'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
-    ])
-    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
+    assert.equal(patchById.has('emate-image-generation'), false)
+    assert.equal(patchById.get('emate-imagegen').config.rootUrl, 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1')
+    assert.deepEqual(patchById.get('emate-image-history').inject, ['sessionProjections', 'sessionProjectionCache', 'sessionPersistence'])
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
     assert.match(patch, /id: emate-schedule-import[\s\S]*\.\/plugins\/schedule-import\.js[\s\S]*inject: \[tools\]/)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'agent-operations.js')).byteLength > 0)
@@ -421,17 +419,20 @@ test('managed profile installation is idempotent', () => {
       assert.ok(pluginPatch.length >= 2)
       const patchBody = pluginPatch.split('\n').map(line => line.trim()).filter(line => line !== '' && !line.startsWith('#')).join('\n')
       if (patchBody !== '[]') {
-        assert.ok(pluginPatch.includes(`name: './node_modules/${name}/${pluginManifest.main}'`))
-        assert.doesNotMatch(pluginPatch, new RegExp(`name: '${name}'`, 'u'))
+        if (pluginManifest.dsh?.client?.platform === 'web') {
+          assert.ok(pluginPatch.includes(`name: '${name}'`))
+        } else {
+          assert.ok(pluginPatch.includes(`name: './node_modules/${name}/${pluginManifest.main}'`))
+          assert.doesNotMatch(pluginPatch, new RegExp(`name: '${name}'`, 'u'))
+        }
       }
     }
-    const imageGeneration = readFileSync(join(first.profile, 'plugins', 'image-generation.js'), 'utf8')
-    assert.match(imageGeneration, /name: "imagegen"/)
-    assert.match(imageGeneration, /ctx\.jobs\.start/)
-    assert.match(imageGeneration, /attachments\.saveImage/)
+    assert.equal(existsSync(join(first.profile, 'plugins', 'image-generation.js')), false)
+    const imageGeneration = readFileSync(join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-imagegen', 'lib', 'index.js'), 'utf8')
+    assert.match(imageGeneration, /generate_image/)
+    assert.match(imageGeneration, /edit_image/)
     assert.match(imageGeneration, /emateIdentity/)
     assert.match(imageGeneration, /emateModelPolicy/)
-    assert.doesNotMatch(imageGeneration, /\bfetch\(/)
     const legacyMigration = readFileSync(join(first.profile, 'plugins', 'legacy-migration.js'), 'utf8')
     assert.match(legacyMigration, /sessionPersistence/)
     assert.match(legacyMigration, /legacy-sessions-v1\.json/)
@@ -963,7 +964,6 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
   try {
     const paths = installProfile(dshHome)
     const visible = new Set([
-      '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-cdp',
       '@e-mate/dsh-plugin-computer-use',
@@ -978,6 +978,7 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-mcp-manage',
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
+      '@e-mate/dsh-plugin-univer-office',
       '@e-mate/dsh-plugin-schedules',
     ]
     for (const name of packages) {
@@ -1045,6 +1046,41 @@ test('capability registry projects only registered plugin metadata and actions',
 })
 
 
+test('capability action reports failures without leaking errors or swallowing cancellation', async () => {
+  let handler
+  let registry
+  applyCapabilities({
+    connection: { rpc: { handle: (_channel, callback) => { handler = callback; return () => {} } } },
+    provide: (_name, value) => { registry = value },
+    effect: effect => effect(),
+  })
+  let failStatus = false
+  registry.register({
+    id: 'cdp-browser', title: 'Chrome 浏览器', summary: 'Browser', icon_key: 'browser', order: 1,
+    actions: [{ id: 'open-browser', label: '打开浏览器', kind: 'primary' }],
+    status: async () => {
+      if (failStatus) throw new Error('private status detail')
+      return { state: 'ready', action_ids: ['open-browser'] }
+    },
+    invoke: async () => { throw new Error('private launch detail') },
+  })
+  const payload = { capability_id: 'cdp-browser', action_id: 'open-browser', data: {} }
+  const signal = new AbortController().signal
+  for (const failedStatus of [false, true]) {
+    failStatus = failedStatus
+    const result = await handler('action', payload, signal)
+    assert.equal(result.ok, false)
+    assert.equal(result.error.code, 'internal')
+    assert.match(result.error.message, /Chrome 浏览器.*刷新能力状态/)
+    assert.doesNotMatch(JSON.stringify(result), /private/)
+    assert.equal(result.value, undefined)
+  }
+  const cancelled = new AbortController()
+  const reason = new Error('cancelled')
+  cancelled.abort(reason)
+  await assert.rejects(handler('action', payload, cancelled.signal), error => error === reason)
+})
+
 test('Agent QR generation uses the target Tool, Job, Attachment, and image renderer path', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-qr-generation-'))
   const context = new Context()
@@ -1102,1919 +1138,6 @@ test('Agent QR generation uses the target Tool, Job, Attachment, and image rende
   }
 })
 
-test('image capability stays visible and inert until its managed endpoint is configured', async () => {
-  for (const [config, state] of [
-    [{}, 'setup-required'],
-    [{ rootUrl: 'http://model.example/e-mate/model-api/v1' }, 'blocked'],
-  ]) {
-    const registered = []
-    await applyImageGeneration({
-      get: name => name === 'emateCapabilities'
-        ? { register: definition => { registered.push(definition); return () => {} } }
-        : undefined,
-      effect: effect => effect(),
-    }, config)
-    assert.equal(registered.length, 1)
-    assert.equal(registered[0].id, 'image-generation')
-    assert.equal(registered[0].icon_key, 'image')
-    assert.deepEqual(registered[0].actions, [])
-    assert.deepEqual(await registered[0].status(), {
-      state,
-      detail: state === 'setup-required'
-        ? '企业管理端尚未下发生图服务地址。'
-        : 'e-Mate managed image gateway must be a fixed HTTPS Model Gateway /v1 endpoint',
-      action_ids: [],
-    })
-  }
-})
-
-test('image batch source preparation uses parent catalog and verifies each CAS ref once in order', async () => {
-  const refs = [1, 2].map(value => ({
-    attachmentId: 'sha256:' + String(value).repeat(64), mediaType: 'image/png', bytes: 8,
-    width: 1, height: 1, name: 'source-' + value + '.png',
-  }))
-  const parent = { id: 'source-parent', session: {
-    header: { id: 'source-parent' }, events: [],
-    deriveMessages: () => [{ source: { kind: 'user' }, content: refs.map(attachment => ({ type: 'image', attachment })) }],
-  } }
-  const reads = []
-  const ctx = { attachments: { readImage: async ref => { reads.push(ref.attachmentId); return { ref: structuredClone(ref), data: new Uint8Array(ref.bytes) } } } }
-  const resolved = await resolveBatchSources(ctx, parent, refs.map(ref => ref.attachmentId), new AbortController().signal)
-  assert.deepEqual(resolved, refs)
-  assert.deepEqual(reads, refs.map(ref => ref.attachmentId))
-  assert(Object.isFrozen(resolved) && resolved.every(Object.isFrozen))
-
-  await assert.rejects(resolveBatchSources(ctx, parent, ['sha256:' + 'f'.repeat(64)], new AbortController().signal), /not a successful current-session image output/)
-  assert.equal(reads.length, 2)
-  await assert.rejects(resolveBatchSources({ attachments: { readImage: async ref => ({ ref: { ...ref, width: 2 }, data: new Uint8Array(ref.bytes) }) } },
-    parent, [refs[0].attachmentId], new AbortController().signal), /no longer matches/)
-  const unsupported = { ...refs[0], mediaType: 'image/gif' }
-  const oversized = { ...refs[0], attachmentId: 'sha256:' + '3'.repeat(64), bytes: 5 * 1024 * 1024 + 1 }
-  for (const source of [unsupported, oversized]) {
-    const sourceParent = { ...parent, session: { ...parent.session,
-      deriveMessages: () => [{ source: { kind: 'user' }, content: [{ type: 'image', attachment: source }] }],
-    } }
-    let read = false
-    await assert.rejects(resolveBatchSources({ attachments: { readImage: async () => { read = true } } },
-      sourceParent, [source.attachmentId], new AbortController().signal), /unsupported or oversized/)
-    assert.equal(read, false)
-  }
-})
-
-test('image generation reuses the Model Gateway with Harness Jobs and attachments', async () => {
-  const imageGenerationSource = readFileSync(new URL('../src/profile/image-generation.ts', import.meta.url), 'utf8')
-  assert.equal(imageGenerationSource.match(/ctx\.jobs\.start\(/gu)?.length, 1)
-  assert.doesNotMatch(imageGenerationSource, /startWhenAvailable|subagents?\.start|ctx\.on\(['"]subagent\//u)
-  assert.doesNotMatch(imageGenerationSource, /IMAGE_LEAF_LABEL|childImageRuns|authorizedLeaves/u)
-  assert.doesNotMatch(imageGenerationSource, /ctx.get(['"]userQuestions['"])|reviewImageCandidate|requireImageFlush|combinedReviewPersistence/u)
-  const verifiedProducer = imageGenerationSource.slice(
-    imageGenerationSource.indexOf('function verifiedReceipt'),
-    imageGenerationSource.indexOf('function validVerification'),
-  )
-  assert.match(verifiedProducer, /revision: 2/u)
-  assert(verifiedProducer.includes("semantic: sameSource ? 'failed' : 'not-applicable'"))
-  assert.doesNotMatch(verifiedProducer, /human_review|needs-review|reviewDecision|revision: 3/u)
-  assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image-2.5-flare'/gu)?.length, 1)
-  assert.equal(imageGenerationSource.match(/await request\(endpoint\(root, path\)/gu)?.length, 1)
-  assert.doesNotMatch(imageGenerationSource, /['"]gpt-image-2['"]/u)
-  const projectionSource = imageGenerationSource.slice(
-    imageGenerationSource.indexOf('export function imageReceiptsProjectionDefinition'),
-    imageGenerationSource.indexOf('function sessionIdentity'),
-  )
-  assert.doesNotMatch(projectionSource, /ctx\.jobs|identity\.request|endpoint\(|IMAGE_MODEL|retry|fallback/u)
-  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-image-generation-'))
-  const context = new Context()
-  const cleanups = []
-  let attachmentFiber
-  let jobFiber
-  try {
-    const dshHome = join(temporary, 'dsh-home')
-    const harness = resolveHarness()
-    const toolsModule = resolveHarnessModule(harness, 'packages/core/tools', '@deepseek-ai/dsh-tools')
-    const llmModule = resolveHarnessModule(harness, 'packages/llm/llm', '@deepseek-ai/dsh-llm')
-    const storageDomainModule = resolveHarnessModule(
-      harness,
-      'packages/storage/storage-domain',
-      '@deepseek-ai/dsh-storage-domain',
-    )
-    const zodModule = realpathSync(new URL(
-      '../../../upstream/deepseek-harness/packages/storage/storage-domain/node_modules/zod/index.js',
-      import.meta.url,
-    ))
-    const bindingPath = join(temporary, 'runtime-binding.json')
-    writeFileSync(bindingPath, JSON.stringify({
-      schema_version: 1,
-      product: 'e-Mate',
-      version: VERSION,
-      dsh_home: dshHome,
-      harness_commit: HARNESS_COMMIT,
-      tools_module: toolsModule,
-      tools_module_sha256: createHash('sha256').update(readFileSync(toolsModule)).digest('hex'),
-      llm_module: llmModule,
-      llm_module_sha256: createHash('sha256').update(readFileSync(llmModule)).digest('hex'),
-      storage_domain_module: storageDomainModule,
-      storage_domain_module_sha256: fileDigest(storageDomainModule),
-      zod_module: zodModule,
-      zod_module_sha256: fileDigest(zodModule),
-    }))
-    await context.plugin(AgentRegistry)
-    jobFiber = await context.plugin(LocalJobRegistry)
-    attachmentFiber = await context.plugin(LocalAttachmentStore, { dshHome })
-    const inputBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
-    const alternateBytes = readFileSync(new URL('../../../upstream/deepseek-harness/examples/acp-agent/tests/snapshots/read-image/workspace/red.png', import.meta.url))
-    const rejectedBytes = readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-custom-form.png', import.meta.url))
-    const unreviewedBytes = readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-custom-form.zh.png', import.meta.url))
-    const requests = []
-    const requestScopes = []
-    const requestBodies = []
-    const requestRawBodies = []
-    const requestContentTypes = []
-    let remoteCounter = 0
-    let nextFailureStatus
-    const queuedGatewayOutcomes = []
-    const sourceReadCounts = new Map()
-    let nextCorruptData = false
-    let nextPrivateRequestError = false
-    let nextNoop = false
-    let nextResponseBytes
-    let requestGate
-    const perCallGates = new Map()
-    let rejectOutputSave = false
-    let rejectOutputRead = false
-    let outputAttachmentId
-    let activeSubmissions = 0
-    let maximumSubmissions = 0
-    const jobTimeline = []
-    // Match Fetch's decoded body with the proxy's original compressed headers.
-    const json = (value, status = 200) => {
-      const body = JSON.stringify(value)
-      return new Response(body, { status, headers: {
-        'content-type': 'application/json', 'content-encoding': 'gzip', 'content-length': String(gzipSync(body).length),
-      } })
-    }
-    const admission = (code, retryAfterMs = 1_000, retryAfter = String(Math.ceil(retryAfterMs / 1_000))) => new Response(
-      JSON.stringify({ error: { code, message: 'admission rejected', retryAfterMs } }),
-      { status: 429, headers: { 'content-type': 'application/json', 'retry-after': retryAfter } },
-    )
-    const identity = {
-      async request(url, init = {}) {
-        assert.equal(url.origin, 'https://model.example')
-        assert.equal(url.pathname.startsWith('/e-mate/model-api/v1/images/'), true)
-        const outgoing = new Request(url, init)
-        requestBodies.push(init.body)
-        requestRawBodies.push(Buffer.from(await outgoing.clone().arrayBuffer()))
-        requestContentTypes.push(outgoing.headers.get('content-type'))
-        jobTimeline.push(`provider:${outgoing.headers.get('x-client-request-id')}`)
-        requestScopes.push({
-          task: outgoing.headers.get('x-e-mate-task-id'),
-          trace: outgoing.headers.get('x-e-mate-trace-id'),
-          session: outgoing.headers.get('session_id'),
-          client: outgoing.headers.get('x-client-request-id'),
-          batch: outgoing.headers.get('x-e-mate-batch-id'),
-          ordinal: outgoing.headers.get('x-e-mate-batch-ordinal'),
-        })
-        activeSubmissions += 1
-        maximumSubmissions = Math.max(maximumSubmissions, activeSubmissions)
-        try {
-          await new Promise(resolveImmediate => setImmediate(resolveImmediate))
-          const selectedGate = perCallGates.get(outgoing.headers.get('x-client-request-id')) ?? requestGate
-          if (selectedGate !== undefined) {
-            const aborted = new Promise((_, reject) => {
-              if (init.signal?.aborted) reject(init.signal.reason)
-              else init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true })
-            })
-            await Promise.race([
-              selectedGate,
-              aborted,
-            ])
-          }
-        } finally {
-          activeSubmissions -= 1
-        }
-        let sourceBytes
-        if (url.pathname.endsWith('/generations')) {
-          requests.push({ path: url.pathname, body: await outgoing.json() })
-        } else if (url.pathname.endsWith('/edits')) {
-          const form = await outgoing.formData()
-          const images = [...form.entries()].filter(([key]) => key === 'image' || key === 'image[]')
-          const imageBuffers = await Promise.all(images.map(([, value]) => value.arrayBuffer().then(Buffer.from)))
-          sourceBytes = imageBuffers[0]
-          requests.push({
-            path: url.pathname,
-            body: {
-              model: form.get('model'),
-              prompt: form.get('prompt'),
-              imageFields: images.map(([key]) => key),
-              imageBytes: imageBuffers.map(buffer => buffer.byteLength),
-            },
-          })
-        } else {
-          throw new Error(`unexpected managed image request ${init.method ?? 'GET'} ${url.pathname}`)
-        }
-        if (queuedGatewayOutcomes.length > 0) {
-          const outcome = queuedGatewayOutcomes.shift()
-          if (outcome instanceof Error) throw outcome
-          return outcome
-        }
-        if (nextFailureStatus !== undefined) {
-          const status = nextFailureStatus
-          nextFailureStatus = undefined
-          return json({ error: 'upstream unavailable' }, status)
-        }
-        if (nextPrivateRequestError) {
-          nextPrivateRequestError = false
-          throw new Error('private /Users/example/image-key prompt must not enter Job detail')
-        }
-        const responseBytes = nextResponseBytes ?? (nextNoop && sourceBytes !== undefined
-          ? sourceBytes
-          : sourceBytes?.equals(inputBytes) ? alternateBytes : inputBytes)
-        nextResponseBytes = undefined
-        nextNoop = false
-        const b64Json = nextCorruptData ? 'invalid base64 / private' : responseBytes.toString('base64')
-        nextCorruptData = false
-        return json({
-          id: `image-response-${++remoteCounter}`,
-          data: [{ b64_json: b64Json }],
-          usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-        })
-      },
-    }
-    const imageAttachments = {
-      imageLimits: context.attachments.imageLimits,
-      async readImage(ref, signal) {
-        sourceReadCounts.set(ref.attachmentId, (sourceReadCounts.get(ref.attachmentId) ?? 0) + 1)
-        if (rejectOutputRead && ref.attachmentId === outputAttachmentId) {
-          rejectOutputRead = false
-          outputAttachmentId = undefined
-          throw new Error('private /Users/example/parent-cas must not enter the receipt')
-        }
-        return await context.attachments.readImage(ref, signal)
-      },
-      async saveImage(input) {
-        if (rejectOutputSave) {
-          rejectOutputSave = false
-          throw new Error('simulated local attachment commit failure')
-        }
-        const saved = await context.attachments.saveImage(input)
-        if (rejectOutputRead) outputAttachmentId = saved.attachmentId
-        return saved
-      },
-    }
-    const tools = new Map()
-    const imageProjectionDefinitions = []
-    const batchChildren = new Map()
-    let parentProjectionSnapshots = 0
-    const coldProjectionSnapshots = []
-    const jobs = []
-    const waitedJobs = []
-    context.jobs.onJobDone(snapshot => { jobTimeline.push(`settled:${snapshot.id}`) })
-    const controllers = []
-    const capabilities = []
-    const policyModels = []
-    const requestedServices = []
-    let sandboxMode = 'read-only'
-    let preStep
-    let modelPolicyGate
-    let modelPolicyGateEntered
-    let rejectModelPolicyFrom
-    const modelPolicy = { assertModel: async model => {
-      policyModels.push(model)
-      modelPolicyGateEntered?.()
-      await modelPolicyGate
-      if (rejectModelPolicyFrom !== undefined && policyModels.length >= rejectModelPolicyFrom) {
-        throw new Error('simulated image model policy pre-Job failure')
-      }
-    } }
-    let throwNextImageJobStarter = false
-    let imageReviewAsk
-    const recoveryRootSession = { header: { id: 'image-recovery-root' }, events: [],
-      append(type, data, options) { this.events.push({ seq: this.events.length, type, data, options }) } }
-    let sessionCreated
-    let sessionCreatedRegistrations = 0
-    let recoveryFlushes = 0
-    const recoveryBaseline = { requests: requests.length, jobs: jobs.length, policies: policyModels.length }
-    const projectionSnapshot = session => {
-      const ordered = [...session.events].sort((left, right) => left.seq - right.seq)
-      const values = {}
-      for (const definition of imageProjectionDefinitions) {
-        let state = definition.init()
-        for (const event of ordered) state = definition.apply(state, event)
-        const view = definition.view(state)
-        values[definition.key] = definition.schema.parse(view)
-      }
-      return { asOfSeq: ordered.at(-1)?.seq ?? -1, values }
-    }
-    const pluginCtx = {
-      tools: {
-        register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } },
-        schemas: () => [...tools.values()],
-      },
-      jobs: {
-        attachController(kind) {
-          controllers.push(kind)
-          return context.jobs.attachController(kind)
-        },
-        start(spec) {
-          assert.equal(spec.kind, 'emate-image')
-          const registry = context.jobs
-          const startSpec = throwNextImageJobStarter
-            ? { ...spec, run() { throw new Error('simulated image Job starter failure') } }
-            : spec
-          throwNextImageJobStarter = false
-          const id = registry.start(startSpec)
-          const done = registry.wait(id, 120_000, startSpec.owner).then((snapshot) => {
-            let output = ''
-            try {
-              output = registry.read(id, startSpec.owner).text
-            } catch (error) {
-              if (context.jobs !== undefined) throw error
-            }
-            return {
-              status: snapshot.status,
-              ...(snapshot.detail === undefined ? {} : { detail: snapshot.detail }),
-              ...(output === '' ? {} : { output }),
-            }
-          })
-          jobs.push({ id, spec: startSpec, done })
-          return id
-        },
-        startWhenAvailable() {
-          assert.fail('imagegen must not enter the process-wide Job FIFO')
-        },
-        async wait(id, _timeoutMs, owner, signal) {
-          waitedJobs.push(id)
-          return await context.jobs.wait(id, _timeoutMs, owner, signal)
-        },
-        get(id, owner) {
-          return context.jobs.get(id, owner)
-        },
-        kill: (id, owner, reason) => context.jobs.kill(id, owner, reason),
-      },
-      attachments: imageAttachments,
-      sessionProjections: {
-        register(definition) {
-          imageProjectionDefinitions.push(definition)
-          return () => {}
-        },
-        snapshot(session) {
-          parentProjectionSnapshots += 1
-          return projectionSnapshot(session)
-        },
-      },
-      sessionProjectionCache: {
-        cachedSnapshot: () => undefined,
-        async coldSnapshot(id) {
-          coldProjectionSnapshots.push(id)
-          const child = batchChildren.get(id)
-          if (child === undefined) throw new Error(`session \"${id}\" not found`)
-          return projectionSnapshot(child.session)
-        },
-      },
-      sessionPersistence: { list: async () => [] },
-      sessions: {
-        list: () => [recoveryRootSession],
-        async flush() { recoveryFlushes += 1; return true },
-      },
-      sandboxPolicy: { resolve: () => ({ mode: sandboxMode, workspaceRoot: temporary }) },
-      get(name) {
-        requestedServices.push(name)
-        if (name === 'emateIdentity') return identity
-        if (name === 'emateModelPolicy') return modelPolicy
-        if (name === 'emateCapabilities') {
-          return { register: definition => { capabilities.push(definition); return () => {} } }
-        }
-        if (name === 'userQuestions' && imageReviewAsk !== undefined) return { ask: imageReviewAsk }
-        return undefined
-      },
-      effect(effect) {
-        const cleanup = effect()
-        if (typeof cleanup === 'function') cleanups.push(cleanup)
-        return cleanup
-      },
-      on(name, listener) {
-        if (name === 'agent/pre-step') {
-          assert.equal(preStep, undefined)
-          preStep = listener
-        } else if (name === 'session/created') {
-          assert.equal(sessionCreated, undefined)
-          sessionCreated = listener
-          sessionCreatedRegistrations += 1
-        } else {
-          assert.fail(`unexpected image-generation listener ${name}`)
-        }
-        return () => {}
-      },
-    }
-    await applyImageGeneration(pluginCtx, {
-      bindingPath,
-      rootUrl: 'https://model.example/e-mate/model-api/v1',
-    })
-    assert.equal(sessionCreatedRegistrations, 1)
-    assert.equal(typeof sessionCreated, 'function')
-    assert.equal(recoveryRootSession.events.length, 0)
-    assert.equal(recoveryFlushes, 0)
-    assert.equal(parentProjectionSnapshots, 0)
-    assert.deepEqual(coldProjectionSnapshots, [])
-    assert.deepEqual({ requests: requests.length, jobs: jobs.length, policies: policyModels.length }, recoveryBaseline)
-    const restoredNoBatch = { header: { id: 'restored-no-batch' }, events: [{ seq: 0, type: 'emate/image-output', data: { schema_version: 2 } }],
-      append(type, data, options) { this.events.push({ seq: this.events.length, type, data, options }) } }
-    sessionCreated(restoredNoBatch)
-    await new Promise(resolveImmediate => setImmediate(resolveImmediate))
-    assert.equal(restoredNoBatch.events.length, 1)
-    assert.equal(recoveryFlushes, 0)
-    assert.deepEqual({ requests: requests.length, jobs: jobs.length, policies: policyModels.length }, recoveryBaseline)
-    assert.deepEqual([...tools.keys()], ['imagegen', 'image_batch', 'image_pack'])
-    assert.equal(imageProjectionDefinitions.length, 2)
-    assert.equal(imageProjectionDefinitions[1].key, 'eMateImageBatches')
-    const imageProjection = imageProjectionDefinitions[0]
-    assert.equal(imageProjection.key, 'eMateImageReceipts')
-    assert.equal(imageProjection.stateVersion, 2)
-    const projectionReceipt = (callId, status = 'completed', revision = 2) => ({
-      schema_version: 2,
-      revision,
-      call_id: callId,
-      operation: 'generate',
-      status,
-      billing_status: status === 'running' ? 'not-submitted' : 'recorded',
-      parent_session_id: 'projection-child',
-      sources: [],
-      content: ['completed', 'needs-review'].includes(status) ? [{ type: 'image', attachment: {
-        attachmentId: `sha256:${'1'.repeat(64)}`,
-        mediaType: 'image/png', bytes: 42, width: 2, height: 3, name: 'projected.png',
-      } }] : [],
-      verifier: { structural: 'attachment-cas-v1', semantic: 'not-required' },
-      verification: {
-        structural: status === 'completed' ? 'passed' : 'not-run',
-        source_output: status === 'completed' ? 'not-applicable' : 'unknown',
-        semantic: status === 'completed' ? 'not-applicable' : 'failed',
-      },
-      ...(status === 'failed' ? { failure_code: 'provider-result-uncommitted' } : {}),
-    })
-    const runningProjectionEvent = {
-      type: 'emate/image-output', seq: 1, time: 100, data: projectionReceipt('projected-a', 'running', 1),
-    }
-    const completedProjectionEvent = {
-      type: 'emate/image-output', seq: 2, time: 200, data: projectionReceipt('projected-a'),
-    }
-    const reviewProjectionEvent = {
-      type: 'emate/image-output', seq: 3, time: 300,
-      data: { ...projectionReceipt('projected-a', 'needs-review', 3), operation: 'edit' },
-    }
-    const failedProjectionEvent = {
-      type: 'emate/image-output', seq: 4, time: 250, data: projectionReceipt('projected-b', 'failed'),
-    }
-    const emptyProjection = imageProjection.init()
-    const runningProjection = imageProjection.apply(emptyProjection, runningProjectionEvent)
-    assert.equal(runningProjection[0].receipt.status, 'running')
-    const completedProjection = imageProjection.apply(runningProjection, completedProjectionEvent)
-    assert.strictEqual(imageProjection.apply(completedProjection, runningProjectionEvent), completedProjection)
-    assert.strictEqual(imageProjection.apply(completedProjection, completedProjectionEvent), completedProjection)
-    const reviewedProjection = imageProjection.apply(completedProjection, reviewProjectionEvent)
-    const finalProjection = imageProjection.apply(reviewedProjection, failedProjectionEvent)
-    assert.equal(finalProjection[0].createdAt, 100)
-    assert.deepEqual(imageProjection.view(finalProjection).map(row => row.receipt.call_id), [
-      'projected-a', 'projected-b',
-    ])
-    assert.doesNotThrow(() => imageProjection.schema.parse(imageProjection.view(finalProjection)))
-    const restoredProjection = [
-      runningProjectionEvent, completedProjectionEvent, reviewProjectionEvent, failedProjectionEvent,
-    ].reduce((state, entry) => imageProjection.apply(state, entry), imageProjection.init())
-    assert.deepEqual(imageProjection.view(restoredProjection), imageProjection.view(finalProjection))
-    assert.equal(requests.length, 0)
-    assert.deepEqual(controllers, ['emate-image'])
-    assert.equal(typeof preStep, 'function')
-    assert.equal(requestedServices.includes('subagents'), false)
-    assert.equal(requestedServices.includes('agents'), false)
-    assert.equal(capabilities.length, 1)
-    assert.deepEqual(await capabilities[0].status(), {
-      state: 'ready',
-      detail: 'gpt-image-2.5-flare',
-      action_ids: [],
-    })
-    const registeredImagegen = tools.get('imagegen')
-    tools.delete('imagegen')
-    assert.deepEqual(await capabilities[0].status(), {
-      state: 'blocked',
-      detail: '图像 Tool 注册尚未就绪。',
-      action_ids: [],
-    })
-    tools.set('imagegen', registeredImagegen)
-    const toolHeaderContract = JSON.stringify([...tools.values()].map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    })))
-    const sessionMessages = []
-    const sessionEvents = []
-    const agent = {
-      id: 'image-session',
-      ctx: context.plugin(() => {}).ctx,
-      session: {
-        id: 'image-session',
-        header: { id: 'image-session', cwd: temporary },
-        events: sessionEvents,
-        append(type, data, options) {
-          sessionEvents.push({ type, data, ...options, seq: sessionEvents.length, time: Date.now() })
-        },
-        deriveMessages: () => sessionMessages,
-      },
-    }
-    context.agents.register(agent)
-    let callIndex = 0
-    const execution = () => ({
-      agent,
-      callId: `image-call-${++callIndex}`,
-      signal: new AbortController().signal,
-    })
-    const nativeParentScopes = new WeakMap()
-    const nativeParent = (rawId, optionalMeta = {}) => {
-      const metaKeys = Object.keys(optionalMeta).sort()
-      assert.deepEqual(metaKeys, optionalMeta.origin === undefined ? [] : ['origin', 'parentSession'])
-      if (optionalMeta.origin !== undefined) {
-        assert.equal(optionalMeta.origin, 'subagent')
-        assert.equal(typeof optionalMeta.parentSession, 'string')
-      }
-      const id = SessionId(rawId)
-      const scopeFiber = context.plugin(() => {})
-      const session = Session.create(id, undefined, {
-        version: SESSION_FORMAT_VERSION,
-        id,
-        createdAt: Date.now(),
-        cwd: temporary,
-        ...optionalMeta,
-      })
-      const parent = {
-        id,
-        options: {},
-        session,
-        inbox: new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
-        status: 'idle',
-        ctx: scopeFiber.ctx,
-        send: () => {},
-        followup: () => {},
-        steer: () => ({ outcome: Promise.resolve({ status: 'rejected' }) }),
-        inject: () => {},
-        cancel() {},
-        runMaintenance: job => job(new AbortController().signal),
-        whenIdle: () => Promise.resolve(),
-      }
-      context.agents.register(parent)
-      nativeParentScopes.set(parent, scopeFiber)
-      return parent
-    }
-    const waitFor = async (read, message) => {
-      const deadline = Date.now() + 2_000
-      while (Date.now() < deadline) {
-        const value = read()
-        if (value !== undefined) return value
-        await new Promise(resolveImmediate => setImmediate(resolveImmediate))
-      }
-      throw new Error(message)
-    }
-    const terminalReceipt = (parent, callId) => parent.session.events
-      .findLast(event => event.type === 'emate/image-output'
-        && event.data?.call_id === callId
-        && event.data?.status !== 'running')?.data
-    const imageBatch = tools.get('image_batch')
-    assert.equal(imageBatch.isConcurrencySafe({}), false)
-    assert.equal(imageBatch.timeoutMs, 5_000_000)
-    assert.equal(imageBatch.output.presentationMeta, undefined)
-    const batchReceipt = status => ({ owner_session_id: 'child-1', call_id: 'call-1', revision: 2, event_seq: 4, status })
-    const batchTask = (ordinal, state, extra = {}) => ({
-      task_id: 'task-' + ordinal, ordinal, revision: 3, state,
-      submission_status: state === 'completed' ? 'submitted' : state === 'cancelled' ? 'unknown' : state === 'unknown' ? 'unknown' : 'not-submitted',
-      prompt_sha256: 'a'.repeat(64), image_url: [],
-      ...(state === 'completed' ? { child_session_id: 'child-1', job_id: 'emate-image-1', receipt: batchReceipt('completed') } : {}),
-      ...(state === 'completed' ? {} : { failure_code: state === 'unknown' ? 'provider-outcome-unknown' : state }),
-      ...extra,
-    })
-    const attachment = { attachmentId: 'sha256:' + 'b'.repeat(64), mediaType: 'image/png', bytes: 8, width: 1, height: 1, name: 'kept.png' }
-    const terminalId = 'sha256:' + 'c'.repeat(64)
-    const batchId = 'sha256:' + 'd'.repeat(64)
-    const completedTasks = [batchTask(1, 'completed'), batchTask(2, 'completed')]
-    const completedImages = completedTasks.map(task => ({ task_id: task.task_id, ordinal: task.ordinal,
-      child_session_id: task.child_session_id, receipt: task.receipt, attachment }))
-    const representative = [
-      { schema_version: 1, batch_id: batchId, status: 'completed', tasks: completedTasks,
-        images: completedImages, failures: [], terminal_event_id: terminalId },
-      { schema_version: 1, batch_id: batchId, status: 'partial', tasks: [completedTasks[0], batchTask(2, 'failed')],
-        images: [completedImages[0]], failures: [{ task_id: 'task-2', ordinal: 2, state: 'failed', failure_code: 'validation-failed' }], terminal_event_id: terminalId },
-      ...['failed', 'cancelled', 'unknown'].map(state => ({ schema_version: 1, batch_id: batchId,
-        status: state === 'cancelled' ? 'cancelled' : 'failed', tasks: [batchTask(1, state), batchTask(2, state)], images: [],
-        failures: [1, 2].map(ordinal => ({ task_id: 'task-' + ordinal, ordinal, state, failure_code: state === 'unknown' ? 'provider-outcome-unknown' : state })), terminal_event_id: terminalId })),
-    ]
-    for (const value of representative) {
-      assert.deepEqual(validateJsonSchemaValue(imageBatch.output.schema, value), [])
-      assert.deepEqual(imageBatch.output.render({}, value).filter(block => block.type === 'image').map(block => block.attachment),
-        value.images.map(item => item.attachment))
-    }
-    const malformed = [
-      { ...representative[0], extra: true },
-      (({ batch_id: _missing, ...value }) => value)(representative[0]),
-      { ...representative[0], images: [{ ...completedImages[0], attachment: { ...attachment, width: undefined } }] },
-      { ...representative[0], images: [{ ...completedImages[0], receipt: { ...completedImages[0].receipt, status: 'needs-review' } }] },
-    ]
-    for (const value of malformed) assert.notDeepEqual(validateJsonSchemaValue(imageBatch.output.schema, value), [])
-    const batchText = imageBatch.output.render({}, { status: 'partial', images: [{ attachment: { ...attachment, name: 'kept.png' } }], failures: [{}] })[0].text
-    assert.match(batchText, /partial.*kept\.png.*1 failures/u)
-    assert.doesNotMatch(batchText, /sha256:|child-|emate-image-/u)
-    const imagegen = tools.get('imagegen')
-    assert.equal(imagegen.isConcurrencySafe({ prompt: 'Independent image' }), true)
-    assert.deepEqual(imagegen.output.schema.properties.status.enum, ['completed'])
-    assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
-    assert.deepEqual(imagegen.parameters.required, ['prompt'])
-    assert.match(imagegen.description, /For independent outputs, call this tool once per output in the current Agent/u)
-    assert.match(imagegen.description, /native image_batch child may call imagegen exactly once/u)
-    assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
-    let batchChildOrdinal = 0
-    let rejectBatchChildModelPolicy = false
-    pluginCtx.sessions = { flush: async () => true }
-    pluginCtx.emateModelPolicy = modelPolicy
-    pluginCtx.subagents = {
-      getProvider: () => ({ inheritsParentContext: false, capabilities: { toolFilter: true, persona: true } }),
-      async start(_provider, request) {
-        const childId = 'image-batch-real-child-' + ++batchChildOrdinal
-        const child = nativeParent(childId, { origin: 'subagent', parentSession: request.parent.id })
-        batchChildren.set(child.id, child)
-        assert.equal(child.session.header.origin, 'subagent')
-        assert.equal(child.session.header.parentSession, request.parent.id)
-        if (rejectBatchChildModelPolicy) rejectModelPolicyFrom = policyModels.length + 1
-        child.session.append('subagent/descriptor', { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label })
-        const callId = 'image-batch-real-call-' + batchChildOrdinal
-        const childArgs = { prompt: 'real batch pre-job ' + batchChildOrdinal, image_url: [] }
-        const childArguments = JSON.stringify(childArgs)
-        const turn = 200 + batchChildOrdinal
-        const step = 1
-        child.session.append('turn/start', { turn })
-        child.session.append('step/start', { turn, step })
-        child.session.append('assistant/message', {
-          turn,
-          step,
-          message: {
-            id: 'image-batch-real-message-' + batchChildOrdinal,
-            role: 'assistant',
-            content: [{ type: 'tool-call', id: callId, name: 'imagegen', arguments: childArguments }],
-            source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
-          },
-        }, { surfaceOp: 'append' })
-        child.session.append('tool/call', { turn, step, name: 'imagegen', callId, arguments: childArguments })
-        const result = imagegen.execute(childArgs, {
-          agent: child, callId, signal: request.signal,
-        }).then(() => ({ stopReason: 'completed' }), () => ({ stopReason: 'error' }))
-        return { id: child.id, localAgent: child, result, async dispose() { await result } }
-      },
-    }
-    const requestsBeforePolicyFailure = requests.length
-    const jobsBeforePolicyFailure = jobs.length
-    rejectBatchChildModelPolicy = true
-    const policyFailureParent = nativeParent('image-batch-policy-failure-parent')
-    const policyFailure = await imageBatch.execute({ tasks: [
-      { prompt: 'real batch pre-job 1' }, { prompt: 'real batch pre-job 2' },
-    ], concurrency: 1 }, { agent: policyFailureParent, callId: 'image-batch-policy-failure', signal: new AbortController().signal })
-    rejectBatchChildModelPolicy = false
-    rejectModelPolicyFrom = undefined
-    assert.equal(policyFailure.status, 'failed')
-    assert.equal(parentProjectionSnapshots, 1)
-    assert.deepEqual(coldProjectionSnapshots, policyFailure.tasks
-      .filter(task => task.receipt?.status === 'completed').map(task => task.child_session_id))
-    assert.equal(requests.length, requestsBeforePolicyFailure)
-    assert.equal(jobs.length, jobsBeforePolicyFailure)
-    assert.ok(batchChildren.size >= 1, 'model-policy fixture must create at least one batch child')
-    const linkedPolicyFailures = policyFailure.tasks.filter(task => typeof task.child_session_id === 'string')
-    const unstartedPolicyFailures = policyFailure.tasks.filter(task => typeof task.child_session_id !== 'string')
-    assert.ok(linkedPolicyFailures.length >= 1, 'model-policy failure must retain at least one linked child')
-    assert.equal(
-      linkedPolicyFailures.length,
-      batchChildren.size,
-      'linked policy-failure tasks must exactly match the fake batch child map',
-    )
-    for (const task of linkedPolicyFailures) {
-      const child = batchChildren.get(task.child_session_id)
-      assert.ok(child, `missing fake batch child for linked task ${task.task_id}: ${task.child_session_id}`)
-      assert.equal(task.receipt.owner_session_id, task.child_session_id)
-      assert.equal(task.failure_code, 'validation-failed')
-      assert.notEqual(task.failure_code, 'child-contract-failed')
-      const receipt = terminalReceipt(child, task.receipt.call_id)
-      assert.equal(receipt.billing_status, 'not-submitted')
-      assert.equal(receipt.client_request_id, 'image-' + task.task_id.slice('sha256:'.length))
-      assert.equal('job_id' in receipt, false)
-      assert.equal('provider_request_id' in receipt, false)
-      assert.equal(task.submission_status, 'not-submitted')
-    }
-    for (const task of unstartedPolicyFailures) {
-      assert.equal('child_session_id' in task, false)
-      assert.equal('job_id' in task, false)
-      assert.equal('receipt' in task, false)
-      assert.equal(task.submission_status, 'not-submitted')
-      assert.ok(['failed', 'cancelled'].includes(task.state), `unstarted task has invalid terminal state: ${task.state}`)
-      assert.equal(task.failure_code, task.state === 'cancelled' ? 'cancelled' : 'not-submitted')
-    }
-
-    tools.delete('imagegen')
-    await assert.rejects(
-      imagegen.execute({ prompt: 'must fail before dispatch' }, {
-        agent,
-        callId: 'image-health-unavailable',
-        signal: new AbortController().signal,
-      }),
-      /current Agent tool scope/u,
-    )
-    assert.equal(sessionEvents.at(-1).data.failure_code, 'agent-tool-unavailable')
-    sessionEvents.length = 0
-    tools.set('imagegen', imagegen)
-
-    const selected = await context.attachments.saveImage({
-      data: inputBytes,
-      mediaType: 'image/png',
-      name: 'selected-locally.png',
-    })
-    const userUpload = {
-      id: 'local-upload-message',
-      role: 'user',
-      source: { kind: 'user' },
-      content: [{ type: 'image', attachment: selected }, { type: 'text', text: '请修改这张图。' }],
-    }
-    const admitted = await preStep({ agent, messages: [userUpload] }, async () => ({ kind: 'enter', messages: [userUpload] }))
-    assert.equal(admitted.messages.length, 2)
-    assert.deepEqual(admitted.messages[0], userUpload)
-    assert.deepEqual(admitted.messages[1].source, {
-      kind: 'plugin', plugin: '@e-mate/dsh-image-generation', form: 'catalog',
-    })
-    assert.match(admitted.messages[1].content[0].text, new RegExp(selected.attachmentId))
-    assert.match(admitted.messages[1].content[0].text, /Never ask for an image already available here/u)
-
-    const textOnly = { ...userUpload, id: 'text-only-message', content: [{ type: 'text', text: '只生成一张新图。' }] }
-    const unchanged = await preStep({ agent, messages: [textOnly] }, async () => ({ kind: 'enter', messages: [textOnly] }))
-    assert.deepEqual(unchanged.messages, [textOnly])
-    sessionMessages.push(textOnly)
-
-    const generated = await imagegen.execute({ prompt: 'Generate one verified image.' }, execution())
-    assert.equal(generated.images.length, 1)
-    assert.equal(generated.images[0].model, 'gpt-image-2.5-flare')
-    assert.equal(generated.status, 'completed')
-    assert.equal(sessionEvents.at(-1)?.type, 'emate/image-output')
-    assert.equal(sessionEvents.at(-1)?.ignorable, true)
-    assert.deepEqual(requests.at(-1), {
-      path: '/e-mate/model-api/v1/images/generations',
-      body: { model: 'gpt-image-2.5-flare', prompt: 'Generate one verified image.' },
-    })
-    const generatedContent = imagegen.output.render({}, generated)
-    const attachmentId = String(generated.images[0].image.attachmentId)
-    assert.deepEqual(await jobs.at(-1).done, {
-      status: 'completed',
-      detail: '1 image, 0 failures',
-      output: JSON.stringify({
-        image_count: 1,
-        failure_count: 0,
-        receipt_status: 'completed',
-        request_ids: [generated.images[0].request_id],
-        attachment_ids: [attachmentId],
-      }),
-    })
-    assert.equal(generatedContent.some(block => block.type === 'image'), true)
-    assert.deepEqual(generatedContent.filter(block => block.type === 'text'), [{
-      type: 'text',
-      text: 'Image generation completed: 1 image (e-Mate-image.png).',
-    }])
-    assert.doesNotMatch(JSON.stringify(generatedContent.filter(block => block.type === 'text')), /sha256:|attachment(?:Id| ID)/iu)
-    assert.deepEqual(generatedContent.find(block => block.type === 'image').attachment, generated.images[0].image)
-    // Exercise the native model boundary with the actual generated attachment,
-    // not a locator-only receipt or a second vision request.
-    const { toPiContext } = await import('../../../upstream/deepseek-harness/packages/llm/llm-pi-ai/src/context.ts')
-    const { createToolResultMessage, CallId } = await import(llmModule)
-    const imageFeedback = createToolResultMessage({ callId: CallId('image-call-1'), content: generatedContent })
-    const modelContext = await toPiContext({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', messages: [imageFeedback] }, imageAttachments)
-    const modelImage = modelContext.messages[0].content.find(block => block.type === 'image')
-    assert.equal(modelImage.mimeType, generated.images[0].image.mediaType)
-    assert.deepEqual(Buffer.from(modelImage.data, 'base64'), Buffer.from((await imageAttachments.readImage(generated.images[0].image)).data))
-    assert.equal(modelContext.messages[0].toolCallId, 'image-call-1')
-    assert.equal(sessionEvents.at(-1).data.schema_version, 2)
-    assert.equal(sessionEvents.at(-1).data.call_id, 'image-call-1')
-    assert.equal(sessionEvents.at(-1).data.operation, 'generate')
-    assert.equal(sessionEvents.at(-1).data.status, 'completed')
-    assert.equal(sessionEvents.at(-1).data.billing_status, 'recorded')
-    assert.equal(sessionEvents.at(-1).data.parent_session_id, 'image-session')
-    assert.equal('child_session_id' in sessionEvents.at(-1).data, false)
-    assert.equal(sessionEvents.at(-1).data.provider_request_id, generated.images[0].request_id)
-    assert.equal(sessionEvents.at(-1).data.client_request_id, requestScopes[0].client)
-    assert.deepEqual(sessionEvents.at(-1).data.verifier, {
-      structural: 'attachment-cas-v1',
-      semantic: 'not-required',
-    })
-    assert.deepEqual(sessionEvents.at(-1).data.content, [{ type: 'image', attachment: generated.images[0].image }])
-    assert.deepEqual(
-      sessionEvents.filter(event => event.data?.call_id === 'image-call-1')
-        .map(event => [event.data.revision, event.data.status, event.data.billing_status]),
-      [[1, 'running', 'unknown'], [2, 'completed', 'recorded']],
-    )
-    assert.equal(pluginCtx.jobs.get(generated.job_id, agent).ownerSession, agent.id)
-    assert.deepEqual(imagegen.output.presentationMeta({}, generated), {
-      $eMateDeliverables: {
-        schema_version: 1,
-        items: [{
-          kind: 'image',
-          name: 'e-Mate-image.png',
-          mime: 'image/png',
-          size: generated.images[0].image.bytes,
-          sha256: attachmentId.slice('sha256:'.length),
-          locator: {
-            kind: 'image-attachment',
-            attachment_id: attachmentId,
-            media_type: 'image/png',
-            bytes: generated.images[0].image.bytes,
-            width: generated.images[0].image.width,
-            height: generated.images[0].image.height,
-          },
-        }],
-      },
-    })
-    const requestsAfterFirst = requests.length
-    await assert.rejects(
-      imagegen.execute({ prompt: 'A replay must not invoke the provider.' }, {
-        agent, callId: 'image-call-1', signal: new AbortController().signal,
-      }),
-      /already has a terminal receipt.*new explicit retry Tool call/iu,
-    )
-    assert.equal(requests.length, requestsAfterFirst)
-    const legacyEvents = [{
-      type: 'emate/image-output',
-      data: {
-        call_id: 'legacy-image-call',
-        content: [{ type: 'image', attachment: selected }],
-      },
-    }]
-    await assert.rejects(
-      imagegen.execute({ prompt: 'A legacy terminal call must not replay the provider.' }, {
-        agent: {
-          id: 'legacy-image-session',
-          session: {
-            header: { id: 'legacy-image-session', cwd: temporary },
-            events: legacyEvents,
-            deriveMessages: () => [],
-          },
-        },
-        callId: 'legacy-image-call',
-        signal: new AbortController().signal,
-      }),
-      /already has a terminal receipt.*new explicit retry Tool call/iu,
-    )
-    assert.equal(requests.length, requestsAfterFirst)
-    assert.equal(legacyEvents.length, 1)
-    const runningOnly = structuredClone(sessionEvents.find(event =>
-      event.data?.call_id === 'image-call-1' && event.data?.revision === 1))
-    const replayEvents = [runningOnly]
-    const replayAgent = {
-      id: 'image-session',
-      session: {
-        header: { id: 'image-session', cwd: temporary },
-        events: replayEvents,
-        append(type, data, options) {
-          replayEvents.push({ type, data, ...options, seq: replayEvents.length, time: Date.now() })
-        },
-        deriveMessages: () => [],
-      },
-    }
-    await assert.rejects(
-      imagegen.execute({ prompt: 'A restart must not replay an unknown invocation.' }, {
-        agent: replayAgent, callId: 'image-call-1', signal: new AbortController().signal,
-      }),
-      /outcome is unknown after restart.*automatic replay is disabled/iu,
-    )
-    assert.equal(requests.length, requestsAfterFirst)
-    assert.equal(replayEvents.length, 1)
-    const restartedAgent = {
-      id: 'image-session-restarted',
-      session: {
-        header: { id: 'image-session', cwd: temporary },
-        events: structuredClone(sessionEvents),
-        deriveMessages: () => [],
-      },
-    }
-    const restartedMessage = {
-      id: 'restart-edit', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'text', text: '继续修改上图。' }],
-    }
-    const restarted = await preStep({ agent: restartedAgent }, async () => ({
-      kind: 'enter', messages: [restartedMessage],
-    }))
-    assert.match(restarted.messages.at(-1).content[0].text, new RegExp(attachmentId))
-    sessionMessages.push({
-      id: 'generated-tool-result',
-      source: { kind: 'tool', callId: 'image-call-1' },
-      content: [{
-        type: 'tool-result',
-        toolCallId: 'image-call-1',
-        isError: false,
-        content: generatedContent,
-      }],
-    })
-
-    const modifyAbove = {
-      id: 'modify-above-message', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'text', text: '就直接修改上图，不要让我重新上传。' }],
-    }
-    const resumed = await preStep({ agent, messages: [...sessionMessages, modifyAbove] }, async () => ({
-      kind: 'enter', messages: [...sessionMessages, modifyAbove],
-    }))
-    assert.match(resumed.messages.at(-1).content[0].text, new RegExp(attachmentId))
-    assert.match(resumed.messages.at(-1).content[0].text, /recency alone does not identify an edit target/u)
-    sessionMessages.push(modifyAbove)
-
-    let questionCalls = 0
-    imageReviewAsk = async () => { questionCalls += 1; throw new Error('userQuestions must never be invoked') }
-    nextResponseBytes = unreviewedBytes
-    const implicitEdit = await imagegen.execute({ prompt: 'Retouch the referenced image only.', image_url: attachmentId }, execution())
-    assert.equal(implicitEdit.images.length, 1)
-    assert.equal(implicitEdit.status, 'completed')
-    assert.equal(implicitEdit.receipt.revision, 2)
-    assert.equal(implicitEdit.receipt.verification.source_output, 'distinct')
-    assert.equal(implicitEdit.receipt.verification.semantic, 'not-applicable')
-    assert.deepEqual(implicitEdit.receipt.verifier, { structural: 'attachment-cas-v1', semantic: 'not-required' })
-    assert.equal(implicitEdit.receipt.verification.human_review, undefined)
-    assert.deepEqual(await jobs.at(-1).done, {
-      status: 'completed', detail: '1 image, 0 failures', output: JSON.stringify({
-        image_count: 1, failure_count: 0, receipt_status: 'completed',
-        request_ids: [implicitEdit.images[0].request_id], attachment_ids: [implicitEdit.images[0].image.attachmentId],
-      }),
-    })
-    assert.deepEqual(requests.at(-1), {
-      path: '/e-mate/model-api/v1/images/edits', body: { model: 'gpt-image-2.5-flare',
-        prompt: 'Retouch the referenced image only.', imageFields: ['image'], imageBytes: [inputBytes.byteLength] },
-    })
-
-    sessionMessages.push({ id: 'modify-text-on-image', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'text', text: '图上的方林改为圣都。' }] })
-    const textEdit = await imagegen.execute({ prompt: '把图片中的方林改成圣都。', image_url: attachmentId }, execution())
-    assert.equal(textEdit.status, 'completed')
-    assert.equal(textEdit.receipt.revision, 2)
-    assert.equal(textEdit.receipt.verification.semantic, 'not-applicable')
-    assert.equal(textEdit.receipt.verification.text_replacement, undefined)
-    assert.equal(textEdit.receipt.verification.human_review, undefined)
-    assert.deepEqual(imagegen.output.render({}, textEdit).filter(block => block.type === 'text'), [{ type: 'text', text: 'Image generation completed: 1 image (e-Mate-image.png).' }])
-    assert.deepEqual(imagegen.output.render({}, textEdit).find(block => block.type === 'image').attachment, textEdit.images[0].image)
-    const textMeta = imagegen.output.presentationMeta({}, textEdit)
-    assert.equal(textMeta.$eMateDeliverables.schema_version, 1)
-    assert.equal(textMeta.$eMateDeliverables.items.length, 1)
-    assert.equal('review_candidates' in textMeta.$eMateDeliverables, false)
-
-    const explicitEdit = await imagegen.execute({ prompt: '只把标题中的旧名称改成新名称。', image_url: attachmentId }, execution())
-    assert.equal(explicitEdit.status, 'completed')
-    assert.equal(explicitEdit.receipt.revision, 2)
-    assert.equal(explicitEdit.receipt.verification.semantic, 'not-applicable')
-    assert.equal(explicitEdit.receipt.verification.human_review, undefined)
-
-    sessionMessages.push({ id: 'new-map-image', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'text', text: '生成一张地图上的路线图。' }] })
-    await imagegen.execute({ prompt: '生成一张地图上的路线图。' }, execution())
-    const edited = await imagegen.execute({ prompt: 'Retouch only the supplied image.', image_url: [attachmentId] }, execution())
-    assert.equal(edited.status, 'completed')
-    assert.equal(edited.receipt.revision, 2)
-    assert.equal(edited.images[0].model, 'gpt-image-2.5-flare')
-
-    const storedSecond = await context.attachments.saveImage({
-      data: readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.png', import.meta.url)),
-      mediaType: 'image/png', name: 'diagram.png',
-    })
-    const second = { ...storedSecond, name: join(temporary, 'private', 'diagram.png') }
-    sessionMessages.push({ id: 'second-user-upload', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'image', attachment: second }, { type: 'text', text: '这是第二张源图。' }] })
-    const fused = await imagegen.execute({ prompt: 'Fuse these two references into one new composition.',
-      image_url: [attachmentId, second.attachmentId] }, execution())
-    assert.equal(fused.status, 'completed')
-    assert.equal(fused.receipt.revision, 2)
-    assert.equal(fused.receipt.operation, 'fusion')
-    assert.equal(fused.receipt.verification.semantic, 'not-applicable')
-    assert.equal(fused.receipt.verification.human_review, undefined)
-    assert.deepEqual(requests.at(-1).body.imageFields, ['image[]', 'image[]'])
-    assert.deepEqual(fused.receipt.sources.map(ref => ref.attachmentId), [attachmentId, second.attachmentId])
-    assert.doesNotMatch(JSON.stringify(fused.receipt), /private|e-mate-image-generation-/u)
-    const noQuestionGenerate = await imagegen.execute({ prompt: 'Generate without any confirmation lookup.' }, execution())
-    assert.equal(noQuestionGenerate.status, 'completed')
-    assert.equal(noQuestionGenerate.receipt.revision, 2)
-    assert.equal(noQuestionGenerate.receipt.verification.semantic, 'not-applicable')
-    assert.equal(questionCalls, 0)
-    assert.equal(requestedServices.includes('userQuestions'), false)
-    assert.equal(sessionEvents.some(event => event.type === 'emate/image-output'
-      && (event.data.status === 'needs-review' || event.data.revision === 3)), false)
-    imageReviewAsk = undefined
-
-
-    const imagePack = tools.get('image_pack')
-    await assert.rejects(
-      imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution()),
-      /read-only sandbox policy/u,
-    )
-    assert.equal(existsSync(join(temporary, '.e-mate', 'images')), false)
-    sandboxMode = 'workspace-write'
-    const unverifiedOutput = await context.attachments.saveImage({ data: rejectedBytes, mediaType: 'image/png', name: 'unverified.png' })
-    sessionMessages.push({
-      id: 'unverified-image-tool-result', source: { kind: 'tool', callId: 'image-call-unverified-pack' },
-      content: [{ type: 'tool-result', toolCallId: 'image-call-unverified-pack', isError: false,
-        content: [{ type: 'image', attachment: unverifiedOutput }] }],
-    })
-    await assert.rejects(
-      imagePack.execute({ image_url: [attachmentId, unverifiedOutput.attachmentId] }, execution()),
-      /not a successful current-session image output/u,
-    )
-    sessionEvents.push({ type: 'emate/image-output', data: {
-      status: 'completed', output: unverifiedOutput,
-      content: [{ type: 'image', attachment: unverifiedOutput }],
-    } })
-    await assert.rejects(
-      imagePack.execute({ image_url: [unverifiedOutput.attachmentId] }, execution()),
-      /not a successful current-session image output/u,
-    )
-    sessionEvents.pop()
-    assert.equal(existsSync(join(temporary, '.e-mate', 'images')), false)
-    const confirmedPack = await imagePack.execute({ image_url: [explicitEdit.images[0].image.attachmentId] }, execution())
-    assert.equal(confirmedPack.image_count, 1)
-    const legacyChildOutput = await context.attachments.saveImage({
-      data: readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.zh.png', import.meta.url)),
-      mediaType: 'image/png',
-      name: 'legacy-child-output.png',
-    })
-    const legacyChildReceipt = {
-      ...structuredClone(generated.receipt),
-      call_id: 'legacy-child-receipt-v2',
-      model: 'gpt-image-2-pro',
-      child_session_id: 'legacy-image-child',
-      job_id: 'emate-image-legacy',
-      provider_request_id: 'image-response-legacy',
-      client_request_id: 'image-client-legacy',
-      output: legacyChildOutput,
-      content: [{ type: 'image', attachment: legacyChildOutput }],
-    }
-    sessionEvents.push({ type: 'emate/image-output', data: legacyChildReceipt })
-    assert.equal((await imagePack.execute({ image_url: [legacyChildOutput.attachmentId] }, execution())).image_count, 1)
-    sessionEvents.push({
-      type: 'emate/image-output',
-      data: {
-        ...legacyChildReceipt,
-        call_id: 'invalid-legacy-child-receipt-v2',
-        output: unverifiedOutput,
-        content: [{ type: 'image', attachment: unverifiedOutput }],
-        unexpected: true,
-      },
-    })
-    await assert.rejects(
-      imagePack.execute({ image_url: [unverifiedOutput.attachmentId] }, execution()),
-      /not a successful current-session image output/u,
-    )
-    sessionEvents.pop()
-    const packed = await imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution())
-    assert.equal(packed.image_count, 2)
-    assert.match(packed.relative_path, /^\.e-mate\/images\/e-Mate-images-[0-9a-f]{12}\.zip$/u)
-    const archiveBytes = readFileSync(join(temporary, packed.relative_path))
-    assert.equal(archiveBytes.readUInt16LE(10), 0, 'ZIP time is stable across retries')
-    assert.equal(archiveBytes.readUInt16LE(12), 33, 'ZIP date is 1980-01-01')
-    const archive = unzipSync(archiveBytes)
-    assert.deepEqual(Object.keys(archive), ['image-001.png', 'image-002.png'])
-    assert.equal(Buffer.from(archive['image-001.png']).equals(inputBytes), true)
-    assert.equal(Buffer.from(archive['image-002.png']).equals(readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.png', import.meta.url))), true)
-    assert.deepEqual(imagePack.presentCall({ image_url: [attachmentId, second.attachmentId] }), {
-      card: 'generic', title: '打包图片', kind: 'edit', rawInput: '2 images',
-      locations: [{ path: packed.relative_path }],
-    })
-    assert.match(imagePack.output.render({}, packed)[0].text, /2 张图片打包到本地产物/u)
-    assert.deepEqual(imagePack.output.presentationMeta({}, packed), {
-      $eMateDeliverables: {
-        schema_version: 1,
-        items: [{
-          kind: 'archive',
-          name: packed.relative_path.split('/').at(-1),
-          mime: 'application/zip',
-          size: packed.bytes,
-          sha256: null,
-          locator: { kind: 'workspace-file', relative_path: packed.relative_path },
-        }],
-      },
-    })
-    sandboxMode = 'danger-full-access'
-    assert.deepEqual(
-      await imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution()),
-      packed,
-    )
-
-    sessionMessages.push({
-      id: 'new-variants-message', role: 'user', source: { kind: 'user' },
-      content: [{ type: 'text', text: '生成两个全新的独立方案。' }],
-    })
-    const firstParent = nativeParent('image-session-first-parent')
-    const secondParent = nativeParent('image-session-second-parent')
-    const jobsBeforeConcurrentParents = jobs.length
-    const policiesBeforeConcurrentParents = policyModels.length
-    const timelineBeforeConcurrentParents = jobTimeline.length
-    let releaseConcurrentGate
-    requestGate = new Promise(resolveGate => { releaseConcurrentGate = resolveGate })
-    const concurrentOutcome = Promise.allSettled([
-      imagegen.execute({ prompt: 'Generate independent variant A.' }, {
-        agent: firstParent,
-        callId: 'first-parent-image-call',
-        signal: new AbortController().signal,
-      }),
-      imagegen.execute({ prompt: 'Generate independent variant B.' }, {
-        agent: secondParent,
-        callId: 'second-parent-image-call',
-        signal: new AbortController().signal,
-      }),
-    ])
-    await waitFor(() => activeSubmissions === 2 ? true : undefined, 'independent parent image Jobs did not overlap')
-    releaseConcurrentGate()
-    requestGate = undefined
-    const concurrent = await concurrentOutcome
-    assert.deepEqual(concurrent.map(result => result.status), ['fulfilled', 'fulfilled'])
-    const [firstConcurrent, secondConcurrent] = concurrent.map(result => result.value)
-    assert.equal(maximumSubmissions, 2)
-    assert.equal(policyModels.every(model => model === 'gpt-image-2.5-flare'), true)
-    assert.equal(policyModels.length, policiesBeforeConcurrentParents + 2)
-    assert.equal(jobs.length, jobsBeforeConcurrentParents + 2)
-    const concurrentTimeline = jobTimeline.slice(timelineBeforeConcurrentParents)
-    assert.deepEqual(concurrentTimeline.filter(entry => entry.startsWith('settled:')).sort(), [
-      `settled:${firstConcurrent.job_id}`,
-      `settled:${secondConcurrent.job_id}`,
-    ].sort())
-    assert.ok(concurrentTimeline.indexOf(`provider:${firstConcurrent.receipt.client_request_id}`)
-      < concurrentTimeline.indexOf(`settled:${firstConcurrent.job_id}`))
-    assert.ok(concurrentTimeline.indexOf(`provider:${secondConcurrent.receipt.client_request_id}`)
-      < concurrentTimeline.indexOf(`settled:${secondConcurrent.job_id}`))
-    assert.equal(pluginCtx.jobs.get(firstConcurrent.job_id, firstParent).ownerSession, firstParent.id)
-    assert.throws(
-      () => pluginCtx.jobs.get(firstConcurrent.job_id, secondParent),
-      /belongs to another session/u,
-    )
-    assert.equal(pluginCtx.jobs.kill(firstConcurrent.job_id, firstParent), 'already-finished')
-    assert.throws(
-      () => pluginCtx.jobs.kill(firstConcurrent.job_id, secondParent),
-      /belongs to another session/u,
-    )
-    assert.deepEqual([...waitedJobs].sort(), jobs.map(job => job.id).sort())
-    assert.equal(requests.every(request => !('provider' in request.body) && !('api_key' in request.body)), true)
-    const firstScope = `image-${createHash('sha256').update('image-session\0image-call-1').digest('hex').slice(0, 32)}`
-    assert.deepEqual(requestScopes[0], {
-      task: firstScope, trace: firstScope, session: firstScope, client: firstScope, batch: null, ordinal: null,
-    })
-    assert.equal(new Set(requestScopes.map(scope => scope.task)).size, requestScopes.length)
-
-    let nativeBoundaryTurn = 100
-    const appendNativeAssistant = (parent, calls) => {
-      const turn = ++nativeBoundaryTurn
-      const step = 1
-      parent.session.append('turn/start', { turn })
-      parent.session.append('step/start', { turn, step })
-      parent.session.append('assistant/message', {
-        turn,
-        step,
-        message: {
-          id: `native-image-message-${turn}`,
-          role: 'assistant',
-          content: calls.map(call => ({
-            type: 'tool-call', id: call.id, name: 'imagegen',
-            arguments: call.rawArguments ?? JSON.stringify(call.args),
-          })),
-          source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
-        },
-      }, { surfaceOp: 'append' })
-      return { turn, step }
-    }
-    const executeNativeImageCall = (parent, position, call) => {
-      parent.session.append('tool/call', {
-        ...position, callId: call.id, name: 'imagegen',
-        arguments: call.rawArguments ?? JSON.stringify(call.args),
-      })
-      return imagegen.execute(call.args, {
-        agent: parent,
-        callId: call.id,
-        signal: new AbortController().signal,
-      })
-    }
-
-    const parallelParent = nativeParent('image-native-parallel-parent')
-    const parallelCalls = [1, 2].map(index => ({ id: `native-parallel-${index}`, args: { prompt: `Independent image ${index}` } }))
-    const parallelPosition = appendNativeAssistant(parallelParent, parallelCalls)
-    const scopeFor = call => `image-${createHash('sha256').update(parallelParent.id).update('\0').update(call.id).digest('hex').slice(0, 32)}`
-    const releases = parallelCalls.map(call => {
-      let release
-      perCallGates.set(scopeFor(call), new Promise(resolve => { release = resolve }))
-      return release
-    })
-    const parallelRuns = parallelCalls.map(call => executeNativeImageCall(parallelParent, parallelPosition, call))
-    await waitFor(() => activeSubmissions === 2 ? true : undefined, 'same Agent image calls did not overlap')
-    releases[1]()
-    const faster = await parallelRuns[1]
-    assert.equal(faster.receipt.status, 'completed')
-    assert.equal(parallelParent.session.events.findLast(event => event.type === 'emate/image-output' && event.data.call_id === parallelCalls[0].id).data.status, 'running')
-    releases[0]()
-    const slower = await parallelRuns[0]
-    assert.notEqual(faster.job_id, slower.job_id)
-    assert.notEqual(faster.receipt.client_request_id, slower.receipt.client_request_id)
-    perCallGates.clear()
-
-    // Simultaneous duplicate calls reserve only one provider request and one receipt sequence.
-    const duplicateParent = nativeParent('image-duplicate-parent')
-    const duplicateExec = { agent: duplicateParent, callId: 'duplicate-call', signal: new AbortController().signal }
-    const requestsBeforeDuplicate = requests.length
-    const duplicates = await Promise.allSettled([1, 2].map(() => imagegen.execute({ prompt: 'One submission only' }, duplicateExec)))
-    assert.deepEqual(duplicates.map(value => value.status).sort(), ['fulfilled', 'rejected'])
-    assert.equal(requests.length, requestsBeforeDuplicate + 1)
-    assert.deepEqual(duplicateParent.session.events.filter(event => event.type === 'emate/image-output').map(event => event.data.status), ['running', 'completed'])
-
-    // A cancelled sibling and an invalid reference cannot poison a valid call.
-    const isolatedParent = nativeParent('image-isolation-parent')
-    let releaseIsolation
-    requestGate = new Promise(resolve => { releaseIsolation = resolve })
-    const cancelledController = new AbortController()
-    const isolated = [
-      imagegen.execute({ prompt: 'Cancel this image' }, { agent: isolatedParent, callId: 'isolation-cancel', signal: cancelledController.signal }),
-      imagegen.execute({ prompt: 'Keep this image' }, { agent: isolatedParent, callId: 'isolation-keep', signal: new AbortController().signal }),
-      imagegen.execute({ prompt: 'Invalid reference', image_url: `sha256:${'f'.repeat(64)}` }, { agent: isolatedParent, callId: 'isolation-invalid', signal: new AbortController().signal }),
-    ]
-    const isolatedOutcomes = Promise.allSettled(isolated)
-    await waitFor(() => activeSubmissions === 2 ? true : undefined, 'isolation calls did not overlap')
-    cancelledController.abort(new Error('cancel one image'))
-    await waitFor(() => activeSubmissions === 1 ? true : undefined, 'cancelled image did not release provider')
-    releaseIsolation()
-    requestGate = undefined
-    assert.deepEqual((await isolatedOutcomes).map(value => value.status), ['rejected', 'fulfilled', 'rejected'])
-    assert.equal(terminalReceipt(isolatedParent, 'isolation-cancel').status, 'cancelled')
-    assert.equal(terminalReceipt(isolatedParent, 'isolation-keep').status, 'completed')
-    assert.equal(terminalReceipt(isolatedParent, 'isolation-invalid').billing_status, 'not-submitted')
-
-    const malformedBatchParent = nativeParent('image-native-malformed-batch-parent')
-    const malformedBatch = [
-      { id: 'native-malformed-valid', args: { prompt: 'Generate one valid image.' } },
-      { id: 'native-malformed-invalid', args: { prompt: 'unreachable' }, rawArguments: '{"prompt":' },
-    ]
-    const malformedPosition = appendNativeAssistant(malformedBatchParent, malformedBatch)
-    await executeNativeImageCall(malformedBatchParent, malformedPosition, malformedBatch[0])
-    const mismatchedCall = { id: 'native-mismatch', args: { prompt: 'original' } }
-    const mismatchedPosition = appendNativeAssistant(malformedBatchParent, [mismatchedCall])
-    await assert.rejects(executeNativeImageCall(malformedBatchParent, mismatchedPosition, { ...mismatchedCall, args: { prompt: 'changed' } }), /cannot verify its owning native assistant/u)
-    const requestsBeforeBlockedBatch = requests.length
-    const allowedChild = nativeParent('image-native-single-child')
-    const singleCall = { id: 'native-single-new', args: { prompt: 'Generate one delegated child image.' } }
-    const singlePosition = appendNativeAssistant(allowedChild, [singleCall])
-    const singleResult = await executeNativeImageCall(allowedChild, singlePosition, singleCall)
-    assert.equal(requests.length, requestsBeforeBlockedBatch + 1)
-
-    const editCalls = [1, 2].map(index => ({
-      id: `native-edit-${index}`,
-      args: { prompt: `Modify the above image as variant ${index}.`, image_url: singleResult.images[0].image.attachmentId },
-    }))
-    const editPosition = appendNativeAssistant(allowedChild, editCalls)
-    for (const call of editCalls) await executeNativeImageCall(allowedChild, editPosition, call)
-    assert.equal(requests.length, requestsBeforeBlockedBatch + 3)
-
-    const mixedCalls = [
-      { id: 'native-mixed-new', args: { prompt: 'Generate one new image in a mixed message.' } },
-      {
-        id: 'native-mixed-edit',
-        args: { prompt: 'Edit the existing image in a mixed message.', image_url: singleResult.images[0].image.attachmentId },
-      },
-    ]
-    const mixedPosition = appendNativeAssistant(allowedChild, mixedCalls)
-    for (const call of mixedCalls) await executeNativeImageCall(allowedChild, mixedPosition, call)
-    assert.equal(requests.length, requestsBeforeBlockedBatch + 5)
-
-    const jobsBeforeStarterFailure = jobs.length
-    const requestsBeforeStarterFailure = requests.length
-    throwNextImageJobStarter = true
-    const starterFailureExec = execution()
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Fail closed when the native Job producer cannot start.' }, starterFailureExec),
-      /receipt status failed/u,
-    )
-    assert.equal(jobs.length, jobsBeforeStarterFailure)
-    assert.equal(requests.length, requestsBeforeStarterFailure)
-    const starterFailureReceipt = terminalReceipt(agent, starterFailureExec.callId)
-    assert.equal(starterFailureReceipt.status, 'failed')
-    assert.equal(starterFailureReceipt.billing_status, 'not-submitted')
-    assert.equal(starterFailureReceipt.failure_code, 'validation-failed')
-    assert.equal('job_id' in starterFailureReceipt, false)
-    assert.equal('client_request_id' in starterFailureReceipt, false)
-    assert.equal('provider_request_id' in starterFailureReceipt, false)
-
-    const killedParent = nativeParent('image-direct-killed-parent')
-    const jobsBeforeKill = jobs.length
-    const requestsBeforeKill = requests.length
-    let releaseKillGate
-    requestGate = new Promise(resolveGate => { releaseKillGate = resolveGate })
-    const killedCall = imagegen.execute({ prompt: 'Cancel this direct native Job exactly once.' }, {
-      agent: killedParent,
-      callId: 'direct-killed-call',
-      signal: new AbortController().signal,
-    })
-    await waitFor(() => activeSubmissions === 1 ? true : undefined, 'direct-killed image Job did not reach the provider')
-    const killedJob = await waitFor(
-      () => jobs.length === jobsBeforeKill + 1 ? jobs[jobsBeforeKill] : undefined,
-      'direct-killed image Job was not registered',
-    )
-    assert.equal(context.jobs.kill(killedJob.id, killedParent, 'cancel direct image'), 'requested')
-    await assert.rejects(killedCall, /receipt status cancelled/u)
-    releaseKillGate()
-    requestGate = undefined
-    assert.equal(requests.length, requestsBeforeKill)
-    const killedReceipt = terminalReceipt(killedParent, 'direct-killed-call')
-    assert.equal(killedReceipt.job_id, killedJob.id)
-    assert.equal(killedReceipt.status, 'cancelled')
-    assert.equal(killedReceipt.billing_status, 'unknown')
-    assert.equal(killedReceipt.failure_code, 'cancelled')
-    assert.equal('provider_request_id' in killedReceipt, false)
-
-    const disposedParent = nativeParent('image-direct-disposed-parent')
-    const jobsBeforeOwnerDispose = jobs.length
-    const requestsBeforeOwnerDispose = requests.length
-    let releaseOwnerGate
-    requestGate = new Promise(resolveGate => { releaseOwnerGate = resolveGate })
-    const disposedCall = imagegen.execute({ prompt: 'Cancel this direct Job when its owner is disposed.' }, {
-      agent: disposedParent,
-      callId: 'direct-owner-disposed-call',
-      signal: new AbortController().signal,
-    })
-    await waitFor(() => activeSubmissions === 1 ? true : undefined, 'owner-disposed image Job did not reach the provider')
-    const disposedJob = await waitFor(
-      () => jobs.length === jobsBeforeOwnerDispose + 1 ? jobs[jobsBeforeOwnerDispose] : undefined,
-      'owner-disposed image Job was not registered',
-    )
-    await nativeParentScopes.get(disposedParent).dispose()
-    await assert.rejects(disposedCall, /receipt status cancelled/u)
-    releaseOwnerGate()
-    requestGate = undefined
-    assert.equal(requests.length, requestsBeforeOwnerDispose)
-    assert.throws(() => context.jobs.get(disposedJob.id, disposedParent), new RegExp(`unknown job ${disposedJob.id}`, 'u'))
-    const disposedReceipt = terminalReceipt(disposedParent, 'direct-owner-disposed-call')
-    assert.equal(disposedReceipt.job_id, disposedJob.id)
-    assert.equal(disposedReceipt.status, 'cancelled')
-    assert.equal(disposedReceipt.billing_status, 'unknown')
-    assert.equal(disposedReceipt.failure_code, 'cancelled')
-    assert.equal('provider_request_id' in disposedReceipt, false)
-
-    const requestsBeforeParentCasFailure = requests.length
-    rejectOutputRead = true
-    const parentCasExec = execution()
-    await assert.rejects(
-      imagegen.execute({
-        prompt: 'Preserve source and provider identity when Attachment CAS readback fails.',
-        image_url: attachmentId,
-      }, parentCasExec),
-      /receipt status failed/u,
-    )
-    assert.equal(requests.length, requestsBeforeParentCasFailure + 1)
-    const parentCasReceipt = sessionEvents.findLast(event => event.data?.call_id === parentCasExec.callId)?.data
-    assert.equal(parentCasReceipt.revision, 2)
-    assert.equal(parentCasReceipt.status, 'failed')
-    assert.equal(parentCasReceipt.billing_status, 'recorded')
-    assert.equal(parentCasReceipt.failure_code, 'provider-result-uncommitted')
-    assert.match(parentCasReceipt.job_id, /^emate-image-/u)
-    assert.match(parentCasReceipt.provider_request_id, /^image-response-/u)
-    assert.match(parentCasReceipt.client_request_id, /^image-/u)
-    assert.equal(parentCasReceipt.model, 'gpt-image-2.5-flare')
-    assert.equal('output' in parentCasReceipt, false)
-    assert.deepEqual(parentCasReceipt.sources.map(source => source.attachmentId), [attachmentId])
-    assert.deepEqual(parentCasReceipt.verification, {
-      structural: 'not-run', source_output: 'unknown', semantic: 'failed',
-    })
-    assert.deepEqual(parentCasReceipt.content, [])
-    assert.doesNotMatch(JSON.stringify(parentCasReceipt), /private|Users|parent-cas/iu)
-    const restartedParentCasAgent = {
-      id: 'image-session-restarted-after-parent-cas',
-      session: {
-        header: { id: 'image-session', cwd: temporary },
-        events: structuredClone(sessionEvents),
-        deriveMessages: () => [],
-      },
-    }
-    const requestsBeforeParentCasRestart = requests.length
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Restart must not replay the recorded provider call.' }, {
-        agent: restartedParentCasAgent,
-        callId: parentCasExec.callId,
-        signal: new AbortController().signal,
-      }),
-      /already has a terminal receipt/u,
-    )
-    assert.equal(requests.length, requestsBeforeParentCasRestart)
-
-    const requestsBeforeCorruptData = requests.length
-    nextCorruptData = true
-    const corruptDataExec = execution()
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Capture provider ID before corrupt image data fails.' }, corruptDataExec),
-      /receipt status failed/u,
-    )
-    assert.equal(requests.length, requestsBeforeCorruptData + 1)
-    const corruptDataReceipt = sessionEvents.findLast(event => event.data?.call_id === corruptDataExec.callId)?.data
-    assert.equal(corruptDataReceipt.status, 'failed')
-    assert.equal(corruptDataReceipt.billing_status, 'recorded')
-    assert.match(corruptDataReceipt.provider_request_id, /^image-response-/u)
-    assert.match(corruptDataReceipt.job_id, /^emate-image-/u)
-    assert.match(corruptDataReceipt.client_request_id, /^image-/u)
-    assert.equal(corruptDataReceipt.failure_code, 'provider-result-uncommitted')
-    assert.deepEqual(await jobs.at(-1).done, { status: 'failed', detail: 'Image task failed' })
-
-    const requestsBeforePrivateFailure = requests.length
-    nextPrivateRequestError = true
-    const privateFailureExec = execution()
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Do not expose private provider failures.' }, privateFailureExec),
-      /receipt status unknown/u,
-    )
-    assert.equal(requests.length, requestsBeforePrivateFailure + 1)
-    const privateFailureReceipt = sessionEvents.findLast(event => event.data?.call_id === privateFailureExec.callId)?.data
-    assert.equal(privateFailureReceipt.billing_status, 'unknown')
-    assert.equal(privateFailureReceipt.failure_code, 'provider-outcome-unknown')
-    assert.deepEqual(await jobs.at(-1).done, { status: 'failed', detail: 'Image task failed' })
-    assert.doesNotMatch(JSON.stringify({ receipt: privateFailureReceipt, job: await jobs.at(-1).done }), /private|Users|image-key|prompt/iu)
-
-    // Replay the installed failure at the real Tool/Job/provider boundary. A
-    // negated reference must not select a historical image or demand an upload.
-    for (const [index, prompt] of [
-      '为小红书装修干货笔记创作一张竖版3:4中文封面，新图生成，并非修改原图。',
-      '生成全新的封面，不要使用上图。',
-      'Create a new cover, not editing the original image.',
-      '生成一张没有文字的海报。',
-      '不要去掉海报上的文字，生成一个新设计。',
-    ].entries()) {
-      const priorMessages = sessionMessages.splice(0)
-      const priorEvents = sessionEvents.splice(0)
-      if (index === 1) sessionEvents.push(...priorEvents)
-      sessionMessages.push({ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] })
-      let output
-      try {
-        output = await imagegen.execute({ prompt }, execution())
-      } finally {
-        sessionMessages.splice(0, sessionMessages.length, ...priorMessages)
-        sessionEvents.splice(0, sessionEvents.length, ...priorEvents)
-      }
-      assert.equal(output.receipt.operation, 'generate', `negative reference ${index}`)
-      assert.equal(output.status, 'completed')
-      assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/generations')
-    }
-
-    // A prior uploaded poster followed by text-only removal must send its exact
-    // CAS bytes to edits using the Agent-selected image_url.
-    for (const text of ['去掉海报上的文字', '把照片上的文字去掉', '去除图片里的文字', '去掉文字']) {
-      const priorMessages = sessionMessages.splice(0)
-      const priorEvents = sessionEvents.splice(0)
-      sessionMessages.push(
-        { role: 'user', source: { kind: 'user' }, content: [{ type: 'image', attachment: selected }] },
-        { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] },
-      )
-      try {
-        const output = await imagegen.execute({ prompt: text, image_url: selected.attachmentId }, execution())
-        assert.equal(output.receipt.operation, 'edit', text)
-        assert.deepEqual(output.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId])
-        assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
-        const form = await new Response(requestRawBodies.at(-1), {
-          headers: { 'content-type': requestContentTypes.at(-1) },
-        }).formData()
-        assert.deepEqual(Buffer.from(await form.get('image').arrayBuffer()),
-          Buffer.from((await context.attachments.readImage(selected)).data))
-      } finally {
-        sessionMessages.splice(0, sessionMessages.length, ...priorMessages)
-        sessionEvents.splice(0, sessionEvents.length, ...priorEvents)
-      }
-    }
-
-    // A newly uploaded target and a previous generated composition are two
-    // distinct inputs; the historical reference must be visible and submitted.
-    {
-      const priorMessages = sessionMessages.splice(0)
-      const priorEvents = sessionEvents.splice(0)
-      const text = '帮我把图中的设计师也改成以上图片的这种站位'
-      const current = { role: 'user', source: { kind: 'user' }, content: [
-        { type: 'image', attachment: selected }, { type: 'text', text },
-      ] }
-      sessionMessages.push(current)
-      sessionEvents.push({ type: 'emate/image-output', data: { content: [{ type: 'image', attachment: second }] } })
-      sessionEvents.push({ type: 'user/message', data: { content: current.content } })
-      try {
-        const step = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
-        assert.ok(step.messages.at(-1).content[0].text.includes(second.attachmentId))
-        assert.ok(step.messages.at(-1).content[0].text.includes(selected.attachmentId))
-        const output = await imagegen.execute({ prompt: text, image_url: [selected.attachmentId, second.attachmentId] }, execution())
-        assert.deepEqual(output.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId, second.attachmentId])
-        assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
-        const form = await new Response(requestRawBodies.at(-1), {
-          headers: { 'content-type': requestContentTypes.at(-1) },
-        }).formData()
-        const refs = form.getAll('image[]')
-        assert.equal(refs.length, 2)
-        for (const [index, ref] of [selected, second].entries()) {
-          assert.deepEqual(Buffer.from(await refs[index].arrayBuffer()),
-            Buffer.from((await context.attachments.readImage(ref)).data))
-        }
-
-        // Explicit semantic selection stays authoritative after another output.
-        const nextStep = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
-        assert.ok(nextStep.messages.at(-1).content[0].text.includes(second.attachmentId))
-        // Ordinary single-upload edits and negated references do not inherit history.
-        for (const request of ['只去掉这张图上的文字', '不要参考以上图片，只修改当前照片',
-          '参考这张图片比例生成，按照参考图的文字排版、文字风格，在图片中加入文字：上方“顾家家居限时福利 线上预约 到店购买 立减1000元”，左下“大坐家沙发”，右下“左滑查看更多”']) {
-          current.content[1].text = request
-          const singleStep = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
-          assert.equal(singleStep.messages.at(-1).content.filter(block => block.type === 'image').length, 0)
-          const singleOutput = await imagegen.execute({ prompt: request, image_url: selected.attachmentId }, execution())
-          assert.deepEqual(singleOutput.receipt.sources.map(ref => ref.attachmentId), [selected.attachmentId])
-          assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
-          const singleForm = await new Response(requestRawBodies.at(-1), {
-            headers: { 'content-type': requestContentTypes.at(-1) },
-          }).formData()
-          assert.equal(singleForm.get('prompt'), request)
-          assert.deepEqual(Buffer.from(await singleForm.get('image').arrayBuffer()),
-            Buffer.from((await context.attachments.readImage(selected)).data))
-        }
-        // No lexical inference: the Agent can deliberately generate without
-        // references even while current uploads and earlier images are present.
-        const explicitNewImage = await imagegen.execute({ prompt: 'A new image unrelated to these uploads.' }, execution())
-        assert.deepEqual(explicitNewImage.receipt.sources, [])
-        assert.equal(explicitNewImage.receipt.operation, 'generate')
-        // An empty pre-upload history must not fall forward to this turn's output.
-        current.content[1].text = text
-        sessionEvents.splice(0, sessionEvents.length, { type: 'user/message', data: { content: current.content } },
-          { type: 'emate/image-output', data: { content: [{ type: 'image', attachment: second }] } })
-        const noEarlier = await preStep({ agent }, async () => ({ kind: 'enter', messages: [current] }))
-        assert.equal(noEarlier.messages.at(-1).content.filter(block => block.type === 'image').length, 0)
-      } finally {
-        sessionMessages.splice(0, sessionMessages.length, ...priorMessages)
-        sessionEvents.splice(0, sessionEvents.length, ...priorEvents)
-      }
-    }
-
-    const mixedEvents = []
-    const mixedAgent = { ...agent, session: { ...agent.session, events: mixedEvents,
-      append(type, data, options) { mixedEvents.push({ type, data, ...options, seq: mixedEvents.length, time: Date.now() }) },
-      deriveMessages: () => [{ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] }],
-    } }
-    const beforeMixed = requests.length
-    for (const prompt of [
-      '去掉海报上的文字',
-      '去掉文字',
-      '新图生成，并非修改原图；但请参考上图。',
-      '并非不修改原图，请继续。',
-      '不要修改原图，但把这张图中的灯改成蓝色。',
-      'Create a new cover, not editing the original image, but use the attached photo.',
-    ]) {
-      await assert.rejects(imagegen.execute({ prompt, image_url: selected.attachmentId }, { ...execution(), agent: mixedAgent }), /not present in this e-Mate session/u)
-      assert.equal(mixedEvents.at(-1).data.billing_status, 'not-submitted')
-    }
-    await assert.rejects(imagegen.execute({ prompt: '新图生成，并非修改原图。', image_url: `sha256:${'f'.repeat(64)}` },
-      { ...execution(), agent: mixedAgent }), /not present in this e-Mate session/u)
-    await assert.rejects(imagegen.execute({ prompt: '新图生成，并非修改原图。', operation: 'generate' },
-      { ...execution(), agent: mixedAgent }), /additional property|only prompt and optional image_url/iu)
-    assert.equal(requests.length, beforeMixed)
-
-    const requestsBeforePreflightFailures = requests.length
-    const missingImageExec = execution()
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Edit missing image.', image_url: `sha256:${'f'.repeat(64)}` }, missingImageExec),
-      /not present in this e-Mate session/,
-    )
-    const missingImageReceipts = sessionEvents.filter(event => event.data?.call_id === missingImageExec.callId)
-    assert.equal(missingImageReceipts.length, 1)
-    assert.equal(missingImageReceipts[0].data.revision, 2)
-    assert.equal(missingImageReceipts[0].data.status, 'failed')
-    assert.equal(missingImageReceipts[0].data.billing_status, 'not-submitted')
-    assert.equal(missingImageReceipts[0].data.failure_code, 'validation-failed')
-    const invalidArgsExec = execution()
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Do not accept caller-selected model.', model: 'gpt-image-2' }, invalidArgsExec),
-      /additional property|only prompt and optional image_url/iu,
-    )
-    const invalidArgsReceipts = sessionEvents.filter(event => event.data?.call_id === invalidArgsExec.callId)
-    assert.equal(invalidArgsReceipts.length, 1)
-    assert.equal(invalidArgsReceipts[0].data.revision, 2)
-    assert.equal(invalidArgsReceipts[0].data.status, 'failed')
-    assert.equal(invalidArgsReceipts[0].data.billing_status, 'not-submitted')
-    const emptyEditEvents = []
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Modify the above image only.', image_url: attachmentId }, {
-        agent: {
-          id: 'empty-image-session',
-          session: {
-            header: { id: 'empty-image-session', cwd: temporary },
-            events: emptyEditEvents,
-            append(type, data, options) {
-              emptyEditEvents.push({ type, data, ...options, seq: emptyEditEvents.length, time: Date.now() })
-            },
-            deriveMessages: () => [{
-              id: 'empty-edit', role: 'user', source: { kind: 'user' },
-              content: [{ type: 'text', text: '修改上图。' }],
-            }],
-          },
-        },
-        callId: 'empty-edit-call', signal: new AbortController().signal,
-      }),
-      /not present in this e-Mate session/u,
-    )
-    assert.equal(emptyEditEvents.length, 1)
-    assert.equal(emptyEditEvents[0].data.revision, 2)
-    assert.equal(emptyEditEvents[0].data.status, 'failed')
-    assert.equal(emptyEditEvents[0].data.billing_status, 'not-submitted')
-    assert.equal(requests.length, requestsBeforePreflightFailures)
-    const requestsBeforeFailure = requests.length
-    nextFailureStatus = 503
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Do not retry an unknown upstream failure.' }, execution()),
-      /receipt status unknown/u,
-    )
-    assert.equal(requests.length, requestsBeforeFailure + 1)
-    assert.equal(sessionEvents.at(-1).data.status, 'unknown')
-    assert.equal(sessionEvents.at(-1).data.billing_status, 'unknown')
-    assert.equal(sessionEvents.at(-1).data.failure_code, 'http-503')
-    assert.equal(sessionEvents.at(-1).data.parent_session_id, 'image-session')
-    assert.equal('child_session_id' in sessionEvents.at(-1).data, false)
-    assert.equal(sessionEvents.at(-1).data.client_request_id, requestScopes.at(-1).client)
-    assert.equal('provider_request_id' in sessionEvents.at(-1).data, false)
-    const requestsBeforeRateLimit = requests.length
-    const responsesBeforeRateLimit = remoteCounter
-    queuedGatewayOutcomes.push(admission('TENANT_REQUEST_RATE_LIMITED'))
-    const rateRetried = await imagegen.execute({ prompt: 'Retry one typed request admission response.' }, execution())
-    assert.equal(requests.length, requestsBeforeRateLimit + 2)
-    assert.equal(remoteCounter, responsesBeforeRateLimit + 1)
-    assert.deepEqual(requestScopes.slice(-2), [requestScopes.at(-1), requestScopes.at(-1)])
-    assert.deepEqual(requests.slice(-2).map(request => request.body), [
-      { model: 'gpt-image-2.5-flare', prompt: 'Retry one typed request admission response.' },
-      { model: 'gpt-image-2.5-flare', prompt: 'Retry one typed request admission response.' },
-    ])
-    assert.equal(rateRetried.receipt.billing_status, 'recorded')
-
-    const requestsBeforeConcurrency = requests.length
-    queuedGatewayOutcomes.push(admission('TENANT_CONCURRENCY_LIMITED'))
-    await imagegen.execute({ prompt: 'Retry one typed concurrency admission response.' }, execution())
-    assert.equal(requests.length, requestsBeforeConcurrency + 2)
-    assert.deepEqual(requestScopes.slice(-2), [requestScopes.at(-1), requestScopes.at(-1)])
-
-    const beforeLongConcurrency = requests.length
-    const responsesBeforeLongConcurrency = remoteCounter
-    const longWaitStartedAt = Date.now()
-    queuedGatewayOutcomes.push(...Array.from({ length: 10 }, () => admission('TENANT_CONCURRENCY_LIMITED')))
-    const admittedAfterRelease = await imagegen.execute({ prompt: 'Admit after a slot releases ten seconds later.' }, execution())
-    assert.equal(requests.length, beforeLongConcurrency + 11)
-    assert.equal(remoteCounter, responsesBeforeLongConcurrency + 1)
-    assert(Date.now() - longWaitStartedAt >= 10_000)
-    assert.deepEqual(requestScopes.slice(-11), Array(11).fill(requestScopes.at(-1)))
-    assert.equal(new Set(requestRawBodies.slice(-11).map(bytes => bytes.toString('hex'))).size, 1)
-    assert.equal(admittedAfterRelease.receipt.billing_status, 'recorded')
-
-    const assertGatewayFailure = async ({ prompt, outcomes, billing = 'unknown', status = billing === 'unknown' ? 'unknown' : 'failed' }) => {
-      const before = requests.length
-      queuedGatewayOutcomes.push(...outcomes)
-      const attempt = execution()
-      await assert.rejects(imagegen.execute({ prompt }, attempt), new RegExp(`receipt status ${status}`, 'u'))
-      assert.equal(requests.length, before + outcomes.length)
-      const receipt = terminalReceipt(agent, attempt.callId)
-      assert.equal(receipt.billing_status, billing)
-      assert.equal(receipt.status, status)
-      return receipt
-    }
-
-    const capped = await assertGatewayFailure({
-      prompt: 'Stop at the fixed typed admission attempt cap.',
-      outcomes: Array.from({ length: 3 }, () => admission('TENANT_REQUEST_RATE_LIMITED')),
-      billing: 'not-submitted',
-    })
-    assert.equal(capped.failure_code, 'http-429')
-    const beforeBudget = requests.length
-    const responsesBeforeBudget = remoteCounter
-    const budgetStartedAt = Date.now()
-    queuedGatewayOutcomes.push(...Array.from({ length: 31 }, () => admission('TENANT_CONCURRENCY_LIMITED')))
-    const exhaustedExecution = execution()
-    await assert.rejects(imagegen.execute({ prompt: 'Bound continuous concurrency polling to thirty seconds.' }, exhaustedExecution), /receipt status failed/u)
-    assert(requests.length > beforeBudget + 3 && requests.length <= beforeBudget + 31)
-    assert(Date.now() - budgetStartedAt >= 29_000)
-    assert.equal(remoteCounter, responsesBeforeBudget)
-    assert.equal(terminalReceipt(agent, exhaustedExecution.callId).billing_status, 'not-submitted')
-    queuedGatewayOutcomes.length = 0
-    await assertGatewayFailure({
-      prompt: 'Do not wait beyond the total admission deadline.',
-      outcomes: [admission('TENANT_CONCURRENCY_LIMITED', 31_000)],
-      billing: 'not-submitted',
-    })
-
-    const abortWaitController = new AbortController()
-    const beforeAbortWait = requests.length
-    queuedGatewayOutcomes.push(admission('TENANT_CONCURRENCY_LIMITED', 1_000))
-    const abortWaitExecution = { ...execution(), signal: abortWaitController.signal }
-    const abortWait = imagegen.execute({ prompt: 'Abort during typed admission wait.' }, abortWaitExecution)
-    await waitFor(() => requests.length === beforeAbortWait + 1 ? true : undefined, 'typed admission wait did not begin')
-    abortWaitController.abort(new Error('cancel typed admission wait'))
-    await assert.rejects(abortWait, /receipt status cancelled/u)
-    assert.equal(requests.length, beforeAbortWait + 1)
-    assert.equal(terminalReceipt(agent, abortWaitExecution.callId).billing_status, 'not-submitted')
-
-    const malformedAdmissionCases = [
-      new Response(JSON.stringify({ error: { code: 'TENANT_REQUEST_RATE_LIMITED', message: 'missing header', retryAfterMs: 1_000 } }), { status: 429, headers: { 'content-type': 'application/json' } }),
-      admission('TENANT_REQUEST_RATE_LIMITED', 1_000, 'invalid'),
-      admission('TENANT_REQUEST_RATE_LIMITED', 1_000, '2'),
-      new Response('not json', { status: 429, headers: { 'content-type': 'text/plain', 'retry-after': '1' } }),
-      new Response('{', { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } }),
-      new Response(JSON.stringify({ error: null }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } }),
-      new Response(JSON.stringify({ error: { code: 'TENANT_REQUEST_RATE_LIMITED', message: 'invalid\ncontrol', retryAfterMs: 1_000 } }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } }),
-      new Response(JSON.stringify({ error: { code: 'UNKNOWN_LIMIT', message: 'unknown', retryAfterMs: 1_000 } }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } }),
-    ]
-    for (const [index, outcome] of malformedAdmissionCases.entries()) {
-      await assertGatewayFailure({ prompt: `Do not retry malformed admission ${index}.`, outcomes: [outcome] })
-    }
-    await assertGatewayFailure({
-      prompt: 'Do not retry a user token limit.',
-      outcomes: [admission('USER_TOKEN_LIMIT_REACHED')],
-      billing: 'not-submitted',
-    })
-    for (const [prompt, outcome] of [
-      ['Do not retry conflict.', json({ error: { code: 'INVOCATION_REQUEST_CONFLICT' } }, 409)],
-      ['Do not retry gateway failure.', json({ error: { code: 'MODEL_GATEWAY_UNAVAILABLE' } }, 503)],
-      ['Do not retry upstream rejection.', json({ error: { code: 'UPSTREAM_REJECTED' } }, 502)],
-      ['Do not retry network failure.', new Error('network failed')],
-      ['Do not retry timeout.', Object.assign(new Error('request timed out'), { name: 'TimeoutError' })],
-      ['Do not retry malformed success.', new Response('{', { status: 200, headers: { 'content-type': 'application/json' } })],
-      ['Do not retry non-JSON success.', new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })],
-    ]) await assertGatewayFailure({ prompt, outcomes: [outcome] })
-    await assertGatewayFailure({
-      prompt: 'Preserve unknown after an admission retry reaches a network error.',
-      outcomes: [admission('TENANT_REQUEST_RATE_LIMITED'), new Error('network failed after admission')],
-    })
-
-    const sourceReadsBeforeRetry = sourceReadCounts.get(selected.attachmentId) ?? 0
-    const requestsBeforeEditRetry = requests.length
-    const bodiesBeforeEditRetry = requestBodies.length
-    const rawBodiesBeforeEditRetry = requestRawBodies.length
-    queuedGatewayOutcomes.push(admission('TENANT_CONCURRENCY_LIMITED'))
-    const editRetried = await imagegen.execute({
-      prompt: 'Rebuild the same edit body after typed admission.', image_url: selected.attachmentId,
-    }, execution())
-    assert.equal(editRetried.images.length, 1)
-    assert.equal(requests.length, requestsBeforeEditRetry + 2)
-    assert.deepEqual(requests.slice(-2).map(request => request.body), [requests.at(-1).body, requests.at(-1).body])
-    assert.notStrictEqual(requestBodies[bodiesBeforeEditRetry], requestBodies[bodiesBeforeEditRetry + 1])
-    assert.equal(requestRawBodies[rawBodiesBeforeEditRetry].equals(requestRawBodies[rawBodiesBeforeEditRetry + 1]), true)
-    assert.equal(requestContentTypes.at(-2), requestContentTypes.at(-1))
-    assert.match(requestContentTypes.at(-1), /^multipart\/form-data; boundary=/u)
-    assert.equal(sourceReadCounts.get(selected.attachmentId), sourceReadsBeforeRetry + 1)
-
-    const requestsBeforeOversize = requests.length
-    nextFailureStatus = 413
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Reject an oversized image request before provider submission.' }, execution()),
-      /receipt status failed/u,
-    )
-    assert.equal(requests.length, requestsBeforeOversize + 1)
-    assert.equal(sessionEvents.at(-1).data.status, 'failed')
-    assert.equal(sessionEvents.at(-1).data.billing_status, 'not-submitted')
-    assert.equal(sessionEvents.at(-1).data.failure_code, 'http-413')
-
-    const requestsBeforeCommitFailure = requests.length
-    rejectOutputSave = true
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Record a known provider result even if local attachment commit fails.' }, execution()),
-      /receipt status failed/u,
-    )
-    assert.equal(requests.length, requestsBeforeCommitFailure + 1)
-    assert.equal(sessionEvents.at(-1).data.status, 'failed')
-    assert.equal(sessionEvents.at(-1).data.billing_status, 'recorded')
-    assert.match(sessionEvents.at(-1).data.provider_request_id, /^image-response-/u)
-    assert.match(sessionEvents.at(-1).data.client_request_id, /^image-/u)
-    assert.equal(sessionEvents.at(-1).data.failure_code, 'provider-result-uncommitted')
-
-    const unsupportedEvents = []
-    const unsupportedAgent = {
-      id: 'unsupported-image-session',
-      session: {
-        header: { id: 'unsupported-image-session', cwd: temporary },
-        events: unsupportedEvents,
-        deriveMessages: () => [{
-          id: 'unsupported-image-source', role: 'user', source: { kind: 'user' },
-          content: [{ type: 'image', attachment: { ...selected, mediaType: 'image/gif' } }],
-        }],
-        append(type, data, options) {
-          unsupportedEvents.push({ type, data, ...options, seq: unsupportedEvents.length, time: Date.now() })
-        },
-      },
-    }
-    const requestsBeforeValidationFailure = requests.length
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Reject unsupported source media.', image_url: selected.attachmentId }, {
-        agent: unsupportedAgent,
-        callId: 'unsupported-source-call',
-        signal: new AbortController().signal,
-      }),
-      /receipt status failed/u,
-    )
-    assert.equal(requests.length, requestsBeforeValidationFailure)
-    assert.equal(unsupportedEvents.at(-1).data.billing_status, 'not-submitted')
-    assert.equal('job_id' in unsupportedEvents.at(-1).data, false)
-    assert.equal('client_request_id' in unsupportedEvents.at(-1).data, false)
-
-    let releaseModelPolicy
-    modelPolicyGate = new Promise(resolveGate => { releaseModelPolicy = resolveGate })
-    const enteredModelPolicy = new Promise(resolveEntered => { modelPolicyGateEntered = resolveEntered })
-    const preSubmitCancelController = new AbortController()
-    const requestsBeforePreSubmitCancel = requests.length
-    const preSubmitCancelled = imagegen.execute({ prompt: 'Cancel before any image submission.' }, {
-      ...execution(), signal: preSubmitCancelController.signal,
-    })
-    await enteredModelPolicy
-    preSubmitCancelController.abort(new Error('cancelled before image submission'))
-    releaseModelPolicy()
-    await assert.rejects(preSubmitCancelled, /receipt status cancelled/u)
-    modelPolicyGate = undefined
-    modelPolicyGateEntered = undefined
-    assert.equal(requests.length, requestsBeforePreSubmitCancel)
-    assert.equal(sessionEvents.at(-1).data.status, 'cancelled')
-    assert.equal(sessionEvents.at(-1).data.billing_status, 'not-submitted')
-
-    const requestsBeforeNoop = requests.length
-    nextNoop = true
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Change the supplied image.', image_url: second.attachmentId }, execution()),
-      /same SHA-256/u,
-    )
-    assert.equal(requests.length, requestsBeforeNoop + 1)
-    assert.equal(sessionEvents.at(-1).data.status, 'failed')
-    assert.equal(sessionEvents.at(-1).data.failure_code, 'source-output-same-sha256')
-    assert.equal(sessionEvents.at(-1).data.revision, 2)
-    assert.deepEqual(sessionEvents.at(-1).data.verifier, { structural: 'attachment-cas-v1', semantic: 'not-configured' })
-    assert.equal(sessionEvents.at(-1).data.verification.semantic, 'failed')
-    assert.equal(sessionEvents.at(-1).data.verification.human_review, undefined)
-    assert.equal(sessionEvents.at(-1).data.content.length, 0)
-    assert.equal((await imagePack.execute({ image_url: [second.attachmentId] }, execution())).image_count, 1)
-
-    let releaseRequestGate
-    requestGate = new Promise(resolveGate => { releaseRequestGate = resolveGate })
-    const cancelController = new AbortController()
-    const cancelExecution = execution()
-    cancelExecution.signal = cancelController.signal
-    const cancelled = imagegen.execute({ prompt: 'Cancel this image exactly once.' }, cancelExecution)
-    await waitFor(() => activeSubmissions === 1 ? true : undefined, 'cancelled image request did not reach the provider')
-    cancelController.abort(new Error('cancelled by test'))
-    await assert.rejects(cancelled, /receipt status cancelled/u)
-    releaseRequestGate()
-    requestGate = undefined
-    assert.equal(sessionEvents.at(-1).data.status, 'cancelled')
-    assert.equal(sessionEvents.at(-1).data.billing_status, 'unknown')
-    assert.equal(sessionEvents.at(-1).data.failure_code, 'cancelled')
-    assert.equal(JSON.stringify([...tools.values()].map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    }))), toolHeaderContract)
-
-    const serviceActiveParent = nativeParent('image-service-active-parent')
-    const serviceWaitingParent = nativeParent('image-service-waiting-parent')
-    const jobsBeforeServiceTeardown = jobs.length
-    const providersBeforeServiceTeardown = jobTimeline.filter(entry => entry.startsWith('provider:')).length
-    let releaseServiceGate
-    requestGate = new Promise(resolveGate => { releaseServiceGate = resolveGate })
-    const serviceActiveCall = imagegen.execute({ prompt: 'Hold one provider through service teardown.' }, {
-      agent: serviceActiveParent,
-      callId: 'service-active-call',
-      signal: new AbortController().signal,
-    })
-    const serviceActiveOutcome = Promise.allSettled([serviceActiveCall])
-    const serviceWaitingCall = imagegen.execute({ prompt: 'Hold a second independent provider through service teardown.' }, {
-      agent: serviceWaitingParent,
-      callId: 'service-waiting-call',
-      signal: new AbortController().signal,
-    })
-    const serviceWaitingOutcome = Promise.allSettled([serviceWaitingCall])
-    await waitFor(() => activeSubmissions === 2 ? true : undefined, 'service teardown image Jobs did not overlap')
-    const serviceActiveJob = await waitFor(
-      () => jobs.length >= jobsBeforeServiceTeardown + 1 ? jobs[jobsBeforeServiceTeardown] : undefined,
-      'service-active image Job was not registered',
-    )
-    const serviceWaitingJob = await waitFor(
-      () => jobs.length >= jobsBeforeServiceTeardown + 2 ? jobs[jobsBeforeServiceTeardown + 1] : undefined,
-      'service-waiting image Job was not registered',
-    )
-    assert.equal(context.jobs.get(serviceActiveJob.id, serviceActiveParent).status, 'running')
-    assert.equal(context.jobs.get(serviceWaitingJob.id, serviceWaitingParent).status, 'running')
-    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeServiceTeardown + 2)
-    await jobFiber.dispose()
-    jobFiber = undefined
-    releaseServiceGate()
-    requestGate = undefined
-    assert.deepEqual((await serviceActiveOutcome).map(result => result.status), ['rejected'])
-    assert.deepEqual((await serviceWaitingOutcome).map(result => result.status), ['rejected'])
-    const serviceActiveReceipt = terminalReceipt(serviceActiveParent, 'service-active-call')
-    const serviceWaitingReceipt = terminalReceipt(serviceWaitingParent, 'service-waiting-call')
-    assert.equal(serviceActiveReceipt.job_id, serviceActiveJob.id)
-    assert.equal(serviceActiveReceipt.status, 'cancelled')
-    assert.equal(serviceActiveReceipt.failure_code, 'cancelled')
-    assert.equal(serviceActiveReceipt.billing_status, 'unknown')
-    assert.equal(serviceWaitingReceipt.job_id, serviceWaitingJob.id)
-    assert.equal(serviceWaitingReceipt.status, 'cancelled')
-    assert.equal(serviceWaitingReceipt.failure_code, 'cancelled')
-    assert.equal(serviceWaitingReceipt.billing_status, 'unknown')
-    assert.equal('provider_request_id' in serviceWaitingReceipt, false)
-    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeServiceTeardown + 2)
-    assert.deepEqual([...waitedJobs].sort(), jobs.map(job => job.id).sort())
-  } finally {
-    for (const cleanup of cleanups.reverse()) await cleanup()
-    await attachmentFiber?.dispose()
-    await context.fiber.dispose()
-    rmSync(temporary, { recursive: true, force: true })
-  }
-})
-
 test('expert mode persists in its native session and leaves other conversations unchanged', async () => {
   const first = { header: { cwd: '/test' }, events: [], append(type, data) { this.events.push({ type, data }) } }
   const second = { events: [] }
@@ -3038,10 +1161,9 @@ test('expert mode persists in its native session and leaves other conversations 
   await assert.rejects(expertModeRequest(ctx, 'set', { session_id: 'missing', active: true }), /尚未就绪/u)
 })
 
-test('Agent operation guidance owns the e-Mate persona and native image batch policy', () => {
+test('Agent operation guidance owns the e-Mate persona without a second image policy', () => {
   let section
   applyAgentOperations({
-    get: name => name === 'tools' ? { schemas: () => [{ name: 'image_batch' }] } : undefined,
     effect: () => {},
     systemPrompt: { section: value => { if (value.name === 'emate:agent-operations') section = value } },
   })
@@ -3067,17 +1189,9 @@ test('Agent operation guidance owns the e-Mate persona and native image batch po
   assert.match(section.text, /installed find-skill provider/u)
   assert.match(section.text, /use `mcp_manage`/u)
   assert.match(section.text, /latest direct request explicitly asks to read or operate a user-visible webpage/u)
-  assert.match(section.text, /never use Browser\/CDP as a fallback for `imagegen`, native `web_search`, attachment resolution/u)
+  assert.match(section.text, /never use Browser\/CDP as a fallback for native `web_search`, attachment resolution/u)
   assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
-  assert.match(section.text, /Call `imagegen` in the current Agent once per image output/u)
-  assert.match(section.text, /Independent outputs may use concurrent calls to the same Tool/u)
-  assert.match(section.text, /it is not required for multiple outputs/u)
-  assert.doesNotMatch(section.text, /Batch source\/edit tasks remain unavailable/u)
-  assert.match(section.text, /explicit source IDs for each edit or fusion/u)
-  assert.match(section.text, /Dependent edits wait/u)
-  assert.match(section.text, /Successful images remain valid when sibling tasks fail/u)
-  assert.match(section.text, /Never display attachment IDs, hashes, receipt pointers, child Session IDs, Job IDs/u)
-  assert.doesNotMatch(section.text, /run_in_background|at most four sibling native|native AgentLoop's existing four-call limit/u)
+  assert.doesNotMatch(section.text, /imagegen|image_batch|image_pack|batch children/u)
 })
 
 test('identity agreements are immutable, explicit, and use the target Connection RPC', async () => {
@@ -5168,20 +3282,20 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
       tools: {
         provenance(name, agent) {
           if (agent.id === 'audit-provenance-error') throw new Error('private provenance failure')
-          if (name === 'office_write' && agent.id === 'audit-private-office') {
+          if (name === 'univer_new' && agent.id === 'audit-private-office') {
             return { moduleSpecifier: './private/office.js', pluginName: 'private-office' }
           }
-          if (name === 'office_read') {
+          if (name === 'univer_inspect') {
             return {
-              moduleSpecifier: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
-              pluginName: 'emate-office-skills',
+              moduleSpecifier: './node_modules/@e-mate/dsh-plugin-univer-office/lib/index.js',
+              pluginName: 'univer-tools',
             }
           }
-          if (name === 'office_write') {
-            return { moduleSpecifier: '@e-mate/dsh-plugin-office-skills', pluginName: 'emate-office-skills' }
+          if (name === 'univer_new') {
+            return { moduleSpecifier: '@e-mate/dsh-plugin-univer-office', pluginName: 'univer-tools' }
           }
-          if (name === 'imagegen' || name === 'image_batch') {
-            return { moduleSpecifier: './plugins/image-generation.js', pluginName: 'emate-image-generation' }
+          if (name === 'generate_image' || name === 'edit_image') {
+            return { moduleSpecifier: './node_modules/@e-mate/dsh-plugin-imagegen/lib/index.js', pluginName: 'emate-imagegen' }
           }
           if (name === 'web_search') {
             return { moduleSpecifier: '@deepseek-ai/dsh-tool-web', pluginName: 'tool-web' }
@@ -5263,13 +3377,13 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
     const startedAt = Date.now()
     run('audit-content', startedAt)
     run('audit-office', startedAt + 100, {
-      terminalEvidence: (agent, time) => { settleTool(agent, time, 'office_write') },
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'univer_new') },
     })
-    const imageReceipt = status => (agent, time) => {
+    const imageReceipt = (status, schemaVersion = 2) => (agent, time) => {
       handlers.get('session/event')(agent, {
         type: 'emate/image-output', seq: 2, time: time + 2,
         data: {
-          schema_version: 2,
+          schema_version: schemaVersion,
           call_id: `private-image-call:${agent.id}`,
           parent_session_id: agent.id,
           status,
@@ -5282,52 +3396,53 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
       terminalEvidence: (agent, time) => { settleTool(agent, time, 'web_search') },
     })
     run('audit-private-office', startedAt + 400, {
-      terminalEvidence: (agent, time) => { settleTool(agent, time, 'office_write') },
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'univer_new') },
     })
     run('audit-unknown', startedAt + 500, {
       terminalEvidence: (agent, time) => { settleTool(agent, time, 'private_tool') },
     })
     run('audit-provenance-error', startedAt + 600, {
-      terminalEvidence: (agent, time) => { settleTool(agent, time, 'office_write') },
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'univer_new') },
     })
     run('audit-conflict', startedAt + 700, {
       terminalEvidence: (agent, time) => {
-        settleTool(agent, time, 'office_read')
+        settleTool(agent, time, 'univer_inspect')
         imageReceipt('completed')(agent, time)
       },
     })
     run('audit-office-cancelled', startedAt + 800, {
       reason: 'aborted',
-      terminalEvidence: (agent, time) => { settleTool(agent, time, 'office_write', true) },
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'univer_new', true) },
     })
     run('audit-image-cancelled', startedAt + 900, {
       reason: 'interrupted',
       terminalEvidence: imageReceipt('failed'),
     })
     run('audit-model-name-only', startedAt + 1_000, { model: 'gpt-image-2.5-flare' })
-    run('audit-imagegen-tool', startedAt + 1_100, {
-      terminalEvidence: (agent, time) => { settleTool(agent, time, 'imagegen', true) },
+    run('audit-generate-image-tool', startedAt + 1_100, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'generate_image', true) },
     })
-    run('audit-image-batch-tool', startedAt + 1_150, {
-      terminalEvidence: (agent, time) => { settleTool(agent, time, 'image_batch', true) },
+    run('audit-edit-image-tool', startedAt + 1_150, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'edit_image', true) },
     })
     run('audit-document-with-search', startedAt + 1_200, {
       terminalEvidence: (agent, time) => {
         settleTool(agent, time, 'web_search')
-        settleTool(agent, time, 'office_read')
+        settleTool(agent, time, 'univer_inspect')
       },
     })
     run('audit-document-with-run-code', startedAt + 1_250, {
       terminalEvidence: (agent, time) => {
-        settleTool(agent, time, 'office_read')
+        settleTool(agent, time, 'univer_inspect')
         settleTool(agent, time, 'run_code')
       },
     })
+    run('audit-image-v3', startedAt + 1_275, { terminalEvidence: imageReceipt('completed', 3) })
     const abandonedAgent = { id: 'audit-abandoned' }
     handlers.get('session/event')(abandonedAgent, {
       type: 'turn/start', seq: 0, time: startedAt + 1_300, data: { turn: 1 },
     })
-    settleTool(abandonedAgent, startedAt + 1_300, 'office_write')
+    settleTool(abandonedAgent, startedAt + 1_300, 'univer_new')
     handlers.get('agent/disposed')({ agent: abandonedAgent })
     await audit.drain()
 
@@ -5350,7 +3465,8 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
       'ASSET_PRODUCTION',
       'ASSET_PRODUCTION',
       'DOCUMENT_EDITING',
-      'GENERAL',
+      'DOCUMENT_EDITING',
+      'ASSET_PRODUCTION',
       'GENERAL',
     ])
     const scenariosByTask = Map.groupBy(taskRecords, record => record.payload.taskId)
@@ -5361,7 +3477,7 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
     for (const privateValue of [
       'private-response',
       'private_tool',
-      'office_write',
+      'univer_new',
       'web_search',
       'PRIVATE_FAILURE',
       '/private/customer.docx',
@@ -5397,7 +3513,7 @@ test('audit replays persisted scenario candidates without reclassifying historic
     },
     {
       type: 'tool/call', seq: 2, time: 1_800_000_000_002,
-      data: { turn: 1, step: 1, callId: 'private-replay-call', name: 'office_read', arguments: '{}' },
+      data: { turn: 1, step: 1, callId: 'private-replay-call', name: 'univer_inspect', arguments: '{}' },
     },
     { type: 'turn/end', seq: 3, time: 1_800_000_000_003, data: { turn: 1, reason: { kind: 'completed' } } },
   ]
@@ -5418,8 +3534,8 @@ test('audit replays persisted scenario candidates without reclassifying historic
       sessionPersistence,
       storageDomain: { open: async () => domain(openedDomains++ === 0 ? usageTables : taskTables) },
       tools: {
-        provenance: name => name === 'office_read'
-          ? { moduleSpecifier: '@e-mate/dsh-plugin-office-skills', pluginName: 'emate-office-skills' }
+        provenance: name => name === 'univer_inspect'
+          ? { moduleSpecifier: '@e-mate/dsh-plugin-univer-office', pluginName: 'univer-tools' }
           : undefined,
       },
       emateIdentity: { localAccountSubject: () => 'tenant-207:replay-user' },
@@ -5449,7 +3565,7 @@ test('audit replays persisted scenario candidates without reclassifying historic
       first.handlers.get('session/event')({ id: 'audit-replay' }, event)
     }
     first.handlers.get('tools/result')({
-      name: 'office_read', callId: 'private-replay-call', agent: { id: 'audit-replay' },
+      name: 'univer_inspect', callId: 'private-replay-call', agent: { id: 'audit-replay' },
     }, { isError: false, content: [{ type: 'text', text: 'private-result' }], value: null })
     await first.audit.drain('audit-replay')
     assert.equal(taskTables.outbox.size, 0)

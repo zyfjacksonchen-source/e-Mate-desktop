@@ -2,8 +2,8 @@
 
 import { readFileSync, realpathSync } from 'node:fs'
 import { builtinModules, registerHooks } from 'node:module'
-import { join, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { dirname, join, resolve, sep } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isProfileBaseRuntimePackage } from './base-contract.ts'
 
 const DESKTOP_ENTRY_URL = new URL('../lib/index.js', import.meta.url).href
@@ -64,9 +64,38 @@ export function installProfilePackageResolver(
   baseRuntimeEntryUrl: string = DESKTOP_ENTRY_URL,
 ): () => void {
   const components = [...componentRoots].map(root => ({
+    root: realpathSync(resolve(root)),
     prefix: pathToFileURL(`${realpathSync(resolve(root))}${sep}`).href,
     imports: componentBaseImports(root, baseRuntimeImports),
   }))
+  const localDeclarations = new Map<string, ReadonlySet<string>>()
+  const declaresLocalDependency = (root: string, parentURL: string, specifier: string): boolean => {
+    // Harness and product services remain exclusive to the declared Base ABI.
+    if (specifier.startsWith('@deepseek-ai/') || specifier.startsWith('@e-mate/')) return false
+    const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]!
+    let directory = dirname(fileURLToPath(parentURL))
+    while (directory === root || directory.startsWith(`${root}${sep}`)) {
+      let names = localDeclarations.get(directory)
+      if (names === undefined) {
+        try {
+          const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')) as {
+            name?: string; dependencies?: Record<string, unknown>; optionalDependencies?: Record<string, unknown>
+          }
+          names = new Set([
+            ...(manifest.name === undefined ? [] : [manifest.name]),
+            ...Object.keys(manifest.dependencies ?? {}),
+            ...Object.keys(manifest.optionalDependencies ?? {}),
+          ])
+          localDeclarations.set(directory, names)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+      }
+      if (names !== undefined) return names.has(name)
+      directory = dirname(directory)
+    }
+    return false
+  }
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
       const fromLoader = context.parentURL === loaderEntryUrl
@@ -84,6 +113,12 @@ export function installProfilePackageResolver(
               return nextResolve(specifier, { ...context, parentURL })
             }
             if (BUILTIN_PACKAGES.has(specifier)) return nextResolve(specifier, context)
+            if (declaresLocalDependency(component.root, context.parentURL, specifier)) {
+              const resolved = nextResolve(specifier, context)
+              if (resolved.url.startsWith('file:')
+                && pathToFileURL(realpathSync(fileURLToPath(resolved.url))).href.startsWith(component.prefix)) return resolved
+              throw new Error(`bundled Profile component dependency escape is blocked: ${specifier}`)
+            }
             throw new Error(`bundled Profile component undeclared runtime import is blocked: ${specifier}`)
           }
           if (specifier.startsWith('node:') && BUILTIN_PACKAGES.has(specifier.slice(5))) {

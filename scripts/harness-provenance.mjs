@@ -16,6 +16,7 @@ import {
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
+import { adaptHarnessSessionTitleSource, SESSION_TITLE_PACKAGE, SESSION_TITLE_ADAPTER_PATH } from './harness-runtime-adapters.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSource, ARTIFACT_LINKS_RENDERER_PATH, ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE, adaptHarnessArtifactDeliverablesSource, ARTIFACT_DELIVERABLES_PACKAGE } from './harness-artifact-links-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
@@ -321,6 +322,10 @@ export function materializeHarnessDesktopRuntime(root) {
     if (!existsSync(sourceLib)) throw new Error(`pinned Harness build is missing emitted lib for ${manifest.name}`)
     rmSync(targetLib, { recursive: true, force: true })
     cpSync(sourceLib, targetLib, { recursive: true, errorOnExist: true })
+    if (manifest.name === SESSION_TITLE_PACKAGE) {
+      const entry = join(targetLib, 'index.js')
+      writeFileSync(entry, adaptHarnessSessionTitleSource(readFileSync(entry, 'utf8')))
+    }
     if (manifest.name === ARTIFACT_LINKS_PACKAGE) {
       const entry = join(targetLib, 'index.js')
       writeFileSync(entry, adaptHarnessArtifactLinksSource(readFileSync(entry, 'utf8')))
@@ -380,11 +385,16 @@ function desktopProvenance(root, receipt) {
     const targetLib = join(target, 'lib')
     if (!existsSync(sourceLib) || !existsSync(targetLib)) throw new Error(`Desktop Harness lib is missing: ${manifest.name}`)
     const overlay = DESKTOP_OVERLAYS.get(manifest.name)
-    const adapter = manifest.name === ARTIFACT_LINKS_PACKAGE || manifest.name === ARTIFACT_DELIVERABLES_PACKAGE ? ARTIFACT_LINKS_ADAPTER_PATH
+    const adapter = manifest.name === SESSION_TITLE_PACKAGE ? SESSION_TITLE_ADAPTER_PATH
+      : manifest.name === ARTIFACT_LINKS_PACKAGE || manifest.name === ARTIFACT_DELIVERABLES_PACKAGE ? ARTIFACT_LINKS_ADAPTER_PATH
       : manifest.name === SLOT_ERROR_PACKAGE ? SLOT_ERROR_ADAPTER_PATH
       : manifest.name === CONVERSATION_PACKAGE ? CONVERSATION_ADAPTER_PATH
       : manifest.name === SESSION_EXPORT_PACKAGE ? SESSION_EXPORT_ADAPTER_PATH
         : manifest.name === FS_BYTES_PACKAGE ? FS_BYTES_ADAPTER_PATH : null
+    if (manifest.name === SESSION_TITLE_PACKAGE && readFileSync(join(targetLib, 'index.js'), 'utf8')
+      !== adaptHarnessSessionTitleSource(readFileSync(join(sourceLib, 'index.js'), 'utf8'))) {
+      throw new Error('Desktop session titles do not match the pinned native owner plus product adapter')
+    }
     if (manifest.name === ARTIFACT_LINKS_PACKAGE && readFileSync(join(targetLib, 'index.js'), 'utf8')
       !== adaptHarnessArtifactLinksSource(readFileSync(join(sourceLib, 'index.js'), 'utf8'))) {
       throw new Error('Desktop artifact links do not match the pinned native renderer plus product adapter')

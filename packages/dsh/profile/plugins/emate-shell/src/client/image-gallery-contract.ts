@@ -11,6 +11,7 @@ export interface ImageGalleryItem {
   readonly createdAt?: number
   readonly attachment?: ImageAttachmentRef
   readonly failureCode?: string
+  readonly failureMessage?: string
   /** Read-only presentation provenance; never written back into a receipt. */
   readonly source?: {
     readonly kind: 'subagent'
@@ -98,4 +99,56 @@ export function parseImageOutputReceipt(value: unknown): ImageGalleryItem | null
 
 export function imageReceiptRole(item: ImageGalleryItem): 'start' | 'update' {
   return item.revision === 3 ? 'update' : 'start'
+}
+
+export interface ImageOutputGroup {
+  readonly callId: string
+  readonly rootCallId?: string
+  readonly revision: number
+  readonly items: readonly ImageGalleryItem[]
+}
+const V3_KEYS = new Set(['turn', 'schema_version', 'revision', 'call_id', 'root_call_id', 'tool_name', 'task_id',
+  'parent_session_id', 'operation', 'status', 'sources', 'content', 'model', 'job_id',
+  'request_receipts', 'provider_request_ids', 'client_request_ids', 'requested_count', 'returned_count', 'failed_count', 'error'])
+
+/** New jobs have one durable receipt containing every saved native attachment. */
+export function parseImageOutputGroup(value: unknown): ImageOutputGroup | null {
+  if (!record(value) || value.schema_version !== 3) {
+    const item = parseImageOutputReceipt(value)
+    return item === null ? null : { callId: item.callId, revision: item.revision, items: [item] }
+  }
+  if (Object.keys(value).some(key => !V3_KEYS.has(key))
+    || !['call_id', 'root_call_id', 'task_id', 'parent_session_id'].every(key => typeof value[key] === 'string' && value[key] !== '')
+    || value.turn !== undefined && (!Number.isSafeInteger(value.turn) || Number(value.turn) < 0)
+    || !['generate', 'edit'].includes(String(value.operation))
+    || value.tool_name !== (value.operation === 'edit' ? 'edit_image' : 'generate_image')
+    || !['running', 'completed', 'failed', 'cancelled'].includes(String(value.status))
+    || value.revision !== (value.status === 'running' ? 1 : 2)
+    || value.model !== 'gpt-image-2.5-flare'
+    || !Array.isArray(value.sources) || value.sources.some(ref => imageRef(ref, true) === undefined)
+    || !Array.isArray(value.content) || value.content.length > 4
+    || value.status === 'completed' && value.content.length === 0
+    || value.status === 'running' && value.content.length !== 0
+    || !Number.isSafeInteger(value.requested_count) || Number(value.requested_count) < 1 || Number(value.requested_count) > 4
+    || value.returned_count !== value.content.length
+    || value.failed_count !== (value.status === 'running' ? 0 : Number(value.requested_count) - value.content.length)
+    || Number(value.returned_count) > Number(value.requested_count)
+    || ['provider_request_ids', 'client_request_ids'].some(key => value[key] !== undefined
+      && (!Array.isArray(value[key]) || value[key].some(id => typeof id !== 'string' || id === '')))
+    || value.error !== undefined && typeof value.error !== 'string') return null
+  const images: ImageAttachmentRef[] = []
+  for (const block of value.content) {
+    if (!record(block) || block.type !== 'image') return null
+    const ref = imageRef(block.attachment, true)
+    if (ref === undefined) return null
+    if (!images.some(image => image.attachmentId === ref.attachmentId)) images.push(ref)
+  }
+  const base = { callId: value.call_id as string, revision: value.revision as number,
+    operation: value.operation as 'generate' | 'edit' }
+  return { callId: base.callId, rootCallId: value.root_call_id as string, revision: base.revision,
+    items: value.status === 'running' ? [] : images.length > 0
+      ? images.map(attachment => ({ ...base, status: 'completed', attachment }))
+      : [{ ...base, status: 'failed', failureMessage: typeof value.error === 'string' && value.error !== ''
+        ? value.error : value.status === 'cancelled' ? '已取消' : '生成失败' }],
+  }
 }

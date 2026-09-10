@@ -162,7 +162,7 @@ function nodeProps(chat, openFile) {
   return { nodeKey: node.key, selectedCallId: null, cwd: '/workspace', openFile, inspectCall() {}, forkAt() {}, useSession,
     fileMentions: owner => fileLinkOwner({ get: () => undefined }, owner), t: key => key,
     renderSlot(_name, owner, { hookContext }) {
-      return jsx(conversationOwners.AssistantNodeView, { ...owner, t: key => key, useTurnData: conversationOwners.CHAT_NODE_INJECT.hooks.turnData({ useSession }, hookContext) })
+      return jsx(conversationOwners.AssistantNodeView, { ...owner, useSession, t: key => key, useTurnData: conversationOwners.CHAT_NODE_INJECT.hooks.turnData({ useSession }, hookContext) })
     },
   }
 }
@@ -276,4 +276,84 @@ test('native deliverables adopts only successful Office receipts explicitly name
   assert.ok(paths().includes('.e-mate/office/page.png'))
   const before = paths(); const event = { type: 'assistant/message', surfaceOp: 'replace', data: { turn: 3 } }
   assert.equal(definition.match(event), null); assert.deepEqual(paths(), before)
+})
+
+test('Univer outputs use native root and Code trees in replay and live closing, with exact paths and session ownership', async () => {
+  const { adaptHarnessArtifactDeliverablesSource } = await import('./harness-artifact-links-adapter.mjs')
+  const adapted = adaptHarnessArtifactDeliverablesSource(await readFile(join(harness, 'packages/client/ui-deliverables/lib/client.js'), 'utf8'))
+  const code = adapted.slice(adapted.indexOf('function producedPaths('), adapted.indexOf('function basename('))
+  const select = new Function('_deepseek_ai_dsh_client_runtime_client', code + '\nreturn selectProducedFiles')({ isAppendSurfaceEvent: () => true })
+  const events = []; let seq = 0
+  const add = (type, data) => events.push({ type, data, seq: ++seq, time: 100 + seq, surfaceOp: 'append' })
+  const content = (operation, file, result) => [{ type: 'text', text: JSON.stringify({ ok: true, operation, ...(file ? { file } : {}), result }) }]
+  const call = (id, name, blocks, isError = false, turn = 1) => {
+    add('tool/call', { turn, step: 1, callId: id, name, arguments: '{}' })
+    add('tool/result', { turn, step: 1, message: { source: { callId: id }, content: [{ type: 'tool-result', isError, content: blocks }] } })
+  }
+  const file = '/workspace/book.univer'
+  add('turn/start', { turn: 1 }); add('step/start', { turn: 1, step: 1 })
+  call('new', 'univer_new', content('new', file, { filePath: file, created: true }))
+  call('export', 'univer_export', content('export', file, { filePath: file, outputPath: '/one/report.xlsx', kind: 'sheet' }))
+  call('execute-read', 'univer_execute', content('execute', file, { filePath: file, committed: false }))
+  call('png', 'univer_screenshot', content('screenshot', file, { images: [{ path: '/workspace/page.png', mediaType: 'image/png', image: { attachmentId: 'sha256:' + 'a'.repeat(64), mediaType: 'image/png' } }] }))
+  call('svg', 'univer_resources', content('resources', undefined, { exported: [{ path: '/workspace/icon.svg' }] }))
+  for (const [id, output] of [['root-a', '/one/report.pdf'], ['root-b', 'C:\\two\\report.pdf']]) {
+    add('tool/call', { turn: 1, step: 1, callId: id, name: 'run_code', arguments: '{}' })
+    const identity = { rootCallId: id, parentCallId: id, subCallId: 'same-child', name: 'univer_print_pdf', arguments: { output: '/guessed.pdf' } }
+    add('tool/code-dispatch-start', identity)
+    add('tool/code-dispatch', { ...identity, isError: false, content: content('print-pdf', file, { output, pageCount: 1, unitType: 'slide' }) })
+    add('tool/result', { turn: 1, step: 1, message: { source: { callId: id }, content: [{ type: 'tool-result', isError: id === 'root-b', content: [{ type: 'text', text: 'partial: /guessed.pdf' }] }] } })
+  }
+  const fake = content('print-pdf', file, { output: '/fake.pdf', pageCount: 1 })
+  call('stdout', 'run_code', fake); call('failed', 'univer_print_pdf', fake, true)
+  call('mismatch', 'univer_export', fake)
+  call('escape', 'univer_print_pdf', content('print-pdf', file, { output: '/workspace/../escape.pdf', pageCount: 1 }))
+  call('remote', 'univer_print_pdf', content('print-pdf', file, { output: 'https://example.com/report.pdf', pageCount: 1 }))
+  call('prose', 'univer_print_pdf', [{ type: 'text', text: 'Result: ' + fake[0].text }])
+  add('assistant/message', { turn: 1, step: 1, message: { id: 'done', role: 'assistant', content: [{ type: 'text', text: '完成' }] } })
+  const closing = seq
+  call('late', 'univer_print_pdf', content('print-pdf', file, { output: '/late.pdf', pageCount: 1 }))
+  add('step/end', { turn: 1, step: 1 }); add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+  add('turn/start', { turn: 2 }); add('step/start', { turn: 2, step: 1 })
+  call('foreign', 'univer_print_pdf', content('print-pdf', file, { output: '/foreign.pdf', pageCount: 1 }), false, 2)
+  const expected = [file, '/one/report.xlsx', '/workspace/page.png', '/workspace/icon.svg', '/one/report.pdf', 'C:\\two\\report.pdf']
+  for (const incremental of [false, true]) {
+    const chat = nativeChat(events, incremental)
+    const turn = chat.timeline.turns.get(1)
+    const owner = { turn, seq: closing, nodes: chat.nodes.values(), openFile() {} }
+    assert.deepEqual(select(owner), expected)
+    assert.deepEqual(select({ ...owner, seq: Infinity }), [...expected, '/late.pdf'])
+    const { nodes, ...assistantOwner } = owner
+    const snapshot = { sessionId: 'current', openState: 'open', chat }
+    const session = { getSnapshot: () => snapshot }
+    const sessions = { list: { getSnapshot: () => ({ current: 'current' }) }, binding: () => ({ session }) }
+    assert.deepEqual(select(assistantOwner, sessions), expected)
+    const foreignChat = nativeChat(events)
+    assert.equal(select({ ...assistantOwner, turn: foreignChat.timeline.turns.get(1) }, sessions), null)
+    const opened = []; const mentions = vocabulary.producedFileMentions(select(owner), path => opened.push(path), path => path)
+    assert.equal(mentions.resolve('report.pdf'), undefined)
+    for (const path of ['/one/report.pdf', 'C:\\two\\report.pdf']) mentions.resolve(path).open()
+    assert.deepEqual(opened, ['/one/report.pdf', 'C:\\two\\report.pdf'])
+    const priorOpened = []
+    const followUp = { turn: chat.timeline.turns.get(2), seq: Infinity, nodes: chat.nodes.values().filter(node => node.location.turn?.turn === 2), openFile: path => priorOpened.push(path) }
+    const service = { forClosing: owner => {
+      const paths = select(owner, sessions)
+      return paths === null ? undefined : vocabulary.producedFileMentions(paths, owner.openFile, path => path)
+    } }
+    const followMentions = fileLinkOwner({ get: () => service }, followUp, sessions, 'current')
+    assert.deepEqual(select(followUp, sessions), ['/foreign.pdf'])
+    for (const path of [file, '/one/report.xlsx', '/one/report.pdf', 'C:\\two\\report.pdf']) {
+      assert.equal(followMentions.resolve(path)?.title, path)
+      followMentions.resolve(path).open()
+    }
+    assert.deepEqual(priorOpened, [file, '/one/report.xlsx', '/one/report.pdf', 'C:\\two\\report.pdf'])
+    assert.deepEqual(select(followUp, sessions), ['/foreign.pdf'], 'prior mentions do not promote new produced facts')
+    for (const unknown of ['report.pdf', '/unverified/report.pdf', '/fake.pdf', '/workspace/../escape.pdf']) assert.equal(followMentions.resolve(unknown), undefined)
+    const retained = followMentions.resolve(file)
+    snapshot.sessionId = 'other-session'
+    assert.equal(followMentions.resolve(file), undefined); retained.open(); assert.equal(priorOpened.length, 4)
+    snapshot.sessionId = 'current'
+    snapshot.chat = foreignChat
+    assert.equal(followMentions.resolve(file), undefined); retained.open(); assert.equal(priorOpened.length, 4)
+  }
 })

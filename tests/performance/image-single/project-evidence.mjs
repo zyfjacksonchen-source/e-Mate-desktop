@@ -10,14 +10,18 @@ const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
 const SHA256 = /^[0-9a-f]{64}$/u
 const writeNew = (path, value) => writeFileSync(path, value, { flag: 'wx', mode: 0o600 })
 
-function gui([measurementsPath, outputPath]) {
+async function gui([measurementsPath, outputPath]) {
   if (!outputPath) throw new Error('usage: project-evidence.mjs gui MEASUREMENTS_JSON GUI_RAW_OUT')
   const dirty = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=no'], { cwd: ROOT, encoding: 'utf8' }).trim()
   if (dirty) throw new Error('EM218-108 GUI evidence requires a clean committed worktree')
   const machine = process.env.EMATE_EVIDENCE_MACHINE_NAME
   const appBundle = process.env.EMATE_EVIDENCE_APP_BUNDLE_SHA256
   if (!machine || machine.length > 128 || !SHA256.test(appBundle ?? '')) throw new Error('EMATE_EVIDENCE_MACHINE_NAME and EMATE_EVIDENCE_APP_BUNDLE_SHA256 are required')
-  const measurements = JSON.parse(readFileSync(measurementsPath, 'utf8'))
+  const measurementsBytes = readFileSync(measurementsPath)
+  const measurements = JSON.parse(measurementsBytes)
+  const runner = await import('../image-batch/project-release-evidence.mjs')
+  if (typeof runner.installedGuiProvenance !== 'function') throw new Error('Merge the reviewed installed-provenance runner before collecting current GUI evidence')
+  const installedProvenance = runner.installedGuiProvenance(measurementsBytes)
   if (!measurements || Object.keys(measurements).sort().join(',') !== 'latencies_ms,measured_at'
     || !Array.isArray(measurements.latencies_ms)) throw new Error('measurements require exactly measured_at and latencies_ms')
   const samples = measurements.latencies_ms.map((latency_ms, index) => ({ sample: index + 1, latency_ms }))
@@ -25,8 +29,7 @@ function gui([measurementsPath, outputPath]) {
     schema_version: 1, ticket: TICKET, claim: 'macos-dev-cached-terminal-projection-first-visible-v1',
     protocol: { clock: 'performance.now monotonic', stimulus: 'cached-local-bytes', start: 'terminal-projection-handoff',
       end: 'first-visible-image', percentile: 'nearest-rank', minimum_samples: 100, p95_limit_ms: 500 },
-    provenance: { emate_commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(),
-      harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: RELEASE_VERSION },
+    provenance: installedProvenance,
     environment: { class: 'macos-app-directory-dev', machine_sha256: createHash('sha256').update(machine).digest('hex'), app_bundle_sha256: appBundle },
     measured_at: measurements.measured_at, samples, p95_ms: nearestRank(measurements.latencies_ms, 0.95),
   }
@@ -55,7 +58,7 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   try {
     const [command, ...args] = process.argv.slice(2)
     if (command === 'open' && args.length === 1) writeNew(args[0], JSON.stringify(createOpenManifest(), null, 2) + '\n')
-    else if (command === 'gui') gui(args)
+    else if (command === 'gui') await gui(args)
     else if (command === 'project') project(args)
     else throw new Error('usage: project-evidence.mjs <open|gui|project> ...')
   } catch (error) {

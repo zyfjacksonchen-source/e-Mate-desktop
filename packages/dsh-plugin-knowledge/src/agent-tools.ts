@@ -1,14 +1,14 @@
 import { assertSupportedJsonSchema, validateJsonSchemaValue, type JsonSchemaNode } from '@deepseek-ai/dsh-tools'
 import { digest, fail, HASH, OPERATION, UUID, type Execution, type Scope } from './imports.ts'
 import { knowledgeFailure, type CallKnowledge } from './contract.ts'
+import { READ_ENDPOINTS, readRequestSchema, readRequestError } from './read-contract.ts'
 import type { createKnowledgeWorkflow } from './workflow.ts'
 
 type Workflow = ReturnType<typeof createKnowledgeWorkflow> & {
   operationStatus(exec: Execution, operationId: string, scope?: Scope): Promise<unknown>
 }
-const READ_ENDPOINTS = ['catalog', 'graph', 'sources', 'source', 'node', 'search', 'benchmarks', 'benchmark', 'evidence', 'original', 'revisions', 'revision'] as const
 const fields: Record<string, readonly string[]> = {
-  read: ['action', 'endpoint', 'request'],
+  read: ['action', 'request'],
   import: ['action', 'paths', 'scope', 'title', 'publisher', 'supersedes', 'graph_files', 'graph_root', 'batch_key'],
   compile: ['action', 'source_versions', 'topics', 'scope', 'benchmark_query_ids', 'source_replacements', 'batch_key'],
   'import-status': ['action', 'operation_id', 'scope'],
@@ -29,17 +29,7 @@ const graphPath: JsonSchemaNode = { type: 'object', additionalProperties: false,
   namespace_id: id, relative_path: string(500), layer: { type: 'string', enum: ['expert', 'case', 'source'] },
   expected_binding: { oneOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, properties: { binding_revision: hash, source_id: id, source_version: hash }, required: ['binding_revision', 'source_id', 'source_version'] }] },
 }, required: ['namespace_id', 'relative_path', 'layer', 'expected_binding'] }
-const parameters: JsonSchemaNode = {
-  type: 'object', required: ['action'], additionalProperties: false,
-  properties: {
-    action: { type: 'string', enum: Object.keys(fields) }, endpoint: { type: 'string', enum: [...READ_ENDPOINTS] },
-    request: { type: 'object', additionalProperties: false, properties: {
-      root_id: hash, depth: { type: 'integer' }, limit: { type: 'integer' }, corpus_revision: hash, offset: { type: 'integer' },
-      kind: { type: 'string', enum: ['knowledge', 'benchmark'] }, source_id: id, version: hash, node_id: hash, query_id: id, revision_id: id,
-      scope: { type: 'string', enum: ['public', 'uploader-private'] }, question: string(4000), keyword: { type: 'string' },
-      layer: { type: 'string', enum: ['expert', 'case', 'source'] }, media: string(80), industry: string(200), metric: string(120), marketing_purpose: string(80),
-      period: { type: 'object', properties: { start: string(10), end: string(10) }, required: ['start', 'end'], additionalProperties: false },
-    } },
+const operationProperties: Record<string, JsonSchemaNode> = {
     paths: { type: 'array', items: string(4096), description: '本次完整的 1 至 100 个文件或目录路径。' }, scope: scopeSchema,
     batch_key: { type: 'string', description: '同一用户消息需要多个导入或编译批次时，为每批指定固定标识，如 public-001。限 1 至 64 位英文字母、数字、下划线、短横线，首位字母或数字。同批重试保持此值及完整输入；结果未知先回查原 operation_id，不换标识重放。单批可省略。' },
     title: string(300), publisher: string(300),
@@ -50,6 +40,17 @@ const parameters: JsonSchemaNode = {
     topics: { type: 'array', items: { type: 'object', properties: { key: string(160), expected_revision_id: { oneOf: [id, { type: 'null' }] } }, required: ['key'], additionalProperties: false } },
     benchmark_query_ids: { type: 'array', items: id }, source_replacements: { type: 'array', items: sourceReplacement },
     operation_id: { type: 'string', description: '回查时使用已经返回的原操作编号。' }, compilation_id: id,
+}
+const parameters: JsonSchemaNode = {
+  type: 'object', additionalProperties: false, required: ['action'],
+  properties: {
+    action: { type: 'string', enum: Object.keys(fields) },
+    request: { oneOf: READ_ENDPOINTS.map(endpoint => {
+      const schema = readRequestSchema(endpoint)
+      return { ...schema, properties: { endpoint: { type: 'string', const: endpoint }, ...schema.properties },
+        required: ['endpoint', ...(schema.required ?? [])] }
+    }) },
+    ...operationProperties,
   },
 }
 assertSupportedJsonSchema(parameters)
@@ -83,7 +84,7 @@ function publicValue(value: unknown, depth = 0): void {
 export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { workflow: Workflow; read: CallKnowledge }) {
   return ctx.tools.register({
     name: 'enterprise_knowledge',
-    description: '读取企业知识、原件和同一版本证据；导入本次用户指定的完整文件或目录批次，并用本机原生任务编译主题。默认上传者私有；公共库必须有明确用户用途，客户资料使用已授权的 project。一次用户消息的同种导入/编译共用操作编号，请一次传完整批次，冲突时回查原操作。模型和身份由宿主确定，不传凭据或地址。',
+    description: '读取使用 action=read、request={endpoint,...该端点字段}。读取企业知识和同一版本证据：source 是元数据，node 是节点正文，revision 需要修订 ID，evidence 需要查询 ID。corpus_revision 仅用于列表和搜索快照，不传入 source/node/original。original 是原生知识页面下载端点，Agent 没有其下载正文读取接口；不要猜测 URL 或端口。导入本次指定的完整批次，默认上传者私有，公共库需明确用途，客户资料使用已授权 project。同一用户消息的同种导入/编译共用操作编号，冲突时回查原操作。模型和身份由宿主确定，不传凭据或地址。',
     parameters,
     output: { schema: { type: 'object', additionalProperties: true }, render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args: any, execution: any) {
@@ -104,14 +105,18 @@ export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { work
       try {
         const call = nativeCall(ctx, exec)
         await verify()
-        if (validateJsonSchemaValue(parameters, args).length) fail('invalid-request')
+        if (validateJsonSchemaValue(parameters, args).length) {
+          if (args?.action === 'read' && READ_ENDPOINTS.includes(args.request?.endpoint)) throw readRequestError(args.request?.endpoint)
+          fail('invalid-request')
+        }
         if (!fields[args.action] || Object.keys(args).some(key => !fields[args.action]!.includes(key))) fail('invalid-request')
         if (args.batch_key !== undefined && (typeof args.batch_key !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(args.batch_key))) fail('invalid-request')
         const scope = args.scope ?? { kind: 'uploader-private' }
         let result: any
         if (args.action === 'read') {
-          if (!READ_ENDPOINTS.includes(args.endpoint)) fail('invalid-request')
-          const reply = await checked(() => read(args.endpoint, args.request ?? {}, exec.signal))
+          if (!READ_ENDPOINTS.includes(args.request?.endpoint)) fail('invalid-request')
+          const { endpoint, ...request } = args.request
+          const reply = await checked(() => read(endpoint, request, exec.signal))
           if (reply?.scope_key !== owner) fail('scope-changed')
           result = reply.result
         } else if (args.action === 'import') {
@@ -147,8 +152,14 @@ export function registerKnowledgeAgentTools(ctx: any, { workflow, read }: { work
         if (result === undefined || result === null) fail('invalid-response')
         if (result.scope_key !== undefined && result.scope_key !== owner) fail('scope-changed')
         publicValue(result)
+        // original returns an owner-bound UI download handle, not Agent-readable content.
+        // Keep the existing UI download route; do not expose a relative URL for shell guessing.
+        if (args.action === 'read' && args.request?.endpoint === 'original') fail('original-content-unavailable')
         return { schema_version: 1, status: 'success', value: { scope_key: owner, result } }
-      } catch (error) { return knowledgeFailure(error) }
+      } catch (error) {
+        if ((error as any)?.code === 'invalid-request' && args?.action === 'read' && READ_ENDPOINTS.includes(args.request?.endpoint)) return knowledgeFailure(readRequestError(args.request?.endpoint))
+        return knowledgeFailure(error)
+      }
     },
   })
 }

@@ -1,7 +1,7 @@
 /** Download the fixed Python bootstrap exposed to the rc.7 Vision component. */
 
 import { createHash } from 'node:crypto'
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -46,65 +46,7 @@ function pythonExecutable(targetRoot, platform) {
 }
 
 function receipt(target, asset) {
-  officeNotices() // Validate the source notices even when the prepared runtime is reused.
-  return JSON.stringify({ release: RELEASE, python: PYTHON_VERSION, target, sha256: asset.sha256,
-    officeRequirementsSha256: sha256(join(packageRoot, 'scripts', 'office-python', `${target}.txt`)),
-    officeManifestSha256: sha256(join(packageRoot, 'scripts', 'office-python', 'manifest.json')) })
-}
-
-function officeNotices() {
-  const root = join(packageRoot, 'scripts', 'office-python')
-  const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'))
-  return manifest.supplementalNotices.map(({ filename, sha256: expected }) => {
-    if (basename(filename) !== filename) throw new Error('Invalid office notice filename')
-    const bytes = readFileSync(join(root, 'notices', filename))
-    if (createHash('sha256').update(bytes).digest('hex') !== expected) throw new Error(`Office notice SHA-256 mismatch: ${filename}`)
-    return { filename, bytes }
-  })
-}
-
-export function installOfficeNotices(staging) {
-  const destination = join(staging, 'office-notices')
-  mkdirSync(destination, { recursive: true })
-  for (const { filename, bytes } of officeNotices()) {
-    writeFileSync(join(destination, filename), bytes, { mode: 0o644, flag: 'wx' })
-  }
-}
-
-function officeSitePackages(staging, platform) {
-  return join(staging, 'python', ...(platform === 'win32' ? ['Lib', 'site-packages'] : ['lib', 'python3.12', 'site-packages']))
-}
-
-const OFFICE_VERIFY_SCRIPT = `import importlib.metadata as metadata,json,sys
-expected=json.loads(sys.argv[1])
-normalize=lambda name:name.lower().replace('_','-').replace('.','-')
-installed={normalize(d.metadata['Name']):d for d in metadata.distributions(path=[sys.argv[2]])}
-verified={}
-for name,spec in expected.items():
- d=installed[normalize(name)]
- assert d.version==spec['version'],(name,d.version,spec['version'])
- files=list(d.files or [])
- for license_file in spec['license_files']:
-  matches=[f for f in files if str(f)==license_file or str(f).endswith('/'+license_file)]
-  assert matches and all(d.locate_file(f).is_file() for f in matches),(name,'missing license',license_file)
- verified[name]={'version':d.version,'license_files':len(spec['license_files'])}
-if sys.argv[3]=='native':
- sys.path.insert(0,sys.argv[2])
- import reportlab,pypdf,pdfplumber,openpyxl,PIL.Image,pypdfium2
- import pptx,xlsxwriter,lxml.etree,pathops,uharfbuzz,yaml,typing_extensions
- import formulas,numpy,scipy,schedula
-print(json.dumps({'distributions':verified,'native_imports':sys.argv[3]=='native'},sort_keys=True))
-`
-
-export function officeInstallArguments(target, staging) {
-  const platform = target.startsWith('win32-') ? 'win32' : 'darwin'
-  const wheelPlatform = { 'darwin-arm64': 'macosx_12_0_arm64', 'darwin-x64': 'macosx_12_0_x86_64', 'win32-x64': 'win_amd64' }[target]
-  if (wheelPlatform === undefined) throw new Error('Unsupported office Python target')
-  return ['-I', '-m', 'pip', '--isolated', 'install', '--disable-pip-version-check',
-    '--no-deps', '--no-index', '--no-compile', '--only-binary=:all:', '--require-hashes',
-    '--platform', wheelPlatform, '--implementation', 'cp', '--python-version', '3.12', '--abi', 'cp312',
-    '--target', officeSitePackages(staging, platform),
-    '-r', join(packageRoot, 'scripts', 'office-python', `${target}.txt`)]
+  return JSON.stringify({ release: RELEASE, python: PYTHON_VERSION, target, sha256: asset.sha256 })
 }
 
 export async function download(url, destination, request = fetch) {
@@ -126,43 +68,6 @@ export async function download(url, destination, request = fetch) {
 
 function sha256(filename) {
   return createHash('sha256').update(readFileSync(filename)).digest('hex')
-}
-
-/** Source and build materials travel inside the same existing Python resource volume. */
-export async function prepareOfficeSources(destination = join(outputRoot, 'office-sources'), request = fetch) {
-  const sourceRoot = join(packageRoot, 'scripts', 'office-python', 'source-companion')
-  const manifestBytes = readFileSync(join(sourceRoot, 'manifest.json'))
-  const manifest = JSON.parse(manifestBytes)
-  const valid = (root, file) => {
-    try {
-      const bytes = readFileSync(join(root, file.distribution_path))
-      return bytes.length === file.bytes && createHash('sha256').update(bytes).digest('hex') === file.sha256
-    } catch { return false }
-  }
-  if (existsSync(join(destination, 'manifest.json'))
-    && readFileSync(join(destination, 'manifest.json')).equals(manifestBytes)
-    && manifest.files.every(file => valid(destination, file))) return
-  const staging = `${destination}.staging-${process.pid}-${Date.now()}`
-  mkdirSync(staging, { recursive: true })
-  try {
-    for (const file of manifest.files) {
-      const output = join(staging, file.distribution_path)
-      mkdirSync(dirname(output), { recursive: true })
-      if (file.role !== 'original-source-archive') {
-        copyFileSync(join(sourceRoot, file.distribution_path), output)
-      } else if (valid(destination, file)) {
-        copyFileSync(join(destination, file.distribution_path), output)
-      } else {
-        await download(file.url, output, request)
-      }
-      if (!valid(staging, file)) throw new Error(`Office source SHA-256 or size mismatch: ${file.distribution_path}`)
-    }
-    writeFileSync(join(staging, 'manifest.json'), manifestBytes, { mode: 0o644 })
-    rmSync(destination, { recursive: true, force: true })
-    renameSync(staging, destination)
-  } finally {
-    rmSync(staging, { recursive: true, force: true })
-  }
 }
 
 async function prepare(target) {
@@ -196,20 +101,6 @@ async function prepare(target) {
     if (!existsSync(pythonExecutable(staging, platform))) {
       throw new Error(`Python runtime archive for ${target} is missing its interpreter`)
     }
-    const hostPython = target === `${process.platform}-${process.arch}`
-      ? pythonExecutable(staging, platform)
-      : pythonExecutable(join(outputRoot, `${process.platform}-${process.arch}`), process.platform)
-    const install = spawnSync(hostPython, officeInstallArguments(target, staging), { stdio: 'inherit' })
-    if (install.error !== undefined) throw install.error
-    if (install.status !== 0) throw new Error(`Office dependency installation failed for ${target}`)
-    const manifest = JSON.parse(readFileSync(join(packageRoot, 'scripts', 'office-python', 'manifest.json'), 'utf8'))
-    const expectedPackages = Object.fromEntries(manifest.targets[target].map(({ name, version, license_files }) => [name, { version, license_files }]))
-    const probe = spawnSync(hostPython, ['-I', '-c', OFFICE_VERIFY_SCRIPT,
-      JSON.stringify(expectedPackages), officeSitePackages(staging, platform),
-      target === `${process.platform}-${process.arch}` ? 'native' : 'metadata'], { stdio: 'inherit' })
-    if (probe.error !== undefined) throw probe.error
-    if (probe.status !== 0) throw new Error(`Office dependency verification failed for ${target}`)
-    installOfficeNotices(staging)
     writeFileSync(join(staging, 'receipt.json'), expectedReceipt, { mode: 0o644 })
     rmSync(finalRoot, { recursive: true, force: true })
     renameSync(staging, finalRoot)
@@ -231,5 +122,4 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     throw new Error(`e-Mate Python runtime target is unsupported on ${process.platform}-${process.arch}`)
   }
   for (const target of targets) await prepare(target)
-  await prepareOfficeSources()
 }

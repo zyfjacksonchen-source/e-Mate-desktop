@@ -7,14 +7,15 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
   ATTACHMENT_LIMITS, CLAIM, COMPARISON_SCENARIOS, DESKTOP_REFERENCE, HARNESS_COMMIT, HISTORY_SCENARIO, NORMALIZED_PROMPT, REQUEST_BODY,
-  SCENARIO_NAMES, comparisonSummary, historySummary, nearestRank, sha256,
+  NATIVE_EXECUTION, NATIVE_MODEL, NATIVE_REQUEST_BODY, SCENARIO_NAMES, comparisonSummary, historySummary, nearestRank, sha256,
   createOpenManifest, createPassManifest, createSourcePassManifest, validateAggregate, validateDirectMeasurement, validateDirectProductSource,
   validateGuiEvidence, validateManifest, validateWorkerReport,
 } from './protocol.mjs'
 import { crc32 } from 'node:zlib'
+import { createNativeImageFixture, snakeRef } from './native-fixture.mjs'
 import { assertBuiltPrerequisites, sourceSmoke } from './benchmark.mjs'
 import { MAX_IMAGE_BYTES, SMALL_PNG, createExactMaxPng } from './fixtures.mjs'
-import { createStreamResponse, runtimeNetworkGuardSmoke, workerSourceSmoke } from './worker.mjs'
+import { createStreamResponse, runtimeNetworkGuardSmoke, workerSourceSmoke, nativeOwnerSmoke } from './worker.mjs'
 
 const ROOT = new URL('../../../', import.meta.url)
 const PROJECT_EVIDENCE = fileURLToPath(new URL('./project-evidence.mjs', import.meta.url))
@@ -101,6 +102,28 @@ function worker(repetition = 1) {
 function aggregate() {
   return { schema_version: 1, ticket: 'EM217-108', claim: CLAIM,
     repetitions: [worker(1), worker(2), worker(3)], all_repetitions_pass: true }
+}
+
+function nativeAggregate() {
+  const value = aggregate(); value.schema_version = 2; value.ticket = 'EM218-108'
+  for (const entry of value.repetitions) {
+    entry.schema_version = 2; entry.ticket = value.ticket; entry.model = NATIVE_MODEL
+    entry.protocol.execution_contract = NATIVE_EXECUTION
+    entry.request_body_sha256 = sha256(NATIVE_REQUEST_BODY)
+    const adapt = measurement => {
+      measurement.execution_contract = NATIVE_EXECUTION
+      measurement.request_body_sha256 = sha256(NATIVE_REQUEST_BODY)
+      measurement.stages.job_terminal_ms = 33.4
+    }
+    for (const name of Object.keys(COMPARISON_SCENARIOS)) for (const sample of entry.scenarios[name].samples) {
+      sample.lower_bound.request_body_sha256 = sha256(NATIVE_REQUEST_BODY); adapt(sample.assembled)
+    }
+    for (const sample of entry.scenarios['history-0-vs-256'].samples) { adapt(sample.empty); adapt(sample.loaded) }
+    entry.admission_retry_probe = { status: 'SUPERSEDED_BY_NATIVE_SAFE_FAILURE', attempts: 1, provider_posts: 0,
+      cas_saves: 0, terminal_receipts: 1, terminal_status: 'failed', job_terminal_status: 'failed',
+      repeated_call_rejected: true, duplicate_provider_generation: 0, pass: true }
+  }
+  return value
 }
 
 function openManifest() {
@@ -223,12 +246,12 @@ test('rejects fake native parity, retries, network use, batch events, and subage
   rejectsMutation(value => { value.scenarios['warm-small'].samples[0].assembled.counts.subagent_starts = 1 }, /subagent/u)
 })
 
-test('direct product source rejects benchmark controls, n greater than one, and batch or subagent execution', () => {
-  const source = readFileSync(new URL('../../../packages/dsh/src/profile/image-generation.ts', import.meta.url), 'utf8')
+test('native product source excludes catalog, subagents and benchmark flags while provider calls remain single-image', () => {
+  const source = ['index.ts', 'host.ts', 'upstream/agent-image-tools.ts'].map(path => readFileSync(new URL('../../../packages/dsh-plugin-imagegen/src/' + path, import.meta.url), 'utf8')).join('\n')
   assert.equal(validateDirectProductSource(source), true)
-  assert.throws(() => validateDirectProductSource(source.replace("name: 'imagegen'", "name: 'imagegen'\nconst benchmarkMode = true")), /benchmark sleep or flag/u)
-  assert.throws(() => validateDirectProductSource(source.replace('startImageJob(ctx, exec.agent', 'subagents.start(); startImageJob(ctx, exec.agent')), /batch or subagent/u)
-  assert.throws(() => validateDirectProductSource(source.replace("JSON.stringify({ model: IMAGE_MODEL, prompt: task.prompt })", "JSON.stringify({ model: IMAGE_MODEL, prompt: task.prompt, n: 2 })")), /single request body changed|n > 1/u)
+  assert.throws(() => validateDirectProductSource(source + '\nconst benchmarkMode = true'), /benchmark sleep or flag/u)
+  assert.throws(() => validateDirectProductSource(source + '\nsubagents.start()'), /batch or subagent/u)
+  assert.throws(() => validateDirectProductSource(source.replace("return [{ type: 'text', text: JSON.stringify(value) }]", "return [{ type: 'image', attachment: value }]")), /must remain textual/u)
 })
 
 test('OPEN manifest cannot claim source or GUI results', () => {
@@ -333,16 +356,78 @@ test('source-only smoke requires no build while full benchmark prerequisite fail
 })
 
 test('current single evidence preserves EM218 identity and cannot mix historical worker or GUI results', () => {
-  const value = aggregate()
-  value.ticket = 'EM218-108'
-  value.repetitions.forEach(entry => { entry.ticket = value.ticket })
+  const retagged = aggregate(); retagged.ticket = 'EM218-108'; retagged.repetitions.forEach(entry => { entry.ticket = retagged.ticket })
+  assert.throws(() => validateAggregate(retagged), /historical cohort/u)
+  const value = nativeAggregate()
   const raw = JSON.stringify(value)
   const source = createSourcePassManifest(value, `https://evidence.invalid/${sha256(raw)}.json`, raw)
   assert.equal(createOpenManifest().ticket, 'EM218-108')
   assert.equal(source.ticket, 'EM218-108')
   assert.equal(source.contract, 'tests/performance/image-single/protocol.mjs')
   const mixed = structuredClone(value); mixed.repetitions[0].ticket = 'EM217-108'
-  assert.throws(() => validateAggregate(mixed), /EM218-108 evidence invalid: .*release identities differ/u)
+  assert.throws(() => validateAggregate(mixed), /EM218-108 evidence invalid: .*historical cohort/u)
   const historicalGui = guiEvidence()
   assert.throws(() => createPassManifest(value, source.external_raw.uri, raw, historicalGui.raw, historicalGui.descriptor.uri), /identities or commits differ/u)
+})
+
+test('real native owner smoke measures actual Tool/Job/CAS and safely refuses a repeated rejected call', async () => {
+  const result = await nativeOwnerSmoke()
+  assert.equal(result.network_calls, 0)
+  assert.equal(result.measurement.execution_contract, NATIVE_EXECUTION)
+  assert.equal(result.measurement.counts.jobs, 1)
+  assert.equal(result.measurement.counts.provider_posts, 1)
+  assert.equal(result.failure.attempts, 1)
+  assert.equal(result.failure.provider_posts, 0)
+  assert.equal(result.failure.repeated_call_rejected, true)
+  const loaded = await nativeOwnerSmoke({ maximum: true, historyCount: 256 })
+  assert.equal(loaded.measurement.counts.cas_saves, 1)
+  assert.equal(loaded.network_calls, 0)
+  assert.equal(loaded.measurement.attachment_sha256, sha256(createExactMaxPng()))
+  const value = nativeAggregate()
+  assert.strictEqual(validateAggregate(value), value)
+  value.repetitions[0].admission_retry_probe.attempts = 2
+  assert.throws(() => validateAggregate(value), /fail once without retry/u)
+})
+
+test('three native steps preserve the real user image, omit generated model images/catalog and retain explicit edit references', async () => {
+  const f = await createNativeImageFixture({ request: async (_url, _init, ordinal) => new Response(JSON.stringify({
+    id: 'context-provider-' + ordinal, data: [{ b64_json: SMALL_PNG.toString('base64') }],
+  }), { headers: { 'content-type': 'application/json' } }) })
+  const imageBlocks = content => content.flatMap(block => block.type === 'image' ? [block]
+    : block.type === 'tool-result' ? imageBlocks(block.content) : [])
+  try {
+    const uploaded = await f.ctx.attachments.saveImage({ data: SMALL_PNG, mediaType: 'image/png', name: 'actual-user-upload.png' })
+    f.agent.session.append('user/message', f.createUserMessage({ content: [{ type: 'image', attachment: uploaded }],
+      source: { kind: 'user' } }), { surfaceOp: 'append' })
+    const assertContext = () => {
+      const messages = f.agent.session.deriveMessages()
+      const images = messages.flatMap(message => imageBlocks(message.content))
+      assert.deepEqual(images.map(block => block.attachment), [uploaded])
+      assert.equal(messages.filter(message => message.source?.kind === 'user').length, 1)
+      assert.equal(messages.some(message => message.source?.plugin === '@e-mate/dsh-image-generation' || message.source?.form === 'catalog'), false)
+    }
+    assertContext()
+    const generated = await f.call('generate_image', { prompt: 'offline new image' }, { step: 1 })
+    assert.deepEqual(generated.content.map(block => block.type), ['text'])
+    assertContext()
+    const queried = await f.call('get_image_generation_task', { task_id: generated.value.task_id }, { step: 2 })
+    assert.equal(queried.value.images.length, 1)
+    assert.equal(f.calls.length, 1)
+    assertContext()
+    const edited = await f.call('edit_image', { prompt: 'offline explicit generated edit', source_image: generated.value.images[0] }, { step: 3 })
+    assert.equal(edited.value.status, 'completed')
+    assertContext()
+    assert.equal(f.calls[1].url.endsWith('/images/edits'), true)
+    assert.deepEqual(Buffer.from(await f.calls[1].init.body.get('image').arrayBuffer()), SMALL_PNG)
+    assert.deepEqual(snakeRef(uploaded).attachment_id, generated.value.images[0].attachment_id)
+    for (const result of [generated, queried, edited]) {
+      assert.equal(result.isError, false)
+      assert.equal(result.meta.images.length, 1)
+    }
+    const view = f.ctx.tools.get('generate_image').presentResult({ prompt: 'offline new image' }, generated)
+    assert.equal(view.content[0].type, 'image')
+    assert.deepEqual(Buffer.from((await f.ctx.attachments.readImage(view.content[0].attachment)).data), SMALL_PNG)
+    const restored = f.Session.create(f.agent.id, f.agent.session.events, f.agent.session.header)
+    assert.deepEqual(restored.deriveMessages(), f.agent.session.deriveMessages())
+  } finally { await f.dispose() }
 })

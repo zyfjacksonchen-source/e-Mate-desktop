@@ -1,19 +1,6 @@
 # Source and licensing record
 
-The adapter and normalized Office contracts are original e-Mate MIT code. No Codex runtime, Microsoft Office, LibreOffice, Python worker, or old e-Mate Office plugin code is copied.
-
-Exact distributable dependencies:
-
-- docx 9.7.1 — MIT
-- XLSX is implemented directly with the bundled JSZip and XML primitives; no spreadsheet runtime dependency is added.
-- pptxgenjs 4.0.1 — MIT
-- pdf-lib 1.17.1 and @pdf-lib/fontkit 1.1.1 — MIT
-- pdf2json 4.0.3 — Apache-2.0; its published single-file ESM is copied unchanged into `assets/pdf2json/`
-- jszip 3.10.1 — used under MIT
-- @xmldom/xmldom 0.9.11 — MIT
-- Noto Sans SC Variable 5.3.0 font assets — SIL Open Font License 1.1
-
-The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability seams. Unsupported layout-preserving edits are an explicit product boundary, not a hidden system dependency.
+This package is an original e-Mate MIT adapter for the pinned DeepSeek Harness 0.1.0-rc.7 native Skill registry. It contributes only meeting-summary and lieflat-charts; it has no Office executor, Tool/Job registration, client preview, Calc runtime, or bundled Office dependencies. The historical package name is retained for the existing Profile entry.
 
 ## Meeting summary preset
 
@@ -24,37 +11,12 @@ The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability
 - Original `SKILL.md` bytes are unchanged (SHA-256 `852f8724aafd16de632326fb7aa12437bf8129b919f80180de71e216902694ca`); its three references, HTML template and examples are preserved. The source README and explanatory screenshots are not required by the Skill entry and are omitted.
 - e-Mate additions: `HOST.md` is prepended by the existing provider with the actual absolute resource directory. It retains the original transcript as authority, makes cleaning optional, uses only existing native Python if available, and does not claim audio transcription or require a connection.
 - e-Mate script change (2026-09-07): `clean_transcript.py` now drops an all-digit line only when immediately followed by a subtitle timestamp. Standalone numeric meeting facts survive. All other upstream cleanup behavior remains; timestamps are still removed from the optional derivative, so citations and facts must be checked against the untouched original.
-- The helper requires only Python standard-library modules; no Python dependency or runtime is bundled by this addition. The Agent performs synthesis through its existing model channel. The two existing Tool/Job paths remain available alongside the replacement Skill workflows.
-
-## Word TypeScript workflow
-
-- Uses the existing pinned `dolanmiu/docx` 9.7.1 MIT dependency and native e-Mate Tool/Job/attachment paths. The documents Skill is an e-Mate workflow, not a claimed upstream Skill release.
-- The Python Hermes subtree and Word-only Python wheel installation were removed in favor of TypeScript creation, template filling and text replacement. Historical provenance and test receipts remain in Git and private evidence.
-- Visual pagination acceptance and complex edit coverage remain separate from package correctness; see `skills/documents/UPSTREAM.md`.
-
-## Codex PDF replacement
-
-- OpenAI PDF plugin `26.905.11957`; its original four Skill files are retained byte-for-byte. Exact file hashes, the original MIT plugin manifest and the licensing inspection scope are recorded in `skills/pdf/SOURCE.md` and `skills/pdf/UPSTREAM.json`.
-- `HOST.md` maps resource paths, the native Python environment and real attachment delivery to e-Mate. The marker helper only checks its arguments; it is not evidence of successful generation or rendering.
-- Python dependencies and a real renderer remain a separate acceptance gate. The provider reports `needs-runtime` until that gate is verified.
-- e-Mate adds `scripts/render_pdf.py` and `references/rendering.md` using publicly distributed pypdfium2/PDFium. Rendering tests use real PDFs and PNGs; the original four upstream Skill files remain unchanged. Packaged dependency verification is separate.
-- The PDF Skill adds a static Noto Sans SC Regular 400 font for ReportLab, derived reproducibly from the fixed official variable font. Its OFL, modification notice, hashes and reproduction instructions are under `skills/pdf/assets/noto-sans-sc`; fontTools is not a client dependency. The original variable font defaults to Thin 100 and is not silently treated as Regular. Actual document glyph coverage and rendered layout still require checking.
-
-## Codex Spreadsheets replacement
-
-- OpenAI Spreadsheets plugin `26.905.11957`; original 19 Skill files are retained byte-for-byte. Original MIT plugin declaration and hashes: `skills/spreadsheets/UPSTREAM.json`.
-- The original Skill explicitly permits openpyxl when artifact-tool is unavailable. HOST selects that supported path; the proprietary artifact-tool runtime is not distributed.
-- Formula recalculation and rendering need actual supporting runtime and receipts; openpyxl alone does not establish either. Provider readiness remains pending.
-
-## PPT Master replacement
-
-- Fixed source: `hugohe3/ppt-master@c45b7427e707d8695f1bf7df4d20360d05f82e7c`; the native provider replaces `presentations` with `ppt-master` and prepends its Host guide.
-- The complete Skill resources, necessary external document references, original attribution guard, MIT license and separately licensed assets are preserved. Exact original and adapted file identities are recorded in `skills/ppt-master/UPSTREAM.json` and `SOURCE.md`.
-- The export owner is adapted to preserve file permissions and Windows DACLs. Successful publication remains successful if backup cleanup fails, with a warning identifying the retained backup. Regression evidence does not replace Windows installed acceptance.
-- Python dependency distribution, native preview integration, final PPTX rendering and installed Skill discovery remain acceptance gates. No PyMuPDF or proprietary artifact-tool runtime is included.
+- The helper requires only Python standard-library modules; no Python dependency or runtime is bundled by this addition. The Agent performs synthesis through its existing model channel.
 
 ## Lieflat Charts preset
 
-- Fixed source: `larashero3-dotcom/lieflat-charts@eace082a317b696c5570c25826a53a7fa113e984`; complete unchanged upstream resources and file hashes are retained under `skills/lieflat-charts`.
+- Fixed source: `larashero3-dotcom/lieflat-charts@eace082a317b696c5570c25826a53a7fa113e984`; all 125 upstream resource identities and the existing documented SKILL.md adaptation are retained under `skills/lieflat-charts`.
 - Distribution basis: user-confirmed enterprise authorization on 2026-09-08 for e-Mate bundling. Original PolyForm Noncommercial license and upstream third-party notices are preserved; this is not an MIT relicensing or a fabricated contract. See the preset SOURCE.md and UPSTREAM.json.
 - Existing provider and Host guidance only; no new Tool or runtime. Browser-dependent templates retain their network requirements.
+
+Office data and output requests load the Univer Skill and the relevant Unit Skill, then use the existing univer_* tools. This host guidance does not modify the preserved meeting or Lieflat resources or establish installed Univer acceptance.

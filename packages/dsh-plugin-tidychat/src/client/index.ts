@@ -1131,7 +1131,7 @@ export function apply(ctx: any): void {
   })
 
   // Preserve the compact navigation footprint, including the slot padding.
-  const NAV_RAIL_WIDTH = 48
+  const NAV_RAIL_WIDTH = 28
 
   const measurePos = (): { left: number; top: number; gutter: number } | null => {
     // 新版 DSH 里 [data-slot="conversation.session"] 是 0×0 的空壳元素（slot host 未参与布局），
@@ -1155,14 +1155,13 @@ export function apply(ctx: any): void {
   }
 
   // ===== Adaptive Conversation Navigation Rail（v0.2.0 Canvas Minimap）=====
-  const NAV_RAIL_BAR_H = 3
-  const NAV_RAIL_BAR_LEN = 14
-  const NAV_RAIL_BAR_LEN_CURRENT = 22
-  const NAV_RAIL_TURN_SPACING = 12
+  const NAV_RAIL_BAR_H = 2
+  const NAV_RAIL_BAR_LEN = 6
+  const NAV_RAIL_TURN_SPACING = 10
   const NAV_RAIL_MIN_HEIGHT = 48
   const HEADER_OFFSET = 64
 
-  // 轨道高度自适应：turn 少时按 12px/轮 收紧（不用最大高度），turn 多时封顶 min(70vh, 660px)
+  // 轨道高度自适应：turn 少时按 10px/轮 收紧（不用最大高度），turn 多时封顶 min(70vh, 660px)
   const railHeight = (n: number): number => Math.min(Math.min(window.innerHeight * 0.7, 660), Math.max(NAV_RAIL_MIN_HEIGHT, n * NAV_RAIL_TURN_SPACING))
 
   // 导航条（挂到会话头部 utilities 槽，fixed 定位到聊天区左缘；独立开关 navigator）
@@ -1207,7 +1206,7 @@ export function apply(ctx: any): void {
         setCurrent((p) => (p === cur ? p : cur))
       }
 
-      // Keep tick targets stationary while nearby lengths expand around the reading position.
+      // Keep fixed short ticks stationary; only neighbour opacity follows the reading position.
       const layoutPositions = (n: number, _hoverIdx: number | null, H: number): number[] => {
         const pitch = Math.min(NAV_RAIL_TURN_SPACING, H / Math.max(1, n))
         const first = (H - (n - 1) * pitch) / 2
@@ -1234,7 +1233,7 @@ export function apply(ctx: any): void {
         const n = users.length
         if (n === 0) return
         const H = railHeight(users.length)
-        const W = NAV_RAIL_BAR_LEN_CURRENT + 4
+        const W = NAV_RAIL_WIDTH - 4 // 24px hit area plus the rail’s 2px side padding.
         const dpr = window.devicePixelRatio || 1
         if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
           canvas.width = Math.round(W * dpr)
@@ -1256,10 +1255,12 @@ export function apply(ctx: any): void {
           const y = positions[i]
           const distance = focus === null ? 4 : Math.min(4, Math.abs(i - focus))
           const weight = (1 + Math.cos(Math.PI * distance / 4)) / 2
-          const len = NAV_RAIL_BAR_LEN + (NAV_RAIL_BAR_LEN_CURRENT - NAV_RAIL_BAR_LEN) * weight
-          ctx.fillStyle = current === i || hover === i ? hotColor : barColor
-          ctx.fillRect(0, y - NAV_RAIL_BAR_H / 2, len, NAV_RAIL_BAR_H)
+          const hot = current === i || hover === i
+          ctx.fillStyle = hot ? hotColor : barColor
+          ctx.globalAlpha = hot ? 1 : 0.55 + 0.45 * weight
+          ctx.fillRect(0, y - NAV_RAIL_BAR_H / 2, NAV_RAIL_BAR_LEN, NAV_RAIL_BAR_H)
         }
+        ctx.globalAlpha = 1
       }
 
       React.useEffect(() => {

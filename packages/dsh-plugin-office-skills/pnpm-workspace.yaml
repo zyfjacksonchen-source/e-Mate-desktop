@@ -1,2 +1,2 @@
-patchedDependencies:
-  pdf2json@4.0.3: patches/pdf2json@4.0.3.patch
+# Harness provides the exact native peers through its managed Profile.
+autoInstallPeers: false

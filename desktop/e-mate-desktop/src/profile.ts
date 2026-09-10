@@ -204,20 +204,22 @@ export function shippedPresetRoot(moduleUrl: string = import.meta.url): string {
   )
 }
 
-/** Materialize the target standard preset with only its product persona replaced. */
+/** Preserve the shipped Standard and PTC compositions, replacing only the product persona. */
 function managedPresetRoot(profileDir: string): string {
-  const source = join(shippedPresetRoot(), 'standard')
   const targetRoot = join(profileDir, 'agent-presets')
-  const target = join(targetRoot, 'standard')
-  mkdirSync(target, { recursive: true })
-  const original = readFileSync(join(source, 'agent.cordis.yml'), 'utf8')
   const targetPersona = 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.'
-  if (!original.includes(targetPersona)) {
-    throw new Error(`${BIN_NAME}: pinned standard preset persona contract changed`)
-  }
   const persona = '你是小芯，用户的 AI 办公助手。你运行在 e-Mate 内，是亦芯开发的全场景办公 AI Agent。自我介绍时使用第一人称：“我是小芯，你的 AI 办公助手。我运行在 e-Mate 内，是亦芯开发的全场景办公 AI Agent。” 当前工作目录是 {{cwd}}。当前会话默认具有完全访问权限；普通 Bash 或 PowerShell 调用不要设置 sandbox_permissions 或 justification，只有工具实际返回沙箱拒绝并明确提示可升级时，才按提示重试一次。'
-  writeFileSync(join(target, 'agent.cordis.yml'), original.replace(targetPersona, persona))
-  writeFileSync(join(target, 'preset.yml'), readFileSync(join(source, 'preset.yml')))
+  for (const id of ['standard', 'code']) {
+    const source = join(shippedPresetRoot(), id)
+    const target = join(targetRoot, id)
+    const original = readFileSync(join(source, 'agent.cordis.yml'), 'utf8')
+    if (!original.includes(targetPersona)) {
+      throw new Error(`${BIN_NAME}: pinned ${id} preset persona contract changed`)
+    }
+    mkdirSync(target, { recursive: true })
+    writeFileSync(join(target, 'agent.cordis.yml'), original.replace(targetPersona, persona))
+    writeFileSync(join(target, 'preset.yml'), readFileSync(join(source, 'preset.yml')))
+  }
   return targetRoot
 }
 

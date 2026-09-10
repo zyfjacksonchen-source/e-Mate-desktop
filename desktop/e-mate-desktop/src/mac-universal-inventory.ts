@@ -3,6 +3,10 @@
 export type MacUniversalArch = 'arm64' | 'x86_64'
 
 export const MACOS_UNIVERSAL_NATIVE_ENTRIES = [
+  { arch: 'arm64', path: 'build/e-mate-profile/bundles/univer-office/node_modules/libsql/node_modules/@libsql/darwin-arm64/index.node' },
+  { arch: 'x86_64', path: 'build/e-mate-profile/bundles/univer-office/node_modules/libsql/node_modules/@libsql/darwin-x64/index.node' },
+  { arch: 'arm64', path: 'build/e-mate-profile/bundles/univer-office/node_modules/@univerjs-pro/engine-formula-rust-binding/node_modules/@univerjs-pro/engine-formula-rust-binding-darwin-arm64/univer-formula.darwin-arm64.node' },
+  { arch: 'arm64', path: 'build/e-mate-profile/bundles/univer-office/node_modules/@univerjs-pro/exchange-node-binding/node_modules/@univerjs-pro/exchange-node-binding-darwin-arm64/univer-exchange-node.darwin-arm64.node' },
   { arch: 'arm64', path: 'node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.3.node' },
   { arch: 'arm64', path: 'node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.18.3.dylib' },
   { arch: 'arm64', path: 'node_modules/@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node' },

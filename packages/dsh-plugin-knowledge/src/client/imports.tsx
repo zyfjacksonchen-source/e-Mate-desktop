@@ -4,7 +4,7 @@ import { HASH, type CallKnowledge } from '../contract.ts'
 import type { UiImportStatus } from '../ui-operations.ts'
 import css from './imports.module.css'
 type Picked = { path: string; name: string; mediaType: string }
-export interface KnowledgeImportsProps { openRequest?: number; callKnowledge: CallKnowledge; pickDirectory?: (signal?: AbortSignal) => Promise<string | null>; openTask?: (sessionId: string) => void; replacement?: { source_id: string; source_version: string; title: string } }
+export interface KnowledgeImportsProps { openRequest?: number; callKnowledge: CallKnowledge; pickDirectory?: (signal?: AbortSignal) => Promise<string | null>; openTask?: (sessionId: string) => void | Promise<void>; replacement?: { source_id: string; source_version: string; title: string } }
 const labels = { prepared: '尚未开始', importing: '导入中', parsing: '解析中', compiling: '整理中', complete: '已完成', partial: '部分未完成', paused: '已暂停', stopping: '正在停止', stopped: '已停止', unknown: '回执待确认', failed: '未完成' }
 const sourceLabels: Record<string, string> = { ready: '已解析', parsing: '解析中', failed: '解析失败', deleted: '已删除', superseded: '已有新版本', awaiting_content: '等待原件', unknown: '回执待确认' }
 export function diskFiles(files: File[], bridge = (window as any).__DSH_DESKTOP_FILE_PATH__): Picked[] {
@@ -39,6 +39,11 @@ export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, repla
     } finally { requests.current.delete(controller) }
   }
   const report = (reason: any) => { if (reason?.name !== 'AbortError') setError(reason instanceof Error ? reason.message : '操作未完成，请查看最近任务。') }
+  const viewTask = async (item: UiImportStatus) => {
+    const current = generation.current
+    try { await openTask?.(item.compilation_session_id ?? item.session_id) }
+    catch (reason) { if (current === generation.current) report(reason) }
+  }
   const refresh = () => refreshRead.current?.()
   useEffect(() => {
     const clear = () => {
@@ -140,7 +145,7 @@ export function KnowledgeImports({ callKnowledge, pickDirectory, openTask, repla
       <div className={css.recentHeader}><strong>最近任务（最多20条）</strong><button type="button" onClick={() => void refresh()}>刷新</button></div>{!items.length && <p className={css.notice}>暂无本账号的导入任务。</p>}
       <ul className={css.tasks} aria-label="知识导入任务">{items.map(item => <li key={item.operation_id}><div className={css.taskTitle}><strong>{item.title}</strong><span data-phase={item.phase}>{labels[item.phase]}</span></div><p>{item.scope.kind === 'public' ? '公共知识' : item.scope.kind === 'project' ? '项目资料' : '仅自己可见'} · {item.model.id} · {item.file_count === undefined ? '原件数量待核对' : `${item.file_count}份原件`} · 已发布{item.compiled_count}个主题</p>
         {!!item.sources.length && <details><summary>查看原件回执</summary><ul className={css.sourceRows}>{item.sources.map(source => <li key={source.key}><FileIcon name={source.name} mediaType="" /><span>{source.name}</span><small>{sourceLabels[source.status] ?? '回执待确认'}</small></li>)}</ul></details>}
-        {item.reason && <p className={css.notice}>{item.reason}</p>}<div className={css.actions}>{openTask && <button type="button" onClick={() => openTask(item.compilation_session_id ?? item.session_id)}>查看任务</button>}{['importing', 'parsing', 'compiling', 'stopping'].includes(item.phase) ? <button type="button" disabled={!!pending || item.phase === 'stopping'} onClick={() => void changeTask(item, 'stop')}>停止</button> : item.phase !== 'complete' && <button type="button" disabled={!!pending} onClick={() => void changeTask(item, item.phase === 'prepared' ? 'start' : 'resume')}>{item.phase === 'prepared' ? '开始' : item.phase === 'unknown' ? '回查并继续' : '继续'}</button>}</div></li>)}</ul>
+        {item.reason && <p className={css.notice}>{item.reason}</p>}<div className={css.actions}>{openTask && <button type="button" onClick={() => void viewTask(item)}>查看任务</button>}{['importing', 'parsing', 'compiling', 'stopping'].includes(item.phase) ? <button type="button" disabled={!!pending || item.phase === 'stopping'} onClick={() => void changeTask(item, 'stop')}>停止</button> : item.phase !== 'complete' && <button type="button" disabled={!!pending} onClick={() => void changeTask(item, item.phase === 'prepared' ? 'start' : 'resume')}>{item.phase === 'prepared' ? '开始' : item.phase === 'unknown' ? '回查并继续' : '继续'}</button>}</div></li>)}</ul>
       {more && <button type="button" onClick={() => void refresh()}>继续加载任务</button>}
     </div>}
   </section>

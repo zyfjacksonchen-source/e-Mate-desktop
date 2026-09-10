@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { imageBatchEventId, imageBatchId, imageBatchTaskId } from '../src/profile/image-batch.ts'
 import { imageBatchProjectionDefinition } from '../src/profile/image-batch-events.ts'
@@ -71,16 +70,4 @@ test('parent terminal is unique and rejects malformed receipt revision and owner
     assert.throws(() => projection.apply(values.slice(0, 5).reduce((state, data) => projection.apply(state, { type: 'emate/image-batch', data }), projection.init()),
       { type: 'emate/image-batch', data: corrupt }), /invalid image batch event/u)
   }
-})
-
-test('child receipt producer remains child-owned and carries no batch correlation metadata', () => {
-  const source = readFileSync(new URL('../src/profile/image-generation.ts', import.meta.url), 'utf8')
-  const verified = source.slice(source.indexOf('function verifiedReceipt('), source.indexOf('function validVerification'))
-  const failed = source.slice(source.indexOf('function failedReceipt('), source.indexOf('function runningReceipt('))
-  const running = source.slice(source.indexOf('function runningReceipt('), source.indexOf('function appendImageReceipt('))
-  for (const producer of [verified, failed, running]) {
-    assert.doesNotMatch(producer, /batch_id|task_id|ordinal|child_session_id/u)
-    assert.match(producer, /parent_session_id|parentSessionId/u)
-  }
-  assert.equal(source.includes("agent.session.append('emate/image-output', receipt, { ignorable: true })"), true)
 })

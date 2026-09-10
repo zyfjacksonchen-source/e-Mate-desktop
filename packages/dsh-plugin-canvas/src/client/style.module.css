@@ -18,6 +18,12 @@
 .stage{position:relative;flex:1;min-height:320px;overflow:hidden;background:var(--dsw-alias-bg-base)}
 .tools{position:absolute;z-index:5;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:4px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-base);box-shadow:0 2px 8px #0001}
 .tools button{border-color:transparent;padding:8px 12px;font-size:14px;min-height:36px}
+.arrowColor{height:36px;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;cursor:pointer}
+.arrowColor:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.arrowColor input[type=color]{appearance:none;-webkit-appearance:none;width:22px;height:22px;box-sizing:border-box;padding:0;border:1px solid var(--dsw-alias-border-l1);border-radius:5px;background:transparent;cursor:pointer;overflow:hidden}
+.arrowColor input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+.arrowColor input[type=color]::-webkit-color-swatch{border:0;border-radius:3px}
+.arrowColor input[type=color]::-moz-color-swatch{border:0;border-radius:3px}
 .tools button[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--emate-color-brand,#eb5b16)}
 .stageHint{position:absolute;z-index:1;pointer-events:none;inset:0;display:grid;place-items:center;color:var(--dsw-alias-label-tertiary);font-size:14px}
 /* Excalidraw still owns editing, keyboard actions and history. Its full menus

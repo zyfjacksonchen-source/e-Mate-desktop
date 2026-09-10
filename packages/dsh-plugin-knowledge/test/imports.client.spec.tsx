@@ -259,3 +259,18 @@ it('does not replace an acknowledged task action with an older in-flight recent 
   expect(screen.getByText('整理中')).toBeTruthy()
   expect(recentCount).toBe(2)
 })
+
+it('View task reports native navigation failure without resuming the partial import', async () => {
+  const item = { ...prepared, phase: 'partial', compilation_session_id: 'compiled-session' }
+  const call = vi.fn(async (endpoint: string) => {
+    if (endpoint === 'ui.import.recent') return reply({ items: [item], has_more: false })
+    throw Error('unexpected mutation')
+  })
+  const openTask = vi.fn(async () => { throw Error('原任务暂不可用') })
+  render(<KnowledgeImports callKnowledge={call} openTask={openTask} />)
+  fireEvent.click(screen.getByRole('button', { name: '导入并整理' }))
+  fireEvent.click(await screen.findByRole('button', { name: '查看任务' }))
+  await screen.findByText('原任务暂不可用')
+  expect(openTask).toHaveBeenCalledWith('compiled-session')
+  expect(call.mock.calls.every(([endpoint]) => endpoint === 'ui.import.recent')).toBe(true)
+})

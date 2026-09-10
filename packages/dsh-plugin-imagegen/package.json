@@ -1,0 +1,25 @@
+{
+  "name": "@e-mate/dsh-plugin-imagegen",
+  "version": "2.0.18",
+  "description": "Pinned dsh-imagegen engine with e-Mate enterprise identity and native Session, Job and attachment integration",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./package.json": "./package.json" },
+  "files": ["lib", "src", "LICENSE", "SOURCE.md", "README.md", "upstream-manifest.json", "cordis.patch.yml"],
+  "license": "Apache-2.0",
+  "private": true,
+  "scripts": {
+    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "test": "node --test test/*.test.mjs",
+    "test:types": "../../upstream/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json"
+  },
+  "peerDependencies": { "@deepseek-ai/cordis": "4.0.1", "@deepseek-ai/dsh-attachment": "0.1.0-rc.7", "@deepseek-ai/dsh-tools": "0.1.0-rc.7" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "eMate": {
+    "harnessVersion": "0.1.0-rc.7",
+    "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
+    "baseImports": ["@deepseek-ai/cordis", "@deepseek-ai/dsh-attachment", "@deepseek-ai/dsh-tools"],
+    "excludedFeatures": ["studio", "sidebar-entry", "standalone-gallery", "standalone-canvas", "settings", "template-sync", "updater", "user-api-keys", "model-fallback"]
+  },
+  "engines": { "node": "^22.19.0 || >=24.0.0" }
+}

@@ -15,15 +15,16 @@ import dgram from 'node:dgram'
 import { syncBuiltinESMExports } from 'node:module'
 import {
   ATTACHMENT_LIMITS, CLAIM, COMPARISON_SCENARIOS, FAKE_DELAY_MS, HARNESS_COMMIT, HISTORY_SCENARIO,
-  MODEL, NORMALIZED_PROMPT, REPETITIONS, REQUEST_BODY, SCHEMA_VERSION, TICKET, RELEASE_VERSION,
+  NATIVE_MODEL as MODEL, NORMALIZED_PROMPT, REPETITIONS, NATIVE_REQUEST_BODY as REQUEST_BODY, SCHEMA_VERSION, TICKET, RELEASE_VERSION, NATIVE_EXECUTION,
   comparisonSummary, historySummary, sha256, validateDirectMeasurement, validateLowerMeasurement, validateWorkerReport,
 } from './protocol.mjs'
 import { SMALL_PNG, createExactMaxPng, imageResponseBody } from './fixtures.mjs'
+import { createNativeImageFixture, nativeModules } from './native-fixture.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
 const PATHS = Object.freeze({
-  imageGenerationBundle: join(ROOT, 'packages/dsh/profile/plugins/image-generation.js'),
-  imageGenerationSource: join(ROOT, 'packages/dsh/src/profile/image-generation.ts'),
+  imageGenerationBundle: join(ROOT, 'packages/dsh-plugin-imagegen/lib/index.js'),
+  imageGenerationSource: join(ROOT, 'packages/dsh-plugin-imagegen/src/host.ts'),
   cordis: join(ROOT, 'upstream/deepseek-harness/vendor/cordis/lib/index.js'),
   agent: join(ROOT, 'upstream/deepseek-harness/packages/core/agent/lib/index.js'),
   session: join(ROOT, 'upstream/deepseek-harness/packages/core/session/lib/index.js'),
@@ -70,35 +71,9 @@ function installNetworkGuard() {
   }
 }
 
-let modulesPromise
 async function modules() {
-  modulesPromise ??= Promise.all([
-    import(pathToFileURL(PATHS.cordis)), import(pathToFileURL(PATHS.agent)), import(pathToFileURL(PATHS.session)),
-    import(pathToFileURL(PATHS.projection)), import(pathToFileURL(PATHS.jobs)), import(pathToFileURL(PATHS.attachment)),
-    import(pathToFileURL(PATHS.imageGenerationBundle)),
-  ]).then(([cordis, agent, session, projection, jobs, attachment, imageGeneration]) => ({
-    Context: cordis.Context,
-    AgentRegistry: agent.default,
-    SessionStore: session.default,
-    SessionId: session.SessionId,
-    SessionProjectionRegistry: projection.default,
-    LocalJobRegistry: jobs.default,
-    LocalAttachmentStore: attachment.LocalAttachmentStore,
-    applyImageGeneration: imageGeneration.apply,
-  }))
-  return modulesPromise
-}
-function writeBinding(root, dshHome) {
-  const zod = realpathSync(PATHS.zod)
-  const path = join(root, 'runtime-binding.json')
-  writeFileSync(path, JSON.stringify({
-    schema_version: 1, product: 'e-Mate', version: RELEASE_VERSION, dsh_home: dshHome, harness_commit: HARNESS_COMMIT,
-    tools_module: PATHS.tools, tools_module_sha256: fileSha256(PATHS.tools),
-    llm_module: PATHS.llm, llm_module_sha256: fileSha256(PATHS.llm),
-    storage_domain_module: PATHS.storage, storage_domain_module_sha256: fileSha256(PATHS.storage),
-    zod_module: zod, zod_module_sha256: fileSha256(zod),
-  }))
-  return path
+  const m = await nativeModules()
+  return { Context: m.Context, LocalAttachmentStore: m.Attachments }
 }
 export function createStreamResponse(bytes, marks) {
   const split = Math.max(1, Math.floor(bytes.byteLength / 2))
@@ -131,8 +106,8 @@ function fakeRequest(fixture, active) {
     const requestId = init.headers.get('x-client-request-id')
     active.requestId ??= requestId
     assert.equal(requestId, active.requestId)
-    assert.match(requestId ?? '', /^image-[0-9a-f]{32}$/u)
-    assert.equal(init.headers.get('x-e-mate-task-id'), requestId)
+    assert.match(requestId ?? '', /^image-[0-9a-f]{32}(?:-[1-4])?$/u)
+    assert.ok(init.headers.get('x-e-mate-task-id'))
     assert.equal(init.headers.get('x-e-mate-trace-id'), requestId)
     assert.equal(init.headers.get('session_id'), requestId)
     const bodySha256 = sha256(String(init.body))
@@ -169,6 +144,7 @@ function relativeMark(value, start) { return value === undefined ? null : value 
 function assembledMeasurement(active, start, end, fixture) {
   const marks = active.marks
   return {
+    execution_contract: NATIVE_EXECUTION,
     total_ms: end - start,
     stages: {
       provider_submit_ms: relativeMark(marks.providerSubmit, start), provider_finish_ms: relativeMark(marks.providerFinish, start),
@@ -185,14 +161,11 @@ function assembledMeasurement(active, start, end, fixture) {
   }
 }
 function historicalReceipt(sessionId, index, attachment) {
-  return {
-    schema_version: 2, revision: 2, call_id: 'history-' + String(index + 1).padStart(3, '0'), operation: 'generate',
-    status: 'completed', billing_status: 'recorded', parent_session_id: String(sessionId), sources: [],
-    content: [{ type: 'image', attachment }], job_id: 'emate-image-history-' + String(index + 1),
-    provider_request_id: 'history-provider-' + String(index + 1), client_request_id: 'history-client-' + String(index + 1),
-    model: MODEL, output: attachment, verifier: { structural: 'attachment-cas-v1', semantic: 'not-required' },
-    verification: { structural: 'passed', source_output: 'not-applicable', semantic: 'not-applicable' },
-  }
+  return { schema_version: 3, revision: 2, call_id: 'history-' + index, root_call_id: 'history-' + index,
+    tool_name: 'generate_image', operation: 'generate', status: 'completed', parent_session_id: String(sessionId), sources: [],
+    content: [{ type: 'image', attachment }], job_id: 'history-job-' + index, task_id: 'history-task-' + index,
+    client_request_ids: ['history-client-' + index], provider_request_ids: ['history-provider-' + index],
+    model: MODEL, requested_count: 1, returned_count: 1, failed_count: 0 }
 }
 
 async function createLower(root) {
@@ -238,120 +211,50 @@ async function createLower(root) {
 }
 
 async function createAssembled(root, fixture, historyCount = 0) {
-  const { Context, AgentRegistry, SessionStore, SessionId, SessionProjectionRegistry, LocalJobRegistry, LocalAttachmentStore, applyImageGeneration } = await modules()
   mkdirSync(root, { recursive: true })
-  const context = new Context()
-  await context.plugin(AgentRegistry)
-  await context.plugin(SessionStore)
-  await context.plugin(SessionProjectionRegistry)
-  await context.plugin(LocalJobRegistry)
-  await context.plugin(LocalAttachmentStore, { dshHome: join(root, 'dsh-home') })
-  assert.equal(JSON.stringify(context.attachments.imageLimits), JSON.stringify(ATTACHMENT_LIMITS))
-  const tools = new Map()
-  const effectCleanups = []
-  let active = emptyActive()
-  const modelPolicy = { assertModel: async model => { assert.equal(model, MODEL) } }
-  const identity = { request: (url, init) => fakeRequest(fixture, active)(url, init) }
-  const attachments = {
-    imageLimits: context.attachments.imageLimits,
-    async saveImage(input) {
-      active.counts.cas_saves += 1
-      active.marks.casBegin = performance.now()
-      const saved = await context.attachments.saveImage(input)
-      active.marks.casEnd = performance.now()
-      active.savedAttachmentId = saved.attachmentId
-      return saved
+  let active = emptyActive(), latestJob
+  const native = await createNativeImageFixture({ home: join(root, 'dsh-home'),
+    request: (url, init) => fakeRequest(fixture, active)(url, init),
+    hooks: {
+      casBegin(at, count) { active.counts.cas_saves += count; active.marks.casBegin = at },
+      casEnd(at) { active.marks.casEnd = at },
+      jobStart() { active.counts.jobs += 1 },
+      jobTerminal({ at, snapshot }) { active.marks.jobTerminal = at; latestJob = snapshot },
+      receiptBegin(at) { active.counts.terminal_receipts += 1; active.marks.receiptAppendBegin = at },
+      receiptHandoff({ at }) { active.marks.projectionHandoff = at },
+      receiptReturn(at) { active.marks.receiptAppendReturn = at },
     },
-    async readImage(ref, signal) {
-      if (ref.attachmentId === active.savedAttachmentId) active.marks.verificationBegin = performance.now()
-      const stored = await context.attachments.readImage(ref, signal)
-      if (ref.attachmentId === active.savedAttachmentId) active.marks.verificationEnd = performance.now()
-      return stored
-    },
-  }
-  const jobs = {
-    attachController: name => context.jobs.attachController(name),
-    start(spec) { active.counts.jobs += 1; return context.jobs.start(spec) },
-    startWhenAvailable() { throw new Error('direct imagegen entered the queued Job path') },
-    wait: (id, timeout, owner, signal) => context.jobs.wait(id, timeout, owner, signal),
-    get: (id, owner) => context.jobs.get(id, owner),
-    kill: (id, owner, reason) => context.jobs.kill(id, owner, reason),
-  }
-  const facade = {
-    tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) }, schemas: () => [...tools.values()] },
-    jobs, attachments, sessionProjections: context.sessionProjections,
-    sessionProjectionCache: { cachedSnapshot: () => undefined, coldSnapshot: async () => { throw new Error('unexpected cold projection read') } },
-    sessionPersistence: { list: async () => [] }, sessions: context.sessions, agents: context.agents,
-    subagents: {
-      getProvider() { active.counts.subagent_starts += 1; return undefined },
-      async start() { active.counts.subagent_starts += 1; throw new Error('direct imagegen started a subagent') },
-    },
-    emateModelPolicy: modelPolicy,
-    sandboxPolicy: { resolve: () => ({ mode: 'read-only', workspaceRoot: root }) }, logger: context.logger,
-    get(name) {
-      if (name === 'emateIdentity') return identity
-      if (name === 'emateModelPolicy') return modelPolicy
-      if (name === 'emateCapabilities') return { register: () => () => {} }
-      return undefined
-    },
-    effect(setup) { const cleanup = setup(); if (typeof cleanup === 'function') effectCleanups.push(cleanup); return cleanup },
-    on() { return () => {} },
-  }
-  await applyImageGeneration(facade, { bindingPath: writeBinding(root, join(root, 'dsh-home')), rootUrl: 'https://model.example/e-mate/model-api/v1' })
-  const imagegen = tools.get('imagegen')
-  assert.ok(imagegen, 'assembled imagegen Tool was not registered')
-  const ownerFiber = context.plugin(() => {})
-  const sessionId = SessionId('image-benchmark-' + createHash('sha256').update(root).digest('hex').slice(0, 24))
-  const session = context.sessions.create(sessionId, { meta: { cwd: root } })
-  const seedAttachment = { attachmentId: 'sha256:' + fixture.sha256, mediaType: 'image/png', bytes: fixture.bytes, width: 1, height: 1, name: 'history.png' }
-  for (let index = 0; index < historyCount; index += 1) session.append('emate/image-output', historicalReceipt(sessionId, index, seedAttachment), { ignorable: true })
-  const nativeAppend = session.append.bind(session)
-  session.append = (type, data, ...options) => {
-    if (type === 'emate/image-batch') active.counts.batch_events += 1
-    const terminalReceipt = type === 'emate/image-output' && data?.status !== 'running'
-    if (terminalReceipt) {
-      active.counts.terminal_receipts += 1
-      active.marks.receiptAppendBegin = performance.now()
-    }
-    const event = nativeAppend(type, data, ...options)
-    if (terminalReceipt) active.marks.receiptAppendReturn = performance.now()
-    return event
-  }
-  context.sessionProjections.onChanged((changed, key) => {
-    if (changed === session && key === 'eMateImageReceipts' && active.marks.receiptAppendBegin !== undefined) active.marks.projectionHandoff = performance.now()
   })
-  context.jobs.onJobDone((snapshot, owner) => {
-    if (owner?.id === sessionId && snapshot.kind === 'emate-image') active.marks.jobTerminal = performance.now()
-  })
-  const agent = {
-    id: sessionId, ctx: ownerFiber.ctx, session, options: {}, status: 'idle',
-    send() {}, followup() {}, inject() {}, cancel() {},
-    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' }) }),
-    runMaintenance: job => job(new AbortController().signal), whenIdle: () => Promise.resolve(),
-  }
-  context.agents.register(agent)
+  assert.deepEqual(native.ctx.attachments.imageLimits, ATTACHMENT_LIMITS)
+  const seed = await native.ctx.attachments.saveImage({ data: fixture.data, mediaType: 'image/png', name: 'history.png' })
+  for (let index = 0; index < historyCount; index += 1) native.agent.session.append('emate/image-output', historicalReceipt(native.agent.id, index, seed), { ignorable: true })
   let call = 0
   return {
     async run(options = {}) {
       active = emptyActive(options.admissionRejects ?? 0)
-      const start = performance.now()
-      const result = await imagegen.execute({ prompt: NORMALIZED_PROMPT }, {
-        agent, callId: 'single-image-' + String(++call), signal: new AbortController().signal,
-      })
+      const start = performance.now(), callId = 'single-image-' + ++call
+      const result = await native.call('generate_image', { prompt: NORMALIZED_PROMPT }, { callId })
       active.marks.toolReturn = performance.now()
-      assert.equal(result.status, 'completed')
-      assert.equal(result.images.length, 1)
-      assert.equal(result.images[0].model, MODEL)
-      assert.equal(result.images[0].image.attachmentId, 'sha256:' + fixture.sha256)
-      const end = performance.now()
-      const measurement = assembledMeasurement(active, start, end, fixture)
-      return options.admissionRejects === undefined ? validateDirectMeasurement(measurement) : measurement
+      const receipt = native.receipts.at(-1).receipt
+      await native.ctx.jobs.wait(receipt.job_id, 1000, native.agent)
+      if (options.admissionRejects) {
+        assert.equal(result.value.status, 'failed')
+        const repeated = await native.call('generate_image', { prompt: NORMALIZED_PROMPT }, { callId })
+        return { status: 'SUPERSEDED_BY_NATIVE_SAFE_FAILURE', attempts: active.counts.attempts,
+          provider_posts: active.counts.provider_posts, cas_saves: active.counts.cas_saves,
+          terminal_receipts: active.counts.terminal_receipts, terminal_status: receipt.status,
+          job_terminal_status: latestJob.status, repeated_call_rejected: repeated.isError,
+          duplicate_provider_generation: Math.max(0, active.counts.provider_posts - 1),
+          pass: active.counts.attempts === 1 && active.counts.provider_posts === 0 && repeated.isError }
+      }
+      assert.equal(result.isError, false)
+      assert.equal(result.value.status, 'completed')
+      assert.equal(result.value.images.length, 1)
+      assert.equal(result.value.images[0].attachment_id, 'sha256:' + fixture.sha256)
+      assert.deepEqual(result.content.map(block => block.type), ['text'])
+      return validateDirectMeasurement(assembledMeasurement(active, start, performance.now(), fixture))
     },
-    async dispose() {
-      for (const cleanup of effectCleanups.reverse()) await cleanup()
-      await ownerFiber.dispose()
-      await context.fiber.dispose()
-    },
+    dispose: () => native.dispose(),
   }
 }
 
@@ -416,18 +319,10 @@ async function runHistory(fixture, workerRoot) {
 
 
 async function runAdmissionRetryProbe(fixture, workerRoot) {
-  const assembled = await createAssembled(join(workerRoot, 'admission-retry'), fixture)
-  try {
-    const measurement = await assembled.run({ admissionRejects: 1 })
-    const pass = measurement.counts.attempts === 2 && measurement.counts.provider_posts === 1
-      && measurement.counts.admission_wait_ms >= 999 && measurement.counts.admission_wait_ms <= 5000
-    return { retry_after_ms: 1000, identical_request_scope: true, measurement, pass }
-  } finally {
-    await assembled.dispose()
-  }
+  const assembled = await createAssembled(join(workerRoot, 'admission-safe-failure'), fixture)
+  try { return await assembled.run({ admissionRejects: 1 }) }
+  finally { await assembled.dispose() }
 }
-
-
 
 export function runtimeNetworkGuardSmoke() {
   const before = networkCalls
@@ -444,6 +339,24 @@ export function workerSourceSmoke() {
   assert.equal(typeof prerequisiteError, 'function')
   assert.equal(typeof fileSha256, 'function')
   return { status: 'worker-source-smoke-passed' }
+}
+
+export async function nativeOwnerSmoke({ maximum = false, historyCount = 0 } = {}) {
+  const restoreNetwork = installNetworkGuard()
+  const root = mkdtempSync(join(tmpdir(), 'emate-native-owner-smoke-'))
+  const data = maximum ? createExactMaxPng() : SMALL_PNG
+  const fixture = { data, sha256: sha256(data), bytes: data.byteLength,
+    response: imageResponseBody(data), responseSha256: sha256(imageResponseBody(data)) }
+  try {
+    const assembled = await createAssembled(join(root, 'single'), fixture, historyCount)
+    let measurement
+    try { measurement = await assembled.run() } finally { await assembled.dispose() }
+    const failure = await runAdmissionRetryProbe(fixture, root)
+    return { claim: 'one-offline-native-owner-smoke-not-full-performance-evidence', measurement, failure, network_calls: networkCalls }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    restoreNetwork()
+  }
 }
 
 async function main() {
@@ -475,9 +388,9 @@ async function main() {
     const admissionRetryProbe = await runAdmissionRetryProbe(fixtures.small, workerRoot)
     const report = {
       schema_version: SCHEMA_VERSION, ticket: TICKET, claim: CLAIM, repetition,
-      protocol: { fake_delay_ms: 25, repetitions: 3, clock: 'performance.now monotonic', percentile: 'nearest-rank-per-repetition', ordering: 'interleaved-ABBA', filesystem: 'same-worker-temp-volume' },
+      protocol: { fake_delay_ms: 25, repetitions: 3, clock: 'performance.now monotonic', percentile: 'nearest-rank-per-repetition', ordering: 'interleaved-ABBA', filesystem: 'same-worker-temp-volume', execution_contract: NATIVE_EXECUTION },
       provenance: { emate_commit: emateCommit, harness_commit: HARNESS_COMMIT, module_sha256: {
-        image_generation_source: fileSha256(PATHS.imageGenerationSource), image_generation_bundle: fileSha256(PATHS.imageGenerationBundle),
+        image_generation_source: fileSha256(PATHS.imageGenerationSource), native_tool_source: fileSha256(join(ROOT, 'packages/dsh-plugin-imagegen/src/upstream/agent-image-tools.ts')), native_queue_source: fileSha256(join(ROOT, 'packages/dsh-plugin-imagegen/src/upstream/task-queue.ts')), image_generation_bundle: fileSha256(PATHS.imageGenerationBundle),
         attachment_store_source: fileSha256(PATHS.attachmentStore), attachment_bundle: fileSha256(PATHS.attachment),
         jobs_bundle: fileSha256(PATHS.jobs), tools_bundle: fileSha256(PATHS.tools),
       } },

@@ -23,7 +23,6 @@ export const name = 'emate-cdp'
 export const inject = ['tools', 'approval', 'settings', 'subprocess', 'systemPrompt', 'userQuestions', 'emateCapabilities']
 
 const TOOL_TIMEOUT_MS = 45_000
-const CDP_START_TIMEOUT_MS = 12_000
 const CDP_START_POLL_MS = 200
 const MUTATING_TOOLS = new Set([
   'browser_click', 'browser_type', 'browser_press', 'browser_navigate',
@@ -67,6 +66,8 @@ interface ManagedChromeRuntime {
   readonly ensure: (signal: AbortSignal) => Promise<void>
   readonly open: (signal: AbortSignal) => Promise<void>
   readonly dispose: () => void
+  readonly lastError: string | undefined
+  readonly markConnected: () => void
 }
 
 export function browserToolRequiresApproval(toolName: string): boolean {
@@ -174,31 +175,51 @@ async function promiseWithSignal<T>(promise: Promise<T>, signal: AbortSignal): P
   })
 }
 
+// Only a refused connection means Chrome is not running. HTTP/protocol failures
+// and invalid debugger origins must never turn into readiness or another launch.
+function isCdpNotRunning(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const failure = error as { code?: unknown; cause?: unknown }
+  return failure.code === 'ECONNREFUSED'
+    || (typeof failure.cause === 'object' && failure.cause !== null
+      && (failure.cause as { code?: unknown }).code === 'ECONNREFUSED')
+}
+
 function managedChromeRuntime(ctx: Context, endpoint: string): ManagedChromeRuntime {
   const lifetime = new AbortController()
   const browser = new CdpBrowser(endpoint)
   let pending: Promise<void> | undefined
+  let lastError: string | undefined
 
   const available = async (signal: AbortSignal): Promise<boolean> => {
+    signal.throwIfAborted()
     try {
-      return (await browser.pages(AbortSignal.any([signal, AbortSignal.timeout(1_000)]))).length > 0
-    } catch {
+      await browser.pages(AbortSignal.any([signal, AbortSignal.timeout(1_000)]))
+      lastError = undefined
+      return true
+    } catch (error) {
       signal.throwIfAborted()
+      if (!isCdpNotRunning(error)) throw error
       return false
     }
   }
   const launchAndWait = async (): Promise<void> => {
-    const signal = lifetime.signal
+    // A cold start shares the browser Tool budget; an unrelated 12s deadline
+    // previously failed before the observed 14s macOS Chrome check-in.
+    const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(TOOL_TIMEOUT_MS)])
+    const deadline = Date.now() + TOOL_TIMEOUT_MS
     await launchManagedChrome(ctx, endpoint, managedChromeProfile(), signal)
-    const deadline = Date.now() + CDP_START_TIMEOUT_MS
     while (Date.now() < deadline) {
       if (await available(signal)) return
       await abortableDelay(CDP_START_POLL_MS, signal)
     }
-    throw new Error('e-Mate 浏览器未在限定时间内启用 CDP。')
+    throw new Error('Chrome 启动后未能在浏览器任务时限内连接 CDP，请稍后重试。')
   }
   const start = (): Promise<void> => {
-    pending ??= launchAndWait().finally(() => { pending = undefined })
+    pending ??= launchAndWait().catch(error => {
+      lastError = 'Chrome 启动或 CDP 连接失败，请确认 Chrome 已安装后重试。'
+      throw error
+    }).finally(() => { pending = undefined })
     return pending
   }
   const ensure = async (signal: AbortSignal): Promise<void> => {
@@ -209,6 +230,8 @@ function managedChromeRuntime(ctx: Context, endpoint: string): ManagedChromeRunt
     ensure,
     open: ensure,
     dispose: () => { lifetime.abort(new Error('e-Mate CDP plugin disposed')) },
+    get lastError() { return lastError },
+    markConnected: () => { lastError = undefined },
   }
 }
 
@@ -572,14 +595,25 @@ export function apply(ctx: CdpContext, config: Config = {}): void {
       return { allow_control: configuredControl(control, endpoint) }
     },
     status: async (signal: AbortSignal) => {
+      signal.throwIfAborted()
       const controlAction = ctx.settings.writable
         ? configuredControl(control, endpoint) ? 'disable-control' : 'enable-control'
         : undefined
       try {
         const pages = await browser.pages(AbortSignal.any([signal, AbortSignal.timeout(2_000)]))
+        managedChrome.markConnected()
         return { state: 'ready', detail: `CDP 已连接 · ${pages.length} 个页面 · 控制${configuredControl(control, endpoint) ? '已启用' : '未启用'}`, action_ids: controlAction === undefined ? [] : [controlAction] }
-      } catch {
+      } catch (error) {
         signal.throwIfAborted()
+        if (!isCdpNotRunning(error) || managedChrome.lastError !== undefined) {
+          return {
+            state: 'failed',
+            detail: managedChrome.lastError ?? 'CDP 连接或响应校验失败，请检查受管 Chrome 后重试。',
+            action_ids: isCdpNotRunning(error)
+              ? ['open-browser', ...(controlAction === undefined ? [] : [controlAction])]
+              : controlAction === undefined ? [] : [controlAction],
+          }
+        }
         return { state: 'ready', detail: `首次网页任务时自动启动 Chrome · 控制${configuredControl(control, endpoint) ? '已启用' : '未启用'}`, action_ids: ['open-browser', ...(controlAction === undefined ? [] : [controlAction])] }
       }
     },

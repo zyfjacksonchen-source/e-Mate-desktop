@@ -11,26 +11,8 @@ interface UseSessions {
   <T>(selector: (snapshot: SessionListState) => T, equal?: (left: T, right: T) => boolean): T
 }
 
-export interface ImageBatchRetryTask {
-  readonly ordinal: number
-  readonly prompt: string
-  readonly imageIds: readonly string[]
-}
-
-export interface ImageBatchRetryCall {
-  readonly parentCallId: string
-  readonly tasks: readonly ImageBatchRetryTask[]
-}
-
-export interface ImageBatchRetryResult {
-  readonly prepared: boolean
-  readonly message: string
-}
-
 interface ImageBatchProgressProps {
   readonly batches: readonly ImageBatchClientBatch[]
-  readonly retryCalls?: readonly ImageBatchRetryCall[]
-  readonly prepareRetry?: (task: ImageBatchRetryTask) => Promise<ImageBatchRetryResult>
   readonly useSessions: UseSessions
   readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
   readonly addImageToCanvas?: (attachment: ImageAttachmentRef, ownerSessionId: string) => Promise<void>
@@ -113,10 +95,8 @@ function samePreview(left: ExactPreview | undefined, right: ExactPreview | undef
     && a.width === b.width && a.height === b.height && a.name === b.name
 }
 
-const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepareRetry, useSessions, loadImage, addImageToCanvas }: {
+const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, useSessions, loadImage, addImageToCanvas }: {
   readonly task: ImageBatchClientTask
-  readonly retry?: ImageBatchRetryTask
-  readonly prepareRetry?: ImageBatchProgressProps['prepareRetry']
   readonly useSessions: UseSessions
   readonly loadImage: ImageBatchProgressProps['loadImage']
   readonly addImageToCanvas?: ImageBatchProgressProps['addImageToCanvas']
@@ -126,8 +106,6 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
     (attachment: ImageAttachmentRef) => loadImage(attachment, preview?.ownerSessionId),
     [loadImage, preview?.ownerSessionId],
   )
-  const [retryMessage, setRetryMessage] = useState<string>()
-  const [preparing, setPreparing] = useState(false)
   const adding = useRef(false)
   const [addingToCanvas, setAddingToCanvas] = useState(false)
   const [canvasError, setCanvasError] = useState<string>()
@@ -139,15 +117,6 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
     }).finally(() => { adding.current = false; setAddingToCanvas(false) })
   }
   const label = '第 ' + task.ordinal + ' 张图片：' + stateLabels[task.state]
-  const retryable = task.terminal && task.state !== 'completed' && retry !== undefined && prepareRetry !== undefined
-  const sourceReason = retry?.imageIds.length ? '带参考图的任务暂不能安全准备重试，请重新附图后发送。' : undefined
-  const prepare = (): void => {
-    if (!retryable || sourceReason !== undefined || preparing) return
-    setPreparing(true)
-    void prepareRetry(retry).then(result => { setRetryMessage(result.message) }, () => {
-      setRetryMessage('未能准备重试，请保持当前草稿不变并稍后再试。')
-    }).finally(() => { setPreparing(false) })
-  }
   return <article className={css.card} data-task-id={task.taskId} data-state={task.state} aria-label={label}>
     <div className={css.preview}>
       {preview === undefined
@@ -174,26 +143,17 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
     {task.state === 'cancelled' && <p className={css.reason}>已取消；已完成图片仍会保留</p>}
     {task.state === 'interrupted' && <p className={css.reason}>任务未开始；未自动重新生成</p>}
     {task.state === 'failed' && <p className={css.reason}>生成失败；未自动重新生成</p>}
-    {retryable && <div className={css.retry}>
-      <button type="button" disabled={sourceReason !== undefined || preparing} onClick={prepare}>
-        {preparing ? '正在准备…' : '准备重新生成此项'}
-      </button>
-      {(sourceReason ?? retryMessage) !== undefined && <p>{sourceReason ?? retryMessage}</p>}
-    </div>}
   </article>
 })
 
 /**
- * Render batches owned by exact image_batch calls in one parent Turn.
+ * Read historical batches owned by exact image_batch calls in one parent Turn.
  * @param props - exact parent batches, native child Session hook, and Attachment image loader.
  * @returns the live batch cards, or null until an exact parent batch is projected.
  */
 export function ImageBatchProgress({
-  batches, retryCalls = [], prepareRetry, useSessions, loadImage, addImageToCanvas,
+  batches, useSessions, loadImage, addImageToCanvas,
 }: ImageBatchProgressProps) {
-  const retries = new Map(retryCalls.flatMap(call => call.tasks.map(task => [
-    call.parentCallId + '\0' + task.ordinal, task,
-  ] as const)))
   if (batches.length === 0) return null
   return <div className={css.root} aria-label="图片批次进度">
     {batches.map(batch => {
@@ -204,22 +164,18 @@ export function ImageBatchProgress({
         key={batch.batchId}
         className={css.batch}
         aria-label={batchLabel}
-        aria-busy={!batch.terminal}
+        aria-busy={false}
         data-batch-id={batch.batchId}
         data-terminal={batch.terminal || undefined}
       >
         <p className={css.liveSummary} aria-live="polite" aria-atomic="true">
           {batchLiveSummary(batch.tasks)}
         </p>
-        {!batch.terminal && <p className={css.cancelGuidance}>
-          如需取消，请使用输入框旁的“停止生成”按钮。
-        </p>}
+        <p className={css.cancelGuidance}>历史图片批次，仅保留记录与附件。</p>
         <div className={css.grid} role="list">
           {batch.tasks.map(task => <div key={task.taskId} role="listitem">
             <ImageBatchTaskCard
               task={task}
-              retry={retries.get(batch.parentCallId + '\0' + task.ordinal)}
-              prepareRetry={prepareRetry}
               useSessions={useSessions}
               loadImage={loadImage}
               addImageToCanvas={addImageToCanvas}

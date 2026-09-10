@@ -117,14 +117,24 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(findSkillPatch).toContain('/tree/skills-v2.0.12-r1/skills/connect-feishu-cli')
     expect(findSkillPatch).not.toContain('/tree/main/skills/connect-feishu-cli')
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-mcp-manage', 'lib', 'index.mjs'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'client.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'ppt-preview.py'))).toBe(true)
-    expect(lstatSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets')).isSymbolicLink())
-      .toBe(process.platform !== 'win32')
+    const supportSkills = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills')
+    expect(existsSync(join(supportSkills, 'lib', 'index.js'))).toBe(true)
+    expect(existsSync(join(supportSkills, 'lib', 'client.js'))).toBe(false)
+    expect(existsSync(join(supportSkills, 'assets'))).toBe(false)
+    for (const skill of ['documents', 'pdf', 'spreadsheets', 'ppt-master']) {
+      expect(existsSync(join(supportSkills, 'skills', skill))).toBe(false)
+    }
+    for (const skill of ['meeting-summary', 'lieflat-charts']) {
+      expect(existsSync(join(supportSkills, 'skills', skill, 'SKILL.md'))).toBe(true)
+    }
+    const univer = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-univer-office')
+    for (const asset of ['lib/index.js', 'lib/client.js', 'artifacts/gateway.cjs',
+      'artifacts/unit-content-worker.mjs', 'artifacts/viewer/index.html', 'artifacts/render-machine/index.html',
+      'node_modules/libsql/package.json', 'node_modules/@univerjs-pro/engine-formula-rust-binding/package.json',
+      'node_modules/@univerjs-pro/exchange-node-binding/package.json']) {
+      expect(existsSync(join(univer, asset)), asset).toBe(true)
+    }
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant'))).toBe(false)
-    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'pdf2json', 'pdfparser.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'noto-sans-sc', 'files', 'noto-sans-sc-4-wght-normal.woff2'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', 'dsh-at-file', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-better-sidebar', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', 'dsh-better-sidebar'))).toBe(false)
@@ -213,7 +223,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     }))
     expect(rows.find(row => row.id === 'emate-tool-search')?.config?.alwaysVisible).toContain('web_search')
     expect(rows.find(row => row.id === 'emate-tool-search')?.config?.alwaysVisible)
-      .toEqual(expect.arrayContaining(['imagegen', 'image_pack']))
+      .toEqual(expect.arrayContaining(['generate_image', 'edit_image', 'get_image_generation_task', 'cancel_image_generation_task']))
     expect(rows.find(row => row.id === 'emate-file-import')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-file-import',
     }))
@@ -228,7 +238,11 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     }))
     expect(rows.map(row => row.id)).not.toContain('emate-xin-assistant')
     expect(rows.find(row => row.id === 'emate-office-skills')).toEqual(expect.objectContaining({
-      name: '@e-mate/dsh-plugin-office-skills',
+      name: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
+    }))
+    expect(rows.find(row => row.id === 'univer')).toEqual(expect.objectContaining({
+      name: '@e-mate/dsh-plugin-univer-office',
+      config: expect.objectContaining({ telemetry: false }),
     }))
     const agentOperations = rows.find(row => row.id === 'emate-agent-operations')
     expect(agentOperations).toEqual(expect.objectContaining({
@@ -296,7 +310,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       expect(await rpc('set', { session_id: second.id, active: true }, 'https://untrusted.example')).toBe(403)
       expect(await policy(second)).toBe('')
       const assembly = await ctx.systemPrompt.assemble()
-      expect(assembly.sections.find(section => section.name === 'emate:agent-operations')?.text).toContain('image_batch')
+      expect(assembly.sections.find(section => section.name === 'emate:agent-operations')?.text).not.toMatch(/imagegen|image_batch|image_pack/)
       await fiber.dispose()
       expect((await ctx.systemPrompt.assemble()).sections.some(section => section.name.startsWith('emate:'))).toBe(false)
       const removed = await fetch(`http://127.0.0.1:${ctx.webServer.port}/emate.expert-mode/get`, { method: 'POST' })

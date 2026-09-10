@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { syncBuiltinESMExports } from 'node:module'
+import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 
-import { adaptHarnessFsSource, applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
+import { adaptHarnessFsSource, adaptHarnessSessionTitleSource, SESSION_TITLE_PACKAGE, applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 import { adaptHarnessFsBytesSource, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessConversationSource, CONVERSATION_PACKAGE } from './harness-conversation-adapter.mjs'
@@ -41,6 +42,7 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
   const nativeConversation = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js'), 'utf8')
   const nativeExport = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/host/apiproxy/lib/index.js'), 'utf8')
   const nativeBytes = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/fs/fs-local/lib/index.js'), 'utf8')
+  const nativeTitle = await fs.readFile(join(nativeRoot, 'upstream/deepseek-harness/packages/session/session-title/lib/index.js'), 'utf8')
   const entries = [
     { name: '@deepseek-ai/dsh-tool-fs', file: 'index.js', input: rc7Seam, adapt: adaptHarnessFsSource },
     { name: FS_BYTES_PACKAGE, file: 'index.js', input: nativeBytes, adapt: adaptHarnessFsBytesSource },
@@ -49,6 +51,7 @@ test('runtime adapters isolate real hardlinks and preserve their sources on repl
     { name: ARTIFACT_DELIVERABLES_PACKAGE, file: 'client.js', input: nativeDeliverables, adapt: adaptHarnessArtifactDeliverablesSource },
     { name: SLOT_ERROR_PACKAGE, file: 'client.js', input: nativeSlots, adapt: adaptHarnessSlotErrorSource },
     { name: CONVERSATION_PACKAGE, file: 'client.js', input: nativeConversation, adapt: adaptHarnessConversationSource },
+    { name: SESSION_TITLE_PACKAGE, file: 'index.js', input: nativeTitle, adapt: adaptHarnessSessionTitleSource },
   ]
   for (const entry of entries) {
     entry.source = join(directory, entry.name.replace(/[@/]/gu, '_') + '-' + entry.file)
@@ -146,4 +149,115 @@ test('native browser fetches SlotsService as a client plugin bundle, not a Vite 
   assert.match(loader, /const task = this\.loadBundle\(url\)/u)
   const route = readFileSync(join(native, 'packages/client/modules/src/index.ts'), 'utf8')
   assert.match(route, /const bundleSuffix = '\/client\.js'/u)
+})
+
+
+const titleNativeRoot = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
+const titleEntry = join(titleNativeRoot, 'upstream/deepseek-harness/packages/session/session-title/lib/index.js')
+const titleNativeSource = readFileSync(titleEntry, 'utf8')
+const titleRequire = createRequire(titleEntry)
+const titleImport = name => import(pathToFileURL(titleRequire.resolve(name)).href)
+
+async function titleHarness(mode = 'first-prompt', generate) {
+  const [{ Context }, { default: SessionStore, SessionId }, { createUserMessage }] = await Promise.all([
+    titleImport('@deepseek-ai/cordis'), titleImport('@deepseek-ai/dsh-session'), titleImport('@deepseek-ai/dsh-llm'),
+  ])
+  const source = adaptHarnessSessionTitleSource(titleNativeSource).replace(/from "([^".][^"]*)"/gu,
+    (_match, specifier) => `from ${JSON.stringify(pathToFileURL(titleRequire.resolve(specifier)).href)}`)
+  const { default: TitleService } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  const ctx = new Context()
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(TitleService, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
+  const calls = []
+  ctx.sessionTitle.register({ id: 'test-title', automatic: mode, generate: async request => {
+    calls.push(request)
+    return generate ? generate(request) : { title: 'Generated long title', messageSeqs: request.messages.map(message => message.seq) }
+  } })
+  let serial = 0
+  return {
+    ctx, calls,
+    create: () => ctx.sessions.create(SessionId(`title-adapter-${++serial}`)),
+    prompt: (session, text, extra = {}) => session.append('user/message', createUserMessage({
+      role: 'user', content: [{ type: 'text', text }, ...(extra.blocks ?? [])],
+      source: { kind: 'user', ...(extra.mentions ? { mentions: extra.mentions } : {}) },
+    }), { surfaceOp: 'append' }),
+    route: session => session.append('request/header', { header: { config: { provider: 'test', model: 'test' } }, reason: 'initial' }),
+  }
+}
+const settleTitle = () => new Promise(resolve => setImmediate(resolve))
+
+test('title adapter preserves short human titles using native budgets and keeps long, multiline and attachment requests', async () => {
+  const h = await titleHarness()
+  try {
+    for (const [text, extra, shouldGenerate] of [
+      ['你好', {}, false], ['修复登录', {}, false], ['Fix login', {}, false],
+      ['a b c d e', {}, false], ['a'.repeat(40), {}, false], ['中'.repeat(13), {}, false],
+      ['a b c d e f', {}, true], ['a'.repeat(41), {}, true], ['中'.repeat(14), {}, true],
+      ['hello\nworld', {}, true], ['hello\u2028world', {}, true],
+      ['你好', { blocks: [{ type: 'image', attachmentId: 'sha256:test', mediaType: 'image/png' }] }, true],
+      ['report', { mentions: [{ source: 'e-mate/file-import', ref: 'fixture' }] }, true],
+    ]) {
+      const session = h.create(), before = h.calls.length
+      h.prompt(session, text, extra)
+      h.route(session)
+      await settleTitle()
+      assert.equal(h.calls.length - before, shouldGenerate ? 1 : 0, text)
+      const title = h.ctx.sessionTitle.get(session)
+      assert.equal(title.source.kind, shouldGenerate ? 'provider' : 'fallback', text)
+      if (!shouldGenerate) assert.equal(title.title, text)
+      // A later request header must not replay the consumed/skipped automatic job.
+      h.route(session)
+      await settleTitle()
+      assert.equal(h.calls.length - before, shouldGenerate ? 1 : 0)
+    }
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+test('title adapter leaves explicit refresh, all-prompts and manually pinned titles native', async () => {
+  const h = await titleHarness()
+  try {
+    const session = h.create()
+    h.prompt(session, '你好'); h.route(session); await settleTitle()
+    assert.equal(h.calls.length, 0)
+    await h.ctx.sessionTitle.refresh(session)
+    assert.equal(h.calls.length, 1)
+    await h.ctx.sessionTitle.rename(session, 'My title')
+    h.prompt(session, 'a lengthy new user prompt that requires a generated title')
+    h.route(session); await settleTitle()
+    assert.equal(h.ctx.sessionTitle.get(session).title, 'My title')
+    assert.equal(h.calls.length, 1)
+  } finally { await h.ctx.fiber.dispose() }
+  const all = await titleHarness('all-prompts')
+  try {
+    const session = all.create()
+    all.prompt(session, '你好'); all.route(session); await settleTitle()
+    assert.equal(all.calls.length, 1)
+  } finally { await all.ctx.fiber.dispose() }
+})
+
+test('title adapter refuses absent, duplicated or already adapted native seams', () => {
+  assert.throws(() => adaptHarnessSessionTitleSource('future source'), /seam, found 0/)
+  assert.throws(() => adaptHarnessSessionTitleSource(titleNativeSource + titleNativeSource), /seam, found 2/)
+  assert.throws(() => adaptHarnessSessionTitleSource(adaptHarnessSessionTitleSource(titleNativeSource)), /seam, found 0/)
+})
+
+
+test('title adapter keeps an in-flight provider result from overwriting a manual rename', async () => {
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  const h = await titleHarness('first-prompt', async request => {
+    await gate
+    return { title: 'late unrelated title', messageSeqs: request.messages.map(message => message.seq) }
+  })
+  try {
+    const session = h.create()
+    h.prompt(session, 'This is a detailed task description exceeding the fallback word budget')
+    h.route(session); await settleTitle()
+    assert.equal(h.calls.length, 1)
+    h.ctx.sessionTitle.rename(session, 'User title')
+    assert.equal(h.calls[0].signal.aborted, true)
+    release(); await settleTitle()
+    assert.equal(h.ctx.sessionTitle.get(session).title, 'User title')
+    assert.equal(h.ctx.sessionTitle.get(session).source.kind, 'user')
+  } finally { release(); await h.ctx.fiber.dispose() }
 })

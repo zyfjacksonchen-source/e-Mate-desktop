@@ -1,0 +1,13 @@
+packages:
+  - 'packages/*'
+autoInstallPeers: false
+allowBuilds:
+  esbuild: false
+  protobufjs: false
+minimumReleaseAgeExclude:
+  - '@univerjs/*'
+  - '@univerjs-pro/*'
+  - '@univer-cli/*'
+supportedArchitectures:
+  os: [current]
+  cpu: [current, x64, arm64]

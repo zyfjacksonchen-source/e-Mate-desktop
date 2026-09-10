@@ -32,7 +32,8 @@ import {
 import { normalizedAbsolute } from '../../../../../../../desktop/e-mate-desktop/src/client/resource-context.ts'
 import {
   imageReceiptRole,
-  parseImageOutputReceipt,
+  parseImageOutputGroup,
+  type ImageOutputGroup,
   type ImageGalleryItem,
 } from './image-gallery-contract.ts'
 import {
@@ -43,20 +44,16 @@ import {
 import {
   ImageBatchProgress,
   exactPreview,
-  type ImageBatchRetryCall,
-  type ImageBatchRetryResult,
-  type ImageBatchRetryTask,
 } from './image-batch-progress.tsx'
 import { FileIcon } from '../../../../../../dsh-plugin-file-import/src/client/file-icons.tsx'
 import { allowedMediaType, extensionOf } from '../../../../../../dsh-plugin-file-import/src/contract.ts'
 import fileCss from '../../../../../../dsh-plugin-file-import/src/client/style.module.css'
 import css from './image-gallery.module.css'
 
-interface ToolImagesData {
-  readonly item: ImageGalleryItem
-}
+type ToolImagesData = ImageOutputGroup
 
 interface ToolImagesState extends ToolImagesData {
+  readonly createdAt: number
   readonly sourceSeq: number
 }
 
@@ -66,35 +63,7 @@ interface ImageCallsTurnData {
   readonly batchCalls?: readonly {
     readonly callId: string
     readonly seq: number
-    readonly retryTasks?: readonly ImageBatchRetryTask[]
   }[]
-}
-
-const IMAGE_BATCH_ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
-
-function imageBatchRetryTasks(value: string): readonly ImageBatchRetryTask[] | undefined {
-  let args: unknown
-  try { args = JSON.parse(value) } catch { return undefined }
-  if (args === null || typeof args !== 'object' || Array.isArray(args)) return undefined
-  const input = args as Record<string, unknown>
-  const keys = Object.keys(input)
-  if (!Array.isArray(input.tasks) || input.tasks.length < 2 || input.tasks.length > 8
-    || keys.some(key => key !== 'tasks' && key !== 'concurrency')
-    || input.concurrency !== undefined && (!Number.isSafeInteger(input.concurrency)
-      || Number(input.concurrency) < 1 || Number(input.concurrency) > 4)) return undefined
-  const tasks: ImageBatchRetryTask[] = []
-  for (const [index, value] of input.tasks.entries()) {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
-    const task = value as Record<string, unknown>
-    if (Object.keys(task).some(key => key !== 'prompt' && key !== 'image_url')
-      || typeof task.prompt !== 'string') return undefined
-    const prompt = task.prompt.trim()
-    const rawIds = task.image_url === undefined ? [] : Array.isArray(task.image_url) ? task.image_url : [task.image_url]
-    if (prompt.length === 0 || prompt.length > 20_000 || prompt.includes('\0') || rawIds.length > 16
-      || rawIds.some(id => typeof id !== 'string' || !IMAGE_BATCH_ATTACHMENT_ID.test(id))) return undefined
-    tasks.push(Object.freeze({ ordinal: index + 1, prompt, imageIds: Object.freeze([...new Set(rawIds as string[])]) }))
-  }
-  return Object.freeze(tasks)
 }
 
 interface ImageCallsState extends ImageCallsTurnData {
@@ -138,41 +107,51 @@ function locationOf(context: ConversationNodeContext): ConversationLocation {
   return context.start?.location ?? context.matches[0]?.location ?? { kind: 'unresolved' }
 }
 
-function receipt(event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0]): ImageGalleryItem | null {
+function receipt(event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0]): ImageOutputGroup | null {
   if (event.type !== 'emate/image-output') return null
-  const item = parseImageOutputReceipt(event.data)
-  return item === null ? null : { ...item, createdAt: event.time }
+  const group = parseImageOutputGroup(event.data)
+  return group === null ? null : { ...group, items: group.items.map(item => ({ ...item, createdAt: event.time })) }
 }
 
-/** Persist only the strict receipt; presentation is owned by the native Turn tail. */
+/** A running receipt pins asynchronous completion to its original native Turn. */
 export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> = {
   kind: 'e-mate-tool-images',
   target: 'chat',
   match: event => {
-    const item = receipt(event)
-    return item === null ? null : { id: `tool-images:${item.callId}`, role: imageReceiptRole(item) }
+    const group = receipt(event)
+    return group === null ? null : { id: `tool-images:${group.callId}`,
+      role: event.type === 'emate/image-output' && event.data.schema_version === 3
+        ? group.revision === 1 ? 'start' : 'update' : imageReceiptRole(group.items[0]!) }
   },
   start: (_context, match) => {
-    const item = receipt(match.event)
-    if (item === null) throw new Error('e-Mate image receipt start requires a terminal receipt')
-    return { item, sourceSeq: match.event.seq }
+    const group = receipt(match.event)
+    if (group === null) throw new Error('e-Mate image receipt start requires a valid receipt')
+    return { ...group, createdAt: match.event.time, sourceSeq: match.event.seq }
   },
   update: (context, match) => {
-    const item = receipt(match.event)
-    return item === null || item.revision < context.state.item.revision
+    const group = receipt(match.event)
+    return group === null || group.revision < context.state.revision
       ? context.state
-      : { ...context.state, item: { ...item, createdAt: context.state.item.createdAt } }
+      : { ...context.state, ...group, items: group.items.map(item => ({ ...item,
+        createdAt: context.state.createdAt })) }
   },
-  buildViewNode: context => context.state === undefined ? null : ({
-    key: context.key,
-    kind: 'e-mate-tool-images',
-    id: context.id,
-    target: 'chat',
-    anchorSeq: context.state.sourceSeq + 0.02,
-    location: locationOf(context),
-    visibility: 'hidden',
-    data: { item: context.state.item },
-  }),
+  buildViewNode: context => {
+    // A paged history window may contain the terminal receipt without its running event.
+    const last = context.matches.at(-1)
+    const terminal = context.state === undefined && last !== undefined ? receipt(last.event) : null
+    const state = context.state ?? (terminal === null || last === undefined ? undefined
+      : { ...terminal, createdAt: last.event.time, sourceSeq: last.event.seq })
+    return state === undefined ? null : {
+      key: context.key,
+      kind: 'e-mate-tool-images',
+      id: context.id,
+      target: 'chat',
+      anchorSeq: state.sourceSeq + 0.02,
+      location: locationOf(context),
+      visibility: 'hidden',
+      data: { callId: state.callId, rootCallId: state.rootCallId, revision: state.revision, items: state.items },
+    }
+  },
 }
 
 /** Turn-local direct ImageGen provenance; it publishes no presentation node. */
@@ -180,8 +159,10 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
   kind: 'e-mate-image-calls',
   match: event => {
     if (event.type === 'turn/start') return { id: String(event.data.turn), role: 'start' }
+    if (event.type === 'emate/image-output' && Number.isSafeInteger(event.data.turn)
+      && parseImageOutputGroup(event.data) !== null) return { id: String(event.data.turn), role: 'update' }
     if (event.type === 'tool/call'
-      && (event.data.name === 'imagegen' || event.data.name === 'image_batch' || event.data.name === 'subagent')) {
+      && (['generate_image', 'edit_image', 'imagegen', 'image_batch', 'subagent'].includes(event.data.name))) {
       return { id: String(event.data.turn), role: 'update' }
     }
     return null
@@ -191,16 +172,20 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
     return { turn: match.event.data.turn, calls: [], foregroundSubagents: [] }
   },
   update: (context, match) => {
+    if (match.event.type === 'emate/image-output') {
+      const group = parseImageOutputGroup(match.event.data)
+      return group === null || context.state.calls.some(call => call.callId === group.callId)
+        ? context.state : { ...context.state, calls: [...context.state.calls, { callId: group.callId, seq: match.event.seq }] }
+    }
     if (match.event.type !== 'tool/call') return context.state
     if (match.event.data.name === 'image_batch') {
       const callId = String(match.event.data.callId)
-      const retryTasks = imageBatchRetryTasks(match.event.data.arguments)
       return context.state.batchCalls?.some(call => call.callId === callId)
         ? context.state
         : {
             ...context.state,
             batchCalls: [...context.state.batchCalls ?? [], {
-              callId, seq: match.event.seq, ...retryTasks === undefined ? {} : { retryTasks },
+              callId, seq: match.event.seq,
             }],
           }
     }
@@ -220,7 +205,7 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
         }],
       }
     }
-    if (match.event.data.name !== 'imagegen') return context.state
+    if (!['generate_image', 'edit_image', 'imagegen'].includes(match.event.data.name)) return context.state
     const callId = String(match.event.data.callId)
     return context.state.calls.some(call => call.callId === callId)
       ? context.state
@@ -280,7 +265,6 @@ interface ProducedData {
 export interface ArtifactTerminalMatch {
   readonly callIds: readonly string[]
   readonly batchCallIds?: readonly string[]
-  readonly batchRetryCalls?: readonly ImageBatchRetryCall[]
   readonly paths: readonly string[]
   readonly childSessionIds: readonly string[]
   readonly foregroundWindow?: {
@@ -292,18 +276,19 @@ export interface ArtifactTerminalMatch {
 
 /** Keep one live image tail; generic deliverables are added when the Turn closes. */
 export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTerminalMatch | null {
+  const throughSeq = owner.turn.status === 'closed' ? owner.turn.end?.seq ?? owner.seq : Infinity
   const imageData = owner.turn.data.get('e-mate-image-calls')
   const batchCalls = (imageData?.batchCalls ?? [])
-    .filter(call => call.seq <= owner.seq)
+    .filter(call => call.seq <= throughSeq)
     .sort((left, right) => left.seq - right.seq)
   const batchCallIds = [...new Set(batchCalls.map(call => call.callId))]
-  const batchRetryCalls = batchCalls.flatMap(call => call.retryTasks === undefined
-    ? []
-    : [{ parentCallId: call.callId, tasks: call.retryTasks }])
-  const candidates = (imageData?.calls ?? []).filter(call => call.seq <= owner.seq)
+  const candidates = (imageData?.calls ?? []).filter(call => call.seq <= throughSeq)
   const callIds = [...new Set([
     ...candidates.sort((left, right) => left.seq - right.seq).map(call => call.callId),
-    ...nativeToolImageItems(owner.nodes ?? [], owner.turn.turn, owner.seq).map(item => item.callId),
+    ...nativeToolImageItems(owner.nodes ?? [], owner.turn.turn, throughSeq).map(item => item.callId),
+    ...(owner.nodes ?? []).flatMap(node => node.kind === 'e-mate-tool-images'
+      && (node.location.kind === 'turn' || node.location.kind === 'step') && node.location.turn.turn === owner.turn.turn
+      ? [(node.data as ToolImagesData).callId] : []),
   ])]
   if (owner.turn.status !== 'closed') {
     return callIds.length === 0 && batchCallIds.length === 0
@@ -311,7 +296,6 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
       : {
           callIds,
           ...batchCallIds.length === 0 ? {} : { batchCallIds },
-          ...batchRetryCalls.length === 0 ? {} : { batchRetryCalls },
           paths: [], childSessionIds: [],
         }
   }
@@ -319,7 +303,7 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
   const paths: string[] = []
   const seenPaths = new Set<string>()
   for (const item of produced?.produced ?? []) {
-    if (item.seq > owner.seq || seenPaths.has(item.path)) continue
+    if (item.seq > throughSeq || seenPaths.has(item.path)) continue
     seenPaths.add(item.path)
     paths.push(item.path)
   }
@@ -327,7 +311,7 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
     ? [(node.data as SubagentSettledData).sessionId]
     : []))]
   const foregroundLabels = (imageData?.foregroundSubagents ?? [])
-    .filter(call => call.seq <= owner.seq)
+    .filter(call => call.seq <= throughSeq)
     .sort((left, right) => left.seq - right.seq)
     .map(call => call.label)
   const foregroundWindow = foregroundLabels.length > 0 && owner.turn.start !== undefined && owner.turn.end !== undefined
@@ -339,7 +323,6 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
     : {
         callIds,
         ...batchCallIds.length === 0 ? {} : { batchCallIds },
-        ...batchRetryCalls.length === 0 ? {} : { batchRetryCalls },
         paths,
         childSessionIds,
         ...foregroundWindow === undefined ? {} : { foregroundWindow },
@@ -383,12 +366,13 @@ function settledChildSessions(nodes: Iterable<ChatConversationViewNode>): Readon
 
 /** Read native typed output, never infer images from tool names or prose. */
 function nativeToolImageItems(
-  nodes: Iterable<ChatConversationViewNode>, turn: number, throughSeq = Infinity,
+  nodes: Iterable<ChatConversationViewNode>, turn: number | undefined, throughSeq = Infinity,
 ): Array<ImageGalleryItem & { attachment: ImageAttachmentRef }> {
   const images: Array<ImageGalleryItem & { attachment: ImageAttachmentRef }> = []
   const visit = (block: ToolCallBlock): void => {
     if ('kind' in block && !block.isError && block.seq <= throughSeq) {
-      for (const part of block.content) {
+      const content = [...block.content, ...(block.resultView?.card === 'generic' ? block.resultView.content ?? [] : [])]
+      for (const part of content) {
         if (part.type !== 'image') continue
         images.push({ callId: block.callId, revision: 0, status: 'completed', operation: 'unknown',
           createdAt: block.time, attachment: part.attachment })
@@ -398,7 +382,7 @@ function nativeToolImageItems(
   }
   for (const node of nodes) {
     if (node.kind !== 'tool-call' || (node.location.kind !== 'turn' && node.location.kind !== 'step')
-      || node.location.turn.turn !== turn) continue
+      || turn !== undefined && node.location.turn.turn !== turn) continue
     visit((node.data as { root: ToolCallBlock }).root)
   }
   return images
@@ -412,19 +396,16 @@ export function terminalImageItems(
   title?: string,
 ): readonly ImageGalleryItem[] {
   const allNodes = [...nodes]
-  const named = title === undefined
-    ? undefined
-    : new Map(galleryImageItems(allNodes, title).map(item => [item.callId, item]))
   const allowed = new Set(callIds)
-  const latest = new Map<string, ImageGalleryItem>()
+  const latest = new Map<string, ToolImagesData>()
   for (const node of allNodes) {
     if (node.kind !== 'e-mate-tool-images' || node.visibility !== 'hidden') continue
     if ((node.location.kind !== 'turn' && node.location.kind !== 'step') || node.location.turn.turn !== turn) continue
-    const item = (node.data as ToolImagesData).item
-    if (!allowed.has(item.callId) || (latest.get(item.callId)?.revision ?? -1) > item.revision) continue
-    latest.set(item.callId, named?.get(item.callId) ?? item)
+    const group = node.data as ToolImagesData
+    if (!allowed.has(group.callId) || (latest.get(group.callId)?.revision ?? -1) > group.revision) continue
+    latest.set(group.callId, group)
   }
-  const receipts = callIds.flatMap(callId => latest.get(callId) ?? [])
+  const receipts = callIds.flatMap(callId => latest.get(callId)?.items ?? [])
   const seen = new Set(receipts.flatMap(item => item.attachment?.attachmentId ?? []))
   const native = nativeToolImageItems(allNodes, turn).filter(item => {
     if (!allowed.has(item.callId) || latest.has(item.callId) || seen.has(item.attachment.attachmentId)) return false
@@ -432,7 +413,8 @@ export function terminalImageItems(
     return true
   })
   // A strict failed/review receipt must never become a generic completed image.
-  return [...receipts, ...title === undefined ? native : namedGalleryImageItems(native, title)]
+  const items = [...receipts, ...native]
+  return title === undefined ? items : namedGalleryImageItems(items, title)
 }
 
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu
@@ -512,19 +494,23 @@ export function galleryImageItems(
   nodes: Iterable<ChatConversationViewNode>,
   title?: string,
 ): readonly ImageGalleryItem[] {
-  const latest = new Map<string, { readonly item: ImageGalleryItem; readonly anchorSeq: number }>()
-  for (const node of nodes) {
+  const latest = new Map<string, { readonly group: ToolImagesData; readonly anchorSeq: number }>()
+  const allNodes = [...nodes]
+  for (const node of allNodes) {
     if (node.kind !== 'e-mate-tool-images' || node.visibility !== 'hidden') continue
-    const item = (node.data as ToolImagesData).item
-    const current = latest.get(item.callId)
-    if (current !== undefined
-      && (current.item.revision > item.revision
-        || current.item.revision === item.revision && current.anchorSeq >= node.anchorSeq)) continue
-    latest.set(item.callId, { item, anchorSeq: node.anchorSeq })
+    const group = node.data as ToolImagesData
+    const current = latest.get(group.callId)
+    if (current !== undefined && (current.group.revision > group.revision
+      || current.group.revision === group.revision && current.anchorSeq >= node.anchorSeq)) continue
+    latest.set(group.callId, { group, anchorSeq: node.anchorSeq })
   }
-  const items = [...latest.values()]
-    .sort((left, right) => right.anchorSeq - left.anchorSeq)
-    .map(value => value.item)
+  const items = [...latest.values()].sort((left, right) => right.anchorSeq - left.anchorSeq)
+    .flatMap(value => value.group.items)
+  const seen = new Set(items.flatMap(item => item.attachment?.attachmentId ?? []))
+  for (const item of nativeToolImageItems(allNodes, undefined)) {
+    if (latest.has(item.callId) || seen.has(item.attachment.attachmentId)) continue
+    seen.add(item.attachment.attachmentId); items.push(item)
+  }
   return title === undefined ? items : namedGalleryImageItems(items, title)
 }
 
@@ -567,9 +553,9 @@ export function childGalleryImageItems(
     const label = entry.label?.trim() || summary?.displayTitle?.trim() || `子任务 ${ordinal}`
     for (const row of projectedImageReceipts(projection)) {
       if (row.receipt.parent_session_id !== entry.id || row.receipt.child_session_id !== undefined) continue
-      const item = parseImageOutputReceipt(row.receipt)
-      if (item === null) continue
-      candidates.push({
+      const group = parseImageOutputGroup(row.receipt)
+      if (group === null) continue
+      for (const item of group.items) candidates.push({
         item: {
           ...item,
           createdAt: row.createdAt,
@@ -582,19 +568,20 @@ export function childGalleryImageItems(
       })
     }
   }
-  const latest = new Map<string, typeof candidates[number]>()
+  const latest = new Map<string, { first: typeof candidates[number]; items: ImageGalleryItem[] }>()
   for (const candidate of candidates) {
     const key = `${candidate.item.source!.sessionId}\0${candidate.item.callId}`
     const current = latest.get(key)
-    if (current !== undefined
-      && (current.item.revision > candidate.item.revision
-        || current.item.revision === candidate.item.revision && current.seq >= candidate.seq)) continue
-    latest.set(key, candidate)
+    if (current !== undefined && (current.first.item.revision > candidate.item.revision
+      || current.first.item.revision === candidate.item.revision && current.first.seq > candidate.seq)) continue
+    if (current?.first.item.revision === candidate.item.revision && current.first.seq === candidate.seq) {
+      current.items.push(candidate.item)
+    } else latest.set(key, { first: candidate, items: [candidate.item] })
   }
   return [...latest.values()]
-    .sort((left, right) => (left.item.createdAt ?? 0) - (right.item.createdAt ?? 0)
-      || left.seq - right.seq || left.ordinal - right.ordinal)
-    .map(value => value.item)
+    .sort((left, right) => (left.first.item.createdAt ?? 0) - (right.first.item.createdAt ?? 0)
+      || left.first.seq - right.first.seq || left.first.ordinal - right.first.ordinal)
+    .flatMap(value => value.items)
 }
 
 function batchReceiptKey(sessionId: string, callId: string, revision: number, eventSeq: number): string {
@@ -673,7 +660,6 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
   readonly useInput: <T>(selector: (input: InputSnapshot) => T) => T
   readonly useProjection: UseProjection
   readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
-  readonly prepareImageRetry?: (task: ImageBatchRetryTask) => Promise<ImageBatchRetryResult>
   readonly addImageToDraft: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly draftBytes: (ids: readonly string[]) => number
   readonly notify: (level: 'info' | 'error', text: string) => void
@@ -857,7 +843,7 @@ export function ImageGalleryView({
               ? <div className={css.galleryFailure} role="status">
                 <strong>{item.callId}</strong>
                 {item.source !== undefined && <span>来自子任务：{item.source.label}</span>}
-                <span>错误：{item.failureCode ?? 'unknown'}</span>
+                <span>错误：{item.failureMessage ?? item.failureCode ?? 'unknown'}</span>
               </div>
               : <>
                 <div className={css.galleryPreview}>
@@ -1096,7 +1082,7 @@ export function ArtifactTerminal(props: ArtifactTerminalProps) {
 /** Render hidden image receipts, native deliverables, and optional exact batch progress. */
 function ArtifactTerminalBody({
   matched, sessionId, turn, useSession, useSessions, useInput, useProjection,
-  openFile, loadImage, prepareImageRetry, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource,
+  openFile, loadImage, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource,
   batches, batchChildIds,
 }: ArtifactTerminalBodyProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -1224,8 +1210,6 @@ function ArtifactTerminalBody({
   return <div ref={rootRef} className={css.terminal} data-emate-artifact-terminal="">
     {batches.length > 0 && <ImageBatchProgress
       batches={batches}
-      {...matched.batchRetryCalls === undefined ? {} : { retryCalls: matched.batchRetryCalls }}
-      {...prepareImageRetry === undefined ? {} : { prepareRetry: prepareImageRetry }}
       useSessions={useSessions}
       loadImage={loadImage}
       {...addImageToCanvas === undefined ? {} : { addImageToCanvas }}

@@ -10,7 +10,7 @@ import { CLAIM, HARNESS_COMMIT, REPETITIONS, SCENARIO_NAMES, TICKET, sha256, val
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
 const WORKER = fileURLToPath(new URL('./worker.mjs', import.meta.url))
 const BUILT_PREREQUISITES = [
-  'packages/dsh/profile/plugins/image-generation.js',
+  'packages/dsh-plugin-imagegen/lib/index.js',
   'upstream/deepseek-harness/vendor/cordis/lib/index.js',
   'upstream/deepseek-harness/packages/core/agent/lib/index.js',
   'upstream/deepseek-harness/packages/core/session/lib/index.js',
@@ -48,10 +48,10 @@ export function assertExactBuiltProvenance() {
   const dirty = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: ROOT, encoding: 'utf8' }).trim()
   if (dirty !== '') throw new Error('EM218-108 full benchmark requires a clean committed worktree; uncommitted or untracked source cannot be attributed to HEAD')
   verifyHarnessBuildReceipt(ROOT)
-  const bundle = join(ROOT, 'packages/dsh/profile/plugins/image-generation.js')
-  const newestSource = newestSourceMtime(join(ROOT, 'packages/dsh/src/profile'))
+  const bundle = join(ROOT, 'packages/dsh-plugin-imagegen/lib/index.js')
+  const newestSource = newestSourceMtime(join(ROOT, 'packages/dsh-plugin-imagegen/src'))
   if (statSync(bundle).mtimeMs < newestSource) {
-    throw new Error('EM218-108 assembled image-generation bundle is older than product source; run the authorized @e-mate/dsh build before benchmarking')
+    throw new Error('EM218-108 assembled dsh-imagegen bundle is older than product source; run the authorized @e-mate/dsh-plugin-imagegen build before benchmarking')
   }
 }
 
@@ -63,14 +63,10 @@ export function sourceSmoke() {
   assert.match(contract, /has no native image-generation Tool/u)
   assert.match(contract, /pinned-owner lower bound/u)
   assert.doesNotMatch(contract, /native imagegen parity is (?:proved|achieved|passed)/iu)
-  const source = readFileSync(join(ROOT, 'packages/dsh/src/profile/image-generation.ts'), 'utf8')
+  const source = ['index.ts', 'host.ts', 'upstream/agent-image-tools.ts'].map(path => readFileSync(join(ROOT, 'packages/dsh-plugin-imagegen/src', path), 'utf8')).join('\n')
   validateDirectProductSource(source)
-  assert.match(source, /await request\(endpoint\(root, path\)/u)
-  assert.match(source, /await attachments\.saveImage/u)
-  assert.match(source, /await attachments\.readImage/u)
-  assert.match(source, /await ctx\.jobs\.wait/u)
-  const batch = readFileSync(join(ROOT, 'packages/dsh/src/profile/image-batch.ts'), 'utf8')
-  assert.match(batch, /const MIN_TASKS = 2/u)
+  const runtime = readFileSync(join(ROOT, 'packages/dsh-plugin-imagegen/src/upstream/generation-runtime.ts'), 'utf8')
+  assert.match(runtime, /GenerationTaskQueue/u)
   const cas = readFileSync(join(ROOT, 'upstream/deepseek-harness/packages/attachment/attachment-local/src/store.ts'), 'utf8')
   for (const required of ['detectImage', 'createHash', 'handle.sync()', 'syncDirectory(bucket)', 'chmod(target, 0o700)']) {
     assert.ok(cas.includes(required), 'pinned CAS source missing ' + required)
@@ -138,7 +134,7 @@ async function fullBenchmark() {
   assert.match(commit, /^[0-9a-f]{40}$/u)
   const repetitions = []
   for (let repetition = 1; repetition <= REPETITIONS; repetition += 1) repetitions.push(await runWorker(repetition, commit))
-  const aggregate = { schema_version: 1, ticket: TICKET, claim: CLAIM, repetitions, all_repetitions_pass: repetitions.every(entry => entry.pass) }
+  const aggregate = { schema_version: 2, ticket: TICKET, claim: CLAIM, repetitions, all_repetitions_pass: repetitions.every(entry => entry.pass) }
   validateAggregate(aggregate)
   const directory = join(ROOT, 'work/em218-108/image-single')
   mkdirSync(directory, { recursive: true, mode: 0o700 })

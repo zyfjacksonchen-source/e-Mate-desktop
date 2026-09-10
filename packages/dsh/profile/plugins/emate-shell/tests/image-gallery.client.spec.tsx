@@ -4,10 +4,20 @@ import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement, useSyncExternalStore } from 'react'
 import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
+import * as nativeRuntime from '@deepseek-ai/dsh-client-runtime/client'
+import { ConversationNodeAssembler } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/conversation-assembler.ts'
+import { assistantDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/assistant.ts'
+import { toolDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/tool.ts'
+import { turnTailDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/turn-tail.ts'
+import { chatViewDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/chat-snapshot-builder.ts'
+import { unknownFallbackDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/fallback.ts'
+import { chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/common.ts'
+import { deriveTurnMetrics } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/chat/turn-metrics.ts'
+import { adaptHarnessConversationSource } from '../../../../../../scripts/harness-conversation-adapter.mjs'
 import { bindSnapshotSelector } from '../../../../../../upstream/deepseek-harness/packages/client/web-react/src/bind.ts'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseImageOutputReceipt } from '../src/client/image-gallery-contract.ts'
+import { parseImageOutputReceipt, parseImageOutputGroup } from '../src/client/image-gallery-contract.ts'
 import {
   ArtifactTerminal,
   childGalleryImageItems,
@@ -84,6 +94,22 @@ function event(data: Record<string, unknown>, seq = 8) {
   return { type: 'emate/image-output', seq, time: seq, data }
 }
 
+function adaptedTurnTailDefinition(): typeof turnTailDefinition {
+  const bundle = adaptHarnessConversationSource(readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js'), 'utf8'))
+  const start = bundle.indexOf('//#region lib/types/client/conversation-nodes/turn-tail.js')
+  return new Function('_deepseek_ai_dsh_client_runtime_client', 'chatNode', 'CHAT_SYNTHETIC_SEQ_OFFSETS', 'deriveTurnMetrics',
+    bundle.slice(start, bundle.indexOf('//#endregion', start)) + '\nreturn turnTailDefinition',
+  )(nativeRuntime, chatNode, CHAT_SYNTHETIC_SEQ_OFFSETS, deriveTurnMetrics)
+}
+
+function v3Receipt(overrides: Record<string, unknown> = {}) {
+  return { schema_version: 3, revision: 2, call_id: 'call-image-1', root_call_id: 'call-image-1', turn: 1,
+    tool_name: 'generate_image', task_id: 'task-1', parent_session_id: 'session-parent', operation: 'generate',
+    status: 'completed', sources: [], content: [{ type: 'image', attachment }], model: 'gpt-image-2.5-flare',
+    requested_count: 1, returned_count: 1, failed_count: 0,
+    ...overrides }
+}
+
 function hidden(
   item: ReturnType<typeof parseImageOutputReceipt>,
   key = 'receipt',
@@ -92,7 +118,7 @@ function hidden(
 ) {
   return {
     key, kind: 'e-mate-tool-images', id: key, target: 'chat', anchorSeq,
-    location: { kind: 'turn', turn: turn({}, turnNumber) }, visibility: 'hidden', data: { item },
+    location: { kind: 'turn', turn: turn({}, turnNumber) }, visibility: 'hidden', data: { callId: item?.callId, revision: item?.revision, items: item === null ? [] : [item] },
   }
 }
 
@@ -312,46 +338,10 @@ describe('completed artifact terminal', () => {
     await runtime.dispose()
   })
 
-  it('prepares exact new-image retry text without overwriting or submitting composer input', async () => {
-    const retry = { ordinal: 2, prompt: '保留原始构图并使用蓝色背景', imageIds: [] }
-    const ready = galleryAdmissionHarness(limits)
-    expect(await ready.injected.prepareImageRetry(retry)).toEqual({
-      prepared: true,
-      message: '已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。',
-    })
-    expect(ready.draft()).toBe('请重新生成一张图片，要求如下：\n保留原始构图并使用蓝色背景')
-    expect(ready.draft()).not.toMatch(/batch|task|client_request|sha256:/u)
-    expect(ready.openSession).toHaveBeenCalledWith('session-gallery')
-
-    const occupied = galleryAdmissionHarness(limits)
-    occupied.setDraft('用户现有草稿')
-    expect(await occupied.injected.prepareImageRetry(retry)).toEqual({
-      prepared: false, message: '输入框已有内容或图片，未覆盖现有草稿。',
-    })
-    expect(occupied.draft()).toBe('用户现有草稿')
-    expect(occupied.openSession).not.toHaveBeenCalled()
-
-    const occupiedByImage = galleryAdmissionHarness(limits)
-    occupiedByImage.setImageIds([attachment.attachmentId])
-    expect(await occupiedByImage.injected.prepareImageRetry(retry)).toEqual({
-      prepared: false, message: '输入框已有内容或图片，未覆盖现有草稿。',
-    })
-    expect(occupiedByImage.imageIds()).toEqual([attachment.attachmentId])
-    expect(occupiedByImage.draft()).toBe('')
-
-    const busy = galleryAdmissionHarness(limits)
-    busy.setPhase('claimed')
-    expect(await busy.injected.prepareImageRetry(retry)).toEqual({
-      prepared: false, message: '当前输入正在处理中，请稍后再准备。',
-    })
-    expect(busy.draft()).toBe('')
-
-    const referenced = galleryAdmissionHarness(limits)
-    expect(await referenced.injected.prepareImageRetry({ ...retry, imageIds: [attachment.attachmentId] })).toEqual({
-      prepared: false, message: '带参考图的任务暂不能安全准备重试，请重新附图后发送。',
-    })
-    expect(referenced.draft()).toBe('')
-    expect(referenced.openSession).not.toHaveBeenCalled()
+  it('keeps the historical batch retry runner out of Gallery actions', () => {
+    const actions = galleryAdmissionHarness(limits)
+    expect(actions.injected.prepareImageRetry).toBeUndefined()
+    expect(actions.draft()).toBe('')
   })
 
   it('uses the native overlay Toast transiently without changing composer layout', () => {
@@ -981,16 +971,16 @@ describe('completed artifact terminal', () => {
     expect(toolImagesDefinition.match(review as never)).toEqual({ id: 'tool-images:call-image-1', role: 'update' })
     const started = toolImagesDefinition.start({} as never, { event: complete } as never, {} as never)
     const updated = toolImagesDefinition.update({ state: started } as never, { event: review } as never)
-    expect(started.item.createdAt).toBe(complete.time)
-    expect(updated.item.createdAt).toBe(complete.time)
+    expect(started.items[0]!.createdAt).toBe(complete.time)
+    expect(updated.items[0]!.createdAt).toBe(complete.time)
     const other = parseImageOutputReceipt(receipt({ call_id: 'call-other' }))!
     const otherTurn = parseImageOutputReceipt(receipt({ revision: 99 }))!
     expect(terminalImageItems([
-      hidden(updated.item as never), hidden(other, 'other'), hidden(otherTurn, 'other-turn', 2),
-      { ...hidden(updated.item as never, 'visible'), visibility: 'visible' },
-    ] as never, ['call-image-1'], 1)).toEqual([updated.item])
+      hidden(updated.items[0]! as never), hidden(other, 'other'), hidden(otherTurn, 'other-turn', 2),
+      { ...hidden(updated.items[0]! as never, 'visible'), visibility: 'visible' },
+    ] as never, ['call-image-1'], 1)).toEqual([updated.items[0]!])
     expect(toolImagesDefinition.match({ type: 'tool/result', seq: 10, data: {} } as never)).toBeNull()
-    expect(parseImageOutputReceipt(receipt({ revision: 1, status: 'running', content: [], output: undefined }))).toBeNull()
+    expect(parseImageOutputReceipt(receipt({ revision: 1, status: 'running', returned_count: 0, content: [], output: undefined }))).toBeNull()
     expect(parseImageOutputReceipt(receipt({ failure_code: '/Users/private/image.png' }))).toBeNull()
     expect(parseImageOutputReceipt({ ...receipt(), extra: true })).toBeNull()
   })
@@ -1209,7 +1199,7 @@ describe('completed artifact terminal', () => {
     const contract = readFileSync(resolve('src/client/image-gallery-contract.ts'), 'utf8')
     expect(source).not.toMatch(/querySelector|createPortal|MutationObserver|setInterval/u)
     expect(source).not.toMatch(/gpt-image|provider/u)
-    expect(source).toContain('imageBatchRetryTasks(match.event.data.arguments)')
+    expect(source).not.toContain('imageBatchRetryTasks')
     expect(source).toContain('subagentsByParent')
     expect(source.match(/child_session_id/gu)).toHaveLength(1)
     expect(source).toContain('row.receipt.child_session_id !== undefined')
@@ -1391,7 +1381,7 @@ describe('native typed tool image outputs', () => {
     expect(matched.callIds).toEqual(['one', 'two', 'nested'])
     const items = terminalImageItems(nodes, matched.callIds, 1)
     expect(items.map(item => item.attachment?.name)).toEqual(['a.png', 'b.png', 'c.png'])
-    expect(selectArtifactTerminal({ turn: turn({}, 1, 'open'), seq: 2, nodes, openFile: vi.fn() } as any)).toBeNull()
+    expect(selectArtifactTerminal({ turn: turn({}, 1, 'open'), seq: 2, nodes, openFile: vi.fn() } as any)?.callIds).toEqual(matched.callIds)
   })
 
   it('preserves strict receipts over duplicate native outputs and cannot promote failed or review-required calls', () => {
@@ -1455,4 +1445,155 @@ describe('native typed tool image outputs', () => {
     await waitFor(() => expect(screen.getAllByRole('img').map(img => img.getAttribute('src'))).toEqual(['blob:other-session']))
     expect(otherLoad.mock.calls[0]?.[0]).toMatchObject({ attachmentId: image('c').attachment.attachmentId })
   })
+})
+
+
+describe('dsh-imagegen native receipt integration', () => {
+  it('accepts one atomic multi-image result and rejects malformed metadata without reinterpreting historical receipts', () => {
+    const images = 'abcd'.split('').map(digit => ({ ...attachment, attachmentId: `sha256:${digit.repeat(64)}` }))
+    expect(parseImageOutputGroup(v3Receipt({ requested_count: 4, returned_count: 4, content: images.map(attachment => ({ type: 'image', attachment })) }))?.items).toHaveLength(4)
+    expect(parseImageOutputGroup(v3Receipt({ revision: 1, status: 'running', returned_count: 0, content: [] }))?.items).toEqual([])
+    expect(parseImageOutputGroup(v3Receipt({ status: 'failed', returned_count: 0, failed_count: 1, content: [], error: 'unavailable' }))?.items[0]?.status).toBe('failed')
+    for (const override of [{ revision: 3 }, { content: Array(5).fill({ type: 'image', attachment }) },
+      { content: [{ type: 'image', attachment: { ...attachment, width: 0 } }] },
+      { root_call_id: '' }, { turn: -1 }, { output: attachment }, { verification: {} }, { tool_name: 'imagegen' }]) {
+      expect(parseImageOutputGroup(v3Receipt(override))).toBeNull()
+    }
+    expect(parseImageOutputReceipt(v3Receipt())).toBeNull()
+  })
+
+  it.each(['generate_image', 'edit_image', 'run_code'])('shows all four %s outputs before the parent tool settles and preserves native cards through close and replay', async name => {
+    nativeImageRendering.enabled = true
+    const images = 'abcd'.split('').map(digit => ({ ...attachment, attachmentId: `sha256:${digit.repeat(64)}`, name: digit + '.png' }))
+    const rootCallId = 'root-image', callId = name === 'run_code' ? 'root-image:code:0' : rootCallId
+    const payload = v3Receipt({ call_id: callId, root_call_id: rootCallId,
+      tool_name: name === 'edit_image' ? 'edit_image' : 'generate_image', operation: name === 'edit_image' ? 'edit' : 'generate',
+      requested_count: 4, returned_count: 4, content: images.map(attachment => ({ type: 'image', attachment })) })
+    const events: any[] = []
+    const createAssembler = () => new ConversationNodeAssembler({
+      entries: () => [assistantDefinition, toolDefinition, adaptedTurnTailDefinition(), imageCallsDefinition, toolImagesDefinition],
+      fallbackEntry: () => unknownFallbackDefinition,
+    }, { entries: () => [chatViewDefinition] })
+    const assembler = createAssembler()
+    assembler.replaceWindow([], false); assembler.flush()
+    const append = (type: string, data: unknown, surfaceOp?: 'append') => {
+      const next = { type, data, seq: events.length + 1, time: 1_789_005_000_000 + events.length, ...surfaceOp === undefined ? {} : { surfaceOp } }
+      events.push(next)
+      if (assembler.append({ event: next } as never) !== 'none') assembler.flush()
+    }
+    append('turn/start', { turn: 1 }); append('step/start', { turn: 1, step: 1 })
+    append('tool/call', { turn: 1, step: 1, callId: rootCallId, name, arguments: '{}' })
+    if (name === 'run_code') append('tool/code-dispatch-start', { rootCallId, parentCallId: rootCallId,
+      subCallId: callId, name: 'generate_image', arguments: { prompt: 'four images', count: 4 } })
+    append('emate/image-output', { ...payload, revision: 1, status: 'running', returned_count: 0, content: [] })
+    append('emate/image-output', payload)
+    const projected = () => [...(assembler.snapshot('chat') as any).nodes.values()]
+    let nodes = projected()
+    const tail = nodes.find(node => node.kind === 'turn-tail')!
+    expect(tail).toBeDefined(); expect(tail.location.turn.status).toBe('open')
+    expect(tail.data.closing).toBeNull()
+    expect(nodes.filter(node => node.kind === 'turn-tail')).toHaveLength(1)
+    let matched = selectArtifactTerminal({ turn: tail.location.turn, nodes, seq: 1 } as never)!
+    expect(matched.callIds).toEqual([callId])
+    expect(terminalImageItems(nodes, matched.callIds, 1).map(item => item.attachment?.attachmentId)).toEqual(images.map(image => image.attachmentId))
+    const loadImage = vi.fn(async () => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=')
+    const view = render(<ArtifactTerminal {...terminalProps(nodes, matched, { turn: tail.location.turn, loadImage }) as any} />)
+    const buttons = screen.getAllByRole('button', { name: /^查看原图：/ })
+    expect(buttons).toHaveLength(4)
+    await waitFor(() => expect(loadImage).toHaveBeenCalledTimes(4))
+    // Code child output has no presentationMeta; the v3 event supplies all four native cards.
+    if (name === 'run_code') append('tool/code-dispatch', { rootCallId, parentCallId: rootCallId,
+      subCallId: callId, name: 'generate_image', arguments: {}, isError: false,
+      content: [{ type: 'text', text: JSON.stringify({ status: 'completed', images }) }] })
+    append('tool/result', { turn: 1, step: 1, message: { role: 'tool', source: { kind: 'tool', callId: rootCallId },
+      content: [{ type: 'tool-result', toolCallId: rootCallId, isError: false, content: [{ type: 'text', text: 'completed' }] }] } }, 'append')
+    append('assistant/message', { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '图片已完成。' }] } }, 'append')
+    append('turn/end', { turn: 1, reason: { kind: 'completed' } }); append('turn/start', { turn: 2 })
+    nodes = projected(); const closed = nodes.find(node => node.key === tail.key)!
+    expect(closed.location.turn.status).toBe('closed')
+    matched = selectArtifactTerminal({ turn: closed.location.turn, nodes, seq: closed.data.seq } as never)!
+    view.rerender(<ArtifactTerminal {...terminalProps(nodes, matched, { turn: closed.location.turn, loadImage }) as any} />)
+    expect(screen.getAllByRole('button', { name: /^查看原图：/ })).toEqual(buttons)
+    const nextTurn = (assembler.snapshot('chat') as any).timeline.turns.get(2)
+    expect(selectArtifactTerminal({ turn: nextTurn, nodes, seq: events.length } as never)).toBeNull()
+    const cold = createAssembler(); cold.replaceWindow(events.map(event => ({ event, view: undefined })), false); cold.flush()
+    expect(galleryImageItems([...(cold.snapshot('chat') as any).nodes.values()])).toEqual(galleryImageItems(nodes))
+    expect(galleryImageItems(nodes)).toHaveLength(4)
+    view.unmount()
+  })
+
+  it('background Code completion during the next Turn stays with its root call on live and cold replay', () => {
+    const rootCallId = 'background-code', callId = rootCallId + ':code:0'
+    const payload = v3Receipt({ call_id: callId, root_call_id: rootCallId })
+    const events: any[] = [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: rootCallId, name: 'run_code', arguments: '{}' } },
+      { type: 'emate/image-output', data: { ...payload, revision: 1, status: 'running', returned_count: 0, content: [] } },
+      { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+      { type: 'turn/start', data: { turn: 2 } },
+      { type: 'emate/image-output', data: payload },
+    ].map((event, index) => ({ ...event, seq: index + 1, time: index + 1 }))
+    for (const incremental of [false, true]) {
+      const assembler = new ConversationNodeAssembler({
+        entries: () => [toolDefinition, adaptedTurnTailDefinition(), imageCallsDefinition, toolImagesDefinition],
+        fallbackEntry: () => unknownFallbackDefinition,
+      }, { entries: () => [chatViewDefinition] })
+      if (incremental) { assembler.replaceWindow([], false); for (const event of events) { assembler.append({ event }); assembler.flush() } }
+      else { assembler.replaceWindow(events.map(event => ({ event, view: undefined })), false); assembler.flush() }
+      const snapshot = assembler.snapshot('chat') as any, nodes = [...snapshot.nodes.values()]
+      const tail = nodes.find(node => node.kind === 'turn-tail' && node.data.turn === 1)
+      const matched = selectArtifactTerminal({ turn: tail.location.turn, nodes, seq: 2 } as never)!
+      expect(terminalImageItems(nodes, matched.callIds, 1)).toMatchObject([{ callId, attachment }])
+      expect(selectArtifactTerminal({ turn: snapshot.timeline.turns.get(2), nodes, seq: 5 } as never)).toBeNull()
+      expect(galleryImageItems(nodes)).toHaveLength(1)
+    }
+  })
+})
+
+
+it('native result presentation restores query images without re-reading JSON text or duplicating Gallery images', () => {
+  const original = parseImageOutputGroup(v3Receipt())!
+  const query = { key: 'query', kind: 'tool-call', location: { kind: 'turn', turn: turn({}, 2, 'open') }, data: {
+    root: { kind: 'tool-result', callId: 'query-call', seq: 12, time: 12, isError: false, subCalls: [],
+      content: [{ type: 'text', text: 'model JSON remains text' }],
+      resultView: { card: 'generic', content: [{ type: 'image', attachment }] } },
+  } }
+  const nodes = [{ ...hidden(original.items[0]!), data: original }, query]
+  expect(terminalImageItems(nodes as never, ['query-call'], 2)).toMatchObject([{ callId: 'query-call', attachment }])
+  expect(galleryImageItems(nodes as never)).toHaveLength(1)
+})
+
+it('a child v3 receipt keeps every attachment under the exact native child', () => {
+  const images = 'ab'.split('').map(digit => ({ ...attachment, attachmentId: `sha256:${digit.repeat(64)}` }))
+  const row = { seq: 9, createdAt: 10, receipt: v3Receipt({ parent_session_id: 'child', requested_count: 2,
+    returned_count: 2, content: images.map(attachment => ({ type: 'image', attachment })) }) }
+  const sessions = { byId: { child: { projectionValues: { eMateImageReceipts: [row] } } },
+    subagentsByParent: { parent: { entries: [{ kind: 'child', id: 'child', mode: 'one-shot', label: '两张图' }] } } }
+  expect(childGalleryImageItems(sessions as never, 'parent').map(item => item.attachment?.attachmentId)).toEqual(images.map(image => image.attachmentId))
+  expect(childGalleryImageItems(sessions as never, 'other')).toEqual([])
+})
+
+
+it.each(['cancelled', 'failed'])('%s jobs keep saved images editable without manufacturing missing outputs', async status => {
+  const group = parseImageOutputGroup(v3Receipt({ status, requested_count: 2, returned_count: 1, failed_count: 1, error: '仅保存 1 张' }))!
+  expect(group.items).toHaveLength(1)
+  expect(group.items[0]).toMatchObject({ status: 'completed', attachment })
+  const nodes = [{ ...hidden(group.items[0]!), data: group }]
+  expect(galleryImageItems(nodes as never)).toHaveLength(1)
+  expect(terminalImageItems(nodes as never, [group.callId], 1)).toHaveLength(1)
+  const addImageToCanvas = vi.fn(async () => {})
+  render(<ArtifactTerminal {...terminalProps(nodes, undefined, { addImageToCanvas }) as any} />)
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '加入画布：result.png' })))
+  expect(addImageToCanvas).toHaveBeenCalledWith(attachment, undefined)
+})
+
+
+it('a paged history window with only the v3 terminal receipt still restores its saved images', () => {
+  const payload = v3Receipt({ request_receipts: [{ client_request_id: 'request-1', task_id: 'request-1', trace_id: 'request-1', provider_request_id: 'provider-1' }] })
+  const assembler = new ConversationNodeAssembler({ entries: () => [toolImagesDefinition], fallbackEntry: () => unknownFallbackDefinition },
+    { entries: () => [chatViewDefinition] })
+  assembler.replaceWindow([{ event: event(payload), view: undefined }] as never, false); assembler.flush()
+  const nodes = [...(assembler.snapshot('chat') as any).nodes.values()]
+  expect(galleryImageItems(nodes)).toMatchObject([{ callId: payload.call_id, attachment }])
+  expect(terminalImageItems(nodes, [payload.call_id], 1)).toHaveLength(1)
 })

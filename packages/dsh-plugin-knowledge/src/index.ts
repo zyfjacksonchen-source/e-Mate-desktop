@@ -9,30 +9,16 @@ import { createKnowledgeUiOperations } from './ui-operations.ts'
 import { createKnowledgeUiRead } from './ui-read.ts'
 import { ownerOf } from './imports.ts'
 import { API_ROOT, CHANNEL, GRAPH_ASSET, HASH, SOURCE_ID, knowledgeFailure } from './contract.ts'
+import { READ_OPERATIONS, readRequestError } from './read-contract.ts'
 export const name = 'emate-knowledge'
 export const inject = ['emateIdentity', 'connection', 'webServer', 'timer', 'agents', 'sessions', 'sessionPersistence', 'subagents', 'jobs', 'goals', 'tools', 'emateXinKnowledge', 'apiProxy', 'agentDefaultModel', 'emateModelPolicy', 'llm']
 const MAX_BYTES = 20 * 1024 * 1024
 const DOWNLOAD_ROOT = '/emate-knowledge-downloads/'
-const allowed: Record<string, { method: string; path: string; keys: string[] }> = {
-  catalog: { method: 'GET', path: '/catalog', keys: ['scope'] },
-  graph: { method: 'GET', path: '/graph', keys: ['root_id', 'depth', 'limit', 'corpus_revision', 'scope'] },
-  sources: { method: 'GET', path: '/sources', keys: ['kind', 'offset', 'limit', 'corpus_revision', 'scope'] },
-  source: { method: 'GET', path: '/sources', keys: ['source_id', 'version', 'scope'] },
-  node: { method: 'GET', path: '/nodes', keys: ['node_id', 'version', 'scope'] },
-  search: { method: 'POST', path: '/search', keys: ['question', 'limit', 'layer', 'corpus_revision', 'scope'] },
-  benchmarks: { method: 'GET', path: '/benchmark', keys: ['keyword'] },
-  benchmark: { method: 'POST', path: '/benchmark', keys: ['media', 'industry', 'metric', 'period', 'source_id', 'marketing_purpose'] },
-  evidence: { method: 'GET', path: '/evidence', keys: ['query_id', 'scope'] },
-  original: { method: 'GET', path: '/sources', keys: ['source_id', 'version', 'scope'] },
-  revisions: { method: 'GET', path: '/revisions', keys: ['question', 'limit', 'offset', 'corpus_revision', 'scope'] },
-  revision: { method: 'GET', path: '/revisions', keys: ['revision_id'] },
-  import: { method: 'GET', path: '/imports', keys: ['operation_id'] },
-}
 function reject(message: string, code = 'invalid-request'): never { throw Object.assign(Error(message), { code }) }
 export function knowledgeTarget(endpoint: string, payload: any) {
-  const operation = Object.hasOwn(allowed, endpoint) ? allowed[endpoint] : undefined
+  const operation = Object.hasOwn(READ_OPERATIONS, endpoint) ? READ_OPERATIONS[endpoint] : undefined
   if (!operation || !payload || typeof payload !== 'object' || Array.isArray(payload)
-    || Object.keys(payload).some(key => !operation.keys.includes(key))) reject('知识请求字段无效。')
+    || Object.keys(payload).some(key => !Object.hasOwn(operation.properties, key))) throw readRequestError(endpoint)
   const url = new URL(API_ROOT + operation.path)
   const input = { ...payload }
   if (endpoint === 'import' && (typeof input.operation_id !== 'string' || !/^[A-Za-z0-9_-]{16,80}$/u.test(input.operation_id))) reject('知识导入操作编号无效。')

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 import { RELEASE_VERSION, ticketFor, versionFor } from '../image-batch/release-identity.mjs'
 export { RELEASE_VERSION }
 export const TICKET = ticketFor(RELEASE_VERSION, '108')
@@ -13,6 +13,9 @@ export const REPETITIONS = 3
 export const PROMPT = 'Generate one deterministic benchmark image with a plain neutral background.'
 export const NORMALIZED_PROMPT = PROMPT.trim()
 export const REQUEST_BODY = JSON.stringify({ model: MODEL, prompt: NORMALIZED_PROMPT })
+export const NATIVE_MODEL = 'gpt-image-2.5-flare'
+export const NATIVE_REQUEST_BODY = JSON.stringify({ prompt: NORMALIZED_PROMPT, model: NATIVE_MODEL })
+export const NATIVE_EXECUTION = 'dsh-imagegen-1.5.11-native-tools-jobs-session-v3'
 export const CLAIM = 'pinned-owner-lower-bound-not-native-imagegen-parity'
 export const ATTACHMENT_LIMITS = Object.freeze({
   maxImageBytes: 5 * 1024 * 1024,
@@ -107,7 +110,7 @@ const LOWER_STAGE_KEYS = ['provider_submit_ms', 'provider_finish_ms', 'response_
 const ASSEMBLED_STAGE_KEYS = [...LOWER_STAGE_KEYS, 'verification_begin_ms', 'verification_end_ms', 'job_terminal_ms', 'receipt_append_begin_ms', 'projection_handoff_ms', 'receipt_append_return_ms', 'tool_return_ms']
 const COUNT_KEYS = ['subagent_starts', 'batch_events', 'jobs', 'provider_posts', 'cas_saves', 'terminal_receipts', 'attempts', 'admission_wait_ms']
 
-function validateStages(stages, keys, label) {
+function validateStages(stages, keys, label, native = false) {
   exactKeys(stages, keys, label)
   for (const key of keys) {
     if ((key === 'verification_begin_ms' || key === 'verification_end_ms') && stages[key] === null) continue
@@ -124,7 +127,8 @@ function validateStages(stages, keys, label) {
       expect(stages.cas_end_ms <= stages.verification_begin_ms && stages.verification_begin_ms <= stages.verification_end_ms, label + ' verification order')
       expect(stages.verification_end_ms <= stages.job_terminal_ms, label + ' Job after verification')
     } else expect(stages.cas_end_ms <= stages.job_terminal_ms, label + ' Job after CAS')
-    expect(stages.job_terminal_ms <= stages.receipt_append_begin_ms, label + ' receipt after Job')
+    if (native) expect(stages.receipt_append_return_ms <= stages.job_terminal_ms, label + ' native Job after durable receipt')
+    else expect(stages.job_terminal_ms <= stages.receipt_append_begin_ms, label + ' receipt after Job')
     expect(stages.receipt_append_begin_ms <= stages.projection_handoff_ms, label + ' projection after append begin')
     expect(stages.projection_handoff_ms <= stages.receipt_append_return_ms, label + ' append return after projection')
     expect(stages.receipt_append_return_ms <= stages.tool_return_ms, label + ' Tool return after receipt append')
@@ -153,18 +157,20 @@ function validateLower(value, label) {
 }
 
 function validateAssembled(value, label) {
-  exactKeys(value, ['total_ms', 'stages', 'counts', 'request_body_sha256', 'response_body_sha256', 'attachment_sha256'], label)
+  const native = value.execution_contract === NATIVE_EXECUTION
+  exactKeys(value, ['total_ms', 'stages', 'counts', 'request_body_sha256', 'response_body_sha256', 'attachment_sha256', ...(native ? ['execution_contract'] : [])], label)
   finite(value.total_ms, label + '.total_ms')
-  validateStages(value.stages, ASSEMBLED_STAGE_KEYS, label + '.stages')
+  validateStages(value.stages, ASSEMBLED_STAGE_KEYS, label + '.stages', native)
   validateCounts(value.counts, label + '.counts')
   for (const key of ['request_body_sha256', 'response_body_sha256', 'attachment_sha256']) hash(value[key], label + '.' + key)
   expect(value.stages.tool_return_ms <= value.total_ms, label + ' total precedes Tool return')
+  expect(value.stages.job_terminal_ms <= value.total_ms, label + ' total precedes Job terminal')
 }
 
 export function validateLowerMeasurement(value, label = 'lower_bound') { validateLower(value, label); return value }
 export function validateDirectMeasurement(value, label = 'assembled') { validateAssembled(value, label); return value }
 
-function validateComparisonScenario(name, scenario, fixtures) {
+function validateComparisonScenario(name, scenario, fixtures, native = false) {
   const expected = COMPARISON_SCENARIOS[name]
   exactKeys(scenario, ['kind', 'warmups', 'pairs', 'threshold', 'samples', 'percentiles'], name)
   expect(scenario.kind === 'lower-bound-vs-assembled', name + ' kind')
@@ -177,7 +183,8 @@ function validateComparisonScenario(name, scenario, fixtures) {
     expect(sample.order === (index % 4 === 0 || index % 4 === 3 ? 'lower-bound-first' : 'assembled-first'), name + ' ABBA order')
     validateLower(sample.lower_bound, name + '.samples[' + index + '].lower_bound')
     validateAssembled(sample.assembled, name + '.samples[' + index + '].assembled')
-    expect(sample.lower_bound.request_body_sha256 === sha256(REQUEST_BODY) && sample.assembled.request_body_sha256 === sha256(REQUEST_BODY), name + ' request body changed')
+    expect(sample.assembled.execution_contract === (native ? NATIVE_EXECUTION : undefined), name + ' execution contract mismatch')
+    expect(sample.lower_bound.request_body_sha256 === sha256(native ? NATIVE_REQUEST_BODY : REQUEST_BODY) && sample.assembled.request_body_sha256 === sha256(native ? NATIVE_REQUEST_BODY : REQUEST_BODY), name + ' request body changed')
     const fixture = fixtures[name.endsWith('max') ? 'max' : 'small']
     expect(sample.lower_bound.response_body_sha256 === fixture.response_body_sha256 && sample.assembled.response_body_sha256 === fixture.response_body_sha256, name + ' response body changed')
     expect(sample.lower_bound.attachment_sha256 === fixture.sha256 && sample.assembled.attachment_sha256 === fixture.sha256, name + ' attachment changed')
@@ -192,7 +199,7 @@ function validateComparisonScenario(name, scenario, fixtures) {
   expect(scenario.percentiles.pass === calculated.pass, name + ' threshold result')
 }
 
-function validateHistoryScenario(scenario, fixtures) {
+function validateHistoryScenario(scenario, fixtures, native = false) {
   const name = 'history-0-vs-256'
   exactKeys(scenario, ['kind', 'warmups', 'pairs', 'receipts', 'bounds', 'samples', 'percentiles'], name)
   expect(scenario.kind === 'paired-history-slope', name + ' kind')
@@ -206,6 +213,7 @@ function validateHistoryScenario(scenario, fixtures) {
     expect(sample.order === (index % 4 === 0 || index % 4 === 3 ? 'empty-first' : 'loaded-first'), name + ' ABBA order')
     validateAssembled(sample.empty, name + '.samples[' + index + '].empty')
     validateAssembled(sample.loaded, name + '.samples[' + index + '].loaded')
+    expect(sample.empty.execution_contract === (native ? NATIVE_EXECUTION : undefined) && sample.loaded.execution_contract === (native ? NATIVE_EXECUTION : undefined), name + ' execution contract mismatch')
     expect(sample.empty.response_body_sha256 === fixtures.small.response_body_sha256 && sample.loaded.response_body_sha256 === fixtures.small.response_body_sha256, name + ' response body changed')
     expect(sample.empty.attachment_sha256 === fixtures.small.sha256 && sample.loaded.attachment_sha256 === fixtures.small.sha256, name + ' attachment changed')
     sameNumber(sample.delta_ms, sample.loaded.total_ms - sample.empty.total_ms, name + ' paired delta')
@@ -250,12 +258,23 @@ function validateAdmissionRetryProbe(probe, fixtures) {
   expect(probe.pass === pass, 'admission retry pass arithmetic')
 }
 
+export function validateNativeAdmissionFailure(probe) {
+  exactKeys(probe, ['status', 'attempts', 'provider_posts', 'cas_saves', 'terminal_receipts', 'terminal_status', 'job_terminal_status', 'repeated_call_rejected', 'duplicate_provider_generation', 'pass'], 'native admission failure')
+  expect(probe.status === 'SUPERSEDED_BY_NATIVE_SAFE_FAILURE', 'native admission mechanism')
+  expect(probe.attempts === 1 && probe.provider_posts === 0 && probe.cas_saves === 0 && probe.terminal_receipts === 1, 'native 429 must fail once without retry or fabricated image')
+  expect(probe.terminal_status === 'failed' && probe.job_terminal_status === 'failed', 'native rejection must settle failed')
+  expect(probe.repeated_call_rejected === true && probe.duplicate_provider_generation === 0 && probe.pass === true, 'native rejection must not resubmit the same call')
+  return probe
+}
+
 export function validateWorkerReport(report) {
   exactKeys(report, ['schema_version', 'ticket', 'claim', 'repetition', 'protocol', 'provenance', 'runtime', 'model', 'attachment_limits', 'fixtures', 'prompt_sha256', 'request_body_sha256', 'network_calls', 'scenarios', 'admission_retry_probe', 'pass'], 'worker')
-  expect(report.schema_version === 1 && Boolean(versionFor(report.ticket, '108')) && report.claim === CLAIM, 'worker identity')
+  const native = versionFor(report.ticket, '108') === RELEASE_VERSION
+  expect(report.schema_version === (native ? 2 : 1) && report.claim === CLAIM, 'worker identity: historical cohort cannot close native execution')
   integer(report.repetition, 'worker.repetition', 1)
   expect(report.repetition <= REPETITIONS, 'worker repetition bound')
-  exactKeys(report.protocol, ['fake_delay_ms', 'repetitions', 'clock', 'percentile', 'ordering', 'filesystem'], 'worker.protocol')
+  exactKeys(report.protocol, ['fake_delay_ms', 'repetitions', 'clock', 'percentile', 'ordering', 'filesystem', ...(native ? ['execution_contract'] : [])], 'worker.protocol')
+  if (native) expect(report.protocol.execution_contract === NATIVE_EXECUTION, 'worker native execution contract')
   expect(report.protocol.fake_delay_ms === 25 && report.protocol.repetitions === 3, 'worker protocol constants')
   expect(report.protocol.clock === 'performance.now monotonic' && report.protocol.percentile === 'nearest-rank-per-repetition' && report.protocol.ordering === 'interleaved-ABBA' && report.protocol.filesystem === 'same-worker-temp-volume', 'worker protocol labels')
   exactKeys(report.provenance, ['emate_commit', 'harness_commit', 'module_sha256'], 'worker.provenance')
@@ -265,7 +284,7 @@ export function validateWorkerReport(report) {
   expect(Object.keys(report.provenance.module_sha256).length >= 5, 'worker module hash coverage')
   for (const [key, value] of Object.entries(report.provenance.module_sha256)) hash(value, 'worker module ' + key)
   exactKeys(report.runtime, ['node', 'v8', 'platform', 'arch'], 'worker.runtime')
-  expect(report.model === MODEL, 'worker image model')
+  expect(report.model === (native ? NATIVE_MODEL : MODEL), 'worker image model')
   expect(/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(report.runtime.node), 'worker Node version')
   expect(/^\d+(?:\.\d+){1,4}(?:-[0-9A-Za-z.-]+)?$/u.test(report.runtime.v8), 'worker V8 version')
   expect(['darwin', 'linux', 'win32'].includes(report.runtime.platform), 'worker platform')
@@ -283,12 +302,13 @@ export function validateWorkerReport(report) {
   hash(report.prompt_sha256, 'worker.prompt_sha256')
   expect(report.prompt_sha256 === sha256(NORMALIZED_PROMPT), 'normalized prompt hash')
   hash(report.request_body_sha256, 'worker.request_body_sha256')
-  expect(report.request_body_sha256 === sha256(REQUEST_BODY), 'request body hash')
+  expect(report.request_body_sha256 === sha256(native ? NATIVE_REQUEST_BODY : REQUEST_BODY), 'request body hash')
   expect(report.network_calls === 0, 'network use is forbidden')
   exactKeys(report.scenarios, SCENARIO_NAMES, 'worker.scenarios')
-  for (const name of Object.keys(COMPARISON_SCENARIOS)) validateComparisonScenario(name, report.scenarios[name], report.fixtures)
-  validateHistoryScenario(report.scenarios['history-0-vs-256'], report.fixtures)
-  validateAdmissionRetryProbe(report.admission_retry_probe, report.fixtures)
+  for (const name of Object.keys(COMPARISON_SCENARIOS)) validateComparisonScenario(name, report.scenarios[name], report.fixtures, native)
+  validateHistoryScenario(report.scenarios['history-0-vs-256'], report.fixtures, native)
+  if (native) validateNativeAdmissionFailure(report.admission_retry_probe)
+  else validateAdmissionRetryProbe(report.admission_retry_probe, report.fixtures)
   const pass = SCENARIO_NAMES.every(name => report.scenarios[name].percentiles.pass) && report.admission_retry_probe.pass
   expect(report.pass === pass, 'worker aggregate pass')
   rejectSensitiveKeys(report)
@@ -297,7 +317,7 @@ export function validateWorkerReport(report) {
 
 export function validateAggregate(report) {
   exactKeys(report, ['schema_version', 'ticket', 'claim', 'repetitions', 'all_repetitions_pass'], 'aggregate')
-  expect(report.schema_version === 1 && Boolean(versionFor(report.ticket, '108')) && report.claim === CLAIM, 'aggregate identity')
+  expect(report.schema_version === (versionFor(report.ticket, '108') === RELEASE_VERSION ? 2 : 1) && report.claim === CLAIM, 'aggregate identity: historical cohort cannot close native execution')
   expect(Array.isArray(report.repetitions) && report.repetitions.length === 3, 'aggregate must contain exactly three repetitions')
   report.repetitions.forEach((entry, index) => {
     validateWorkerReport(entry)
@@ -324,13 +344,9 @@ export function validateAggregate(report) {
 export function validateDirectProductSource(source) {
   expect(typeof source === 'string' && source.length > 0, 'product source is missing')
   expect(!/EMATE_(?:IMAGE_)?BENCHMARK|single-image-latency|benchmarkMode|benchmarkFlag|BENCHMARK_DELAY/u.test(source), 'product benchmark sleep or flag is forbidden')
-  const direct = source.slice(source.indexOf("name: 'imagegen'"), source.indexOf("name: 'image_batch'"))
-  expect(direct.length > 0, 'direct imagegen section is missing')
-  expect(/startImageJob/u.test(direct) && /appendImageReceipt/u.test(direct), 'direct imagegen owners are missing')
-  expect(!/subagents?\.start|appendBatchEvent|executeImageBatch/u.test(direct), 'direct imagegen must not use batch or subagent execution')
-  const client = source.slice(source.indexOf('function createImageClient'), source.indexOf('function startImageJob'))
-  expect(/JSON\.stringify\(\{ model: IMAGE_MODEL, prompt: task\.prompt \}\)/u.test(client), 'single request body changed')
-  expect(!/\bn\s*:\s*(?:[2-9]|[1-9][0-9]+)/u.test(client), 'single imagegen request must not request n > 1')
+  for (const owner of ['registerAgentImageTools', 'ctx.jobs.start', 'ctx.attachments.saveImage', 'renderTaskResult', 'imagePresentationMeta']) expect(source.includes(owner), 'native image owner is missing: ' + owner)
+  expect(!/agent\/pre-step|subagents?\.start|name: ['"]image_batch['"]/u.test(source), 'native image plugin cannot restore catalog, batch or subagent execution')
+  expect(source.includes("return [{ type: 'text', text: JSON.stringify(value) }]"), 'model-facing generation result must remain textual')
   return true
 }
 
@@ -342,7 +358,7 @@ function aggregateOperationCounts(aggregate) {
     const measurements = []
     for (const name of Object.keys(COMPARISON_SCENARIOS)) measurements.push(...repetition.scenarios[name].samples.map(sample => sample.assembled))
     for (const sample of repetition.scenarios['history-0-vs-256'].samples) measurements.push(sample.empty, sample.loaded)
-    measurements.push(repetition.admission_retry_probe.measurement)
+    if (repetition.schema_version === 1) measurements.push(repetition.admission_retry_probe.measurement)
     direct_samples += measurements.length
     for (const measurement of measurements) for (const key of COUNT_KEYS) totals[key] += measurement.counts[key]
   }

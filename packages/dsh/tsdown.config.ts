@@ -41,7 +41,7 @@ export default [
   },
   {
     ...node,
-    entry: { 'image-generation': 'src/profile/image-generation.ts' },
+    entry: { 'image-history': 'src/profile/image-history.ts' },
     outDir: 'profile/plugins',
   },
   {

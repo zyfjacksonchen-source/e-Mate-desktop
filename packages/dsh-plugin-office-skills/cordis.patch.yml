@@ -1,5 +1,4 @@
-# Register Office Tools, bundled Skills and the native preview client through
-# the target rc.7 Harness profile and its existing managed runtimes.
+# Register the two bundled Skills with the pinned rc.7 native Skill registry.
 - insert:
     - id: emate-office-skills
       name: '@e-mate/dsh-plugin-office-skills'

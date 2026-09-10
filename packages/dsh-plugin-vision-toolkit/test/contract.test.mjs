@@ -555,11 +555,11 @@ test('Vision capability readiness is bounded, abortable, and cached between refr
   assert.match(source, /status,\n/u)
   assert.match(source, /credentials\/updated/u)
   assert.doesNotMatch(source, /statusPromise/u)
-  assert.match(source, /if \(epoch === statusEpoch\)/u)
+  assert.match(source, /if \(epoch === statusEpoch && value !== FIRST_USE_STATUS\)/u)
 })
 
 
-targetTest('enterprise login credential changes invalidate Vision readiness without copying credentials', async () => {
+targetTest('Vision readiness preserves lazy initialization, health caching, and credential invalidation', async () => {
   const { apply } = await loadBuiltModule()
   const state = await mkdtemp(join(tmpdir(), 'e-mate-vision-login-'))
   const previousHome = process.env.DSH_HOME
@@ -572,6 +572,9 @@ targetTest('enterprise login credential changes invalidate Vision readiness with
   } } }]])
   let capability
   let configured = true
+  let runtime = { ready: true, generation: 1 }
+  let healthy = true
+  let baseUrl
   let requests = 0
   const ctx = {
     settings: {
@@ -597,8 +600,10 @@ targetTest('enterprise login credential changes invalidate Vision readiness with
   globalThis.fetch = async (_url, options) => {
     requests++
     return Response.json({ ok: true, value: options.method === 'POST'
-      ? { healthy: true, connectionTested: true }
-      : { runtime: { ready: true }, credential: { configured }, settings: { value: values.get('vision-toolkit') } } })
+      ? { healthy, connectionTested: true }
+      : { runtime, credential: { configured }, settings: { value: { ...values.get('vision-toolkit'),
+          provider: { ...values.get('vision-toolkit').provider, ...(baseUrl === undefined ? {} : { baseUrl }) },
+        } } } })
   }
   let dispose
   try {
@@ -616,6 +621,53 @@ targetTest('enterprise login credential changes invalidate Vision readiness with
     for (const listener of listeners.get('credentials/updated')) listener('E_MATE_MODEL_SESSION_TOKEN')
     assert.equal((await capability.status(signal)).state, 'ready')
     assert.equal(requests, 5, 'reauthorization must invalidate cached failure')
+    for (const entry of [
+      { runtime: { ready: false, generation: 0 }, expected: 'ready', lazy: true },
+      { runtime: { ready: false, generation: 0 }, configured: false, expected: 'setup-required' },
+      { runtime: { ready: false, generation: 0 }, baseUrl: 'https://127.0.0.1.invalid/v1', expected: 'setup-required' },
+      { runtime: { ready: false, generation: 0, lastError: '/private/runtime failed' }, expected: 'failed' },
+      { runtime: { ready: true, generation: 1, lastError: '/private/reconfiguration failed' }, expected: 'failed' },
+      { runtime: { ready: false, generation: 1 }, expected: 'setup-required' },
+      { runtime: {}, expected: 'setup-required' },
+      { runtime: { ready: true, generation: 1 }, expected: 'ready', healthy: true },
+      { runtime: { ready: true, generation: 1 }, expected: 'setup-required', healthy: false },
+    ]) {
+      runtime = entry.runtime
+      configured = entry.configured ?? true
+      baseUrl = entry.baseUrl
+      healthy = entry.healthy ?? true
+      for (const listener of listeners.get('credentials/updated')) listener('E_MATE_MODEL_SESSION_TOKEN')
+      const before = requests
+      const result = await capability.status(signal)
+      assert.equal(result.state, entry.expected)
+      assert.deepEqual(result.action_ids, [])
+      assert.doesNotMatch(result.detail, /\/private\//u)
+      assert.equal(requests - before, entry.healthy === undefined ? 1 : 2, 'only an initialized runtime may run health')
+      if (entry.lazy) {
+        assert.match(result.detail, /首次使用时自动准备/u)
+        assert.match(result.detail, /尚未完成首次连接验证/u)
+        assert.doesNotMatch(result.detail, /检查通过|需要配置/u)
+        await capability.status(signal)
+        assert.equal(requests - before, 2, 'first-use readiness must not cache an unverified runtime')
+        runtime = { ready: false, generation: 0, lastError: 'initialization failed' }
+        assert.equal((await capability.status(signal)).state, 'failed', 'initialization failure must be visible without a credential event')
+        assert.equal(requests - before, 3)
+      }
+      if (entry.healthy === true) {
+        const previousNow = Date.now
+        const checkedAt = Date.now()
+        try {
+          Date.now = () => checkedAt + 29_000
+          assert.equal((await capability.status(signal)).state, 'ready')
+          assert.equal(requests - before, 2, 'verified readiness must reuse its 30-second cache')
+          Date.now = () => checkedAt + 30_001
+          assert.equal((await capability.status(signal)).state, 'ready')
+          assert.equal(requests - before, 4, 'expired verified readiness must repeat snapshot and health checks')
+        } finally {
+          Date.now = previousNow
+        }
+      }
+    }
   } finally {
     dispose?.()
     globalThis.fetch = previousFetch

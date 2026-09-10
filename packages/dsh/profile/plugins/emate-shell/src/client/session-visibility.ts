@@ -5,7 +5,8 @@ export function collectInternalSubagentIds(state: SessionListState): ReadonlySet
   const internal = new Set<string>()
 
   for (const row of Object.values(state.byId)) {
-    if (row.origin === 'subagent' || row.parentId !== undefined) internal.add(row.id)
+    // Ordinary user forks also carry parentId; only native subagent evidence hides a task.
+    if (row.origin === 'subagent') internal.add(row.id)
   }
   for (const catalog of Object.values(state.subagentsByParent)) {
     for (const entry of catalog.entries) {

@@ -18,6 +18,10 @@
   config:
     maxParallelToolCalls: 4
 
+- id: emate-imagegen
+  config:
+    rootUrl: https://mvdcm.ecoremedia.net/e-mate/model-api/v1
+
 - id: ui-settings-models
   name: '@deepseek-ai/dsh-client-ui-settings-models'
   disabled: true
@@ -33,7 +37,7 @@
 - id: agent-presets
   name: '@deepseek-ai/dsh-agent-presets'
   config:
-    default: standard
+    default: code
 
 - id: sandbox-policy
   name: '@deepseek-ai/dsh-sandbox-policy'
@@ -113,11 +117,9 @@
     - id: emate-qr-generation
       name: ./plugins/qr-generation.js
       inject: [tools, jobs, attachments]
-    - id: emate-image-generation
-      name: ./plugins/image-generation.js
-      inject: [tools, jobs, attachments, sandboxPolicy, sessionProjections, sessionProjectionCache, sessionPersistence, sessions, agents, subagents, emateIdentity, emateModelPolicy, emateCapabilities]
-      config:
-        rootUrl: https://mvdcm.ecoremedia.net/e-mate/model-api/v1
+    - id: emate-image-history
+      name: ./plugins/image-history.js
+      inject: [sessionProjections, sessionProjectionCache, sessionPersistence]
 
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'

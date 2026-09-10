@@ -174,18 +174,39 @@ try {
   if (trayItems.some(item => item.label().startsWith('Profile:'))) {
     throw new Error('assembled e-Mate profile unexpectedly exposes a profile selector')
   }
-  const disclosureAgent = (await ctx.agents.create({
-    sessionId: SessionId('profile-smoke-tool-disclosure'),
+  const defaultAgent = (await ctx.agents.create({
+    sessionId: SessionId('profile-smoke-default-ptc'),
     meta: { cwd: home },
     agentOptions: { provider: 'mock', model: 'mock' },
     setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx),
   })).agent
+  if (ctx.agentPresets.defaultId !== 'code'
+    || ctx.agentPresets.composedPreset(defaultAgent.ctx) !== 'code'
+    || ctx.tools.modeFor(defaultAgent) !== 'code') {
+    throw new Error('assembled Profile did not select the native PTC preset by default')
+  }
+  const ptc = await ctx.tools.execute({
+    callId: CallId('profile-smoke-ptc-sdk'),
+    name: 'run_code',
+    arguments: { code: 'return await tools.job_list({})', description: 'Verify native PTC tool dispatch' },
+    agent: defaultAgent,
+    signal: new AbortController().signal,
+  })
+  if (ptc.isError) throw new Error(`assembled native PTC dispatch failed: ${JSON.stringify(ptc)}`)
+
+  // Standard remains available for its existing direct-dispatch contract checks.
+  const disclosureAgent = (await ctx.agents.create({
+    sessionId: SessionId('profile-smoke-tool-disclosure'),
+    meta: { cwd: home },
+    agentOptions: { provider: 'mock', model: 'mock' },
+    setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'standard'),
+  })).agent
   const initialToolNames = new Set(ctx.tools.schemas(disclosureAgent).map(schema => schema.name))
   if (!initialToolNames.has('tool_search')
-    || !initialToolNames.has('imagegen')
-    || !initialToolNames.has('image_pack')
+    || !['generate_image', 'edit_image', 'get_image_generation_task', 'cancel_image_generation_task'].every(name => initialToolNames.has(name))
+    || ['imagegen', 'image_batch', 'image_pack'].some(name => initialToolNames.has(name))
     || !['job_output', 'job_list', 'job_kill'].every(name => initialToolNames.has(name))
-    || initialToolNames.has('office_write')) {
+    || initialToolNames.has('univer_new')) {
     throw new Error('assembled Profile did not apply progressive Tool disclosure')
   }
 
@@ -222,12 +243,12 @@ try {
   const disclosure = await ctx.tools.execute({
     callId: CallId('profile-smoke-tool-search'),
     name: 'tool_search',
-    arguments: { query: 'office_write', limit: 1 },
+    arguments: { query: 'univer_new', limit: 1 },
     agent: disclosureAgent,
     signal: new AbortController().signal,
   })
-  if (disclosure.isError || !ctx.tools.schemas(disclosureAgent).some(schema => schema.name === 'office_write')) {
-    throw new Error(`assembled Profile Tool Search did not reveal the original office_write Tool: ${JSON.stringify(disclosure)}`)
+  if (disclosure.isError || !ctx.tools.schemas(disclosureAgent).some(schema => schema.name === 'univer_new')) {
+    throw new Error(`assembled Profile Tool Search did not reveal the native univer_new Tool: ${JSON.stringify(disclosure)}`)
   }
   const response = await fetch(expectedUrl)
   const html = await response.text()
@@ -244,7 +265,7 @@ try {
   for (const id of [
     '@e-mate/desktop',
     '@e-mate/dsh-plugin-file-import',
-    '@e-mate/dsh-plugin-office-skills',
+    '@e-mate/dsh-plugin-univer-office',
     '@e-mate/dsh-plugin-skill-hub',
     '@e-mate/dsh-plugin-genui',
     '@e-mate/dsh-plugin-vision-toolkit',

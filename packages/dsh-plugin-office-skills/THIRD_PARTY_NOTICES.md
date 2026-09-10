@@ -1,33 +1,12 @@
 # Third-party notices
 
-This package bundles the following redistributable components:
+This package bundles these two Skill presets. The package's MIT declaration applies to e-Mate adapter code and does not relicense upstream content.
 
-| Component | Version | License |
-|---|---:|---|
-| docx | 9.7.1 | MIT |
-| pptxgenjs | 4.0.1 | MIT |
-| pdf-lib | 1.17.1 | MIT |
-| @pdf-lib/fontkit | 1.1.1 | MIT |
-| pdf2json | 4.0.3 | Apache-2.0 |
-| jszip | 3.10.1 | MIT |
-| @xmldom/xmldom | 0.9.11 | MIT |
-| Noto Sans SC Variable | 5.3.0 | SIL Open Font License 1.1 |
-| Noto Sans SC Regular (weight-400 instance) | noto-cjk f8d157532fbfaeda587e826d4cd5b21a49186f7c | SIL Open Font License 1.1 |
+| Component | Fixed commit | Distribution basis |
+|---|---|---|
 | terravic/meeting-transcript-summary-skill | 510aab036c6190f3ee547628cb66409def639ac6 | Apache-2.0 |
-| OpenAI PDF Skill | 26.905.11957 | MIT declaration in retained upstream plugin manifest |
-| hugohe3/ppt-master | c45b7427e707d8695f1bf7df4d20360d05f82e7c | MIT; bundled assets retain their own notices |
+| larashero3-dotcom/lieflat-charts | eace082a317b696c5570c25826a53a7fa113e984 | User-confirmed enterprise authorization; original PolyForm Noncommercial License 1.0.0 retained |
 
-The exact pdf2json and font license texts are included beside their assets. Transitive JavaScript license texts are included by the repository release SBOM and third-party-license process.
+The meeting-summary preset preserves the upstream Skill, references, template and examples. Its full license remains at `skills/meeting-summary/LICENSE`; the upstream tree contains no separate NOTICE file. e-Mate's host guidance and the numeric-line preservation change in the optional cleaner are documented in `SOURCE.md` and the modified script.
 
-The meeting-summary preset preserves the upstream Skill, references, template and examples from [terravic/meeting-transcript-summary-skill](https://github.com/terravic/meeting-transcript-summary-skill/tree/510aab036c6190f3ee547628cb66409def639ac6). Its complete Apache-2.0 license is included at `skills/meeting-summary/LICENSE`; the upstream tree contains no separate NOTICE file. e-Mate's host guidance and the numeric-line preservation change in the optional cleaner are documented in `SOURCE.md` and in the modified script.
-
-
-The Word workflow uses the existing MIT docx dependency. The Hermes Python Skill is no longer included.
-
-The PDF Skill includes a static weight-400 instance of the official Noto Sans SC variable font. Original copyright, the reserved font name, OFL text, modification notice and exact source/output hashes are retained under `skills/pdf/assets/noto-sans-sc`. fontTools was used only for reproducible asset preparation and is not included as a client dependency.
-
-PPT Master retains its original license and attribution guard under `skills/ppt-master`. Its icon, audio and geometry assets retain their upstream notices; see `skills/ppt-master/SOURCE.md` for the source manifest and adapted document references. No PyMuPDF runtime is distributed.
-
-The OpenAI Spreadsheets Skill 26.905.11957 retains its original MIT plugin manifest at `skills/spreadsheets/UPSTREAM_PLUGIN_MANIFEST.json`. No artifact-tool runtime is included.
-
-Lieflat Charts (`larashero3-dotcom/lieflat-charts@eace082a317b696c5570c25826a53a7fa113e984`) is bundled under the user's confirmed enterprise authorization. Its original PolyForm Noncommercial License 1.0.0 remains at `skills/lieflat-charts/LICENSE`; its separate third-party notices remain alongside it. The package's MIT declaration applies to e-Mate code, not this upstream content. See `skills/lieflat-charts/SOURCE.md` for the recorded distribution basis.
+Lieflat's original license and separate third-party notices remain under `skills/lieflat-charts`. Its `SOURCE.md` and `UPSTREAM.json` record the confirmed distribution basis and exact upstream resources, including the existing documented Skill adaptation. The contract document is not represented as present in this repository.

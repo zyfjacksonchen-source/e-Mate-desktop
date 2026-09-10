@@ -70,15 +70,23 @@ describe('native Subagent top-level visibility', () => {
         parentSessionId: 'parent' as SessionId, origin: 'subagent',
       },
     })
+    sessions.handleHostEnvelope({
+      rpcId: 'fork-added' as never,
+      payload: {
+        type: 'host/session-added', sessionId: 'fork' as SessionId, blank: false,
+        parentSessionId: 'parent' as SessionId,
+      },
+    })
     await Promise.resolve()
 
     const state = sessions.list.getSnapshot()
     const internal = collectInternalSubagentIds(state)
     expect(state.byId['child' as SessionId]).toMatchObject({ parentId: 'parent', origin: 'subagent' })
-    expect(state.ids.filter(id => isTopLevelProductSession(state.byId[id]!, internal))).toEqual(['parent'])
+    expect(state.byId['fork' as SessionId]).toMatchObject({ parentId: 'parent', blank: false })
+    expect(state.ids.filter(id => isTopLevelProductSession(state.byId[id]!, internal)).sort()).toEqual(['fork', 'parent'])
   })
 
-  it('converges origin, lineage, catalog and current-address signals without hiding a root task', () => {
+  it('converges subagent evidence without hiding roots or ordinary fork lineage', () => {
     const root = { id: 'root', displayTitle: 'root', running: false, blank: false, updatedAt: 1 } as SessionSummary
     const origin = { ...root, id: 'origin', origin: 'subagent' as const }
     const lineage = { ...root, id: 'lineage', parentId: 'root' }
@@ -98,9 +106,10 @@ describe('native Subagent top-level visibility', () => {
     })
 
     const internal = collectInternalSubagentIds(state)
-    expect([...internal].sort()).toEqual(['addressed', 'catalog', 'lineage', 'origin'])
+    expect([...internal].sort()).toEqual(['addressed', 'catalog', 'origin'])
     expect(isTopLevelProductSession(root, internal)).toBe(true)
-    expect([origin, lineage, catalog, addressed].every(row => !isTopLevelProductSession(row, internal))).toBe(true)
+    expect(isTopLevelProductSession(lineage, internal)).toBe(true)
+    expect([origin, catalog, addressed].every(row => !isTopLevelProductSession(row, internal))).toBe(true)
     expect(highlightedProductSessionId(state)).toBe(root.id)
   })
 
@@ -476,12 +485,13 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
 
   it('keeps the current Sidebar hierarchy while driving real session and workspace actions', async () => {
     const sessions = nativeSessionState({
-      ids: ['project-session', 'project-image-child', 'general-session', 'general-image-child', 'general-catalog-child', 'unassigned-session'],
+      ids: ['project-session', 'project-image-child', 'general-session', 'general-fork', 'general-image-child', 'general-catalog-child', 'unassigned-session'],
       byId: {
         'project-session': { id: 'project-session', displayTitle: '项目任务', running: false, blank: false, updatedAt: 2 },
         'project-image-child': { id: 'project-image-child', displayTitle: '一次性子代理记录', origin: 'subagent', running: false, blank: false, updatedAt: 4 },
         'general-session': { id: 'general-session', displayTitle: '通用任务', running: true, blank: false, updatedAt: 1 },
-        'general-image-child': { id: 'general-image-child', displayTitle: '内部生图会话', parentId: 'general-session', running: false, blank: false, updatedAt: 3 },
+        'general-fork': { id: 'general-fork', displayTitle: '通用任务 (1)', parentId: 'general-session', running: false, blank: false, updatedAt: 7 },
+        'general-image-child': { id: 'general-image-child', displayTitle: '内部生图会话', parentId: 'general-session', origin: 'subagent', running: false, blank: false, updatedAt: 3 },
         'general-catalog-child': { id: 'general-catalog-child', displayTitle: 'This is one e-Mate image', running: false, blank: false, updatedAt: 5 },
         'unassigned-session': { id: 'unassigned-session', displayTitle: '待恢复任务', running: false, blank: false, updatedAt: 6 },
       },
@@ -497,7 +507,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     const workspaces = {
       items: [
         { workspaceId: 'workspace-1', path: '/work/quarterly', title: '季度报告', sessionIds: ['project-session', 'project-image-child'] },
-        { workspaceId: 'workspace-general', path: '/home/test/.dsh/e-mate/general', title: '通用会话', sessionIds: ['general-session', 'general-image-child', 'general-catalog-child'] },
+        { workspaceId: 'workspace-general', path: '/home/test/.dsh/e-mate/general', title: '通用会话', sessionIds: ['general-session', 'general-fork', 'general-image-child', 'general-catalog-child'] },
       ],
       archivedSessionIds: [],
       phase: 'ready' as const,
@@ -569,6 +579,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     const conversations = screen.getByRole('region', { name: '会话' })
     const unassigned = screen.getByRole('region', { name: '未分组' })
     expect(conversations.textContent).toContain('通用任务')
+    expect(within(conversations).getByRole('button', { name: '打开任务：通用任务 (1)' })).not.toBeNull()
+    expect(within(conversations).getAllByRole('button', { name: /^打开任务：/u })).toHaveLength(2)
     expect(conversations.compareDocumentPosition(unassigned) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     expect(unassigned.textContent).not.toContain('待恢复任务')
     expect(screen.queryByRole('button', { name: '打开任务：待恢复任务' })).toBeNull()
@@ -581,6 +593,10 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByRole('button', { name: '打开任务：项目任务' }).getAttribute('aria-current')).toBe('page')
     fireEvent.change(screen.getByRole('textbox', { name: '搜索会话' }), { target: { value: 'This is one e-Mate image' } })
     expect(screen.getByText('没有匹配的会话')).not.toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索会话' }), { target: { value: '通用任务 (1)' } })
+    expect(screen.queryByText('没有匹配的会话')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: '打开任务：通用任务 (1)' }).at(-1)!)
+    expect(openSession).toHaveBeenCalledWith('general-fork')
     fireEvent.click(screen.getByRole('button', { name: '关闭搜索' }))
     fireEvent.click(screen.getByRole('button', { name: '新建任务' }))
     expect(startSession).toHaveBeenCalledWith()

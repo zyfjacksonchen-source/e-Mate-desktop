@@ -92,12 +92,12 @@ function names(ctx, agent) {
   return ctx.tools.schemas(agent).map(schema => schema.name).sort()
 }
 
-test('keeps one canonical imagegen alias target and the accepted native search route', () => {
+test('keeps the upstream generation and edit tools visible with the accepted native search route', () => {
   const componentPatch = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
   const profilePatch = readFileSync(new URL('../../dsh/profile/cordis.patch.yml', import.meta.url), 'utf8')
-  assert.match(componentPatch, /^\s+- imagegen$/mu)
-  assert.match(componentPatch, /^\s+- image_batch$/mu)
-  assert.match(componentPatch, /image_batch:[\s\S]*批量生图[\s\S]*生成多张图片/u)
+  assert.match(componentPatch, /^\s+- generate_image$/mu)
+  assert.match(componentPatch, /^\s+- edit_image$/mu)
+  assert.match(componentPatch, /generate_image:[\s\S]*批量生图[\s\S]*生成多张图片/u)
   assert.match(componentPatch, /^\s+- web_search$/mu)
   assert.doesNotMatch(componentPatch, /^\s+- imagen$/mu)
   assert.doesNotMatch(componentPatch, /gpt-responses|allowInsecureHttp|43\.135\.183\.53|emate-web-search-gpt/u)

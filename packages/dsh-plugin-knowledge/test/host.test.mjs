@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 import { createKnowledgeHost, knowledgeTarget } from '../src/index.ts'
 import { API_ROOT, parseGraph } from '../src/contract.ts'
+import { knowledgeFailure } from '../src/contract.ts'
+import { READ_OPERATIONS, READ_ENDPOINTS, readRequestSchema } from '../src/read-contract.ts'
+import { validateJsonSchemaValue } from '../../../upstream/deepseek-harness/packages/core/tools/lib/index.js'
 const result = { schema_version: 1, scope: { kind: 'public' }, corpus_revision: 'a'.repeat(64), source_count: 0 }
 const principal = { tenantId: 'enterprise', userId: 'user-1' }
 const reply = value => Response.json(value)
@@ -25,6 +28,30 @@ test('only fixed readonly operations and bounded targets are accepted, never ren
   const target = knowledgeTarget('graph', { limit: 500, depth: 2 })
   assert.equal(target.url.href, API_ROOT + '/graph?limit=500&depth=2')
   for (const [action, params] of [['graph', { limit: 501 }], ['catalog', { token: 'fake' }], ['search', { question: 'q', project_id: 1 }], ['imports', {}], ['original', { source_id: 'a'.repeat(36) }]]) assert.throws(() => knowledgeTarget(action, params))
+})
+
+test('read schema and Host share exact endpoint fields while keeping snapshot and version validation',()=>{
+  const samples={catalog:{},graph:{root_id:'a'.repeat(64),corpus_revision:'b'.repeat(64)},sources:{kind:'knowledge'},
+    source:{source_id:'a'.repeat(36),version:'b'.repeat(64)},node:{node_id:'a'.repeat(64),version:'b'.repeat(64)},
+    search:{question:'实际问题',corpus_revision:'b'.repeat(64)},benchmarks:{keyword:'行业'},benchmark:{media:'小红书'},
+    evidence:{query_id:'a'.repeat(36)},original:{source_id:'a'.repeat(36),version:'b'.repeat(64)},
+    revisions:{offset:1,corpus_revision:'b'.repeat(64)},revision:{revision_id:'a'.repeat(36)}}
+  for(const endpoint of READ_ENDPOINTS){
+    const request=samples[endpoint],schema=readRequestSchema(endpoint)
+    assert.deepEqual(validateJsonSchemaValue(schema,request),[])
+    assert.doesNotThrow(()=>knowledgeTarget(endpoint,request))
+    for(const foreign of ['token','url','source_version','unexpected']){
+      const invalid={...request,[foreign]:'must-not-be-sent'}
+      assert(validateJsonSchemaValue(schema,invalid).length)
+      assert.throws(()=>knowledgeTarget(endpoint,invalid),{code:'invalid-request'})
+    }
+    assert.deepEqual(Object.keys(schema.properties),Object.keys(READ_OPERATIONS[endpoint].properties))
+  }
+  assert.throws(()=>knowledgeTarget('source',{...samples.source,corpus_revision:'c'.repeat(64)}),{code:'invalid-request'})
+  assert.throws(()=>knowledgeTarget('node',{...samples.node,version:'invalid'}),{code:'invalid-request'})
+  assert.throws(()=>knowledgeTarget('revisions',{offset:1}),{code:'invalid-request'})
+  const safe=knowledgeFailure({code:'invalid-request',read_endpoint:'source',message:'Authorization: do-not-expose'})
+  assert.match(safe.error.message,/source.*version/u);assert(!JSON.stringify(safe).includes('do-not-expose'))
 })
 
 test('Host bootstraps the native identity once before capturing the owner and reads no renderer token', async () => {

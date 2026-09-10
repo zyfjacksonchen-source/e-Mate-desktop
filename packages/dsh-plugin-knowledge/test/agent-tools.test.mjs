@@ -10,6 +10,8 @@ import { registerKnowledgeAgentTools } from '../src/agent-tools.ts'
 import { createKnowledgeWorkflow } from '../src/workflow.ts'
 import { digest } from '../src/imports.ts'
 import { knowledgeFailure } from '../src/contract.ts'
+import { validateJsonSchemaValue } from '../../../upstream/deepseek-harness/packages/core/tools/lib/index.js'
+import { knowledgeTarget } from '../src/index.ts'
 const source={source_id:'11111111-1111-4111-8111-111111111111',source_version:'a'.repeat(64),parse_revision:'b'.repeat(64)}
 const compilation='22222222-2222-4222-8222-222222222222'
 class Adapter extends LlmAdapter {
@@ -55,10 +57,10 @@ async function fixture(t){
 }
 test('native ToolRuntime renders safe output and exposes no caller identity or model knobs',async t=>{
   const f=await fixture(t),schema=f.ctx.tools.schemas().find(x=>x.name==='enterprise_knowledge');assert(schema)
-  for(const key of ['token','url','tenant_id','user_id','model','publicIntentId','lease_token'])assert.equal(schema.parameters.properties[key],undefined)
-  const run=await f.run([{action:'read',endpoint:'revisions',request:{scope:'public',question:'方法'}}])
+  assert.equal(schema.parameters.type,'object');for(const key of ['token','url','tenant_id','user_id','model','publicIntentId','lease_token'])assert.equal(schema.parameters.properties[key],undefined)
+  const run=await f.run([{action:'read',request:{endpoint:'revisions',scope:'public',question:'方法'}}])
   assert.equal(run.results[0].status,'success');assert.deepEqual(run.results[0].value.result,{endpoint:'revisions',request:{scope:'public',question:'方法'}});assert.equal(run.results[0].value.scope_key,f.owner())
-  const result=await f.ctx.tools.execute({callId:'without-agent',signal:new AbortController().signal,name:'enterprise_knowledge',arguments:{action:'read',endpoint:'catalog'}})
+  const result=await f.ctx.tools.execute({callId:'without-agent',signal:new AbortController().signal,name:'enterprise_knowledge',arguments:{action:'read',request:{endpoint:'catalog'}}})
   assert.equal(result.value.error.code,'unauthorized')
 })
 test('one native user message keeps one import ID; different bodies conflict in the workflow',async t=>{
@@ -112,27 +114,27 @@ test('status actions keep caller IDs and scope on the existing workflow',async t
 })
 test('late account changes and mismatched read scopes cannot return the old result',async t=>{
   const f=await fixture(t),old=f.owner();f.setRead(async()=>{f.change();return {scope_key:old,result:{text:'private-old-response'}}})
-  const first=await f.run([{action:'read',endpoint:'catalog'}]);assert.equal(first.results[0].error.code,'scope-changed');assert(!JSON.stringify(first.events).includes('private-old-response'))
+  const first=await f.run([{action:'read',request:{endpoint:'catalog'}}]);assert.equal(first.results[0].error.code,'scope-changed');assert(!JSON.stringify(first.events).includes('private-old-response'))
   f.setRead(async()=>({scope_key:old,result:{text:'private-cache-response'}}))
-  const second=await f.run([{action:'read',endpoint:'catalog'}]);assert.equal(second.results[0].error.code,'scope-changed');assert(!JSON.stringify(second.events).includes('private-cache-response'))
+  const second=await f.run([{action:'read',request:{endpoint:'catalog'}}]);assert.equal(second.results[0].error.code,'scope-changed');assert(!JSON.stringify(second.events).includes('private-cache-response'))
 })
 test('private Host protocol fields and raw errors never enter native Session results',async t=>{
   const f=await fixture(t);f.workflow.status=async()=>({compilation_id:compilation,lease_token:'private-host-lease'})
   const first=await f.run([{action:'status',compilation_id:compilation}]);assert.equal(first.results[0].error.code,'invalid-response');assert(!JSON.stringify(first.events).includes('private-host-lease'))
   f.setRead(async()=>{throw Object.assign(Error('Authorization: private-oauth-token'),{code:'unavailable'})})
-  const second=await f.run([{action:'read',endpoint:'catalog'}]);assert.equal(second.results[0].error.code,'unavailable');assert(!JSON.stringify(second.events).includes('private-oauth-token'))
+  const second=await f.run([{action:'read',request:{endpoint:'catalog'}}]);assert.equal(second.results[0].error.code,'unavailable');assert(!JSON.stringify(second.events).includes('private-oauth-token'))
   const schema=f.ctx.tools.schemas().find(x=>x.name==='enterprise_knowledge')
-  for(const key of ['token','url','tenant_id','user_id','lease_token'])assert.equal(schema.parameters.properties.request.properties[key],undefined)
+  for(const branch of schema.parameters.properties.request.oneOf)for(const key of ['token','url','tenant_id','user_id','lease_token'])assert.equal(branch.properties[key],undefined)
 })
 
 test('native input validation rejects additional identity, URL and secret fields before either injected owner is called',async t=>{
   const f=await fixture(t);let reads=0
   f.setRead(async()=>{reads++;return {scope_key:f.owner(),result:{}}})
   const invalid=[
-    {action:'read',endpoint:'catalog',token:'not-a-real-token'},
-    {action:'read',endpoint:'catalog',request:{tenant_id:'other'}},
-    {action:'read',endpoint:'catalog',request:{user_id:'other'}},
-    {action:'read',endpoint:'original',request:{url:'https://unrelated.invalid/file'}},
+    {action:'read',request:{endpoint:'catalog'},token:'not-a-real-token'},
+    {action:'read',request:{endpoint:'catalog',tenant_id:'other'}},
+    {action:'read',request:{endpoint:'catalog',user_id:'other'}},
+    {action:'read',request:{endpoint:'original',url:'https://unrelated.invalid/file'}},
     {action:'import',paths:['/files/a.pdf'],scope:{kind:'uploader-private',token:'not-a-real-token'}},
     {action:'compile',source_versions:[{...source,lease_token:'not-a-real-token'}],topics:[{key:'method'}]},
     {action:'import',paths:['/files/a.pdf'],operation_id:'model-chosen-operation'},
@@ -141,6 +143,57 @@ test('native input validation rejects additional identity, URL and secret fields
   assert.equal(run.results.length,invalid.length)
   assert(run.results.every(r=>r.status==='failure'&&r.error.code==='invalid-request'))
   assert.equal(reads,0);assert.deepEqual(f.calls,[])
+})
+
+test('endpoint-discriminated Tool schema rejects the installed snapshot failure before Host read',async t=>{
+  const f=await fixture(t),schema=f.ctx.tools.schemas().find(x=>x.name==='enterprise_knowledge').parameters
+  const version=source.source_version,node_id='c'.repeat(64),corpus_revision='d'.repeat(64),reads=[]
+  const invalid=[
+    {action:'read',request:{endpoint:'source',source_id:source.source_id,version,corpus_revision}},
+    {action:'read',request:{endpoint:'original',source_id:source.source_id,source_version:version,corpus_revision}},
+    {action:'read',request:{endpoint:'revision',source_id:source.source_id,version}},
+    {action:'read',request:{endpoint:'evidence',source_id:source.source_id,version,node_id}},
+  ]
+  f.setRead(async(endpoint,request)=>{
+    const target=knowledgeTarget(endpoint,request);reads.push({endpoint,request,url:target.url.href})
+    return {scope_key:f.owner(),result:endpoint==='source'
+      ?{source:{id:source.source_id,source_version:version,node_id}}
+      :{id:node_id,source_id:source.source_id,source_version:version,content:'原页15的实际节点正文。',untrusted:true}}
+  })
+  for(const args of invalid)assert(validateJsonSchemaValue(schema,args).length)
+  const rejected=await f.run(invalid)
+  assert(rejected.results.every(r=>r.status==='failure'&&r.error.code==='invalid-request'))
+  assert.match(rejected.results[0].error.message,/source.*version.*不传 corpus_revision/u)
+  assert.match(rejected.results[1].error.message,/不接收 source_version/u)
+  assert.match(rejected.results[2].error.message,/revision_id/u)
+  assert.match(rejected.results[3].error.message,/query_id/u)
+  assert.equal(reads.length,0)
+  const valid=[
+    {action:'read',request:{endpoint:'source',source_id:source.source_id,version,scope:'public'}},
+    {action:'read',request:{endpoint:'node',node_id,version,scope:'public'}},
+  ]
+  for(const args of valid)assert.deepEqual(validateJsonSchemaValue(schema,args),[])
+  const accepted=await f.run(valid)
+  assert(accepted.results.every(r=>r.status==='success'))
+  assert.deepEqual(reads.map(x=>x.request),valid.map(({request:{endpoint,...request}})=>request))
+  assert(reads.every(x=>new URL(x.url).searchParams.get('version')===version))
+  assert.equal(accepted.results[1].value.result.content,'原页15的实际节点正文。')
+  assert.equal(accepted.results[1].value.result.untrusted,true)
+})
+
+test('Agent original reads report missing native content capability without leaking UI download handles',async t=>{
+  const f=await fixture(t),url='/emate-knowledge-downloads/'+randomUUID()
+  f.setRead(async(endpoint,request)=>{
+    assert.equal(endpoint,'original');assert.equal(request.version,source.source_version)
+    return {scope_key:f.owner(),result:{url,sha256:request.version,bytes:321}}
+  })
+  const run=await f.run([{action:'read',request:{endpoint:'original',source_id:source.source_id,version:source.source_version}}])
+  assert.equal(run.results[0].status,'failure')
+  assert.equal(run.results[0].error.code,'original-content-unavailable')
+  assert.match(run.results[0].error.message,/当前 Agent 没有读取.*原生接口/u)
+  assert.match(run.results[0].error.message,/知识页面.*下载原件/u)
+  assert.match(run.results[0].error.message,/不要.*bash\/env\/curl/u)
+  assert(!JSON.stringify(run.events).includes(url))
 })
 
 test('account change during public intent validation prevents the import action itself',async t=>{

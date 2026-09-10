@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { runInNewContext } from 'node:vm'
 import { pathToFileURL } from 'node:url'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -27,6 +28,8 @@ import { CONVERSATION_ADAPTER_PATH, CONVERSATION_PACKAGE } from './harness-conve
 import { SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { ARTIFACT_LINKS_ADAPTER_PATH, ARTIFACT_LINKS_PACKAGE, ARTIFACT_LINKS_RENDERER_PATH } from './harness-artifact-links-adapter.mjs'
 import { FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
+
+import { adaptHarnessSessionTitleSource, SESSION_TITLE_PACKAGE, SESSION_TITLE_ADAPTER_PATH } from './harness-runtime-adapters.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const harnessRoot = join(root, 'upstream', 'deepseek-harness')
@@ -299,4 +302,33 @@ test('rejects missing, modified or overlaid Agent Loop packages at release verif
     [{ ...native, overlay: { path: 'vision.patch' } }]]) {
     assert.throws(() => assertNativeAgentLoop(records), /Agent Loop must exactly match/)
   }
+})
+
+
+test('Desktop title materialization validates exact adapted bytes and records the shared adapter', () => {
+  const runtime = readFileSync(join(root, 'scripts/harness-runtime-adapters.mjs'), 'utf8')
+  const desktop = readFileSync(join(root, 'scripts/harness-provenance.mjs'), 'utf8')
+  assert.equal(SESSION_TITLE_ADAPTER_PATH, 'scripts/harness-runtime-adapters.mjs')
+  assert.match(runtime, /replaceRuntimeFile\(titleTarget, adaptHarnessSessionTitleSource/u)
+  assert.match(desktop, /manifest.name === SESSION_TITLE_PACKAGE \? SESSION_TITLE_ADAPTER_PATH/u)
+  const native = process.env.EMATE_TEST_NATIVE_ROOT ?? root
+  const input = readFileSync(join(native, 'upstream/deepseek-harness/packages/session/session-title/lib/index.js'), 'utf8')
+  const directory = mkdtempSync(join(tmpdir(), 'emate-title-materialization-'))
+  const sourceLib = join(directory, 'source'), targetLib = join(directory, 'target')
+  mkdirSync(sourceLib); mkdirSync(targetLib)
+  writeFileSync(join(sourceLib, 'index.js'), input); writeFileSync(join(targetLib, 'index.js'), input)
+  const materialize = desktop.match(/    if \(manifest.name === SESSION_TITLE_PACKAGE\) \{[\s\S]*?\n    \}/u)?.[0]
+  const verify = desktop.match(/    if \(manifest.name === SESSION_TITLE_PACKAGE &&[\s\S]*?\n    \}/u)?.[0]
+  assert(materialize); assert(verify)
+  const scope = { manifest: { name: SESSION_TITLE_PACKAGE }, SESSION_TITLE_PACKAGE, sourceLib, targetLib,
+    join, readFileSync, writeFileSync, adaptHarnessSessionTitleSource }
+  try {
+    assert.throws(() => runInNewContext(verify, scope), /session titles do not match/)
+    runInNewContext(materialize, scope)
+    assert.equal(readFileSync(join(sourceLib, 'index.js'), 'utf8'), input)
+    assert.equal(readFileSync(join(targetLib, 'index.js'), 'utf8'), adaptHarnessSessionTitleSource(input))
+    assert.doesNotThrow(() => runInNewContext(verify, scope))
+    writeFileSync(join(targetLib, 'index.js'), adaptHarnessSessionTitleSource(input) + '\n// unexpected drift')
+    assert.throws(() => runInNewContext(verify, scope), /session titles do not match/)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

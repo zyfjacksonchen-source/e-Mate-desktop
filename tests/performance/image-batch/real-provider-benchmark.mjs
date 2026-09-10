@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { RELEASE_VERSION, ticketFor } from './release-identity.mjs'
+import { RELEASE_VERSION, ticketFor, imageModelFor } from './release-identity.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url'
 import { DESKTOP_REFERENCE, HARNESS_COMMIT, validateProviderLayerEvidence } from './release-evidence-protocol.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
-const MODEL = 'gpt-image-2-pro'
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 const SIZES = [4, 5, 8]
 const SHA256 = /^[0-9a-f]{64}$/u
@@ -98,7 +97,7 @@ function scope(seed, batchId, ordinal) {
 }
 
 async function requestImage(config, prompt, requestScope, fetchImpl = fetch, now = () => performance.now()) {
-  const body = JSON.stringify({ model: MODEL, prompt })
+  const body = JSON.stringify({ model: imageModelFor(config.provenance.version), prompt })
   const started = now()
   let response
   try {
@@ -148,7 +147,7 @@ function executionManifest(config, prompts, id) {
   if (config.probe) requests.push(...prompts.slice(0, 5).map((prompt, index) => ({ kind: 'typed-429-probe', prompt_sha256: sha256(prompt),
     headers: probeRequest({ ...config, execution: { id } }, index + 1).headers })))
   return { schema_version: 1, ticket: ticketFor(config.provenance.version, '502'), execution_id: id, provenance: config.provenance,
-    layer: config.layer, gateway_sha256: sha256(config.root.href), deployment_sha256: config.deployment,
+    image_model: imageModelFor(config.provenance.version), layer: config.layer, gateway_sha256: sha256(config.root.href), deployment_sha256: config.deployment,
     environment_name_sha256: sha256(config.environmentName), fixed_set_sha256: fixedSetSha256, requests }
 }
 
@@ -195,7 +194,7 @@ async function typed429Probe(config, prompts, fetchImpl) {
   requireValue(rejected.response.headers.get('retry-after') === String(Math.ceil(retryAfterMs / 1_000)), 'Retry-After header and typed body disagree')
   await new Promise(resolveWait => setTimeout(resolveWait, retryAfterMs))
   const retried = await requestImage(config, prompts[first.indexOf(rejected)], rejected.requestScope, fetchImpl)
-  requireValue(retried.status === 'completed' && rejected.body === JSON.stringify({ model: MODEL, prompt: prompts[first.indexOf(rejected)] }), 'the byte-identical rejected request did not succeed once after Retry-After')
+  requireValue(retried.status === 'completed' && rejected.body === JSON.stringify({ model: imageModelFor(config.provenance.version), prompt: prompts[first.indexOf(rejected)] }), 'the byte-identical rejected request did not succeed once after Retry-After')
   return { status: 'PASS', retry_after_ms: retryAfterMs, attempts: 2, accepted_submissions: 1, identical_request: true, pass: true }
 }
 

@@ -1,63 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createHash } from 'node:crypto'
-
-import { download, officeInstallArguments, installOfficeNotices, prepareOfficeSources } from './prepare-python-runtime.mjs'
-
-test('a corrupt source download preserves the previous prepared sources and clears staging', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'e-mate-office-sources-'))
-  const destination = join(directory, 'office-sources')
-  await mkdir(destination)
-  await writeFile(join(destination, 'previous'), 'retained')
-  let requests = 0
-  try {
-    await assert.rejects(prepareOfficeSources(destination, async () => {
-      requests++
-      return new Response('corrupt archive')
-    }), /Office source SHA-256 or size mismatch/u)
-    assert.equal(requests, 1)
-    assert.equal(await readFile(join(destination, 'previous'), 'utf8'), 'retained')
-    assert.deepEqual(await readdir(directory), ['office-sources'])
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
-test('supplemental runtime notices are copied byte-for-byte into the packaged runtime', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'e-mate-office-notices-'))
-  try {
-    installOfficeNotices(directory)
-    const manifest = JSON.parse(await readFile(new URL('./office-python/manifest.json', import.meta.url), 'utf8'))
-    for (const notice of manifest.supplementalNotices) {
-      const bytes = await readFile(join(directory, 'office-notices', notice.filename))
-      assert.equal(createHash('sha256').update(bytes).digest('hex'), notice.sha256)
-    }
-    assert.throws(() => installOfficeNotices(directory), /EEXIST/u)
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
-test('all supported targets have a complete hashed wheel lock matching their manifest', async () => {
-  const manifest = JSON.parse(await readFile(new URL('./office-python/manifest.json', import.meta.url), 'utf8'))
-  for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
-    const content = await readFile(new URL(`./office-python/${target}.txt`, import.meta.url), 'utf8')
-    const entries = content.split(/\r?\n/u).filter(line => line && !line.startsWith('#'))
-    assert.equal(entries.length, manifest.targets[target].length)
-    for (const entry of manifest.targets[target]) {
-      assert.ok(entries.includes(`${entry.url} --hash=sha256:${entry.sha256}`))
-      assert.equal(new URL(entry.url).hostname, 'files.pythonhosted.org')
-      assert.match(entry.sha256, /^[a-f0-9]{64}$/u)
-    }
-    const args = officeInstallArguments(target, '/staging')
-    for (const flag of ['--no-deps', '--no-index', '--only-binary=:all:', '--require-hashes']) assert.ok(args.includes(flag))
-    assert.ok(args.at(-1).endsWith(`${target}.txt`))
-  }
-  assert.throws(() => officeInstallArguments('unsupported', '/staging'), /Unsupported/u)
-})
+import { download } from './prepare-python-runtime.mjs'
 
 test('retries a transient Python runtime connection failure', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'e-mate-python-runtime-'))

@@ -13,7 +13,9 @@ afterEach(() => {
 })
 
 function context(current: string | undefined, blank: boolean, workspaceId = 'general') {
-  const setDraft = vi.fn()
+  const inputState = { draft: '', phase: 'plain', fileRefs: [{ relative_path: 'inputs/notes.txt' }], imageRefs: [{ id: 'image-1' }] }
+  const setDraft = vi.fn((draft: string) => { inputState.draft = draft })
+  const send = vi.fn()
   const connectWorkspace = vi.fn(async () => 'session-new')
   const state = {
     current,
@@ -37,9 +39,9 @@ function context(current: string | undefined, blank: boolean, workspaceId = 'gen
       open: vi.fn((id: string) => { state.current = id; state.byId[id] = { blank: true } }),
       scope: (id: string) => ({ sessionId: id }),
     },
-    conversation: { input: { for: () => ({ setDraft }) } },
+    conversation: { input: { for: vi.fn(() => ({ setDraft, state: { getSnapshot: () => inputState }, send })) } },
   }
-  return { ctx, setDraft, connectWorkspace }
+  return { ctx, setDraft, connectWorkspace, inputState, send }
 }
 
 describe('T21 quick start templates', () => {
@@ -84,6 +86,32 @@ describe('T21 quick start templates', () => {
     expect(ctx.sessions.open).not.toHaveBeenCalled()
     expect(setDraft).toHaveBeenCalledOnce()
     expect(setDraft).toHaveBeenCalledWith('整理会议纪要')
+  })
+
+  it.each(OFFICE_TEMPLATES)('appends %s to the owning native draft without changing attachments or sending', async (title, _description, prompt) => {
+    const { ctx, inputState, send, connectWorkspace } = context('project-session', false, 'project-a')
+    inputState.draft = 'EM218-QUICK-DRAFT-0909'
+    const files = inputState.fileRefs
+    const images = inputState.imageRefs
+    render(<QuickTemplates prepareDraft={draft => prepareTemplateDraftFromRoute(ctx, draft)} />)
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(title, 'u') }))
+    await waitFor(() => { expect(inputState.draft).toBe(`EM218-QUICK-DRAFT-0909\n\n${prompt}`) })
+    expect(inputState.fileRefs).toBe(files)
+    expect(inputState.imageRefs).toBe(images)
+    expect(ctx.conversation.input.for).toHaveBeenCalledWith({ sessionId: 'project-session' })
+    expect(connectWorkspace).not.toHaveBeenCalled()
+    expect(ctx.sessions.open).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('leaves the native input untouched while submission is in progress', async () => {
+    const { ctx, inputState, setDraft, send } = context('project-session', false, 'project-a')
+    inputState.draft = 'keep me'
+    inputState.phase = 'submitting'
+    await expect(prepareTemplateDraftFromRoute(ctx, 'template')).rejects.toThrow('输入框正在提交')
+    expect(inputState.draft).toBe('keep me')
+    expect(setDraft).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('uses the existing Workspace connect seam when no blank Session exists, then opens and drafts once', async () => {

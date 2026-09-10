@@ -25,7 +25,8 @@ test('real provider runner covers 4/5/8 with four-way batch concurrency and emit
   let calls = 0
   let active = 0
   let maximum = 0
-  const fetchImpl = async () => {
+  const fetchImpl = async (_url, init) => {
+    assert.equal(JSON.parse(init.body).model, 'gpt-image-2-pro')
     calls += 1; active += 1; maximum = Math.max(maximum, active)
     await Promise.resolve(); active -= 1
     return success(calls)
@@ -78,11 +79,13 @@ test('controlled staging requires one typed pre-provider 429 and one successful 
   const attempted = []
   const fetchImpl = async (_url, init) => {
     calls += 1
+    assert.equal(JSON.parse(init.body).model, 'gpt-image-2.5-flare')
     attempted.push({ body: init.body, headers: init.headers })
     if (calls === 25) return new Response(JSON.stringify({ error: { code: 'TENANT_CONCURRENCY_LIMITED', message: 'bounded', retryAfterMs: 1000 } }), { status: 429, headers: { 'retry-after': '1' } })
     return success(calls)
   }
-  const report = await runProviderBenchmark(config('staging', true), prompts, fetchImpl)
+  const current = config('staging', true, '2.0.18'); current.retainImage = () => {}
+  const report = await runProviderBenchmark(current, prompts, fetchImpl)
   assert.deepEqual(report.typed_429_retry_probe, { status: 'PASS', retry_after_ms: 1000, attempts: 2, accepted_submissions: 1, identical_request: true, pass: true })
   assert.equal(calls, 26)
   assert.deepEqual(attempted[24], attempted[25])
@@ -103,7 +106,11 @@ test('configuration keeps credentials in env and rejects aliased or uncontrolled
 test('2.0.18 runner requires output retention before calls and retains each successful response', async () => {
   const current = config('production', false, '2.0.18')
   let calls = 0
-  const fetchImpl = async () => success(++calls)
+  const fetchImpl = async (_url, init) => {
+    assert.equal(JSON.parse(init.body).model, 'gpt-image-2.5-flare')
+    assert.equal(JSON.parse(readFileSync(current.execution.path)).image_model, 'gpt-image-2.5-flare')
+    return success(++calls)
+  }
   await assert.rejects(runProviderBenchmark(current, prompts, fetchImpl), /durable private output retention/u)
   assert.equal(calls, 0)
   const retained = new Map()

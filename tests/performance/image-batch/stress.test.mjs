@@ -1,402 +1,211 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import test from 'node:test'
-import { imageBatchProjectionDefinition } from '../../../packages/dsh/src/profile/image-batch-events.ts'
-import { readDurableImageBatchResult } from '../../../packages/dsh/src/profile/image-batch-recovery.ts'
-import { createNativeImageTaskRuntime } from '../../../packages/dsh/src/profile/native-image-task-runner.ts'
-import { CLAIM as RELEASE_CLAIM, RELEASE_VERSION, TICKET, DESKTOP_REFERENCE, HARNESS_COMMIT, validateManifest } from './release-evidence-protocol.mjs'
+import { createNativeImageFixture, NATIVE_EXECUTION } from '../image-single/native-fixture.mjs'
+import { SMALL_PNG } from '../image-single/fixtures.mjs'
+import { CLAIM as RELEASE_CLAIM, RELEASE_VERSION, TICKET, DESKTOP_REFERENCE, HARNESS_COMMIT, validateManifest, validateNativeLocalEvidence } from './release-evidence-protocol.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
-const RAW_RELATIVE_PATH = 'work/em218-502/performance-image-batch-raw.json'
 const MANIFEST_PATH = new URL('../../../docs/2.0.17/evidence-manifests/performance.json', import.meta.url)
-const LEGAL_TERMINALS = new Set(['completed', 'failed', 'cancelled', 'unknown', 'interrupted'])
-const chain = new Proxy(function () { return chain }, { get: () => chain, apply: () => chain })
-const z = new Proxy({}, { get: () => chain })
-
-function session(id, metadata = {}) {
-  const events = []
-  return { header: { id, ...metadata }, events,
-    append(type, data, options) { events.push({ seq: events.length, time: Date.now(), type, data, options }) } }
+const digest = value => createHash('sha256').update(value).digest('hex')
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
+const success = id => new Response(JSON.stringify({ id, data: [{ b64_json: SMALL_PNG.toString('base64') }] }), { headers: { 'content-type': 'application/json' } })
+const summarize = values => {
+  const ordered = values.toSorted((a, b) => a - b)
+  return { p50_ms: ordered[Math.ceil(ordered.length * 0.5) - 1], p95_ms: ordered[Math.ceil(ordered.length * 0.95) - 1],
+    exact_observed_interval_ms: [ordered[0], ordered.at(-1)] }
 }
+export const toolCounts = count => count <= 4 ? [count] : [4, count - 4]
 
-function project(definition, events) {
-  let state = definition.init()
-  for (const event of events) state = definition.apply(state, event)
-  return definition.view(state)
-}
-
-function receiptRows(events) {
-  return events.filter(event => event.type === 'emate/image-output')
-    .map(event => ({ seq: event.seq, createdAt: event.time, receipt: event.data }))
-}
-
-function image(ordinal) {
-  return { attachmentId: 'sha256:' + ordinal.toString(16).padStart(64, '0'), mediaType: 'image/png',
-    bytes: 8, width: 1, height: 1, name: 'evidence-' + ordinal + '.png' }
-}
-
-class EvidenceOnlyBytes extends Uint8Array {
-  constructor(reportedLength) { super(0); this.reportedLength = reportedLength }
-  get byteLength() { return this.reportedLength }
-}
-
-function createHarness({ batchNumber, outcome }) {
-  const parentId = 'parent-' + batchNumber
-  const parentSession = session(parentId)
-  const parent = { id: parentId, session: parentSession }
-  const children = new Map()
-  const jobs = new Map()
-  const effects = []
-  const providerCalls = new Map()
-  const identityCalls = new Map()
-  const completedReceiptAt = []
-  const terminalAt = []
-  const flushedReceipts = new Set()
-  const starts = []
-  const completions = []
-  const startWaiters = []
-  const claims = []
-  const claimWaiters = []
-  let runtime
-  let active = 0
-  let maximum = 0
-  let childOrdinal = 0
-
-  const notifyStarts = () => {
-    for (let index = startWaiters.length - 1; index >= 0; index -= 1) {
-      if (starts.length >= startWaiters[index].count) startWaiters.splice(index, 1)[0].resolve()
-    }
-  }
-  const waitForStarts = count => starts.length >= count ? Promise.resolve()
-    : new Promise(resolveStart => startWaiters.push({ count, resolve: resolveStart }))
-  const waitForClaims = count => claims.length >= count ? Promise.resolve()
-    : new Promise(resolveClaim => claimWaiters.push({ count, resolve: resolveClaim }))
-
-  const ctx = {
-    effect(setup) { const dispose = setup(); effects.push(dispose); return dispose },
-    sessions: { async flush(current) {
-      if (current !== parentSession) {
-        const terminal = current.events.findLast(event => event.type === 'emate/image-output')
-        if (terminal && !flushedReceipts.has(current.header.id)) {
-          flushedReceipts.add(current.header.id)
-          terminalAt.push(performance.now())
-          if (terminal.data.status === 'completed') completedReceiptAt.push(performance.now())
-        }
-      }
-      return true
-    } },
-    emateModelPolicy: { async assertModel(model) { assert.equal(model, 'gpt-image-2-pro') } },
-    jobs: { get(id, owner) { const job = jobs.get(id); assert.equal(job?.ownerSession, owner.id); return job } },
-    subagents: {
-      getProvider(name) {
-        assert.equal(name, 'spawn')
-        return { inheritsParentContext: false, capabilities: { toolFilter: true, persona: true } }
-      },
-      async start(name, request) {
-        assert.equal(name, 'spawn')
-        assert.deepEqual(request.toolFilter, { allow: ['imagegen'] })
-        const ordinal = ++childOrdinal
-        const args = JSON.parse(request.prompt[0].text.split('\n')[2])
-        const childSession = session('child-' + batchNumber + '-' + ordinal,
-          { origin: 'subagent', parentSession: parentId })
-        childSession.append('subagent/descriptor', { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label })
-        const callId = 'call-' + batchNumber + '-' + ordinal
-        childSession.append('tool/call', { name: 'imagegen', callId, arguments: JSON.stringify(args) })
-        const child = { id: childSession.header.id, session: childSession }
-        children.set(child.id, { child, args })
-        starts.push(ordinal)
-        active += 1
-        maximum = Math.max(maximum, active)
-        notifyStarts()
-        const result = (async () => {
-          const scope = await runtime.claim(child, args)
-          assert(scope)
-          claims.push(ordinal)
-          for (let index = claimWaiters.length - 1; index >= 0; index -= 1) {
-            if (claims.length >= claimWaiters[index].count) claimWaiters.splice(index, 1)[0].resolve()
-          }
-          identityCalls.set(scope.taskId, (identityCalls.get(scope.taskId) ?? 0) + 1)
-          const selected = outcome(ordinal)
-          if (selected === 'hold') {
-            await new Promise(resolveAbort => request.signal.addEventListener('abort', resolveAbort, { once: true }))
-            return { stopReason: 'aborted', output: [] }
-          }
-          await Promise.resolve()
-          const common = { schema_version: 2, revision: 2, call_id: callId, operation: 'generate',
-            parent_session_id: child.id, client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources: [] }
-          if (selected === 'pre-provider-failed') {
-            childSession.append('emate/image-output', { ...common, status: 'failed', billing_status: 'not-submitted',
-              content: [], failure_code: 'validation-failed' })
-          } else {
-            providerCalls.set(scope.taskId, (providerCalls.get(scope.taskId) ?? 0) + 1)
-            const jobId = 'job-' + batchNumber + '-' + ordinal
-            const output = image(batchNumber * 10 + ordinal)
-            if (selected === 'success') {
-              jobs.set(jobId, { kind: 'emate-image', ownerSession: child.id, status: 'completed' })
-              childSession.append('emate/image-output', { ...common, status: 'completed', billing_status: 'recorded',
-                content: [{ type: 'image', attachment: output }], job_id: jobId, output })
-            } else {
-              jobs.set(jobId, { kind: 'emate-image', ownerSession: child.id, status: 'failed' })
-              childSession.append('emate/image-output', { ...common, status: selected === 'unknown' ? 'unknown' : 'failed',
-                billing_status: selected === 'unknown' ? 'unknown' : 'recorded', content: [], job_id: jobId,
-                failure_code: selected === 'unknown' ? 'provider-outcome-unknown' : 'provider-failed' })
-            }
-          }
-          completions.push(ordinal)
-          return { stopReason: selected === 'success' ? 'completed' : 'error', output: [] }
-        })()
-        let disposed = false
-        return { id: child.id, localAgent: child, result,
-          async dispose() {
-            if (disposed) return
-            disposed = true
-            await result.catch(() => undefined)
-            active -= 1
-          } }
-      },
-    },
-    sessionProjections: {
-      snapshot(current) {
-        assert.equal(current, parentSession)
-        const definition = imageBatchProjectionDefinition(z, parentId)
-        return { values: { eMateImageBatches: project(definition, parentSession.events) } }
-      },
-    },
-    sessionProjectionCache: {
-      async coldSnapshot(childId) {
-        const entry = children.get(childId)
-        if (!entry) throw new Error('unknown child projection')
-        return { values: { eMateImageReceipts: receiptRows(entry.child.session.events) } }
-      },
-    },
-    attachments: {
-      async readImage(ref) { return { ref, data: new EvidenceOnlyBytes(ref.bytes) } },
-    },
-  }
-  runtime = createNativeImageTaskRuntime(ctx, {
-    deadlineMs: 30_000,
-    readDurableResult: (owner, batchId, signal) => readDurableImageBatchResult(ctx, owner, batchId, signal),
-  })
-  return {
-    runtime, parent, parentSession, children, providerCalls, identityCalls, completedReceiptAt, terminalAt, starts, completions, waitForStarts, waitForClaims,
-    stats: () => ({ active, maximum }),
-    async dispose() { await Promise.all(effects.map(effect => effect())) },
-  }
-}
-
-function outcomeFor(batchNumber, ordinal) {
-  if (batchNumber % 10 === 0 || ordinal === 1) return 'success'
-  return ['success', 'submitted-failed', 'pre-provider-failed', 'unknown'][(batchNumber + ordinal) % 4]
-}
-
-function nearestRank(values, quantile) {
-  const ordered = [...values].sort((left, right) => left - right)
-  return ordered[Math.ceil(ordered.length * quantile) - 1]
-}
-
-function summary(values) {
-  return { p50_ms: nearestRank(values, 0.5), p95_ms: nearestRank(values, 0.95),
-    exact_observed_interval_ms: [Math.min(...values), Math.max(...values)] }
-}
-
-function runReceiptProjectionLowerBound(ordinal) {
+function projectionLowerBound(f, receipt) {
   const started = performance.now()
-  const child = session('control-' + ordinal, { origin: 'subagent', parentSession: 'control-parent' })
-  const output = image(900_000 + ordinal)
-  const callId = 'control-call-' + ordinal
-  child.append('tool/call', { name: 'imagegen', callId, arguments: '{}' })
-  child.append('emate/image-output', { schema_version: 2, revision: 2, call_id: callId, operation: 'generate',
-    status: 'completed', billing_status: 'recorded', parent_session_id: child.header.id,
-    client_request_id: 'image-' + 'a'.repeat(64), sources: [], content: [{ type: 'image', attachment: output }],
-    job_id: 'control-job-' + ordinal, output })
-  const rows = receiptRows(child.events)
-  assert.equal(rows.length, 1)
-  assert.equal(rows[0].receipt.output.attachmentId, output.attachmentId)
-  const evidence = new EvidenceOnlyBytes(output.bytes)
-  assert(evidence instanceof Uint8Array)
-  assert.equal(evidence.byteLength, output.bytes)
+  const session = f.Session.create(f.SessionId('projection-control'))
+  session.append('emate/image-output', receipt, { ignorable: true })
+  assert.equal(session.events[0].data.content.length, receipt.content.length)
+  assert.equal(session.deriveMessages().length, 0, 'presentation receipt is not model input')
   return performance.now() - started
 }
 
-const clone = value => structuredClone(value)
-
-let benchmarkReport
-
-test('120 complete native batches preserve terminal, receipt, identity, concurrency, refill, and local timing invariants', async () => {
-  const samples = []
-  const allTaskIds = new Set()
-  const allChildIds = new Set()
-  let taskTotal = 0
-  let providerTotal = 0
-  let duplicateProviderGeneration = 0
-  let successfulImages = 0
-  let retainedSuccessfulImages = 0
-  let fullySuccessfulBatches = 0
-  const perItemSamples = []
-  const suiteStarted = performance.now()
-  for (let batchNumber = 1; batchNumber <= 120; batchNumber += 1) {
-    const taskCount = [4, 5, 8][(batchNumber - 1) % 3]
-    const concurrency = [1, 2, 3, 4][(batchNumber - 1) % 4]
-    const h = createHarness({ batchNumber, outcome: ordinal => outcomeFor(batchNumber, ordinal) })
-    const receiptProjectionLowerBoundMs = runReceiptProjectionLowerBound(batchNumber)
-    const started = performance.now()
-    const result = await h.runtime.execute({
-      tasks: Array.from({ length: taskCount }, (_, index) => ({ prompt: 'stress-' + batchNumber + '-' + (index + 1) })),
-      concurrency,
-    }, { agent: h.parent, callId: 'batch-' + batchNumber, signal: new AbortController().signal })
-    const finished = performance.now()
-    taskTotal += taskCount
-    assert.equal(result.tasks.length, taskCount)
-    assert(result.tasks.every(task => LEGAL_TERMINALS.has(task.state)))
-    assert.equal(new Set(result.tasks.map(task => task.task_id)).size, taskCount)
-    assert.equal(h.parentSession.events.filter(event => event.type === 'emate/image-batch' && event.data.kind === 'terminal').length, 1)
-    assert.deepEqual(h.starts, Array.from({ length: taskCount }, (_, index) => index + 1))
-    assert.equal(h.stats().maximum <= Math.min(concurrency, 4), true)
-    assert.equal(h.stats().active, 0)
-    if (taskCount >= 5) assert.deepEqual(h.completions.toSorted((a, b) => a - b), h.starts)
-    const completed = result.tasks.filter(task => task.state === 'completed')
-    successfulImages += completed.length
-    retainedSuccessfulImages += result.images.length
-    if (result.status === 'completed') {
-      fullySuccessfulBatches += 1
-      assert.equal(result.images.length, taskCount)
-      assert.equal(result.failures.length, 0)
-    }
-    assert.deepEqual(result.images.map(entry => entry.task_id), completed.map(task => task.task_id))
-    assert(result.images.every(entry => entry.receipt.status === 'completed' && entry.attachment.attachmentId.startsWith('sha256:')))
-    assert.equal(result.images.length + result.failures.length, taskCount)
-    for (const task of result.tasks) {
-      assert.equal(allTaskIds.has(task.task_id), false, 'cross-batch task receipt')
-      allTaskIds.add(task.task_id)
-    }
-    for (const [childId, entry] of h.children) {
-      assert.equal(allChildIds.has(childId), false, 'cross-batch child receipt')
-      allChildIds.add(childId)
-      await assert.rejects(h.runtime.claim(entry.child, entry.args), /authorization is unavailable or already claimed/)
-    }
-    for (const calls of h.providerCalls.values()) {
-      providerTotal += calls
-      if (calls > 1) duplicateProviderGeneration += calls - 1
-      assert(calls <= 1)
-    }
-    assert([...h.identityCalls.values()].every(calls => calls <= 1))
-    const firstChildCompletedReceiptMs = Math.min(...h.completedReceiptAt) - started
-    const allTerminalMs = finished - started
-    const itemLatencies = h.terminalAt.map(mark => mark - started)
-    assert.equal(itemLatencies.length, taskCount)
-    perItemSamples.push(...itemLatencies)
-    samples.push({ batch: batchNumber, task_count: taskCount, requested_concurrency: concurrency,
-      terminal_status: result.status, first_child_completed_receipt_ms: firstChildCompletedReceiptMs, all_terminal_ms: allTerminalMs,
-      per_item_ms: itemLatencies.reduce((sum, value) => sum + value, 0) / taskCount,
-      receipt_projection_lower_bound_ms: receiptProjectionLowerBoundMs,
-      success_count: result.images.length, failure_count: result.failures.length, max_active: h.stats().maximum })
-    await h.dispose()
-    assert.equal(h.stats().active, 0)
+test('160 real native Tool groups preserve 2/4/5/8, queue bounds, receipts, actual CAS bytes and unchanged local latency threshold', async () => {
+  const samples = [], requestIds = new Set(), taskIds = new Set(), jobIds = new Set()
+  let providerCalls = 0, successes = 0, retained = 0
+  const suiteStart = performance.now()
+  for (let batch = 1; batch <= 160; batch += 1) {
+    const count = [2, 4, 5, 8][(batch - 1) % 4], counts = toolCounts(count)
+    let active = 0, peak = 0
+    const intervals = []
+    const f = await createNativeImageFixture({ request: async (_url, init, ordinal) => {
+      const body = JSON.parse(init.body)
+      assert.equal(body.model, 'gpt-image-2.5-flare'); assert.equal('n' in body, false)
+      const id = new Headers(init.headers).get('x-client-request-id')
+      assert.ok(id); assert.equal(requestIds.has(id), false, 'duplicate provider submission identity'); requestIds.add(id)
+      providerCalls += 1; active += 1; peak = Math.max(peak, active)
+      const interval = { group: id.replace(/-[1-4]$/u, ''), start: performance.now() }; intervals.push(interval)
+      try {
+        await Promise.resolve()
+        if (batch % 10 !== 0 && ordinal !== 1 && (batch + ordinal) % 3 === 0)
+          return new Response(JSON.stringify({ error: { message: 'local provider rejection' } }), { status: 503, headers: { 'content-type': 'application/json' } })
+        if (batch % 10 !== 0 && ordinal !== 1 && (batch + ordinal) % 7 === 0) throw new Error('local transport outcome unknown')
+        return success('native-stress-' + batch + '-' + ordinal)
+      } finally { active -= 1; interval.end = performance.now() }
+    } })
+    try {
+      const started = performance.now()
+      // Only real public Tools are composed. The production queue owns admission
+      // and refill: 5/8 use [4,1]/[4,4], not a synthetic batch endpoint.
+      const results = await Promise.all(counts.map((n, index) => f.call('generate_image',
+        { prompt: 'offline group ' + batch, count: n }, { callId: 'batch-' + batch + '-tool-' + index })))
+      const receipts = f.receipts.map(row => row.receipt)
+      await Promise.all(receipts.map(receipt => f.ctx.jobs.wait(receipt.job_id, 1000, f.agent)))
+      const finished = performance.now()
+      assert.equal(f.calls.length, count); assert.equal(active, 0); assert.ok(peak <= 4)
+      assert.equal(results.length, counts.length); assert.equal(receipts.length, counts.length)
+      assert.equal(f.jobTerminals.length, counts.length)
+      if (count > 4) {
+        const firstGroup = intervals[0].group
+        const first = intervals.filter(item => item.group === firstGroup), second = intervals.filter(item => item.group !== firstGroup)
+        assert.ok(Math.min(...second.map(item => item.start)) >= Math.max(...first.map(item => item.end)), '5/8 must form two real queue waves')
+      }
+      let good = 0, failed = 0
+      for (const [index, result] of results.entries()) {
+        assert.equal(result.isError, false); assert.deepEqual(result.content.map(block => block.type), ['text'])
+        assert.equal(result.value.requested_count, counts[index])
+        assert.equal(result.value.returned_count + result.value.failed_count, counts[index])
+        good += result.value.returned_count; failed += result.value.failed_count
+      }
+      for (const receipt of receipts) {
+        assert.equal(receipt.schema_version, 3); assert.equal(receipt.revision, 2)
+        assert.equal(taskIds.has(receipt.task_id), false); taskIds.add(receipt.task_id)
+        const ownedJob = f.agent.id + '/' + receipt.job_id
+        assert.equal(jobIds.has(ownedJob), false); jobIds.add(ownedJob)
+        assert.equal(receipt.parent_session_id, f.agent.id)
+        assert.equal(f.ctx.jobs.get(receipt.job_id, f.agent).id, receipt.job_id)
+        assert.ok(['completed', 'failed'].includes(receipt.status))
+        assert.equal(receipt.content.length, receipt.returned_count)
+        assert.equal(new Set(receipt.client_request_ids).size, receipt.requested_count)
+        assert.equal(receipt.provider_request_ids.length, receipt.returned_count)
+        for (const block of receipt.content) {
+          const stored = await f.ctx.attachments.readImage(block.attachment)
+          assert.deepEqual(Buffer.from(stored.data), SMALL_PNG); retained += 1
+        }
+      }
+      successes += good
+      const completed = f.receipts.filter(row => row.receipt.returned_count > 0)
+      assert.ok(completed.length > 0)
+      samples.push({ batch, task_count: count, tool_counts: counts, terminal_status: failed === 0 ? 'completed' : 'partial',
+        first_completed_receipt_ms: Math.min(...completed.map(row => row.at)) - started,
+        all_terminal_ms: finished - started, tool_terminal_ms: f.jobTerminals.map(row => row.at - started),
+        receipt_projection_lower_bound_ms: projectionLowerBound(f, receipts[0]), success_count: good, failure_count: failed, max_active: peak })
+    } finally { await f.dispose() }
   }
-  const runtimeMs = performance.now() - suiteStarted
-  const metrics = {
-    first_child_completed_receipt: summary(samples.map(sample => sample.first_child_completed_receipt_ms)),
-    all_terminal: summary(samples.map(sample => sample.all_terminal_ms)),
-    per_item: summary(perItemSamples),
-    receipt_projection_lower_bound: summary(samples.map(sample => sample.receipt_projection_lower_bound_ms)),
-  }
-  assert(metrics.all_terminal.p95_ms < 250, 'source-only all-terminal p95 exceeded 250 ms')
-  assert.equal(fullySuccessfulBatches, 12)
-  assert.equal(duplicateProviderGeneration, 0)
-  assert.equal(retainedSuccessfulImages, successfulImages)
-  const emateCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
-  const sourceState = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=no'], { cwd: ROOT, encoding: 'utf8' }).trim() === '' ? 'CLEAN' : 'DIRTY'
-  const digest = value => createHash('sha256').update(value).digest('hex')
-  benchmarkReport = { schema_version: 2, ticket: TICKET,
+  assert.equal(retained, successes)
+  const metrics = { first_completed_receipt: summarize(samples.map(s => s.first_completed_receipt_ms)),
+    all_terminal: summarize(samples.map(s => s.all_terminal_ms)), tool_terminal: summarize(samples.flatMap(s => s.tool_terminal_ms)),
+    receipt_projection_lower_bound: summarize(samples.map(s => s.receipt_projection_lower_bound_ms)) }
+  assert.ok(metrics.all_terminal.p95_ms < 250, 'source-only all-terminal p95 exceeded 250 ms')
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
+  const state = await new Promise((resolveState, reject) => {
+    const child = spawn('git', ['status', '--porcelain=v1', '--untracked-files=normal', '--ignore-submodules=all'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'] })
+    let dirty = false
+    child.stdout.on('data', chunk => { if (chunk.length) dirty = true })
+    child.on('error', reject)
+    child.on('close', code => code === 0 ? resolveState(dirty ? 'DIRTY' : 'CLEAN') : reject(new Error('git status failed with exit ' + code)))
+  })
+  const report = { schema_version: 3, execution_contract: NATIVE_EXECUTION, ticket: TICKET,
     claim: 'local-source-only-not-provider-latency-not-ui-first-visible-not-direct-single-image-evidence',
-    environment: {
-      layer: 'local-test-provider', environment_name_sha256: digest('local-test-provider'),
-      gateway_origin_sha256: digest('no-gateway-local-fixture'), deployment_fingerprint_sha256: digest(emateCommit),
-    },
-    provenance: { emate_commit: emateCommit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: RELEASE_VERSION },
-    measured_at: new Date().toISOString(), source_state: sourceState,
-    batches: samples.length, tasks: taskTotal, fully_successful_batches: fullySuccessfulBatches, runtime_ms: runtimeMs,
-    provider_calls: providerTotal, typed_429_retry_probe: 'OPEN',
-    source_assertions: { duplicate_provider_generation: duplicateProviderGeneration, legal_terminal_rate: 1,
-      successful_image_retention_rate: successfulImages === 0 ? 0 : retainedSuccessfulImages / successfulImages },
-    metrics, samples }
-  const rawPath = resolve(ROOT, RAW_RELATIVE_PATH)
-  mkdirSync(dirname(rawPath), { recursive: true })
-  const bytes = JSON.stringify(benchmarkReport, null, 2) + '\n'
-  assert.doesNotMatch(bytes, /prompt|attachment(?:id|_id|_name|s)?|base64|credential|secret|\/Users\//iu)
-  writeFileSync(rawPath, bytes)
-  const sha256 = createHash('sha256').update(bytes).digest('hex')
-  console.log(JSON.stringify({ batches: samples.length, tasks: taskTotal, fully_successful_batches: fullySuccessfulBatches,
-    runtime_ms: runtimeMs, source_assertions: benchmarkReport.source_assertions, typed_429_retry_probe: 'OPEN', metrics,
-    raw_relative_path: RAW_RELATIVE_PATH, raw_sha256: sha256, release_gates: 'OPEN' }))
+    environment: { layer: 'local-test-provider', environment_name_sha256: digest('local-test-provider'),
+      gateway_origin_sha256: digest('no-gateway-local-fixture'), deployment_fingerprint_sha256: digest(commit) },
+    provenance: { emate_commit: commit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: RELEASE_VERSION },
+    measured_at: new Date().toISOString(), source_state: state, batches: samples.length,
+    tasks: samples.reduce((sum, sample) => sum + sample.task_count, 0), fully_successful_batches: samples.filter(s => s.failure_count === 0).length,
+    runtime_ms: performance.now() - suiteStart, provider_calls: providerCalls, typed_429_retry_probe: 'OPEN',
+    source_assertions: { duplicate_provider_generation: 0, legal_terminal_rate: 1, successful_image_retention_rate: 1 }, metrics, samples }
+  validateNativeLocalEvidence(report, report.provenance, { requireClean: false })
+  if (state !== 'CLEAN') assert.throws(() => validateNativeLocalEvidence(report), /clean committed tree/u)
+  const path = resolve(ROOT, 'work/imagegen-performance-migration-0910/native-batch-source-' + Date.now() + '.json')
+  mkdirSync(dirname(path), { recursive: true })
+  const bytes = JSON.stringify(report, null, 2) + '\n'
+  assert.doesNotMatch(bytes, /prompt|base64|credential|secret|\/Users\//iu)
+  writeFileSync(path, bytes, { flag: 'wx' })
+  console.log(JSON.stringify({ batches: report.batches, tasks: report.tasks, metrics, source_state: state,
+    raw_sha256: digest(bytes), raw_relative_path: path.slice(ROOT.length + 1), release_gates: 'OPEN' }))
 })
 
-test('abort cancellation settles active and queued tasks without live runs or retained gates', async () => {
-  const controller = new AbortController()
-  const h = createHarness({ batchNumber: 1001, outcome: () => 'hold' })
-  const execution = h.runtime.execute({ tasks: Array.from({ length: 8 }, (_, index) => ({ prompt: 'cancel-' + index })), concurrency: 3 },
-    { agent: h.parent, callId: 'cancel', signal: controller.signal })
-  await h.waitForStarts(3)
-  await h.waitForClaims(3)
-  controller.abort(new Error('test cancellation'))
-  await assert.rejects(execution, /test cancellation/)
-  const result = project(imageBatchProjectionDefinition(z, h.parent.id), h.parentSession.events)[0]
-  assert.equal(result.status, 'cancelled')
-  assert(result.tasks.slice(0, 3).every(task => task.state === 'cancelled' && task.submission_status === 'unknown'))
-  assert(result.tasks.slice(3).every(task => task.state === 'cancelled' && task.submission_status === 'not-submitted'))
-  assert.equal(h.stats().active, 0)
-  assert.deepEqual(h.starts, [1, 2, 3])
-  await h.dispose()
+test('native cancellation settles four active requests and queued work without refill or duplicate submission', async () => {
+  const started = deferred(), cleanup = deferred()
+  let active = 0
+  const f = await createNativeImageFixture({ request: async (_url, init, ordinal) => {
+    active += 1; if (ordinal === 4) started.resolve()
+    await new Promise(resolveAbort => init.signal.aborted ? resolveAbort() : init.signal.addEventListener('abort', resolveAbort, { once: true }))
+    await cleanup.promise; active -= 1; throw new Error('local cancellation')
+  } })
+  try {
+    const tasks = await Promise.all(Array.from({ length: 5 }, (_, index) => f.call('generate_image',
+      { prompt: 'cancel fixture', wait_for_completion: false }, { callId: 'cancel-' + index })))
+    await started.promise
+    const cancellations = tasks.map(task => f.call('cancel_image_generation_task', { task_id: task.value.task_id }))
+    await Promise.resolve(); assert.equal(f.calls.length, 4)
+    cleanup.resolve()
+    await Promise.all(cancellations)
+    assert.equal(active, 0); assert.equal(f.calls.length, 4)
+    const receipts = f.receipts.map(row => row.receipt)
+    assert.equal(receipts.length, 5); assert.ok(receipts.every(receipt => receipt.status === 'cancelled'))
+    await Promise.all(receipts.map(receipt => f.ctx.jobs.wait(receipt.job_id, 1000, f.agent)))
+    assert.ok(receipts.every(receipt => f.ctx.jobs.get(receipt.job_id, f.agent).status === 'killed'))
+  } finally { cleanup.resolve(); await f.dispose() }
 })
 
-test('HMR-style effect disposal aborts active children, prevents refill, and leaves no live run', async () => {
-  const h = createHarness({ batchNumber: 1002, outcome: () => 'hold' })
-  const execution = h.runtime.execute({ tasks: Array.from({ length: 8 }, (_, index) => ({ prompt: 'hmr-' + index })), concurrency: 4 },
-    { agent: h.parent, callId: 'hmr', signal: new AbortController().signal })
-  await h.waitForStarts(4)
-  await h.dispose()
-  const result = await execution
-  assert.deepEqual(h.starts, [1, 2, 3, 4])
-  assert.equal(h.stats().active, 0)
-  assert(result.tasks.slice(4).every(task => task.state === 'failed' && task.submission_status === 'not-submitted'))
+test('native preflight and replay refuse duplicate work; durable query survives host recreation', async () => {
+  const f = await createNativeImageFixture({ request: async (_url, _init, ordinal) => success('replay-' + ordinal) })
+  try {
+    for (const count of [0, 5, 8]) assert.equal((await f.call('generate_image', { prompt: 'invalid count', count })).isError, true)
+    assert.equal(f.calls.length, 0)
+    const first = await f.call('generate_image', { prompt: 'one', count: 2 }, { callId: 'one-native-call' })
+    const repeated = await f.call('generate_image', { prompt: 'one', count: 2 }, { callId: 'one-native-call' })
+    assert.equal(repeated.isError, true); assert.equal(f.calls.length, 2)
+    const restored = f.Session.create(f.agent.id, f.agent.session.events, f.agent.session.header)
+    const { host } = f.ImageGen.createImageHost(f.ctx, f.ImageGen.managedRoot('https://model.example/e-mate/model-api/v1'))
+    const task = await host.find(first.value.task_id, { agent: { ...f.agent, session: restored }, callId: 'restore', rootCallId: 'restore' })
+    assert.equal((await host.images(task)).length, 2); assert.equal(f.calls.length, 2)
+    const foreign = await f.owner('foreign')
+    await assert.rejects(host.find(task.id, { agent: foreign, callId: 'foreign', rootCallId: 'foreign' }))
+  } finally { await f.dispose() }
 })
 
-test('tracked manifest stays OPEN now, accepts only complete future evidence, and rejects partial or forged PASS', () => {
+test('plugin-owner disposal cancels active native Jobs and prevents queued provider dispatch', { timeout: 3000 }, async () => {
+  const started = deferred()
+  let active = 0
+  const f = await createNativeImageFixture({ request: async (_url, init, ordinal) => {
+    active += 1; if (ordinal === 4) started.resolve()
+    await new Promise(resolveAbort => init.signal.aborted ? resolveAbort() : init.signal.addEventListener('abort', resolveAbort, { once: true }))
+    active -= 1; throw new Error('owner disposed')
+  } })
+  await Promise.all(Array.from({ length: 5 }, (_, index) => f.call('generate_image',
+    { prompt: 'dispose fixture', wait_for_completion: false }, { callId: 'dispose-' + index })))
+  await started.promise
+  await f.dispose()
+  assert.equal(active, 0); assert.equal(f.calls.length, 4)
+})
+
+test('release thresholds stay OPEN without real provider, billing, installed UI and same-source evidence', () => {
   const manifest = validateManifest(JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')))
   assert.equal(manifest.claim, RELEASE_CLAIM)
-  const openMutations = [
-    value => { value.production.status = 'PASS' },
-    value => { value.staging.result = { sample_count: 1, measured_at: '2026-01-01T00:00:00Z' } },
-    value => { value.local.raw_evidence = { uri: 'https://evidence.example/x', sha256: 'a'.repeat(64) } },
-    value => { value.external_raw_evidence.status = 'PASS' },
-    value => { value.release_gate = 'PASS' },
-    value => { value.release_evidence.duplicate_provider_generation.status = 'PASS' },
-  ]
-  for (const mutate of openMutations) {
-    const value = clone(manifest)
-    mutate(value)
-    assert.throws(() => validateManifest(value))
-  }
-  const serialized = JSON.stringify(manifest)
-  assert.doesNotMatch(serialized, /prompt|base64|credential|secret|screenshot|video|installer|\/Users\//iu)
+  for (const mutate of [
+    value => { value.production.status = 'PASS' }, value => { value.external_raw_evidence.status = 'PASS' },
+    value => { value.release_gate = 'PASS' }, value => { value.release_evidence.duplicate_provider_generation.status = 'PASS' },
+  ]) { const copy = structuredClone(manifest); mutate(copy); assert.throws(() => validateManifest(copy)) }
 })
 
-test('source scan rejects network, sleeps, batch endpoints, and a second scheduler owner', () => {
-  const source = readFileSync(new URL('./stress.test.mjs', import.meta.url), 'utf8')
-  const network = new RegExp('node:(?:ht' + 'tp|ht' + 'tps|n' + 'et|t' + 'ls|d' + 'ns|d' + 'gram)|\\bfet' + 'ch\\s*\\(', 'u')
-  const sleep = new RegExp(['set', 'Timeout'].join('') + '|timers/' + 'promises|Atomics' + '\\.wait', 'u')
-  assert.doesNotMatch(source, network)
-  assert.doesNotMatch(source, sleep)
-  const production = readFileSync(new URL('../../../packages/dsh/src/profile/native-image-task-runner.ts', import.meta.url), 'utf8')
-    + readFileSync(new URL('../../../packages/dsh/src/profile/image-generation.ts', import.meta.url), 'utf8')
-  const batchEndpoint = new RegExp(['/images', 'batch'].join('/'), 'u')
-  assert.doesNotMatch(production, batchEndpoint)
-  assert.equal((production.match(/name: 'image_batch'/g) ?? []).length, 1)
-  assert.equal((production.match(/createNativeImageTaskRuntime\(/g) ?? []).length, 2)
-  assert(benchmarkReport === undefined || benchmarkReport.source_assertions.duplicate_provider_generation === 0)
+test('source remains on the selected upstream queue and public Tools, with no deleted runner import or extra endpoint', () => {
+  const source = readFileSync(new URL('../../../packages/dsh-plugin-imagegen/src/index.ts', import.meta.url), 'utf8')
+    + readFileSync(new URL('../../../packages/dsh-plugin-imagegen/src/host.ts', import.meta.url), 'utf8')
+    + readFileSync(new URL('../../../packages/dsh-plugin-imagegen/src/upstream/agent-image-tools.ts', import.meta.url), 'utf8')
+  assert.ok(source.includes('registerAgentImageTools')); assert.ok(source.includes('ctx.jobs.start'))
+  assert.doesNotMatch(source, /name: 'image_batch'|subagents\.start|agent\/pre-step/u)
+  assert.equal(source.includes(['/images', 'batch'].join('/')), false)
 })

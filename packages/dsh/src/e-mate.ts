@@ -132,6 +132,8 @@ export function installProfile(dshHome = resolveDshHome()) {
     join(paths.profile, 'cordis.patch.yml'),
     readFileSync(join(packageRoot, 'profile', 'cordis.patch.yml')),
   )
+  // Remove only the retired managed executable; saved Sessions and image bytes stay owned by DSH.
+  rmSync(join(paths.profile, 'plugins', 'image-generation.js'), { force: true })
   const generatedPlugins = readdirSync(join(packageRoot, 'profile', 'plugins'), { withFileTypes: true })
     .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
     .map(entry => [`plugins/${entry.name}`, `plugins/${entry.name}`])
@@ -166,7 +168,7 @@ export function installProfile(dshHome = resolveDshHome()) {
     const packageManifest = readJson(join(target, 'package.json'))
     const patchPath = join(target, packageManifest.dsh.bundle.patch)
     const patch = readFileSync(patchPath, 'utf8')
-    if (!emptyBundlePatch(patch)) {
+    if (!emptyBundlePatch(patch) && packageManifest.dsh?.client?.platform !== 'web') {
       const packageEntry = `name: '${name}'`
       if (patch.split(packageEntry).length !== 2) throw new Error(`${name} bundle entry is not uniquely localizable`)
       atomicWrite(patchPath, patch.replace(packageEntry, `name: './node_modules/${name}/${packageManifest.main}'`))
@@ -343,7 +345,7 @@ function pluginBundleCheck(root = join(packageRoot, 'profile', 'bundles')) {
       const slug = name.slice('@e-mate/dsh-plugin-'.length)
       const bundleRoot = join(root, slug)
       const manifest = readJson(join(bundleRoot, 'package.json'))
-      if (manifest?.name !== name || manifest?.version !== VERSION || manifest?.license !== 'MIT'
+      if (manifest?.name !== name || manifest?.version !== VERSION || manifest?.license !== (['@e-mate/dsh-plugin-imagegen', '@e-mate/dsh-plugin-univer-office'].includes(name) ? 'Apache-2.0' : 'MIT')
         || typeof manifest?.main !== 'string' || !existsSync(join(bundleRoot, manifest.main))
         || typeof manifest?.dsh?.bundle?.patch !== 'string'
         || !existsSync(join(bundleRoot, manifest.dsh.bundle.patch))) {
@@ -371,7 +373,7 @@ function profileCheck(paths) {
     join(paths.profile, 'plugins', 'qr-generation.js'),
     join(paths.profile, 'plugins', 'credentials-os.js'),
     join(paths.profile, 'plugins', 'settings-document-boundary.js'),
-    join(paths.profile, 'plugins', 'image-generation.js'),
+    join(paths.profile, 'plugins', 'image-history.js'),
     join(paths.profile, 'plugins', 'model-policy.js'),
     join(paths.profile, 'plugins', 'audit.js'),
     join(paths.profile, 'plugins', 'legacy-migration.js'),

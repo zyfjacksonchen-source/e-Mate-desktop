@@ -6,6 +6,12 @@ import { EMPTY_PROJECTION, type PetTaskProjection, type PetWorkFactsReader } fro
 import type { OfficeScene } from '../scenes.ts'
 export interface Observable<T> { getSnapshot(): T; subscribe(listener: () => void): () => void }
 interface NativeTurn { readonly status: string; readonly start?: { readonly time: number }; readonly end?: { readonly data: { readonly reason: { readonly kind: string } } }; readonly data: { get(key: string): unknown } }
+interface NativeToolRoot {
+  readonly kind?: string; readonly seq?: number; readonly callId?: string; readonly name?: string
+  readonly call?: { readonly name: string } | null; readonly isError?: boolean; readonly meta?: unknown
+  readonly content?: readonly { readonly type: string; readonly text?: string }[]
+  readonly subCalls?: readonly NativeToolRoot[]
+}
 interface NativeConversation {
   readonly sessionId: string; readonly openState: string; readonly composerPhase: string
   readonly running: boolean; readonly lastAgentError: string | null
@@ -14,7 +20,7 @@ interface NativeConversation {
   readonly chat: {
     readonly timeline: { readonly turnOrder: readonly number[]; readonly turns: ReadonlyMap<number, NativeTurn> }
     readonly locations: { getTurn(turn: number): readonly string[] }
-    readonly nodes: { get(key: string): { readonly kind: string; readonly visibility: string; readonly data?: { readonly root?: { readonly kind?: string; readonly seq?: number; readonly callId?: string; readonly call?: { readonly name: string } | null; readonly isError?: boolean; readonly meta?: unknown } } } | undefined }
+    readonly nodes: { get(key: string): { readonly kind: string; readonly visibility: string; readonly data?: { readonly root?: NativeToolRoot } } | undefined }
   }
 }
 export interface NativeSession extends Observable<NativeConversation> { readonly projections: { faceOf(key: string): Observable<unknown> } }

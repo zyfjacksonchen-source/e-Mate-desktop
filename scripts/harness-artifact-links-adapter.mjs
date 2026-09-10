@@ -152,6 +152,57 @@ function emateOfficeDeliverables(native, isAppend) {
 }
 
 export function adaptHarnessArtifactDeliverablesSource(source) {
+  source = replaceOnce(source, 'function selectProducedFiles(owner) {\n\t\t\tconst paths = producedForClosing(owner.turn.data.get("deliverables"), owner.seq);',
+    `${emateUniverProduced.toString()}\nfunction selectProducedFiles(owner, sessions) {\n\t\t\tconst paths = producedForClosing({ produced: [...(owner.turn.data.get("deliverables")?.produced ?? []), ...emateUniverProduced(owner, sessions)] }, owner.seq);`, 'deliverables/native-results')
+  source = replaceOnce(source, 'select: selectProducedFiles,', 'select: (owner) => selectProducedFiles(owner, ctx.get("sessions")),', 'deliverables/tail-selector')
+  source = replaceOnce(source, 'const paths = selectProducedFiles(owner);', 'const paths = selectProducedFiles(owner, ctx.get("sessions"));', 'deliverables/mention-selector')
+  source = replaceOnce(source, '\t\t\t"connection"\n\t\t];', '\t\t\t"connection",\n\t\t\t"sessions"\n\t\t];', 'deliverables/session-owner')
   source = replaceOnce(source, 'const deliverablesDefinition = {', `${emateOfficeDeliverables.toString()}\nconst deliverablesDefinition = emateOfficeDeliverables({`, 'deliverables/library-definition')
   return replaceOnce(source, '\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t};', '\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t}, _deepseek_ai_dsh_client_runtime_client.isAppendSurfaceEvent);', 'deliverables/library-close')
+}
+
+// Read the native turn's Tool tree, including Code subcalls. No separate event
+// accumulator: root association, replay and interruption remain native-owned.
+function emateUniverProduced(owner, sessions) {
+  let nodes = owner.nodes
+  if (!nodes) {
+    const current = sessions?.list.getSnapshot().current
+    const snapshot = current === undefined ? undefined : sessions.binding(current)?.session.getSnapshot()
+    if (snapshot?.sessionId !== current || snapshot?.openState !== 'open'
+      || snapshot.chat.timeline.turns.get(owner.turn.turn) !== owner.turn) return []
+    nodes = snapshot.chat.locations.getTurn(owner.turn.turn).map(key => snapshot.chat.nodes.get(key))
+  }
+  const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+  const path = value => typeof value === 'string' && value.length > 1 && value.length <= 8192
+    && value === value.trim() && !/[\u0000-\u001f\u007f]/u.test(value)
+    && (value.startsWith('/') && !value.startsWith('//') || /^[A-Za-z]:[/\\]/u.test(value))
+    && !value.split(/[/\\]/u).some(part => part === '.' || part === '..')
+  const operations = { univer_new: 'new', univer_execute: 'execute', univer_export: 'export',
+    univer_print_pdf: 'print-pdf', univer_screenshot: 'screenshot', univer_resources: 'resources' }
+  const produced = []
+  const visit = root => {
+    for (const child of root.subCalls ?? []) visit(child)
+    const operation = Object.hasOwn(operations, root.call?.name) ? operations[root.call.name] : undefined
+    if (!operation || root.kind !== 'tool-result' || root.isError !== false || !Number.isSafeInteger(root.seq)) return
+    const texts = (root.content ?? []).filter(block => block.type === 'text')
+    if (texts.length !== 1) return
+    let value
+    try { value = JSON.parse(texts[0].text) } catch { return }
+    if (!object(value) || value.ok !== true || value.operation !== operation || !object(value.result)
+      || operation !== 'resources' && !path(value.file)) return
+    const result = value.result
+    let paths = []
+    if (operation === 'new' && result.created === true && result.filePath === value.file
+      || operation === 'execute' && result.committed === true && result.filePath === value.file) paths = [result.filePath]
+    if (operation === 'export' && result.filePath === value.file && ['sheet', 'doc', 'slide', 'base', 'board'].includes(result.kind)) paths = [result.outputPath]
+    if (operation === 'print-pdf' && Number.isSafeInteger(result.pageCount) && result.pageCount > 0) paths = [result.output]
+    if (operation === 'screenshot' && Array.isArray(result.images)) paths = result.images.filter(item => object(item)
+      && item.mediaType === 'image/png' && object(item.image) && item.image.mediaType === 'image/png'
+      && /^sha256:[a-f0-9]{64}$/u.test(item.image.attachmentId)).map(item => item.path)
+    if (operation === 'resources' && Array.isArray(result.exported)) paths = result.exported.filter(object).map(item => item.path)
+    for (const output of paths) if (path(output)) produced.push({ seq: root.seq, path: output })
+  }
+  for (const node of nodes) if (node?.kind === 'tool-call' && node.data?.root
+    && (node.location.kind === 'turn' || node.location.kind === 'step') && node.location.turn === owner.turn) visit(node.data.root)
+  return produced.sort((left, right) => left.seq - right.seq)
 }

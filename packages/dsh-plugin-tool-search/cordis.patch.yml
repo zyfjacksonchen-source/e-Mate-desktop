@@ -14,9 +14,10 @@
           - glob
           - grep
           - job_*
-          - image_pack
-          - image_batch
-          - imagegen
+          - generate_image
+          - edit_image
+          - get_image_generation_task
+          - cancel_image_generation_task
           - pwsh
           - read
           - skill
@@ -29,34 +30,26 @@
         maxResults: 5
         maxQueryChars: 512
         searchAliases:
-          image_batch:
+          generate_image:
+            - 生图
+            - 图片生成
+            - 生成图片
             - 批量生图
             - 多图生成
             - 生成多张图片
             - 一组配图
-            - 批量图片创作
-          imagegen:
-            - 生图
+            - 生成封面
+            - 内页图片
+            - 图片创作
+            - 海报设计
+            - 插画生成
+          edit_image:
             - 改图
-            - 图片生成
-            - 生成图片
-            - 图像生成
             - 图片编辑
             - 图像编辑
             - 修改图片
             - 编辑图片
-            - 画图
-            - 绘图
-            - 做图
             - 把图中
             - 把图上
             - 把图片中
             - 修改上图
-            - 生成封面
-            - 内页图片
-            - 生成配图
-            - 图片创作
-            - 海报设计
-            - 插画生成
-            - 合并图片
-            - 融合图片

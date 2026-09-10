@@ -130,17 +130,29 @@ export function apply(ctx) {
           || typeof definition.invoke !== 'function') {
           return badRequest('capability action is unavailable')
         }
-        const status = validateStatus(await definition.status(signal), definition)
-        if (!status.action_ids.includes(payload.action_id)) return badRequest('capability action is unavailable')
-        const result = await definition.invoke(payload.action_id, payload.data, signal)
-        return {
-          ok: true,
-          value: {
-            schema_version: 1,
-            capability_id: payload.capability_id,
-            action_id: payload.action_id,
-            result,
-          },
+        try {
+          const status = validateStatus(await definition.status(signal), definition)
+          if (!status.action_ids.includes(payload.action_id)) return badRequest('capability action is unavailable')
+          const result = await definition.invoke(payload.action_id, payload.data, signal)
+          return {
+            ok: true,
+            value: {
+              schema_version: 1,
+              capability_id: payload.capability_id,
+              action_id: payload.action_id,
+              result,
+            },
+          }
+        } catch {
+          signal.throwIfAborted()
+          return {
+            ok: false,
+            error: {
+              code: 'internal',
+              details: {},
+              message: `${definition.title}操作未完成，请刷新能力状态后重试。`,
+            },
+          }
         }
       }
       return badRequest('unknown e-Mate capability endpoint')

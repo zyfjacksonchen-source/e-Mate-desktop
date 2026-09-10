@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { RELEASE_VERSION, ticketFor, minimumQualityPairs } from '../../performance/image-batch/release-identity.mjs'
+import { RELEASE_VERSION, ticketFor, minimumQualityPairs, imageModelFor } from '../../performance/image-batch/release-identity.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -11,7 +11,6 @@ import {
 } from './noninferiority-protocol.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
-const MODEL = 'gpt-image-2-pro'
 const SHA256 = /^[0-9a-f]{64}$/u
 const CATEGORIES = protocolConstants.CATEGORIES
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -66,7 +65,7 @@ function detect(bytes, label) {
   fail(`${label} is not PNG, JPEG, or WebP`)
 }
 
-function requestHashes(prompt, references, upstreamModel) {
+function requestHashes(prompt, references, upstreamModel, version) {
   const prompt_hash = sha256(prompt)
   const reference_set_hash = sha256(JSON.stringify(references.map(reference => ({ media_type: reference.media_type, bytes: reference.bytes, sha256: reference.sha256 }))))
   const digest = createHash('sha256')
@@ -75,7 +74,7 @@ function requestHashes(prompt, references, upstreamModel) {
     digest.update(JSON.stringify({ model: upstreamModel, prompt, operation: 'edit' }))
     for (const reference of references) digest.update('\0').update(reference.media_type).update('\0').update(String(reference.bytes)).update('\0').update(Buffer.from(reference.sha256, 'hex'))
   }
-  return { model: MODEL, quality: 'provider-default', size: 'provider-default', prompt_hash, reference_set_hash, canonical_provider_request_hash: digest.digest('hex') }
+  return { model: imageModelFor(version), quality: 'provider-default', size: 'provider-default', prompt_hash, reference_set_hash, canonical_provider_request_hash: digest.digest('hex') }
 }
 
 function assigned(cases, seed) {
@@ -99,6 +98,7 @@ function assigned(cases, seed) {
 }
 
 export function prepareStudy(input, seed, context) {
+  requireValue(context.provenance.version !== RELEASE_VERSION || context.upstreamModel === imageModelFor(context.provenance.version), 'current upstream model must match the fixed image route')
   exactKeys(input, ['schema_version', 'evaluator_protocol_commitment_sha256', 'cases'], 'case input')
   requireValue(input.schema_version === 1, 'case input schema mismatch')
   hash(input.evaluator_protocol_commitment_sha256, 'evaluator protocol commitment')
@@ -119,7 +119,7 @@ export function prepareStudy(input, seed, context) {
       return { path, media_type: type.mediaType, bytes: bytes.byteLength, sha256: sha256(bytes) }
     })
     return { pair_id: value.pair_id, category: value.category, prompt: value.prompt, references,
-      request: requestHashes(value.prompt, references, context.upstreamModel) }
+      request: requestHashes(value.prompt, references, context.upstreamModel, context.provenance.version) }
   })
   for (const category of CATEGORIES) requireValue(counts[category] >= 5, `category ${category} requires at least five cases`)
   const allocations = assigned(cases, seed)
@@ -140,6 +140,10 @@ function stateShape(state) {
   requireValue(state.schema_version === 1 && state.ticket === ticketFor(state.provenance.version, '503') && state.allocations_created_before_collection === true, 'precommit state identity mismatch')
   hash(state.evaluator_protocol_commitment_sha256, 'evaluator protocol commitment'); hash(state.seed_commitment_sha256, 'seed commitment'); hash(state.allocation_manifest_sha256, 'allocation manifest')
   requireValue(sha256(state.seed) === state.seed_commitment_sha256 && sha256(canonicalAllocationBytes(state.cases)) === state.allocation_manifest_sha256, 'precommit state commitments mismatch')
+  if (state.provenance.version === RELEASE_VERSION) {
+    requireValue(state.upstream_model === imageModelFor(state.provenance.version), 'current upstream model must match the fixed image route')
+    requireValue(state.cases.every(value => JSON.stringify(value.request) === JSON.stringify(requestHashes(value.prompt, value.references, state.upstream_model, state.provenance.version))), 'precommitted request differs from the fixed image route or inputs')
+  }
   return state
 }
 
@@ -162,9 +166,9 @@ async function responseJson(response) {
 async function generate(context, value, headers, fetchImpl) {
   let body
   let contentType
-  if (value.references.length === 0) { body = JSON.stringify({ model: MODEL, prompt: value.prompt }); contentType = 'application/json' }
+  if (value.references.length === 0) { body = JSON.stringify({ model: imageModelFor(context.provenance.version), prompt: value.prompt }); contentType = 'application/json' }
   else {
-    const form = new FormData(); form.set('model', MODEL); form.set('prompt', value.prompt)
+    const form = new FormData(); form.set('model', imageModelFor(context.provenance.version)); form.set('prompt', value.prompt)
     const field = value.references.length === 1 ? 'image' : 'image[]'
     value.references.forEach((reference, index) => {
       const bytes = readBytes(reference.path, `reference for ${value.pair_id}`)
@@ -187,7 +191,7 @@ async function generate(context, value, headers, fetchImpl) {
   requireValue(typeof encoded === 'string' && /^[A-Za-z0-9+/]+={0,2}$/u.test(encoded), `gateway result is not canonical base64 for ${value.pair_id}`)
   const bytes = Buffer.from(encoded, 'base64')
   requireValue(bytes.toString('base64').replace(/=+$/u, '') === encoded.replace(/=+$/u, ''), `gateway result base64 is invalid for ${value.pair_id}`)
-  return { bytes, ...detect(bytes, `gateway result for ${value.pair_id}`), request: requestHashes(value.prompt, value.references, context.upstreamModel) }
+  return { bytes, ...detect(bytes, `gateway result for ${value.pair_id}`), request: requestHashes(value.prompt, value.references, context.upstreamModel, context.provenance.version) }
 }
 
 function groups(values) {

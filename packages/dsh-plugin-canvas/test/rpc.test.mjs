@@ -129,3 +129,44 @@ test('same-workspace sessions isolate projects and explicitly copy legacy files 
   const forged = await call('parent', 'load', { project_id: 'main', owner: 'other' })
   assert.equal(forged.ok, false)
 })
+
+
+test('new direct and Code multi-image receipts keep original request scope and resolve through the existing native attachment route', async t => {
+  const h = await setup(t)
+  const second = { ...ref, attachmentId: 'sha256:' + 'b'.repeat(64) }
+  for (const name of ['generate_image', 'edit_image', 'run_code']) {
+    const rootCallId = 'root-image', callId = name === 'run_code' ? rootCallId + ':code:0' : rootCallId
+    h.session.events = nativeEvents().slice(0, 2).concat([
+      event(2, 'tool/call', { turn: 1, callId: rootCallId, name }),
+      event(3, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      event(4, 'turn/start', { turn: 2 }),
+      event(5, 'emate/image-output', { schema_version: 3, turn: 1, status: 'completed', revision: 2,
+        call_id: callId, root_call_id: rootCallId, tool_name: name === 'edit_image' ? name : 'generate_image',
+        parent_session_id: 'parent', content: [ref, second].map(attachment => ({ type: 'image', attachment })) }),
+    ])
+    for (const status of ['completed', 'failed', 'cancelled']) {
+      h.session.events.at(-1).data.status = status
+      assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [asset, { ownerSessionId: 'parent', ref: second }])
+      assert.equal((await h.call('resolve-image', { owner_session_id: 'parent', attachment_id: ref.attachmentId })).ok, true)
+    }
+    h.session.events.at(-1).data.root_call_id = 'unrelated'
+    assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+    h.session.events.at(-1).data.root_call_id = rootCallId
+    h.session.events[2].data.turn = 2
+    assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+  }
+})
+
+test('native typed result images confer exact request scope but prose and error results never do', async t => {
+  const h = await setup(t)
+  h.session.events = nativeEvents().slice(0, 3)
+  const result = { type: 'tool-result', toolCallId: 'image-call', isError: false, content: [{ type: 'image', attachment: ref }] }
+  h.session.events.push(event(3, 'tool/result', { turn: 1, message: { content: [result] } }))
+  assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [asset])
+  assert.equal((await h.call('resolve-image', { owner_session_id: 'parent', attachment_id: ref.attachmentId })).ok, true)
+  result.isError = true
+  assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+  assert.equal((await h.call('resolve-image', { owner_session_id: 'parent', attachment_id: ref.attachmentId })).ok, false)
+  result.isError = false; result.content = [{ type: 'text', text: JSON.stringify(ref) }]
+  assert.deepEqual(await nativeImageOutputs(h.ctx, 'parent', intent), [])
+})

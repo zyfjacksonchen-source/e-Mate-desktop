@@ -20,30 +20,26 @@ const TASK_SCENARIOS = [
 const TASK_SCENARIO = new Set(TASK_SCENARIOS)
 const TERMINAL_IMAGE_STATUSES = new Set(['completed', 'needs-review', 'failed', 'cancelled', 'unknown'])
 const TRUSTED_TOOL_SCENARIOS = new Map([
-  ['office_read', {
+  ...[
+    'univer_new', 'univer_status', 'univer_import', 'univer_api', 'univer_execute',
+    'univer_unit', 'univer_worktree', 'univer_inspect', 'univer_export', 'univer_lint',
+    'univer_compile_svg', 'univer_screenshot', 'univer_print_pdf', 'univer_resources',
+  ].map(toolName => [toolName, {
     moduleSpecifiers: new Set([
-      '@e-mate/dsh-plugin-office-skills',
-      './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
+      '@e-mate/dsh-plugin-univer-office',
+      './node_modules/@e-mate/dsh-plugin-univer-office/lib/index.js',
     ]),
-    pluginName: 'emate-office-skills',
+    pluginName: 'univer-tools',
     scenario: 'DOCUMENT_EDITING',
-  }],
-  ['office_write', {
-    moduleSpecifiers: new Set([
-      '@e-mate/dsh-plugin-office-skills',
-      './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
-    ]),
-    pluginName: 'emate-office-skills',
-    scenario: 'DOCUMENT_EDITING',
-  }],
-  ['imagegen', {
-    moduleSpecifiers: new Set(['./plugins/image-generation.js']),
-    pluginName: 'emate-image-generation',
+  }]),
+  ['generate_image', {
+    moduleSpecifiers: new Set(['@e-mate/dsh-plugin-imagegen', './node_modules/@e-mate/dsh-plugin-imagegen/lib/index.js']),
+    pluginName: 'emate-imagegen',
     scenario: 'ASSET_PRODUCTION',
   }],
-  ['image_batch', {
-    moduleSpecifiers: new Set(['./plugins/image-generation.js']),
-    pluginName: 'emate-image-generation',
+  ['edit_image', {
+    moduleSpecifiers: new Set(['@e-mate/dsh-plugin-imagegen', './node_modules/@e-mate/dsh-plugin-imagegen/lib/index.js']),
+    pluginName: 'emate-imagegen',
     scenario: 'ASSET_PRODUCTION',
   }],
   ['web_search', {
@@ -109,11 +105,14 @@ function terminalTaskScenario(candidates, envelopes, terminalType) {
 }
 
 function trustedToolScenario(ctx, exec) {
-  const trusted = TRUSTED_TOOL_SCENARIOS.get(exec?.name)
-  if (trusted === undefined || !isRecord(exec?.agent)) return 'GENERAL'
+  if (!isRecord(exec?.agent)) return 'GENERAL'
   try {
     const provenance = ctx.tools.provenance(exec.name, exec.agent)
-    return isRecord(provenance)
+    // rc.7 reserves run_code outside plugin registration. Its nested Tools each
+    // publish their own result; the transport adds no independent task category.
+    if (exec.name === 'run_code' && provenance === undefined) return undefined
+    const trusted = TRUSTED_TOOL_SCENARIOS.get(exec.name)
+    return trusted !== undefined && isRecord(provenance)
       && trusted.moduleSpecifiers.has(provenance.moduleSpecifier)
       && provenance.pluginName === trusted.pluginName
       ? trusted.scenario
@@ -177,7 +176,7 @@ export function imageBatchAuditCorrelation(event) {
 function terminalImageReceipt(sessionId, event) {
   return event?.type === 'emate/image-output'
     && isRecord(event.data)
-    && event.data.schema_version === 2
+    && [2, 3].includes(event.data.schema_version)
     && typeof event.data.call_id === 'string' && event.data.call_id.length > 0
     && event.data.parent_session_id === String(sessionId)
     && TERMINAL_IMAGE_STATUSES.has(event.data.status)

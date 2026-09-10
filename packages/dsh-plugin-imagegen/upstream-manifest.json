@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/dickpy/dsh-imagegen.git",
+  "version": "1.5.11",
+  "commit": "1f0ec46bdc477835202d9d497744eaa18692b4e0",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "src/upstream/agent-image-tools.ts",
+      "upstreamPath": "src/agent-image-tools.ts",
+      "upstreamSha256": "488abd955b4e4c2f59b427330b359baeab436695a29e726905aff2db2e485913",
+      "sha256": "bc165013d64fb0eef4b438364a7bdf66c3aac04a639c84ec0c44bf34d83ba2be",
+      "modified": true
+    },
+    {
+      "path": "src/upstream/engine.ts",
+      "upstreamPath": "src/engine.ts",
+      "upstreamSha256": "dd1a0b061152f9324e0c5a3d015fc217136300abe53db31ca04415f362fd7342",
+      "sha256": "2c0bd77db51c66813531296226fbaa45b5929ed8c60a3650fdc71e8ad9173ef0",
+      "modified": true
+    },
+    {
+      "path": "src/upstream/generation-runtime.ts",
+      "upstreamPath": "src/generation-runtime.ts",
+      "upstreamSha256": "f9fd1296301449adca51a60c14d6fbe2d8f4cd5af0c4b2cbfe13ba17e0330985",
+      "sha256": "f066205bb3afe2274f8f8806bd26518c79eba90f49731b990ac3a5d76ebfb7c9",
+      "modified": true
+    },
+    {
+      "path": "src/upstream/image-format.ts",
+      "upstreamPath": "src/image-format.ts",
+      "upstreamSha256": "6ae013b23452ea2b8c61ad1485e4594184ef40889dc1897672a10961c7e1e80e",
+      "sha256": "6ae013b23452ea2b8c61ad1485e4594184ef40889dc1897672a10961c7e1e80e",
+      "modified": false
+    },
+    {
+      "path": "src/upstream/model-catalog.ts",
+      "upstreamPath": "src/model-catalog.ts",
+      "upstreamSha256": "6b8e7ae07cd26b5bb91b5732ab1524c5172c8d8476db7abc1be3bdd309aea18f",
+      "sha256": "6b8e7ae07cd26b5bb91b5732ab1524c5172c8d8476db7abc1be3bdd309aea18f",
+      "modified": false
+    },
+    {
+      "path": "src/upstream/protocol.ts",
+      "upstreamPath": "src/protocol.ts",
+      "upstreamSha256": "f14b839f7e8a13f469a348d08a00851165fc34896f6ccc27a7d590d8890d3a19",
+      "sha256": "8976de409a0cdd2dc388e0ea0cb3c5a753c526baabdb2dce07ff8d66c80807db",
+      "modified": true
+    },
+    {
+      "path": "src/upstream/task-queue.ts",
+      "upstreamPath": "src/task-queue.ts",
+      "upstreamSha256": "4dc275935dcaa28ab7e80efa2e6075f0c8f65ffa30604058fd391170ff54761f",
+      "sha256": "6509c376f06ce253deb4b957c14eabb195e2b1f516c9dba562baba2e17c57f34",
+      "modified": true
+    }
+  ]
+}

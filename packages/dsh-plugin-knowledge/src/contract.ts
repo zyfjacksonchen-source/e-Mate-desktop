@@ -1,3 +1,4 @@
+import { READ_OPERATIONS } from './read-contract.ts'
 export const CHANNEL = '/emate.knowledge'
 export const API_ROOT = 'https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1'
 export const GRAPH_MODULE = '@e-mate/dsh-plugin-knowledge/graph'
@@ -29,6 +30,7 @@ export function parseGraph(value: any): KnowledgeGraph {
 
 export const FAILURE_MESSAGES = {
   'invalid-request': '知识请求参数无效。', 'invalid-response': '知识服务响应无效，请重试。',
+  'original-content-unavailable': '原件版本已核验，但当前 Agent 没有读取该下载正文的原生接口。请使用知识页面的原生“下载原件”；有真实 node_id 时可按同一 version 调用 node 读取节点正文。节点正文不等于原始 PDF 页面的完整读取。不要猜测主机、端口、URL，不要用 bash/env/curl 寻找下载入口；若必须读取原件正文，本次读取受阻。',
   'scope-changed': '登录账号已变化，请重新加载企业知识。', unauthorized: '当前账号暂不可读取企业知识，请确认登录与访问权限。',
   'revision-conflict': '资料版本已变化，请刷新后重新打开。', 'not-found': '资料不存在或当前不可读。',
   unavailable: '企业知识暂不可用，请稍后重试。', integrity: '原件版本核验失败。',
@@ -64,7 +66,9 @@ export const FAILURE_MESSAGES = {
 export function knowledgeFailure(error: any) {
   const code: keyof typeof FAILURE_MESSAGES = error?.name === 'AbortError' ? 'cancelled'
     : typeof error?.code === 'string' && Object.hasOwn(FAILURE_MESSAGES, error.code) ? error.code : 'unavailable'
-  return { schema_version: 1, status: 'failure', error: { code, message: FAILURE_MESSAGES[code] } }
+  const endpoint = typeof error?.read_endpoint === 'string' && Object.hasOwn(READ_OPERATIONS, error.read_endpoint) ? error.read_endpoint : undefined
+  const message = code === 'invalid-request' && endpoint ? `知识请求参数无效。${READ_OPERATIONS[endpoint]!.help}` : FAILURE_MESSAGES[code]
+  return { schema_version: 1, status: 'failure', error: { code, message } }
 }
 export function parseKnowledgeRpc(response: any): KnowledgeReply {
   const value = response?.ok === true ? response.value : undefined

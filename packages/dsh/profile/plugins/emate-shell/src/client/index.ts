@@ -48,7 +48,6 @@ import {
   subagentSettledDefinition,
   toolImagesDefinition,
 } from './image-gallery.tsx'
-import type { ImageBatchRetryTask } from './image-batch-progress.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
@@ -124,22 +123,6 @@ function imageGalleryInjected(ctx: any, sessionId: string, notice: GalleryNotice
         throw error
       }
       notice('info', '图片已添加到聊天草稿。')
-    },
-    prepareImageRetry: async (task: ImageBatchRetryTask) => {
-      if (task.imageIds.length > 0) {
-        return { prepared: false, message: '带参考图的任务暂不能安全准备重试，请重新附图后发送。' }
-      }
-      const scope = ctx.sessions.scope(sessionId)
-      if (scope === undefined) return { prepared: false, message: '当前会话不可用，未修改输入框。' }
-      const shell = ctx.conversation.input.for(scope)
-      const input = shell.state.getSnapshot()
-      if (input.phase !== 'plain') return { prepared: false, message: '当前输入正在处理中，请稍后再准备。' }
-      if (input.draft !== '' || input.imageIds.length > 0) {
-        return { prepared: false, message: '输入框已有内容或图片，未覆盖现有草稿。' }
-      }
-      shell.setDraft('请重新生成一张图片，要求如下：\n' + task.prompt)
-      ctx.sessions.open(sessionId)
-      return { prepared: true, message: '已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。' }
     },
     draftBytes,
     notify: notice,
@@ -382,9 +365,7 @@ export async function prepareTemplateDraftFromRoute(ctx: any, prompt: string): P
     sessionId = ctx.sessions.list.getSnapshot().current
   }
   if (sessionId === undefined) throw new Error('new task unavailable')
-  const scope = ctx.sessions.scope(sessionId)
-  if (scope === undefined) throw new Error(`session "${sessionId}" is not addressable`)
-  ctx.conversation.input.for(scope).setDraft(prompt)
+  appendConnectionDraft(ctx, sessionId, prompt)
 }
 
 /** Change only the route; SessionRouteProjection remains the single current-Session owner. */

@@ -1,5 +1,5 @@
 /** Shell adapts existing work owners for the read-only pet Cordis service. */
-import { parseImageOutputReceipt } from './image-gallery-contract.ts'
+import { parseImageOutputReceipt, parseImageOutputGroup } from './image-gallery-contract.ts'
 import { createImageBatchProjectionSelector, type ImageBatchClientTask } from './image-batch-client.ts'
 import type { PetWorkFacts, PetWorkFactsReader } from '../../../../../../dsh-plugin-pet/src/projection.ts'
 import type { NativeSession, NativeSessions } from '../../../../../../dsh-plugin-pet/src/client/native-projection.ts'
@@ -14,6 +14,7 @@ function rows(value: unknown): readonly { seq: number; receipt: Record<string, u
   return Array.isArray(value) ? value.filter(row => object(row) && Number.isSafeInteger(row.seq) && object(row.receipt)) : []
 }
 function completedImage(receipt: Record<string, unknown>): boolean {
+  if (receipt.schema_version === 3) return parseImageOutputGroup(receipt)?.items.some(item => item.status === 'completed' && item.attachment !== undefined) ?? false
   if (receipt.schema_version !== 2 || receipt.status !== 'completed' || !object(receipt.verification)
     || receipt.verification.structural !== 'passed' || !['passed', 'not-applicable'].includes(String(receipt.verification.semantic))
     || !object(receipt.output)) return false
@@ -33,6 +34,8 @@ const CODE_EXTENSIONS = new Set(['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 
   'c', 'h', 'cpp', 'cc', 'cxx', 'hpp', 'cs', 'java', 'kt', 'kts', 'swift', 'm', 'mm', 'php', 'lua', 'r', 'sql',
   'sh', 'bash', 'ps1', 'html', 'css', 'scss', 'vue', 'svelte'])
 function runningOperation(call: RunningCall): PetWorkFacts['operation'] {
+  const univer = univerRunningOperation(call.name)
+  if (univer) return univer
   if (call.name === 'web_search') return 'web-search'
   if (call.name === 'grep' || call.name === 'glob') return 'file-search'
   if (BROWSER_OPERATIONS.has(call.name)) return 'browser'
@@ -40,6 +43,65 @@ function runningOperation(call: RunningCall): PetWorkFacts['operation'] {
   if ((call.name === 'write' || call.name === 'edit') && call.callView?.card === 'diff' && files?.length
     && files.every(file => typeof file.path === 'string' && CODE_EXTENSIONS.has(file.path.match(/\.([A-Za-z][A-Za-z0-9]*)$/)?.[1]?.toLowerCase() ?? ''))) return 'code-write'
   return undefined
+}
+const UNIVER_OPERATIONS: Readonly<Record<string, string>> = {
+  univer_new: 'new', univer_status: 'status', univer_inspect: 'inspect', univer_execute: 'execute',
+  univer_import: 'import', univer_export: 'export', univer_print_pdf: 'print-pdf', univer_screenshot: 'screenshot',
+  univer_resources: 'resources', univer_unit: 'unit', univer_worktree: 'worktree', univer_lint: 'lint',
+  univer_api: 'api', univer_compile_svg: 'compile-svg',
+}
+function univerOperation(name: string | undefined): string | undefined {
+  return name !== undefined && Object.hasOwn(UNIVER_OPERATIONS, name) ? UNIVER_OPERATIONS[name] : undefined
+}
+function univerRunningOperation(name: string | undefined): PetWorkFacts['operation'] {
+  const operation = univerOperation(name)
+  if (!operation || operation === 'resources') return undefined
+  return ['status', 'inspect', 'screenshot', 'lint', 'api'].includes(operation) ? 'document-read' : 'document-write'
+}
+function outputPath(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 1 && value.length <= 8192 && value === value.trim()
+    && !/[\u0000-\u001f\u007f]/u.test(value)
+    && (value.startsWith('/') && !value.startsWith('//') || /^[A-Za-z]:[/\\]/u.test(value))
+    && !value.split(/[/\\]/u).some(part => part === '.' || part === '..')
+}
+/** Only a named native Tool's full output envelope is data; Code stdout is not. */
+function univerResult(root: ToolRoot): { operation: NonNullable<PetWorkFacts['completedOperation']>; written: boolean } | undefined {
+  const operation = univerOperation(root.call?.name)
+  if (!operation || root.kind !== 'tool-result' || root.isError !== false) return undefined
+  const texts = (root.content ?? []).filter(block => block.type === 'text')
+  if (texts.length !== 1 || typeof texts[0]?.text !== 'string') return undefined
+  let value: unknown
+  try { value = JSON.parse(texts[0].text) } catch { return undefined }
+  if (!object(value) || value.ok !== true || value.operation !== operation || !Object.hasOwn(value, 'result')
+    || !['resources', 'api'].includes(operation) && !outputPath(value.file)) return undefined
+  if (['status', 'inspect', 'lint', 'api'].includes(operation)) return { operation: 'document-read', written: false }
+  if (!object(value.result)) return undefined
+  const result = value.result
+  let written = false
+  let kind: unknown
+  if (operation === 'new') {
+    if (result.created !== true || result.filePath !== value.file) return undefined
+    written = true
+  } else if (operation === 'execute') {
+    if (typeof result.committed !== 'boolean' || result.filePath !== value.file) return undefined
+    written = result.committed
+  } else if (operation === 'export') {
+    if (result.filePath !== value.file || !outputPath(result.outputPath) || !['sheet', 'doc', 'slide', 'base', 'board'].includes(String(result.kind))) return undefined
+    written = true; kind = result.kind
+  } else if (operation === 'print-pdf') {
+    if (!outputPath(result.output) || !Number.isSafeInteger(result.pageCount) || Number(result.pageCount) < 1) return undefined
+    written = true; kind = result.unitType
+  } else if (operation === 'screenshot') {
+    if (!Array.isArray(result.images)) return undefined
+    written = result.images.some(item => object(item) && outputPath(item.path) && item.mediaType === 'image/png'
+      && object(item.image) && item.image.mediaType === 'image/png' && typeof item.image.attachmentId === 'string'
+      && /^sha256:[a-f0-9]{64}$/u.test(item.image.attachmentId))
+    kind = result.unitType
+  } else if (operation === 'resources') {
+    written = Array.isArray(result.exported) && result.exported.some(item => object(item) && outputPath(item.path))
+  }
+  return { operation: kind === 'sheet' ? 'spreadsheet' : kind === 'slide' ? 'slides'
+    : written || ['import', 'unit', 'worktree', 'compile-svg'].includes(operation) ? 'document-write' : 'document-read', written }
 }
 function officeResult(root: ToolRoot): { operation: NonNullable<PetWorkFacts['completedOperation']>; written: boolean } | undefined {
   const name = root.call?.name; const meta = root.meta
@@ -58,22 +120,37 @@ function officeResult(root: ToolRoot): { operation: NonNullable<PetWorkFacts['co
     : meta.format === 'pdf' && !written ? 'pdf-read' : written ? 'document-write' : 'document-read'
   return { operation, written }
 }
-function settledWork(conversation: NativeConversation, turn: NativeTurn | undefined, turnNumber: number | undefined): Pick<PetWorkFacts, 'completedOperation' | 'delivered'> {
-  if (turnNumber === undefined || turn?.status !== 'closed' || turn.end?.data.reason.kind !== 'completed') return { delivered: false }
+function settledWork(conversation: NativeConversation, turn: NativeTurn | undefined, turnNumber: number | undefined): PetWorkFacts {
+  if (turnNumber === undefined) return { delivered: false }
   const roots = conversation.chat.locations.getTurn(turnNumber).flatMap(key => {
     const node = conversation.chat.nodes.get(key)
     return node?.kind === 'tool-call' && node.data?.root ? [node.data.root] : []
   })
-  const office = roots.map(root => officeResult(root))
+  const blocks = (root: ToolRoot): ToolRoot[] => [root, ...(root.subCalls ?? []).flatMap(blocks)]
+  const all = roots.flatMap(blocks)
+  const univer = all.filter(root => univerOperation(root.call?.name ?? root.name) !== undefined)
+  const closed = turn?.status === 'closed'
+  const completed = closed && turn.end?.data.reason.kind === 'completed'
+  const failed = univer.some(root => root.kind === 'tool-result' && root.isError === true)
+    || roots.some(root => root.isError === true && blocks(root).some(child => univerOperation(child.call?.name ?? child.name)))
+    || univer.length > 0 && closed && !completed
+  const needsAttention = univer.some(root => root.kind === 'tool-result' && root.isError === false && univerResult(root) === undefined
+    || closed && root.kind !== 'tool-result')
+  const operation = all.filter(root => root.kind !== 'tool-result').map(root => univerRunningOperation(root.name)).findLast(value => value !== undefined)
+  const office = all.toSorted((left, right) => (left.seq ?? 0) - (right.seq ?? 0))
+    .map(root => univerResult(root) ?? officeResult(root)).filter(value => value !== undefined)
   const recent = office.at(-1)
   // The native produced-file accumulator carries call-time paths. Office's final
   // collision-resolved file comes only from its canonical result metadata.
-  const produced = turn.data.get('deliverables')
+  const produced = turn?.data.get('deliverables')
   const files = object(produced) && Array.isArray(produced.produced) ? produced.produced : []
   const ordinaryFile = files.some(file => object(file) && Number.isSafeInteger(file.seq) && roots.some(root =>
     root.kind === 'tool-result' && root.isError === false && root.seq === file.seq && root.call?.name !== undefined
-      && root.call.name !== 'office_write' && root.call.name !== 'office_read'))
-  return { ...(recent === undefined ? {} : { completedOperation: recent.operation }), delivered: ordinaryFile || office.some(item => item?.written) }
+      && root.call.name !== 'office_write' && root.call.name !== 'office_read' && univerOperation(root.call.name) === undefined))
+  const hasUsableOutput = ordinaryFile || office.some(item => item.written)
+  return { ...(operation === undefined ? {} : { operation }), failed, needsAttention, hasUsableOutput,
+    ...(completed && !failed && !needsAttention && recent !== undefined ? { completedOperation: recent.operation } : {}),
+    delivered: completed && !failed && !needsAttention && hasUsableOutput }
 }
 function exactChildImage(task: ImageBatchClientTask, list: NativeList): boolean {
   const pointer = task.receipt; const child = task.childSessionId
@@ -91,19 +168,22 @@ function imageActivity(session: NativeSession, conversation: NativeConversation,
   let operation: PetWorkFacts['operation']
   for (const call of running) {
     const row = receipts.find(row => row.receipt.parent_session_id === current && row.receipt.child_session_id === undefined
-      && row.receipt.call_id === call.callId && row.receipt.schema_version === 2 && row.receipt.status === 'running')
-    operation = imageOperation(row?.receipt.operation) ?? operation
+      && (row.receipt.call_id === call.callId || row.receipt.root_call_id === call.callId)
+      && [2, 3].includes(Number(row.receipt.schema_version)) && row.receipt.status === 'running')
+    operation = imageOperation(row?.receipt.operation)
+      ?? (call.name === 'generate_image' ? 'image-generate' : call.name === 'edit_image' ? 'image-edit' : operation)
   }
   const provenance = turn?.data.get('e-mate-image-calls')
   const callIds = (key: string): Set<string> => new Set(object(provenance) && Array.isArray(provenance[key])
     ? provenance[key].flatMap(item => object(item) && typeof item.callId === 'string' ? [item.callId] : []) : [])
   const direct = callIds('calls'); const batchCalls = callIds('batchCalls')
   const closed = turn?.status === 'closed' && turn.end?.data.reason.kind === 'completed'
-  const currentReceipts = receipts.filter(row => direct.has(String(row.receipt.call_id))
-    && row.receipt.parent_session_id === current && row.receipt.child_session_id === undefined && parseImageOutputReceipt(row.receipt) !== null)
+  const currentReceipts = receipts.filter(row => (direct.has(String(row.receipt.call_id))
+    || row.receipt.schema_version === 3 && row.receipt.turn === turnNumber)
+    && row.receipt.parent_session_id === current && row.receipt.child_session_id === undefined && parseImageOutputGroup(row.receipt) !== null)
   let hasUsableOutput = currentReceipts.some(row => completedImage(row.receipt))
   let needsAttention = currentReceipts.some(row => row.receipt.status === 'unknown' || row.receipt.status === 'needs-review')
-  let failed = currentReceipts.some(row => row.receipt.status === 'failed')
+  let failed = currentReceipts.some(row => ['failed', 'cancelled'].includes(String(row.receipt.status)) || Number(row.receipt.failed_count) > 0)
   let delivered = closed && hasUsableOutput
   const batchRows = session.projections.faceOf('eMateImageBatches').getSnapshot()
   const currentBatches = Array.isArray(batchRows) ? batchRows.filter(row => object(row)
@@ -139,10 +219,12 @@ export function createPetWorkFactsReader(ctx: { sessions: NativeSessions }): Pet
     const turn = turnNumber === undefined ? undefined : conversation.chat.timeline.turns.get(turnNumber)
     const images = imageActivity(session, conversation, list, turn, turnNumber, selectBatches)
     const running = conversation.runningCalls.filter(call => call.turn === turnNumber)
-    const operation = images.operation ?? running.map(runningOperation).findLast(value => value !== undefined)
     const completed = settledWork(conversation, turn, turnNumber)
+    const operation = images.operation ?? completed.operation ?? running.map(runningOperation).findLast(value => value !== undefined)
+    const failed = images.failed || completed.failed
+    const needsAttention = images.needsAttention || completed.needsAttention
     return { ...images, ...completed, ...(operation === undefined ? {} : { operation }),
-      hasUsableOutput: images.hasUsableOutput || completed.delivered,
-      delivered: (images.delivered || completed.delivered) && !images.needsAttention && !images.failed }
+      failed, needsAttention, hasUsableOutput: images.hasUsableOutput || completed.hasUsableOutput,
+      delivered: (images.delivered || completed.delivered) && !needsAttention && !failed }
   }
 }

@@ -6,14 +6,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { useRef, useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProjectionValueStore } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/projection-store.ts'
+import { ConversationNodeAssembler } from '../../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/sessions/conversation-assembler.ts'
+import { toolDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/tool.ts'
+import { chatViewDefinition } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation-nodes/chat-snapshot-builder.ts'
 import type { SessionListState, UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { useImageBatchProjection } from '../src/client/image-batch-client.ts'
 import {
   ImageBatchProgress,
-  type ImageBatchRetryCall,
-  type ImageBatchRetryResult,
-  type ImageBatchRetryTask,
 } from '../src/client/image-batch-progress.tsx'
 import { ArtifactTerminal, imageCallsDefinition, selectArtifactTerminal } from '../src/client/image-gallery.tsx'
 
@@ -164,18 +164,12 @@ function renderProgress(
   store: ProjectionValueStore,
   sessions = sessionHarness(emptySessions()),
   loadImage = vi.fn(async () => 'blob:image'),
-  retry: {
-    retryCalls?: readonly ImageBatchRetryCall[]
-    prepareRetry?: (task: ImageBatchRetryTask) => Promise<ImageBatchRetryResult>
-  } = {},
   addImageToCanvas?: (value: ImageAttachmentRef, ownerSessionId: string) => Promise<void>,
 ) {
   function Owner() {
     const view = useImageBatchProjection(useProjectionFrom(store), parentSessionId)
     return <ImageBatchProgress
       batches={view.batches.filter(batch => batch.parentCallId === parentCallId)}
-      {...retry.retryCalls === undefined ? {} : { retryCalls: retry.retryCalls }}
-      {...retry.prepareRetry === undefined ? {} : { prepareRetry: retry.prepareRetry }}
       useSessions={sessions.useSessions}
       loadImage={loadImage}
       {...addImageToCanvas ? { addImageToCanvas } : {}}
@@ -186,11 +180,21 @@ function renderProgress(
 }
 
 describe('live image batch progress', () => {
+  it('reveals canvas controls only on card hover or keyboard-visible button focus', () => {
+    const batchCss = readFileSync(resolve('src/client/image-batch-progress.module.css'), 'utf8')
+    const galleryCss = readFileSync(resolve('src/client/image-gallery.module.css'), 'utf8')
+    expect(batchCss).toMatch(/\.canvasAction\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/u)
+    expect(batchCss).toMatch(/\.card:hover \.canvasAction,\s*\.canvasAction:has\(button:focus-visible\)\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/u)
+    expect(batchCss).not.toMatch(/\.card:focus-within \.canvasAction|\.canvasAction\[data-pending/u)
+    expect(batchCss).toMatch(/\.canvasAction button:focus-visible\s*\{[^}]*outline:/u)
+    expect(galleryCss).toMatch(/\.imageItem:hover \.imageAction,\s*\.imageAction:focus-visible\s*\{\s*opacity:\s*1;/u)
+  })
+
   it('restored batch cards add each exact child attachment to canvas without duplicating the gallery', async () => {
     const store = new ProjectionValueStore()
     store.apply('eMateImageBatches', projection(['completed', 'completed', 'completed'], { revisions: [3, 3, 3], terminal: true }), 1)
     const add = vi.fn(async () => {})
-    renderProgress(store, sessionHarness(projectedSessions(['completed', 'completed', 'completed'])), undefined, {}, add)
+    renderProgress(store, sessionHarness(projectedSessions(['completed', 'completed', 'completed'])), undefined, add)
     for (let i = 1; i <= 3; i++) {
       await act(async () => fireEvent.click(screen.getByRole('button', { name: '加入画布：图片 ' + i })))
       expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ attachmentId: 'sha256:' + '456'[i - 1]!.repeat(64) }), 'child-' + i)
@@ -206,7 +210,7 @@ describe('live image batch progress', () => {
     const sessions = sessionHarness(emptySessions())
     let fail!: (reason: Error) => void
     const add = vi.fn(() => new Promise<void>((_, reject) => { fail = reject }))
-    renderProgress(store, sessions, undefined, {}, add)
+    renderProgress(store, sessions, undefined, add)
     expect(screen.getByRole('button', { name: '加入画布：图片 1' }).hasAttribute('disabled')).toBe(true)
     await act(async () => sessions.set(projectedSessions(['completed', 'needs-review'])))
     expect(screen.getByRole('button', { name: '加入画布：图片 2' }).hasAttribute('disabled')).toBe(true)
@@ -232,16 +236,11 @@ describe('live image batch progress', () => {
     expect(imageCallsDefinition.match(call as never)).toEqual({ id: '1', role: 'update' })
     const state = imageCallsDefinition.update({ state: initial } as never, { event: call } as never)
     expect(state.batchCalls).toEqual([{
-      callId: parentCallId, seq: 2, retryTasks: [
-        { ordinal: 1, prompt: '第一张海报', imageIds: [] },
-        { ordinal: 2, prompt: '修改参考图', imageIds: [sourceId] },
-      ],
+      callId: parentCallId, seq: 2,
     }])
     const owner = { turn: { turn: 1, status: 'open', data: { get: () => state }, steps: [] }, nodes: [], seq: 2 }
     expect(selectArtifactTerminal(owner as never)).toEqual({
-      callIds: [], batchCallIds: [parentCallId], batchRetryCalls: [{
-        parentCallId, tasks: state.batchCalls![0]!.retryTasks!,
-      }], paths: [], childSessionIds: [],
+      callIds: [], batchCallIds: [parentCallId], paths: [], childSessionIds: [],
     })
     expect(selectArtifactTerminal({ ...owner, turn: { ...owner.turn, data: { get: () => ({ calls: [] }) } } } as never)).toBeNull()
   })
@@ -259,7 +258,8 @@ describe('live image batch progress', () => {
     store.apply('eMateImageBatches', projection(['queued', 'queued']), 1)
     const view = renderProgress(store)
     expect(projectionSubscriptions).toBe(1)
-    expect(screen.getByText('如需取消，请使用输入框旁的“停止生成”按钮。')).toBeTruthy()
+    expect(screen.getByText('历史图片批次，仅保留记录与附件。')).toBeTruthy()
+    expect(screen.queryByText('如需取消，请使用输入框旁的“停止生成”按钮。')).toBeNull()
     expect(screen.queryByRole('button', { name: /取消/u })).toBeNull()
     const progress = screen.getByLabelText('图片批次进度')
     expect(progress.getAttribute('aria-live')).toBeNull()
@@ -291,7 +291,7 @@ describe('live image batch progress', () => {
     expect(view.sessions.subscriptions()).toBe(0)
   })
 
-  it('shows an exact child receipt preview while the parent batch remains open', async () => {
+  it('shows an exact child receipt preview from a historical unfinished batch', async () => {
     const store = new ProjectionValueStore()
     store.apply('eMateImageBatches', projection(['completed', 'running'], { revisions: [3, 2] }), 1)
     const sessions = sessionHarness(emptySessions())
@@ -305,7 +305,7 @@ describe('live image batch progress', () => {
       }] } } } } as never)
     })
     const preview = screen.getByRole('button', { name: '查看原图：first.png' })
-    expect(screen.getByLabelText('图片批次，共 2 张').getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByLabelText('图片批次，共 2 张').getAttribute('aria-busy')).toBe('false')
     preview.click()
     expect(loadImage).toHaveBeenCalledWith(attachment, 'child-1')
   })
@@ -504,46 +504,13 @@ describe('live image batch progress', () => {
     view.unmount()
   })
 
-  it('prepares a fresh retry draft from the exact logged task without reusing control IDs', async () => {
-    const store = new ProjectionValueStore()
-    store.apply('eMateImageBatches', projection(['failed', 'completed'], { revisions: [3, 3], terminal: true }), 1)
-    const prepareRetry = vi.fn(async () => ({
-      prepared: true, message: '已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。',
-    }))
-    const retryTask = { ordinal: 1, prompt: '精确原始提示', imageIds: [] }
-    const view = renderProgress(store, sessionHarness(projectedSessions(['failed', 'completed'])), undefined, {
-      retryCalls: [{ parentCallId, tasks: [retryTask] }], prepareRetry,
-    })
-    const button = screen.getByRole('button', { name: '准备重新生成此项' })
-    button.focus()
-    expect(document.activeElement).toBe(button)
-    fireEvent.keyDown(button, { key: 'Enter' })
-    fireEvent.click(button)
-    await waitFor(() => { expect(prepareRetry).toHaveBeenCalledWith(retryTask) })
-    expect(document.activeElement).toBe(button)
-    expect(prepareRetry.mock.calls[0]?.[0]).toEqual({ ordinal: 1, prompt: '精确原始提示', imageIds: [] })
-    expect(JSON.stringify(prepareRetry.mock.calls[0]?.[0])).not.toMatch(/batch_id|task_id|client_request_id|child_session_id/u)
-    expect(screen.getByText('已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^查看原图：/u })).toBeTruthy()
-    view.unmount()
-  })
-
-  it('disables source-image retry without mutating attachments and explains unknown outcomes', () => {
+  it('historical failed and unknown batches remain readable without a retry runner', () => {
     const store = new ProjectionValueStore()
     store.apply('eMateImageBatches', projection(['unknown', 'completed'], { revisions: [3, 3], terminal: true }), 1)
-    const prepareRetry = vi.fn()
-    const sourceId = 'sha256:' + '7'.repeat(64)
-    const view = renderProgress(store, sessionHarness(projectedSessions(['failed', 'completed'])), undefined, {
-      retryCalls: [{ parentCallId, tasks: [{ ordinal: 1, prompt: '参考图任务', imageIds: [sourceId] }] }],
-      prepareRetry,
-    })
+    renderProgress(store, sessionHarness(projectedSessions(['failed', 'completed'])))
     expect(screen.getByText('结果不确定，未自动重复生成')).toBeTruthy()
-    const button = screen.getByRole('button', { name: '准备重新生成此项' }) as HTMLButtonElement
-    expect(button.disabled).toBe(true)
-    expect(screen.getByText('带参考图的任务暂不能安全准备重试，请重新附图后发送。')).toBeTruthy()
-    fireEvent.click(button)
-    expect(prepareRetry).not.toHaveBeenCalled()
-    view.unmount()
+    expect(screen.queryByRole('button', { name: '准备重新生成此项' })).toBeNull()
+    expect(screen.getByRole('button', { name: /^查看原图：/u })).toBeTruthy()
   })
 
   it('keeps eight card subscriptions bounded and delegates URL lifecycle to native owners', async () => {
@@ -770,4 +737,110 @@ it('partial and unknown image batches retain good outputs without claiming whole
   }
   petImageTurn(a,{running:false});a.batches.set([]);a.images.set([petImageRow({status:'unknown'})])
   expect(read('a').needsAttention).toBe(true);expect(read('a').failed).toBe(false);expect(read('a').delivered).toBe(false)
+})
+
+
+it('v3 Code image facts use the original root and truthful partial counts', () => {
+  const { a, read } = petContext(); petImageTurn(a)
+  const receipt = { schema_version: 3, revision: 1, call_id: 'image:code:0', root_call_id: 'image', turn: 1,
+    task_id: 'task-image', parent_session_id: 'a', operation: 'edit', tool_name: 'edit_image', status: 'running',
+    sources: [petImageRef], content: [], model: 'gpt-image-2.5-flare', requested_count: 2, returned_count: 0, failed_count: 0 }
+  a.images.set([{ seq: 9, createdAt: 100, receipt }])
+  expect(read('a').operation).toBe('image-edit')
+  petImageTurn(a, { running: false })
+  a.images.set([{ seq: 10, createdAt: 100, receipt: { ...receipt, revision: 2, status: 'completed',
+    content: [{ type: 'image', attachment: petImageRef }], requested_count: 1, returned_count: 1 } }])
+  expect(read('a').delivered).toBe(true)
+  a.images.set([{ seq: 10, createdAt: 100, receipt: { ...receipt, revision: 2, status: 'completed',
+    content: [{ type: 'image', attachment: petImageRef }], returned_count: 1, failed_count: 1 } }])
+  expect(read('a')).toMatchObject({ delivered: false, hasUsableOutput: true, failed: true })
+  a.images.set([{ seq: 10, createdAt: 100, receipt: { ...receipt, revision: 2, status: 'cancelled',
+    content: [{ type: 'image', attachment: petImageRef }], returned_count: 1, failed_count: 1 } }])
+  expect(read('a')).toMatchObject({ delivered: false, hasUsableOutput: true, failed: true })
+  a.images.set([{ seq: 10, createdAt: 100, receipt: { ...receipt, turn: 2 } }])
+  expect(read('a').delivered).toBe(false)
+})
+
+function univerPetEnvelope(operation: string, result: unknown, file = '/workspace/book.univer') {
+  return [{ type: 'text', text: JSON.stringify({ ok: true, operation, ...(['resources', 'api'].includes(operation) ? {} : { file }), result }) }]
+}
+function univerPetChat(calls: { name: string; content?: unknown[]; error?: boolean }[], { code = false, closed = true, aborted = false, rootError = false, incremental = false } = {}) {
+  const events: any[] = []; let seq = 0
+  const add = (type: string, data: object) => events.push({ type, data, seq: ++seq, time: 100 + seq, surfaceOp: 'append' })
+  add('turn/start', { turn: 1 }); add('step/start', { turn: 1, step: 1 })
+  for (const [index, call] of calls.entries()) {
+    const root = 'root-' + index
+    add('tool/call', { turn: 1, step: 1, callId: root, name: code ? 'run_code' : call.name, arguments: '{}' })
+    if (code) add('tool/code-dispatch-start', { rootCallId: root, parentCallId: root, subCallId: 'same-child', name: call.name, arguments: { path: '/unverified.xlsx' } })
+    if (call.content) {
+      if (code) add('tool/code-dispatch', { rootCallId: root, parentCallId: root, subCallId: 'same-child', name: call.name,
+        arguments: {}, isError: call.error === true, content: call.content })
+      add('tool/result', { turn: 1, step: 1, message: { source: { callId: root }, content: [{ type: 'tool-result', isError: code ? rootError : call.error === true,
+        content: code ? [{ type: 'text', text: 'Code complete' }] : call.content }] } })
+    }
+  }
+  if (closed) { add('step/end', { turn: 1, step: 1 }); add('turn/end', { turn: 1, reason: { kind: aborted ? 'aborted' : 'completed' } }) }
+  const assembler = new ConversationNodeAssembler({ entries: () => [toolDefinition], fallbackEntry: () => undefined } as never, { entries: () => [chatViewDefinition] } as never)
+  if (incremental) for (const event of events) { assembler.append({ event, view: undefined }); assembler.flush() }
+  else assembler.replaceWindow(events.map(event => ({ event, view: undefined })), false)
+  assembler.flush()
+  return assembler.snapshot('chat')
+}
+
+it('Univer pet reads actual native direct and Code results, preserving semantic subtypes and canonical output evidence', () => {
+  const { a, read } = petContext(); const file = '/workspace/book.univer'
+  const cases: [string, string, unknown, string, boolean][] = [
+    ['univer_new', 'new', { filePath: file, created: true }, 'document-write', true],
+    ['univer_execute', 'execute', { filePath: file, committed: false }, 'document-read', false],
+    ['univer_execute', 'execute', { filePath: file, committed: true }, 'document-write', true],
+    ['univer_export', 'export', { filePath: file, kind: 'sheet', outputPath: '/one/report.xlsx' }, 'spreadsheet', true],
+    ['univer_export', 'export', { filePath: file, kind: 'slide', outputPath: 'C:\\two\\report.pptx' }, 'slides', true],
+    ['univer_print_pdf', 'print-pdf', { output: '/workspace/report.pdf', pageCount: 1, unitType: 'slide' }, 'slides', true],
+    ['univer_screenshot', 'screenshot', { unitType: 'sheet', images: [{ path: '/workspace/page.png', mediaType: 'image/png', image: petImageRef }] }, 'spreadsheet', true],
+    ['univer_resources', 'resources', { exported: [{ path: '/workspace/icon.svg' }] }, 'document-write', true],
+    ['univer_status', 'status', { trunk: { units: [] } }, 'document-read', false],
+    ['univer_inspect', 'inspect', [{ id: 'sheet1' }], 'document-read', false],
+    ['univer_api', 'api', [], 'document-read', false],
+    ['univer_import', 'import', { sourcePath: '/workspace/import.xlsx', unitId: 'new-sheet' }, 'document-write', false],
+  ]
+  for (const code of [false, true]) for (const incremental of [false, true]) for (const [name, operation, result, scene, delivered] of cases) {
+    const chat = univerPetChat([{ name, content: univerPetEnvelope(operation, result) }], { code, incremental })
+    a.conversation.set({ ...a.conversation.getSnapshot(), chat })
+    expect(read('a')).toMatchObject({ completedOperation: scene, delivered, failed: false, needsAttention: false })
+  }
+})
+
+it('Univer pet retains partial output but never celebrates failures, cancellations, malformed results or foreign turns/sessions', () => {
+  const { a, list, read } = petContext()
+  const good = { name: 'univer_print_pdf', content: univerPetEnvelope('print-pdf', { output: '/one/report.pdf', pageCount: 1, unitType: 'doc' }) }
+  const set = (calls: Parameters<typeof univerPetChat>[0], options: Parameters<typeof univerPetChat>[1] = {}) => {
+    const chat = univerPetChat(calls, { code: true, ...options })
+    a.conversation.set({ ...a.conversation.getSnapshot(), chat }); return chat
+  }
+  for (const incremental of [false, true]) {
+    set([good, { ...good, error: true }], { incremental })
+    expect(read('a')).toMatchObject({ delivered: false, failed: true, hasUsableOutput: true })
+    expect(read('a').completedOperation).toBeUndefined()
+    set([good, { name: 'univer_export' }], { incremental })
+    expect(read('a')).toMatchObject({ delivered: false, failed: true, hasUsableOutput: true })
+    set([good], { incremental, rootError: true })
+    expect(read('a')).toMatchObject({ delivered: false, failed: true, hasUsableOutput: true })
+    set([good], { incremental, aborted: true })
+    expect(read('a')).toMatchObject({ delivered: false, failed: true, hasUsableOutput: true })
+    set([{ name: 'univer_execute' }], { incremental, closed: false })
+    expect(read('a')).toMatchObject({ delivered: false, operation: 'document-write', failed: false })
+  }
+  for (const bad of [
+    { ...good, name: 'univer_export' },
+    { ...good, content: [{ type: 'text', text: 'Result: ' + good.content[0].text }] },
+    { ...good, content: univerPetEnvelope('print-pdf', { output: '/workspace/../report.pdf', pageCount: 1 }) },
+    { ...good, content: [{ type: 'text', text: JSON.stringify({ ok: false, operation: 'print-pdf', result: {} }) }] },
+  ]) { set([bad]); expect(read('a')).toMatchObject({ delivered: false, needsAttention: true, hasUsableOutput: false }) }
+  set([{ ...good, name: 'run_code' }]); expect(read('a').completedOperation).toBeUndefined(); expect(read('a').delivered).toBe(false)
+  const chat = set([good, { ...good, content: univerPetEnvelope('print-pdf', { output: '/two/report.pdf', pageCount: 1, unitType: 'sheet' }) }])
+  expect(read('a')).toMatchObject({ delivered: true, completedOperation: 'spreadsheet' })
+  a.conversation.set({ ...a.conversation.getSnapshot(), chat: { ...chat, timeline: { ...chat.timeline, turnOrder: [2], turns: new Map([[2, { status: 'closed', end: { data: { reason: { kind: 'completed' } } }, data: new Map() }]]) } } })
+  expect(read('a').delivered).toBe(false)
+  set([good]); list.set({ ...list.getSnapshot(), current: 'b' }); expect(read('a').delivered).toBe(false)
+  list.set({ ...list.getSnapshot(), current: 'a' }); a.conversation.set({ ...a.conversation.getSnapshot(), sessionId: 'b' }); expect(read('a').delivered).toBe(false)
 })

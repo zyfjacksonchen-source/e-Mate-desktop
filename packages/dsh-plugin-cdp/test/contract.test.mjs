@@ -162,7 +162,7 @@ test('keeps Chrome out of application startup and starts it on first browser use
   let launches = 0
   const previousFetch = globalThis.fetch
   globalThis.fetch = async () => {
-    if (!browserRunning) throw new Error('CDP is not running')
+    if (!browserRunning) throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } })
     return new Response(JSON.stringify([{
       id: 'page-1',
       type: 'page',
@@ -444,4 +444,123 @@ test('native registry exposes all CDP argument fields as closed JSON Schema and 
     for (const dispose of disposers.reverse()) dispose()
     await ctx.fiber.dispose()
   }
+})
+
+function launchFixture(spawn) {
+  let capability
+  const disposers = []
+  apply({
+    approval: {}, settings: settingsHarness().settings,
+    subprocess: { resolveExecutable: async () => '/fixture/chrome', spawn },
+    tools: { register: () => () => {} }, systemPrompt: { section: () => () => {} },
+    userQuestions: { ask: async () => { throw new Error('unexpected question') } },
+    emateCapabilities: { register: value => { capability = value; return () => {} } },
+    effect: callback => { const dispose = callback(); if (typeof dispose === 'function') disposers.push(dispose) },
+  })
+  return { capability, dispose: () => disposers.reverse().forEach(dispose => dispose()) }
+}
+const refused = () => new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } })
+const signal = () => new AbortController().signal
+
+test('cold Chrome check-in beyond twelve seconds succeeds within the existing Tool budget', async () => {
+  const originalFetch = globalThis.fetch, originalNow = Date.now
+  let elapsed = 0, launches = 0
+  Date.now = () => elapsed
+  globalThis.fetch = async () => {
+    if (launches > 0) elapsed += 7_000
+    if (elapsed < 14_000) throw refused()
+    return new Response('[]')
+  }
+  const fixture = launchFixture(() => { launches++; return { done: Promise.resolve({ exitCode: 0 }) } })
+  try {
+    await fixture.capability.invoke('open-browser', {}, signal())
+    assert.equal(launches, 1)
+    assert.equal(elapsed, 14_000)
+    await fixture.capability.invoke('open-browser', {}, signal())
+    assert.equal(launches, 1, 'connected Chrome with zero pages is reused')
+  } finally { fixture.dispose(); globalThis.fetch = originalFetch; Date.now = originalNow }
+})
+
+test('HTTP, JSON, debugger origin and timeout errors fail closed without launching', async () => {
+  const originalFetch = globalThis.fetch
+  let launches = 0
+  let respond
+  globalThis.fetch = async () => respond()
+  const fixture = launchFixture(() => { launches++; throw new Error('must not spawn') })
+  try {
+    for (const response of [
+      () => new Response('', { status: 503 }),
+      () => new Response('not JSON'),
+      () => new Response(JSON.stringify([{ id: 'bad', type: 'page', title: 'Bad', url: '', webSocketDebuggerUrl: 'ws://example.com/devtools/page/bad' }])),
+      () => { throw new DOMException('timeout', 'TimeoutError') },
+    ]) {
+      respond = response
+      const status = await fixture.capability.status(signal())
+      assert.equal(status.state, 'failed')
+      assert.equal(status.action_ids.includes('open-browser'), false)
+      await assert.rejects(fixture.capability.invoke('open-browser', {}, signal()))
+    }
+    assert.equal(launches, 0)
+  } finally { fixture.dispose(); globalThis.fetch = originalFetch }
+})
+
+test('launch failure stays visible and permits retry, then a real connection recovers readiness', async () => {
+  const originalFetch = globalThis.fetch
+  let connected = false
+  globalThis.fetch = async () => { if (!connected) throw refused(); return new Response('[]') }
+  const fixture = launchFixture(() => { throw new Error('private launch failure') })
+  try {
+    await assert.rejects(fixture.capability.invoke('open-browser', {}, signal()))
+    const failed = await fixture.capability.status(signal())
+    assert.equal(failed.state, 'failed')
+    assert.equal(failed.action_ids.includes('open-browser'), true)
+    assert.doesNotMatch(failed.detail, /private/)
+    connected = true
+    assert.equal((await fixture.capability.status(signal())).state, 'ready')
+    connected = false
+    assert.equal((await fixture.capability.status(signal())).state, 'ready', 'old failure cleared by observed connection')
+  } finally { fixture.dispose(); globalThis.fetch = originalFetch }
+})
+
+test('cancelling one waiter preserves a shared launch; pre-cancel never spawns', async () => {
+  const originalFetch = globalThis.fetch
+  let running = false, launches = 0, finishLaunch
+  globalThis.fetch = async () => { if (!running) throw refused(); return new Response('[]') }
+  const fixture = launchFixture(() => {
+    launches++
+    return { done: new Promise(resolve => { finishLaunch = () => { running = true; resolve({ exitCode: 0 }) } }) }
+  })
+  try {
+    const cancelled = new AbortController()
+    cancelled.abort(new Error('already cancelled'))
+    await assert.rejects(fixture.capability.invoke('open-browser', {}, cancelled.signal), /already cancelled/)
+    assert.equal(launches, 0)
+    const first = new AbortController()
+    const rejected = assert.rejects(fixture.capability.invoke('open-browser', {}, first.signal), /cancel one/)
+    const second = fixture.capability.invoke('open-browser', {}, signal())
+    await new Promise(resolve => setImmediate(resolve))
+    first.abort(new Error('cancel one'))
+    await rejected
+    finishLaunch()
+    await second
+    assert.equal(launches, 1)
+  } finally { fixture.dispose(); globalThis.fetch = originalFetch }
+})
+
+test('Chrome launch remains bounded by the Tool budget and disposal cancels the owner', async () => {
+  const originalFetch = globalThis.fetch, originalNow = Date.now
+  let elapsed = 0
+  Date.now = () => elapsed
+  globalThis.fetch = async () => { throw refused() }
+  let fixture = launchFixture(() => { elapsed = 45_000; return { done: Promise.resolve({ exitCode: 0 }) } })
+  try {
+    await assert.rejects(fixture.capability.invoke('open-browser', {}, signal()), /任务时限/)
+    assert.equal((await fixture.capability.status(signal())).state, 'failed')
+    fixture.dispose()
+    fixture = launchFixture(() => ({ done: Promise.resolve({ exitCode: 0 }) }))
+    const rejected = assert.rejects(fixture.capability.invoke('open-browser', {}, signal()), /disposed/)
+    await new Promise(resolve => setImmediate(resolve))
+    fixture.dispose()
+    await rejected
+  } finally { fixture.dispose(); globalThis.fetch = originalFetch; Date.now = originalNow }
 })

@@ -266,6 +266,12 @@ function assertArtifactWrite(ctx: VisionContext, exec: VisionToolExecution): voi
   }
 }
 
+const FIRST_USE_STATUS = {
+  state: 'ready',
+  detail: '已配置，首次使用时自动准备。尚未完成首次连接验证。',
+  action_ids: [] as never[],
+}
+
 async function runtimeStatus(ctx: Context, signal: AbortSignal): Promise<{ state: string; detail: string; action_ids: never[] }> {
   const endpoint = `http://127.0.0.1:${String(ctx.webServer.port)}/_dsh/vision-toolkit/settings`
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(3_000)])
@@ -275,12 +281,21 @@ async function runtimeStatus(ctx: Context, signal: AbortSignal): Promise<{ state
     })
     const snapshot = await snapshotResponse.json() as unknown
     if (!snapshotResponse.ok || !isRecord(snapshot) || snapshot.ok !== true || !isRecord(snapshot.value)
-      || !isRecord(snapshot.value.runtime) || snapshot.value.runtime.ready !== true
+      || !isRecord(snapshot.value.runtime)
       || !isRecord(snapshot.value.credential) || snapshot.value.credential.configured !== true
       || !isRecord(snapshot.value.settings) || !isRecord(snapshot.value.settings.value)
       || !isRecord(snapshot.value.settings.value.provider)
       || snapshot.value.settings.value.provider.baseUrl === UNCONFIGURED_BASE_URL) {
       return { state: 'setup-required', detail: 'OCR 运行时或企业视觉模型配置尚未就绪。', action_ids: [] }
+    }
+    if (snapshot.value.runtime.lastError !== undefined) {
+      return { state: 'failed', detail: 'OCR 运行时初始化失败，请重试视觉工具；若仍失败，请联系管理员。', action_ids: [] }
+    }
+    if (snapshot.value.runtime.ready === false && snapshot.value.runtime.generation === 0) {
+      return FIRST_USE_STATUS
+    }
+    if (snapshot.value.runtime.ready !== true) {
+      return { state: 'setup-required', detail: 'OCR 运行时状态尚未就绪。', action_ids: [] }
     }
     const healthResponse = await fetch(endpoint, {
       method: 'POST',
@@ -334,7 +349,7 @@ export async function apply(ctx: VisionContext): Promise<() => void> {
     if (cachedStatus !== undefined && cachedStatus.expiresAt > Date.now()) return cachedStatus.value
     const epoch = statusEpoch
     const value = await runtimeStatus(ctx, signal)
-    if (epoch === statusEpoch) {
+    if (epoch === statusEpoch && value !== FIRST_USE_STATUS) {
       cachedStatus = { value, expiresAt: Date.now() + (value.state === 'ready' ? 30_000 : 2_000) }
     }
     return value

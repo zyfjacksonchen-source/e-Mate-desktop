@@ -13,6 +13,80 @@ import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactDeliverablesSource
 const native = readFileSync(process.env.EMATE_TEST_NATIVE_ROOT ? join(process.env.EMATE_TEST_NATIVE_ROOT, 'upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js') : new URL('../upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', import.meta.url), 'utf8')
 const adapted = adaptHarnessConversationSource(native)
 
+test('terminal errors remain visible after retries through native replay, append and paged prepend', () => {
+  const root = process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname
+  const harness = join(root, 'upstream/deepseek-harness')
+  const requireNative = createRequire(join(harness, 'packages/client/ui-conversation/package.json'))
+  let runtime
+  new Function('window', readFileSync(join(harness, 'packages/client/runtime/lib/client.js'), 'utf8'))({ __ModuleLoader__: { load: module => { runtime = module.factory(requireNative) } } })
+  const region = (source, name) => {
+    const start = source.indexOf('//#region lib/types/client/' + name + '.js')
+    assert(start >= 0, name)
+    return source.slice(start, source.indexOf('//#endregion', start))
+  }
+  const definitions = source => new Function('_deepseek_ai_dsh_client_runtime_client', [
+    region(source, 'conversation-nodes/common'),
+    region(source, 'contract/chat-nodes'),
+    region(source, 'conversation-nodes/chat-snapshot-builder'),
+    region(source, 'conversation-nodes/retry'),
+    region(source, 'conversation-nodes/turn-error'),
+    'return { retryDefinition, turnErrorDefinition, chatViewDefinition }',
+  ].join('\n'))(runtime)
+  const assembler = source => {
+    const d = definitions(source)
+    return new runtime.ConversationNodeAssembler(
+      { entries: () => [d.retryDefinition, d.turnErrorDefinition], fallbackEntry: () => undefined },
+      { entries: () => [d.chatViewDefinition] },
+    )
+  }
+  const event = (seq, type, data) => ({ event: { seq, type, time: 1000 + seq, data } })
+  const finalError = { code: 'PI_AI_ERROR', message: 'OpenAI API error (409): INVOCATION_RECONCILIATION_REQUIRED' }
+  const start = [event(180, 'turn/start', { turn: 7 }), event(182, 'step/start', { turn: 7, step: 1 })]
+  const retry = [
+    event(189, 'llm/retry', { retryId: 'retry-7', turn: 7, step: 1, provider: 'fake', mode: 'normal', policyKey: 'fake', retry: 1, maxRetries: 2, delayMs: 540,
+      failure: { code: 'SERVER', message: 'OpenAI API error (502): UPSTREAM_REJECTED' } }),
+    event(190, 'llm/retry-started', { retryId: 'retry-7', turn: 7, step: 1, retry: 1 }),
+  ]
+  const end = reason => [event(193, 'step/end', { turn: 7, step: 1 }), event(194, 'turn/end', { turn: 7, reason })]
+  const nodes = value => value.snapshot('chat').nodes.values()
+  const terminal = value => nodes(value).filter(node => node.kind === 'turn-error' && node.visibility === 'visible')
+  const assertFailure = value => {
+    assert.equal(terminal(value).length, 1)
+    assert.deepEqual(terminal(value)[0].data, { kind: 'turn-error', seq: 194, time: 1194, turn: 7, step: 1, ...finalError })
+  }
+  // Prove the pinned behavior loses the terminal error for this exact retry shape.
+  const before = assembler(native)
+  before.replaceWindow([...start, ...retry, ...end({ kind: 'error', error: finalError })], false); before.flush()
+  assert.equal(terminal(before).length, 0)
+  for (const withRetry of [false, true]) {
+    for (const mode of ['replay', 'append', 'paged']) {
+      for (const failed of [false, true]) {
+        const entries = [...start, ...(withRetry ? retry : []), ...end(failed ? { kind: 'error', error: finalError } : { kind: 'completed' })]
+        const value = assembler(adapted)
+        if (mode === 'append') {
+          for (const entry of entries) {
+            value.append(entry); value.flush()
+            if (entry.event.type !== 'turn/end') assert.equal(terminal(value).length, 0)
+          }
+        } else if (mode === 'paged') {
+          const cut = withRetry ? 3 : 2
+          value.replaceWindow(entries.slice(cut), true); value.flush()
+          if (failed) assertFailure(value)
+          else assert.equal(terminal(value).length, 0)
+          value.prepend(entries.slice(0, cut), false); value.flush()
+        } else {
+          value.replaceWindow(entries, false); value.flush()
+        }
+        if (failed) assertFailure(value)
+        else assert.equal(terminal(value).length, 0)
+        const retries = nodes(value).filter(node => node.kind === 'model-retry')
+        assert.equal(retries.length, withRetry ? 1 : 0)
+        if (withRetry) assert.equal(retries[0].data.current.failure.code, 'SERVER')
+      }
+    }
+  }
+})
+
 // Execute the actual transformed native machine/facade/hub. The only fixture is
 // its observable-store dependency; no substitute input machine or send path.
 const section = (start, end) => adapted.slice(adapted.indexOf(start), adapted.indexOf(end))
@@ -49,6 +123,10 @@ function setup(sendSession = async () => {}) {
 
 test('every pinned seam fails closed on missing, duplicate or already adapted input', () => {
   assert.doesNotThrow(() => new Script(adapted))
+  const terminalSeam = native.slice(native.indexOf('if (!state.hidden) return chatNode'), native.indexOf('\n\t\t\t}', native.indexOf('if (!state.hidden) return chatNode')))
+  for (const replacement of ['', terminalSeam + terminalSeam]) {
+    assert.throws(() => adaptHarnessConversationSource(native.replace(terminalSeam, replacement)), /turn-error\/terminal-after-retry: expected one rc\.7 seam/u)
+  }
   assert.throws(() => adaptHarnessConversationSource('future'), /expected one rc\.7 seam/u)
   assert.throws(() => adaptHarnessConversationSource(native + native), /found 2/u)
   assert.throws(() => adaptHarnessConversationSource(adapted), /expected one rc\.7 seam/u)
@@ -62,6 +140,69 @@ test('every pinned seam fails closed on missing, duplicate or already adapted in
   assert.match(adapted, /write\(this\.snapshot\.draft, this\.fileRefs, this\.durableImages\)/u)
   assert.throws(() => adaptHarnessConversationSource(native.replace('}, InputBar);', '}, ChangedInputBar);')), /apply\/composer-body: expected one rc\.7 seam/u)
   assert.match(adapted, /"e-mate\.conversation\.composer": \{ kind: "single", scope: "session-maybe" \}/u)
+})
+
+test('live image tail keeps the native definition and fails closed when its pinned seams change', () => {
+  for (const [seam, owner] of [
+    ['kind: "turn-tail",', 'images/job-tail-match'],
+    ['function closingAnchor(context) {', 'images/live-tail-anchor'],
+    ['if (end?.event.type !== "turn/end") return null;', 'images/live-tail-data'],
+  ]) {
+    assert.throws(() => adaptHarnessConversationSource(native.replace(seam, 'changed seam')), error =>
+      error.message.includes(owner + ': expected one rc.7 seam'))
+  }
+  const definition = bundle => {
+    const start = bundle.indexOf('//#region lib/types/client/conversation-nodes/turn-tail.js')
+    return new Function('_deepseek_ai_dsh_client_runtime_client', 'deriveTurnMetrics', 'CHAT_SYNTHETIC_SEQ_OFFSETS',
+      bundle.slice(start, bundle.indexOf('//#endregion', start)) + '\nreturn { turnTailDefinition, closingAnchor }',
+    )({ isAppendSurfaceEvent: event => event.surfaceOp === 'append', toAssistantBlocks: content => content },
+      () => new Map(), { finalizedFollowup: 0.1 })
+  }
+  const original = definition(native), live = definition(adapted)
+  const start = { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }
+  const assistant = { type: 'assistant/message', seq: 2, time: 2, surfaceOp: 'append', data: {
+    turn: 1, step: 1, message: { content: [{ kind: 'text', text: '正在生成。' }] },
+  } }
+  const call = { type: 'tool/call', seq: 3, time: 3, data: { turn: 1, step: 1 } }
+  const context = (imageTool, status = 'open', matches = [assistant, call]) => {
+    const turn = { turn: 1, status, steps: [{ data: new Map([['assistant-step', {
+      finalNode: { seq: 2 }, blocks: [{ kind: 'text', text: '正在生成。' }],
+    }]]) }], data: new Map([['deliverables', { produced: [{ path: 'report.pdf', seq: 3 }] }]]) }
+    const location = { kind: 'turn', turn }
+    return { start: { event: start, location }, matches: matches.map(event => ({
+      event: event.type === 'tool/call' ? { ...event, data: { ...event.data, name: imageTool ?? 'read_file' } } : event,
+      location,
+    })), state: { turn: 1 } }
+  }
+  const data = ctx => live.turnTailDefinition.buildLocationData(ctx, 'turn')
+  assert.equal(data(context(undefined)), null, 'ordinary file/text turn stays closed-only')
+  assert.equal(data(context('subagent')), null, 'background work does not claim a direct image tail')
+  assert.equal(data(context('imagegen', 'closed')), null, 'missing closed boundary is not a live tail')
+  assert.equal(data({ matches: [] }), null, 'missing Turn is not inferred')
+  for (const imageTool of ['generate_image', 'edit_image', 'get_image_generation_task', 'imagegen', 'image_batch']) {
+    const ctx = context(imageTool)
+    assert.deepEqual(data(ctx).value, { turn: 1, seq: 3, time: 3, closing: null, branchUnavailable: true })
+    assert.equal(live.closingAnchor(ctx), 3.1)
+  }
+  const receipt = { type: 'emate/image-output', seq: 4, time: 4, data: { schema_version: 3, turn: 1, tool_name: 'generate_image' } }
+  assert.deepEqual(live.turnTailDefinition.match(receipt), { id: '1', role: 'update' })
+  assert.equal(data(context('run_code', 'open', [assistant, call, receipt])).value.seq, 4)
+  assert.equal(live.turnTailDefinition.match({ ...receipt, data: { ...receipt.data, turn: undefined } }), null)
+  const result = { type: 'tool/result', seq: 4, time: 4, surfaceOp: 'append', data: { turn: 1, message: { content: [
+    { type: 'tool-result', isError: false, content: [{ type: 'image', attachment: imageRef() }] },
+  ] } } }
+  assert.equal(data(context(undefined, 'open', [assistant, call, result])).value.seq, 4)
+  result.data.message.content[0].isError = true
+  assert.equal(data(context(undefined, 'open', [assistant, call, result])), null)
+  for (const ending of ['completed', 'error', 'interrupted']) {
+    const end = { type: 'turn/end', seq: 8, time: 8, data: { turn: 1, reason: { kind: ending } } }
+    const ctx = context('imagegen', 'closed', [assistant, call, end])
+    assert.deepEqual(data(ctx), original.turnTailDefinition.buildLocationData(ctx, 'turn'))
+    assert.equal(live.closingAnchor(ctx), original.closingAnchor(ctx), 'closed prose anchor remains native')
+    assert.equal(live.turnTailDefinition.publication({ event: end }), 'immediate')
+  }
+  assert.equal(live.turnTailDefinition.publication({ event: call }), original.turnTailDefinition.publication({ event: call }))
+  assert.equal(live.turnTailDefinition.publication({ event: result }), original.turnTailDefinition.publication({ event: result }))
 })
 
 test('native scoped chat store persists one file list, cold restores names, and removes only the selected ref', () => {
@@ -541,15 +682,36 @@ test('identity changes invalidate native tab and breadcrumb saves even before th
 test('native chat opener reports failed artifact opening through its own input notice', async () => {
   const original = adapted.slice(adapted.indexOf('openFile: (path) => {'), adapted.indexOf('loadOlder:', adapted.indexOf('openFile: (path) => {')))
   const notices = []
-  const openFile = new Function('sessions', 'sessionId', 'workspaces', 'ctx', '_deepseek_ai_dsh_client_runtime_client', `return ({${original}}).openFile`)(
+  const inputHub = { for: () => ({ notify: (...args) => notices.push(args) }) }
+  // Both callbacks share the native apply closure's existing input hub.
+  // Cordis rejects property access because the plugin cannot inject itself.
+  const ctx = { get conversation() { throw Error('cannot get property "conversation" without inject') } }
+  const openFile = new Function('sessions', 'sessionId', 'workspaces', 'ctx', 'inputHub', '_deepseek_ai_dsh_client_runtime_client', `return ({${original}}).openFile`)(
     { list: { getSnapshot: () => ({ byId: { current: { cwd: '/project' } } }) }, scope: () => ({}) }, 'current',
     { openPath: async () => { throw Error('synthetic missing artifact /private/not-for-ui') } },
-    { conversation: { input: { for: () => ({ notify: (...args) => notices.push(args) }) } } },
+    ctx, inputHub,
     { resolveWorkspacePath: (cwd, path) => cwd + '/' + path },
   )
   openFile('missing.pdf')
   await new Promise(resolve => setImmediate(resolve))
   assert.deepEqual(notices, [['error', '文件不存在、已移出项目或无法打开，请检查原产物后重试。']])
+})
+
+test('native canvas header reports save failures without self-service property access', () => {
+  const start = adapted.indexOf('reportViewError: (error) => {')
+  const original = adapted.slice(start, adapted.indexOf('\n', start))
+  const notices = []
+  let scope = {}
+  const report = new Function('sessions', 'sessionId', 'ctx', 'inputHub', `return ({${original}}).reportViewError`)(
+    { scope: () => scope }, 'current',
+    { get conversation() { throw Error('cannot get property "conversation" without inject') } },
+    { for: () => ({ notify: (...args) => notices.push(args) }) },
+  )
+  report(Error('画布尚未保存，请重试。'))
+  assert.deepEqual(notices, [['error', '画布尚未保存，请重试。']])
+  scope = undefined
+  report(Error('late failure'))
+  assert.equal(notices.length, 1)
 })
 
 
@@ -574,7 +736,7 @@ test('native multi-turn receipts support exact follow-up mentions without creati
   const real = new Function('_deepseek_ai_dsh_client_runtime_client', source.slice(begin, end) + '\nreturn { deliverablesDefinition, selectProducedFiles, producedFileMentions }')(runtime)
   const serviceStart = source.indexOf('ctx.provide("chatFileMentions", '), serviceEnd = source.indexOf('} });', serviceStart) + 5
   let service
-  new Function('ctx', 'selectProducedFiles', 'producedFileMentions', 't', source.slice(serviceStart, serviceEnd))({ provide: (_, value) => { service = value } }, real.selectProducedFiles, real.producedFileMentions, (_, args) => args.name)
+  new Function('ctx', 'selectProducedFiles', 'producedFileMentions', 't', source.slice(serviceStart, serviceEnd))({ get: () => undefined, provide: (_, value) => { service = value } }, real.selectProducedFiles, real.producedFileMentions, (_, args) => args.name)
   const path = 'exports/中文演示.pptx', futurePath = 'exports/未来.pptx'
   let seq = 0
   const events = []
@@ -600,7 +762,7 @@ test('native multi-turn receipts support exact follow-up mentions without creati
     const chat = assembler.snapshot('chat'), opened = []
     const currentTurn = chat.timeline.turns.get(4), closing = events.find(event => event.type === 'assistant/message' && event.data.turn === 4)
     const owner = { turn: currentTurn, seq: closing.seq, openFile: value => opened.push(value) }
-    const session = { getSnapshot: () => ({ chat }) }
+    const session = { getSnapshot: () => ({ sessionId: 'one', openState: 'open', chat }) }
     let current = 'one', binding = { session }, gated = false
     const sessions = { binding: id => id === 'one' ? binding : undefined, list: { getSnapshot: () => ({ current }) } }
     const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
@@ -644,6 +806,14 @@ test('assistant echo filtering is same-turn, successful native output only and r
   assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), [text, c])
   nodes.delete('1:late')
   assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), [text, b, c])
+  nodes.set('1:receipt', { kind: 'e-mate-tool-images', visibility: 'hidden', data: { items: [
+    { status: 'completed', attachment: { attachmentId: 'b' } },
+    { status: 'failed', attachment: { attachmentId: 'c' } },
+  ] } })
+  assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), [text, c])
+  nodes.set('1:query', { kind: 'tool-call', data: { root: { kind: 'result', isError: false, content: [],
+    resultView: { card: 'generic', content: [{ type: 'image', attachment: { attachmentId: 'c' } }] } } } })
+  assert.deepEqual(owners.emateAssistantImageBlocks(snapshot, node), [text])
   const marker = '//#region lib/types/client/conversation-nodes/assistant.js'
   const part = value => { const start = value.indexOf(marker); assert.notEqual(start, -1); return value.slice(start, value.indexOf('//#endregion', start)) }
   assert.equal(part(adapted), part(native), 'render filtering must not change native assistant projection')

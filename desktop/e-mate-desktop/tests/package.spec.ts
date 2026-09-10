@@ -278,7 +278,7 @@ describe('published package surface', () => {
       '!node_modules/**/node-pty/build/**',
     ])
     expect(manifest.build?.extraResources).toEqual([
-      { from: 'build/python-runtime', to: 'python-runtime' },
+      { from: 'build/python-runtime', to: 'python-runtime', filter: ['darwin-*/**', 'win32-*/**'] },
       { from: 'third-party-notices', to: 'third-party-notices' },
       { from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     ])

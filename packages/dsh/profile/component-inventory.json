@@ -114,6 +114,18 @@
       "root": "packages/dsh-plugin-tidychat",
       "desktop": "bundled-profile",
       "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-imagegen",
+      "root": "packages/dsh-plugin-imagegen",
+      "desktop": "bundled-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-univer-office",
+      "root": "packages/dsh-plugin-univer-office",
+      "desktop": "bundled-profile",
+      "cli": true
     }
   ]
 }

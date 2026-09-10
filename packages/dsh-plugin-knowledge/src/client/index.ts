@@ -1,6 +1,27 @@
 import { CHANNEL, GRAPH_ASSET, GRAPH_MODULE, parseKnowledgeRpc } from '../contract.ts'
 import { KnowledgeConstellationIcon, KnowledgeEntry, KnowledgePage } from './page.tsx'
 export const inject = ['slots', 'connection', 'modules', 'workspaces', 'sessions', 'conversation']
+/** Select the native task, then leave the knowledge route through the existing chat route. */
+export async function openKnowledgeTask(ctx: any, sessionId: string, viewActions: (id: string) => { setView(view: string): void } | undefined): Promise<void> {
+  const controller = new AbortController()
+  const cancel = () => controller.abort()
+  addEventListener('emate:identity-changed', cancel); addEventListener('popstate', cancel)
+  const check = () => {
+    controller.signal.throwIfAborted()
+    if (location.pathname !== '/knowledge' || document.querySelector('[data-emate-identity-gate]')) throw Error('当前页面或账号已变化，请重新打开知识任务。')
+  }
+  try {
+    check()
+    await ctx.get?.('emateCanvas')?.beforeNavigate()
+    check()
+    await ctx.sessions.refresh()
+    check()
+    ctx.sessions.open(sessionId)
+    viewActions(sessionId)?.setView('chat')
+    history.pushState(null, '', `/chat/${encodeURIComponent(sessionId)}`)
+    dispatchEvent(new PopStateEvent('popstate'))
+  } finally { removeEventListener('emate:identity-changed', cancel); removeEventListener('popstate', cancel) }
+}
 /** Use the native input and Workspace default projection; never submit or rebuild attachments. */
 export async function prepareKnowledgeDraft(ctx: any, text: string, signal: AbortSignal, viewActions: (id: string) => { setView(view: string): void } | undefined): Promise<void> {
   const initialSession = ctx.sessions.list.getSnapshot().current
@@ -66,7 +87,7 @@ export function apply(ctx: any): void {
         signal?.throwIfAborted()
         return path
       },
-      openTask: (sessionId: string) => ctx.sessions.open(sessionId),
+      openTask: (sessionId: string) => openKnowledgeTask(ctx, sessionId, id => actions.get(id)),
       callKnowledge: async (endpoint: string, payload: Record<string, unknown>, signal?: AbortSignal) => {
         const response = await ctx.connection.rpc.call(CHANNEL, endpoint, payload, signal)
         return parseKnowledgeRpc(response)

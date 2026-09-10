@@ -25,6 +25,25 @@ export function adaptHarnessFsSource(source) {
   return source.replace(FS_OLD, FS_NEW)
 }
 
+export const SESSION_TITLE_PACKAGE = '@deepseek-ai/dsh-session-title'
+export const SESSION_TITLE_ADAPTER_PATH = 'scripts/harness-runtime-adapters.mjs'
+
+const TITLE_SCHEDULE = '\t\t\tif (registration.provider.automatic === "all-prompts" || session.header.parentSession === void 0 && messages.length === 1 && this.get(session) === void 0) {'
+const TITLE_SCHEDULE_GROUNDED = String.raw`			// Preserve a complete compact human title instead of asking a model to expand it.
+			const firstText = messages.length === 1 ? messages[0].text : "";
+			const normalized = normalizeSessionTitle(firstText, Number.MAX_SAFE_INTEGER);
+			const compactHumanTitle = normalized.length > 0 && !/[\r\n\u2028\u2029]/u.test(firstText)
+				&& event.data.content.every(block => block.type === "text") && !event.data.source.mentions?.length
+				&& normalized === fallbackSessionTitle(firstText, this.config.fallbackMaxWords, this.config.fallbackMaxBytes);
+			if (registration.provider.automatic === "all-prompts" || !compactHumanTitle && session.header.parentSession === void 0 && messages.length === 1 && this.get(session) === void 0) {`
+
+/** Adapt only the deployed rc.7 title scheduler; fallback, explicit refresh and rename remain native. */
+export function adaptHarnessSessionTitleSource(source) {
+  const occurrences = source.split(TITLE_SCHEDULE).length - 1
+  if (occurrences !== 1) throw new Error(`Harness title adapter expected one rc.7 automatic-title seam, found ${occurrences}`)
+  return source.replace(TITLE_SCHEDULE, TITLE_SCHEDULE_GROUNDED)
+}
+
 async function replaceRuntimeFile(target, source) {
   const { mode } = await stat(target)
   // pnpm deploy can hardlink this entry to the pinned checkout.
@@ -55,4 +74,6 @@ export async function applyHarnessRuntimeAdapters(runtimeRoot) {
   await replaceRuntimeFile(slotTarget, adaptHarnessSlotErrorSource(await readFile(slotTarget, 'utf8')))
   const conversationTarget = join(runtimeRoot, 'node_modules', CONVERSATION_PACKAGE, 'lib', 'client.js')
   await replaceRuntimeFile(conversationTarget, adaptHarnessConversationSource(await readFile(conversationTarget, 'utf8')))
+  const titleTarget = join(runtimeRoot, 'node_modules', SESSION_TITLE_PACKAGE, 'lib', 'index.js')
+  await replaceRuntimeFile(titleTarget, adaptHarnessSessionTitleSource(await readFile(titleTarget, 'utf8')))
 }

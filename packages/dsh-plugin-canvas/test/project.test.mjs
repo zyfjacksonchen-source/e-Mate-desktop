@@ -18,10 +18,19 @@ async function setup(t) {
 test('canvas edit preserves ordered original and annotation roles and refuses a missing original', () => {
   const project = emptyProject('main')
   const sourceIds = ['sha256:' + 'a'.repeat(64), 'sha256:' + 'b'.repeat(64)]
+  project.assets = sourceIds.map(attachmentId => ({ ownerSessionId: 'live', ref: { attachmentId, mediaType: 'image/png', bytes: 42, width: 2, height: 3 } }))
   const intent = { id: 'edit-1', kind: 'edit', pageId: project.pages[0].id, sessionId: 'live', sourceIds, imported: [] }
   const prompt = intentPrompt(project, intent, '去掉海报上的文字')
   assert(prompt.includes(JSON.stringify(sourceIds)))
-  assert.match(prompt, /imagegen 编辑原图/u)
+  assert.match(prompt, /edit_image 编辑原图/u)
+  assert.match(prompt, /source_images 必须完整传入/u)
+  assert.doesNotMatch(prompt, /source_image 必须/u)
+  const single = intentPrompt(project, { ...intent, sourceIds: [sourceIds[0]] }, '只修改第一张')
+  assert.match(single, /source_image 必须完整传入/u)
+  assert.doesNotMatch(single, /source_images/u)
+  assert.throws(() => intentPrompt({ ...project, assets: project.assets.slice(0, 1) }, intent, '修改'), /参考图附件记录/u)
+  assert(prompt.includes(JSON.stringify({ attachment_id: sourceIds[0], media_type: 'image/png', bytes: 42, width: 2, height: 3 })))
+  assert.doesNotMatch(prompt, /image_url|imagegen|image_batch/u)
   assert.match(prompt, /第一张是待修改原图/u)
   assert.match(prompt, /保留其余区域、人物身份/u)
   assert.throws(() => intentPrompt(project, { ...intent, sourceIds: [] }, '去掉文字'), /缺少原图/u)

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { NATIVE_EXECUTION } from '../image-single/native-fixture.mjs'
 
 import { RELEASE_VERSION, ticketFor, versionFor } from './release-identity.mjs'
 export { RELEASE_VERSION }
@@ -111,6 +112,7 @@ function environment(value, layer, label) {
 }
 
 function validateLocal(value, expectedProvenance) {
+  if (expectedProvenance.version === RELEASE_VERSION) return validateNativeLocalEvidence(value, expectedProvenance)
   exactKeys(value, ['schema_version', 'ticket', 'claim', 'environment', 'provenance', 'measured_at', 'source_state', 'batches', 'tasks', 'fully_successful_batches', 'runtime_ms', 'provider_calls', 'typed_429_retry_probe', 'source_assertions', 'metrics', 'samples'], 'local')
   environment(value.environment, 'local-test-provider', 'local.environment')
   provenance(value.provenance, 'local.provenance'); same(value.provenance, expectedProvenance, 'local provenance')
@@ -142,6 +144,58 @@ function validateLocal(value, expectedProvenance) {
     integer(sample.max_active, 'local max_active'); require(sample.max_active <= Math.min(sample.requested_concurrency, 4), 'local concurrency bound failed')
   }
   require(tasks === report.tasks, 'local task total mismatch')
+  return value
+}
+
+export function validateNativeLocalEvidence(value, expectedProvenance = value.provenance, { requireClean = true } = {}) {
+  exactKeys(value, ['schema_version', 'execution_contract', 'ticket', 'claim', 'environment', 'provenance', 'measured_at', 'source_state',
+    'batches', 'tasks', 'fully_successful_batches', 'runtime_ms', 'provider_calls', 'typed_429_retry_probe', 'source_assertions', 'metrics', 'samples'], 'native local')
+  require(value.schema_version === 3 && value.execution_contract === NATIVE_EXECUTION && value.ticket === TICKET, 'historical local cohort cannot close native execution')
+  require(value.claim === 'local-source-only-not-provider-latency-not-ui-first-visible-not-direct-single-image-evidence', 'native local claim')
+  environment(value.environment, 'local-test-provider', 'native local.environment')
+  provenance(value.provenance, 'native local.provenance'); same(value.provenance, expectedProvenance, 'native local provenance')
+  timestamp(value.measured_at, 'native local.measured_at')
+  require(['CLEAN', 'DIRTY'].includes(value.source_state), 'native local source state')
+  if (requireClean) require(value.source_state === 'CLEAN', 'local source evidence requires a clean committed tree')
+  integer(value.batches, 'native local batches', 100); integer(value.tasks, 'native local tasks', value.batches * 2)
+  integer(value.fully_successful_batches, 'native local fully successful batches'); finite(value.runtime_ms, 'native local runtime')
+  integer(value.provider_calls, 'native local provider calls')
+  require(value.typed_429_retry_probe === 'OPEN', 'local fixture cannot claim the real provider probe')
+  exactKeys(value.source_assertions, ['duplicate_provider_generation', 'legal_terminal_rate', 'successful_image_retention_rate'], 'native local assertions')
+  same(value.source_assertions, { duplicate_provider_generation: 0, legal_terminal_rate: 1, successful_image_retention_rate: 1 }, 'native local invariants')
+  require(Array.isArray(value.samples) && value.samples.length === value.batches, 'native local sample count')
+  const seen = new Set(), sizes = new Map()
+  let tasks = 0, completed = 0
+  for (const sample of value.samples) {
+    exactKeys(sample, ['batch', 'task_count', 'tool_counts', 'terminal_status', 'first_completed_receipt_ms', 'all_terminal_ms', 'tool_terminal_ms',
+      'receipt_projection_lower_bound_ms', 'success_count', 'failure_count', 'max_active'], 'native local sample')
+    integer(sample.batch, 'native sample batch', 1); require(!seen.has(sample.batch), 'native batch IDs must be unique'); seen.add(sample.batch)
+    require([2, 4, 5, 8].includes(sample.task_count), 'native sample task count'); tasks += sample.task_count
+    sizes.set(sample.task_count, (sizes.get(sample.task_count) ?? 0) + 1)
+    same(sample.tool_counts, sample.task_count <= 4 ? [sample.task_count] : [4, sample.task_count - 4], 'native 5/8 must compose real count<=4 Tools')
+    require(['completed', 'partial'].includes(sample.terminal_status), 'native sample terminal status')
+    for (const key of ['first_completed_receipt_ms', 'all_terminal_ms', 'receipt_projection_lower_bound_ms']) finite(sample[key], `native sample ${key}`)
+    require(sample.first_completed_receipt_ms <= sample.all_terminal_ms, 'native receipt follows terminal')
+    require(Array.isArray(sample.tool_terminal_ms) && sample.tool_terminal_ms.length === sample.tool_counts.length, 'native per-tool timing count')
+    for (const elapsed of sample.tool_terminal_ms) { finite(elapsed, 'native tool terminal'); require(elapsed <= sample.all_terminal_ms, 'native tool follows all-terminal') }
+    integer(sample.success_count, 'native success count'); integer(sample.failure_count, 'native failure count')
+    require(sample.success_count + sample.failure_count === sample.task_count, 'native outcome counts')
+    require((sample.terminal_status === 'completed') === (sample.failure_count === 0), 'native completion must mean all images succeeded')
+    completed += sample.failure_count === 0 ? 1 : 0
+    integer(sample.max_active, 'native peak requests', 1); require(sample.max_active <= 4, 'native HTTP concurrency exceeded four')
+  }
+  require([2, 4, 5, 8].every(size => (sizes.get(size) ?? 0) >= 20), 'native fixed set requires >=20 runs of 2/4/5/8')
+  require(tasks === value.tasks && completed === value.fully_successful_batches, 'native aggregate counts')
+  require(value.provider_calls === tasks, 'native fixture must attempt each admitted image once')
+  exactKeys(value.metrics, ['first_completed_receipt', 'all_terminal', 'tool_terminal', 'receipt_projection_lower_bound'], 'native metrics')
+  const summarize = values => {
+    const ordered = values.toSorted((a, b) => a - b)
+    return { p50_ms: ordered[Math.ceil(ordered.length * 0.5) - 1], p95_ms: ordered[Math.ceil(ordered.length * 0.95) - 1], exact_observed_interval_ms: [ordered[0], ordered.at(-1)] }
+  }
+  for (const [key, values] of Object.entries({ first_completed_receipt: value.samples.map(s => s.first_completed_receipt_ms),
+    all_terminal: value.samples.map(s => s.all_terminal_ms), tool_terminal: value.samples.flatMap(s => s.tool_terminal_ms),
+    receipt_projection_lower_bound: value.samples.map(s => s.receipt_projection_lower_bound_ms) })) same(value.metrics[key], summarize(values), 'native timing arithmetic ' + key)
+  require(value.metrics.all_terminal.p95_ms < 250, 'source-only all-terminal p95 exceeded 250 ms')
   return value
 }
 

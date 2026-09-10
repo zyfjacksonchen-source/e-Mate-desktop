@@ -102,15 +102,17 @@ function emateArtifactFileMentions(ctx, owner, sessions, sessionId) {
     && !(typeof document !== "undefined" && document.querySelector("[data-emate-identity-gate]"));
   const previous = value => {
     if (!current()) return undefined;
-    const timeline = session.getSnapshot().chat.timeline;
+    const snapshot = session.getSnapshot();
+    if (snapshot.sessionId !== sessionId || snapshot.openState !== "open") return undefined;
+    const timeline = snapshot.chat.timeline;
     if (timeline.turns.get(owner.turn.turn) !== owner.turn) return undefined;
     for (const number of timeline.turnOrder) {
       if (number >= owner.turn.turn) continue;
       const turn = timeline.turns.get(number);
-      // Only exact receipt paths; never reinterpret a prior basename or
-      // manufacture a new turn's produced-file facts from assistant prose.
-      if (!turn?.data.get("deliverables")?.produced.some(item => item.seq < owner.seq && item.path === value)) continue;
-      const resolved = service?.forClosing({ ...owner, turn })?.resolve(value);
+      // The same native selector admits persisted receipts and structured Tool
+      // outputs. Prior paths never become this turn's produced-file facts.
+      if (!turn) continue;
+      const resolved = service?.forClosing({ ...owner, turn, nodes: undefined })?.resolve(value);
       if (resolved?.title === value) return resolved;
     }
     return undefined;
@@ -164,7 +166,7 @@ function emateAssistantImageBlocks(snapshot, node) {
   if (turn === undefined) return node.data.blocks;
   const ids = new Set();
   const visit = block => {
-    if ('kind' in block && !block.isError) for (const part of block.content) {
+    if ('kind' in block && !block.isError) for (const part of [...block.content, ...(block.resultView?.card === 'generic' ? block.resultView.content ?? [] : [])]) {
       if (part.type === 'image') ids.add(part.attachment.attachmentId);
     }
     for (const child of block.subCalls ?? []) visit(child);
@@ -172,6 +174,9 @@ function emateAssistantImageBlocks(snapshot, node) {
   for (const key of snapshot.chat.locations.getTurn(turn.turn)) {
     const item = snapshot.chat.nodes.get(key);
     if (item?.kind === 'tool-call') visit(item.data.root);
+    if (item?.kind === 'e-mate-tool-images' && item.visibility === 'hidden') {
+      for (const image of item.data.items) if (image.status === 'completed' && image.attachment) ids.add(image.attachment.attachmentId);
+    }
   }
   return node.data.blocks.filter(block => block.kind !== 'image' || !ids.has(block.attachment.attachmentId));
 }
@@ -183,16 +188,46 @@ function emateSameAssistantBlocks(left, right) {
 export function adaptHarnessConversationSource(source) {
   const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
 
+  // A retry describes an earlier request, never supersedes the final turn failure.
+  // Keep rc.7's failure projection and renderer; expose its authoritative turn/end.
+  change('if (!state.hidden) return chatNode(context, "turn-error", node.seq, node);\n\t\t\t\tconst current = context.current.get("chat");\n\t\t\t\treturn current === void 0 || current === null ? null : chatNode(context, "turn-error", node.seq, node, { visibility: "hidden" });',
+    'return chatNode(context, "turn-error", node.seq, node);', 'turn-error/terminal-after-retry')
+
   change('fileMentions: (owner) => ctx.get("chatFileMentions")?.forClosing(owner),',
     'fileMentions: (owner) => emateArtifactFileMentions(ctx, owner, sessions, sessionId),', 'artifacts/explicit-link-owner')
   // Every native file chip and receipt-derived prose link shares this opener.
   change('workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => {});',
-    'workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => { const scope = sessions.scope(sessionId); if (scope) ctx.conversation.input.for(scope).notify("error", "文件不存在、已移出项目或无法打开，请检查原产物后重试。"); });', 'artifacts/open-error')
+    'workspaces.openPath((0, _deepseek_ai_dsh_client_runtime_client.resolveWorkspacePath)(cwd, path)).catch(() => { const scope = sessions.scope(sessionId); if (scope) inputHub.for(scope).notify("error", "文件不存在、已移出项目或无法打开，请检查原产物后重试。"); });', 'artifacts/open-error')
 
   change('function AssistantNodeView({ node, useTurnData, openFile, loadImage, fileMentions, t }) {',
     'function AssistantNodeView({ node, useSession, useTurnData, openFile, loadImage, fileMentions, t }) {\n const imageBlocks = useSession(snapshot => emateAssistantImageBlocks(snapshot, node), emateSameAssistantBlocks);', 'images/assistant-owner');
   change('blocks: data.blocks,\n\t\t\t\tstreaming: data.status === "running",',
     'blocks: imageBlocks,\n\t\t\t\tstreaming: data.status === "running",', 'images/assistant-echo');
+
+  // Image receipts must reach the existing Turn tail before a later model step
+  // ends. Keep its native key, renderer and closed-Turn derivation; ordinary
+  // file/text Turns still acquire their footer only on turn/end.
+  change('function closingAnchor(context) {\n\t\t\tlet anchor =',
+    'function closingAnchor(context) {\n\t\t\tif (turnLocation(context)?.status === "open") return (context.matches.at(-1)?.event.seq ?? context.start?.event.seq ?? 0) + CHAT_SYNTHETIC_SEQ_OFFSETS.finalizedFollowup;\n\t\t\tlet anchor =', 'images/live-tail-anchor')
+  change('if (end?.event.type !== "turn/end") return null;\n\t\t\tconst turn = turnLocation(context);\n\t\t\tif (turn === void 0) return null;',
+    `const turn = turnLocation(context);
+\t\t\tif (turn === void 0) return null;
+\t\t\tif (end?.event.type !== "turn/end") {
+\t\t\t\tif (turn.status !== "open") return null;
+\t\t\t\tconst hasImages = context.matches.some(({ event }) => event.type === "tool/call"
+\t\t\t\t\t&& (["generate_image", "edit_image", "get_image_generation_task", "imagegen", "image_batch"].includes(event.data.name))
+\t\t\t\t\t|| event.type === "emate/image-output" && event.data.schema_version === 3
+\t\t\t\t\t|| event.type === "tool/result"
+\t\t\t\t\t&& (0, _deepseek_ai_dsh_client_runtime_client.isAppendSurfaceEvent)(event)
+\t\t\t\t\t&& event.data.message.content.some(part => part.type === "tool-result" && !part.isError
+\t\t\t\t\t\t&& part.content?.some(content => content.type === "image")));
+\t\t\t\tif (!hasImages) return null;
+\t\t\t\tconst latest = context.matches.at(-1)?.event ?? context.start?.event;
+\t\t\t\treturn latest === void 0 ? null : { turn: turn.turn, seq: latest.seq, time: latest.time, closing: null, branchUnavailable: true };
+\t\t\t}`, 'images/live-tail-data')
+
+  change('kind: "turn-tail",\n\t\t\ttarget: "chat",\n\t\t\tmatch: (event) => {',
+    'kind: "turn-tail",\n\t\t\ttarget: "chat",\n\t\t\tmatch: (event) => {\n\t\t\t\tif (event.type === "emate/image-output" && event.data.schema_version === 3 && Number.isSafeInteger(event.data.turn) && event.data.turn >= 0 && ["generate_image", "edit_image"].includes(event.data.tool_name)) return { id: String(event.data.turn), role: "update" };', 'images/job-tail-match')
 
   // Native Header still commits via its own scoped actions; failed saves do
   // not change view, and pending work cannot redirect a newer session/click.
@@ -201,7 +236,7 @@ export function adaptHarnessConversationSource(source) {
   change('\t\t\t\t\t\t\t\t\t\t\topen(summary.id);', '\t\t\t\t\t\t\t\t\t\t\tvoid open(summary.id);', 'canvas/parent-session-action')
   change('\t\t\t\t\t\t\tactions.setView(viewTab.id);', '\t\t\t\t\t\t\tvoid selectView(viewTab.id);', 'canvas/tab-action')
   change('\t\t\t\tinject: () => ({\n\t\t\t\t\tviews,\n\t\t\t\t\topen: (id) => {',
-    '\t\t\t\tinject: (sessionId) => ({\n\t\t\t\t\tviews,\n\t\t\t\t\tbeforeViewNavigate: (view) => emateCanvasBeforeView(ctx, sessionId, view),\n\t\t\t\t\tisCurrentViewSession: () => sessions.list.getSnapshot().current === sessionId && !document.querySelector("[data-emate-identity-gate]"),\n\t\t\t\t\treportViewError: (error) => { const scope = sessions.scope(sessionId); if (scope) ctx.conversation.input.for(scope).notify("error", error instanceof Error ? error.message : "画布尚未保存，请重试。"); },\n\t\t\t\t\topen: (id) => {', 'canvas/header-inject')
+    '\t\t\t\tinject: (sessionId) => ({\n\t\t\t\t\tviews,\n\t\t\t\t\tbeforeViewNavigate: (view) => emateCanvasBeforeView(ctx, sessionId, view),\n\t\t\t\t\tisCurrentViewSession: () => sessions.list.getSnapshot().current === sessionId && !document.querySelector("[data-emate-identity-gate]"),\n\t\t\t\t\treportViewError: (error) => { const scope = sessions.scope(sessionId); if (scope) inputHub.for(scope).notify("error", error instanceof Error ? error.message : "画布尚未保存，请重试。"); },\n\t\t\t\t\topen: (id) => {', 'canvas/header-inject')
   // Preserve the mounted input/draft and native approval/question overlay.
   // Only its ordinary fallback is hidden; an elected interaction stays usable.
   change('\t\t\t\tclassName: ConversationRoot_module_css_default.composerFallback,', '\t\t\t\tclassName: ConversationRoot_module_css_default.composerFallback,\n\t\t\t\t"data-emate-composer-fallback": "",', 'canvas/composer-fallback')

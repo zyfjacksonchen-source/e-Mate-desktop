@@ -1,0 +1,4 @@
+- insert:
+    - id: emate-imagegen
+      name: '@e-mate/dsh-plugin-imagegen'
+      inject: [tools, jobs, attachments, emateIdentity, emateModelPolicy, emateCapabilities]

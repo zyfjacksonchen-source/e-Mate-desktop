@@ -123,11 +123,20 @@ export const intentMarker = (id: string) => `[e-Mate canvas ${identifier(id)}]`
 export function intentPrompt(project: CanvasProject, intent: CanvasIntent, instruction: string): string {
   text(instruction.trim(), 20_000)
   if (intent.kind === 'edit' && !intent.sourceIds.length) reject('修改图片缺少原图。')
+  const sourceImages = intent.kind !== 'edit' ? [] : intent.sourceIds.map(id => {
+    const ref = project.assets.find(asset => asset.ref.attachmentId === id)?.ref
+    if (ref === undefined) return reject('修改图片缺少原图或参考图附件记录。')
+    return { attachment_id: ref.attachmentId, media_type: ref.mediaType, bytes: ref.bytes,
+      width: ref.width, height: ref.height, ...(ref.name === undefined ? {} : { name: ref.name }) }
+  })
+  const sourceArgument = sourceImages.length === 1
+    ? `source_image 必须完整传入 ${JSON.stringify(sourceImages[0])}`
+    : `source_images 必须完整传入 ${JSON.stringify(sourceImages)}`
   const source = intent.sourceIds.length ? `\n使用所附图片，确切附件 ID：${intent.sourceIds.join(', ')}。` : ''
   const output = intent.kind === 'html' || intent.kind === 'slides'
     ? `\n使用已有文件工具，将完整、离线可用的 HTML 写到工作区相对路径 ${artifactPath(project.id, intent.id)}。${intent.kind === 'slides' ? '每张幻灯片用独立的 <section data-slide> 容器。' : ''}不要引用网络字体、脚本或资源。`
     : intent.kind === 'edit'
-      ? `\n使用已有 imagegen 编辑原图，image_url 必须按顺序传入 ${JSON.stringify(intent.sourceIds)}。第一张是待修改原图，其余仅用于说明标注要求，不是替换原图或新构图。只修改明确要求的内容，保留其余区域、人物身份、五官、表情、姿势和构图；去字只修复文字覆盖的背景，不重新创作整张图片。返回后对照原图检查修改范围及人物，未达到要求应如实说明。不要假装成功，也不要重新执行状态未知的请求。`
-      : '\n使用已有 imagegen 或 image_batch 工具生成结果；不要假装成功，也不要重新执行状态未知的请求。'
+      ? `\n使用已有 edit_image 编辑原图，${sourceArgument}。参考图顺序为 ${JSON.stringify(intent.sourceIds)}。第一张是待修改原图；其余图片按本次请求标明的角色用作额外来源或标注参考，说明标注不要加入成品。只修改明确要求的内容，保留其余区域、人物身份、五官、表情、姿势和构图；去字只修复文字覆盖的背景，不重新创作整张图片。返回后对照原图检查修改范围及人物，未达到要求应如实说明。不要假装成功，也不要重新执行状态未知的请求。`
+      : '\n使用已有 generate_image 工具生成结果；不要假装成功，也不要重新执行状态未知的请求。'
   return `${intentMarker(intent.id)}\n${instruction.trim()}${source}${output}`
 }

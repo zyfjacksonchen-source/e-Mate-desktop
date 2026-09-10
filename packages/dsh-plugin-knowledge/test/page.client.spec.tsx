@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { KnowledgeEntry, KnowledgePage } from '../src/client/page.tsx'
 const scope = 'c'.repeat(64), revision = 'a'.repeat(64)
@@ -447,4 +447,38 @@ it('preserves an in-flight draft and its exact snapshot when a poll discovers ne
   expect(screen.getByText(/资料已更新，当前阅读或检索保留原版本/)).toBeTruthy()
   await act(async () => finishDraft())
   expect(screen.getByText('版本 ' + revision.slice(0, 12))).toBeTruthy()
+})
+
+async function taskBridge() {
+  const { readFileSync } = await import('node:fs')
+  const { stripTypeScriptTypes } = await import('node:module')
+  const source = readFileSync('src/client/index.ts', 'utf8')
+  const body = source.slice(source.indexOf('export async function openKnowledgeTask'), source.indexOf('/** Use the native input'))
+  return new Function(stripTypeScriptTypes(body).replace('export async function', 'async function') + '; return openKnowledgeTask')()
+}
+it('opens an imported task only after native refresh and leaves the knowledge page on the existing chat route', async () => {
+  const open = await taskBridge(), order: string[] = [], setView = vi.fn()
+  const ctx = { get: () => ({ beforeNavigate: async () => { order.push('canvas') } }), sessions: {
+    refresh: async () => { order.push('refresh') }, open: vi.fn(() => { order.push('select') }),
+  } }
+  await open(ctx, 'native-import-session', () => ({ setView }))
+  expect(order).toEqual(['canvas', 'refresh', 'select'])
+  expect(ctx.sessions.open).toHaveBeenCalledWith('native-import-session')
+  expect(setView).toHaveBeenCalledWith('chat')
+  expect(location.pathname).toBe('/chat/native-import-session')
+})
+it('keeps the knowledge route when native selection fails and cancels a late task open after identity changes', async () => {
+  const open = await taskBridge()
+  const ctx = { get: () => undefined, sessions: { refresh: vi.fn(async () => {}), open: vi.fn(() => { throw Error('原任务暂不可用') }) } }
+  await expect(open(ctx, 'missing', () => undefined)).rejects.toThrow('原任务暂不可用')
+  expect(location.pathname).toBe('/knowledge')
+  ctx.sessions.open.mockClear()
+  let release!: () => void
+  ctx.sessions.refresh.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+  const pending = open(ctx, 'late', () => undefined)
+  await waitFor(() => expect(release).toBeTypeOf('function'))
+  dispatchEvent(new Event('emate:identity-changed')); release()
+  await expect(pending).rejects.toThrow()
+  expect(ctx.sessions.open).not.toHaveBeenCalled()
+  expect(location.pathname).toBe('/knowledge')
 })

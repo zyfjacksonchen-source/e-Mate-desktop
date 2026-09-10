@@ -1,0 +1,6 @@
+# Pinned Univer Host, Tools, Skills and browser UI in the native e-Mate Profile.
+- insert:
+    - id: univer
+      name: '@e-mate/dsh-plugin-univer-office'
+      config:
+        telemetry: false

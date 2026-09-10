@@ -18,3 +18,8 @@ export function minimumQualityPairs(version) {
   ticketFor(version, '503')
   return version === RELEASE_VERSION ? 30 : 50
 }
+
+export function imageModelFor(version) {
+  ticketFor(version, '502')
+  return version === RELEASE_VERSION ? 'gpt-image-2.5-flare' : 'gpt-image-2-pro'
+}

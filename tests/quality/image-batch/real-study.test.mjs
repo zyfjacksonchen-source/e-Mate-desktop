@@ -13,7 +13,7 @@ const categories = protocolConstants.CATEGORIES
 
 function context() {
   return {
-    root: new URL('https://production.example/v1'), token: 'private-session-token-value', upstreamModel: 'upstream-image-model',
+    root: new URL('https://production.example/v1'), token: 'private-session-token-value', upstreamModel: 'gpt-image-2.5-flare',
     provenance: { emate_commit: 'a'.repeat(40), harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d', desktop_reference: '6074088f5b660206e404b3591fab51fb99c69add', version: '2.0.18' },
     environment: { layer: 'production-provider', environment_name_sha256: hash('production'), gateway_origin_sha256: hash('https://production.example/v1'), deployment_fingerprint_sha256: hash('deployment') },
   }
@@ -44,13 +44,20 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
       const batchA = values.filter(value => value.allocation.A === 'batch').length
       assert(Math.abs(batchA - (values.length - batchA)) <= 1)
     }
+    assert(state.cases.every(value => value.request.model === 'gpt-image-2.5-flare'))
     const stateRaw = JSON.stringify(state) + '\n'; const precommit = hash(stateRaw)
     const output = join(temporary, 'outputs')
+    const stale = structuredClone(state); stale.cases[0].request.model = 'gpt-image-2-pro'
+    let staleCalls = 0
+    await assert.rejects(collectStudy(stale, hash(JSON.stringify(stale) + '\n'), context(), join(temporary, 'stale-output'), async () => { staleCalls++ }), /precommitted request differs/u)
+    assert.equal(staleCalls, 0)
+    assert.throws(() => prepareStudy(input, '1'.repeat(64), { ...context(), upstreamModel: 'gpt-image-2-pro' }), /fixed image route/u)
     let calls = 0
     const seenBatch = new Map()
     const active = { single: 0, batch: 0 }; const maximum = { single: 0, batch: 0 }
     const packet = await collectStudy(state, precommit, context(), output, async (_url, options) => {
       calls += 1
+      assert.equal(typeof options.body === 'string' ? JSON.parse(options.body).model : options.body.get('model'), 'gpt-image-2.5-flare')
       const headers = options.headers
       const condition = headers['x-e-mate-batch-id'] ? 'batch' : 'single'
       active[condition]++; maximum[condition] = Math.max(maximum[condition], active[condition])

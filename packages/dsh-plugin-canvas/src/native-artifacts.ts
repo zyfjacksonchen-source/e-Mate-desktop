@@ -39,7 +39,11 @@ function refsInEvents(events: readonly NativeEvent[]): ImageRef[] {
     if (['user/message', 'assistant/message', 'emate/image-draft-staged'].includes(event.type)) {
       content(event.data?.content); content(event.data?.message?.content)
     }
-    if (event.type === 'emate/image-output' && event.data?.schema_version === 2 && event.data?.status === 'completed') content(event.data.content)
+    if (event.type === 'tool/result') for (const part of event.data?.message?.content ?? []) {
+      if (part.type === 'tool-result' && !part.isError) content(part.content)
+    }
+    if (event.type === 'emate/image-output' && (event.data?.schema_version === 2 && event.data.status === 'completed'
+      || event.data?.schema_version === 3 && ['completed', 'failed', 'cancelled'].includes(event.data.status))) content(event.data.content)
   }
   return result
 }
@@ -72,6 +76,29 @@ export async function nativeImageOutputs(ctx: SessionContext, current: string, i
   if (!request) return []
   const outputs: CanvasAsset[] = []
   for (const event of session.events) {
+    if (event.type === 'emate/image-output' && event.data?.schema_version === 3
+      && ['completed', 'failed', 'cancelled'].includes(event.data.status) && event.data.revision === 2
+      && event.data.parent_session_id === intent.sessionId
+      && request.calls.has(event.data.root_call_id)
+      && session.events.some(call => call.type === 'tool/call' && call.data.callId === event.data.root_call_id
+        && call.data.turn === request.turn && (call.data.name === event.data.tool_name || call.data.name === 'run_code'))
+      && ['generate_image', 'edit_image'].includes(event.data.tool_name)
+      && Array.isArray(event.data.content) && event.data.content.length >= 1 && event.data.content.length <= 4) {
+      const refs: ImageRef[] = []
+      for (const block of event.data.content) {
+        if (block?.type !== 'image') break
+        try { refs.push(imageRef(block.attachment)) } catch { break }
+      }
+      if (refs.length === event.data.content.length) outputs.push(...refs.map(ref => ({ ownerSessionId: intent.sessionId, ref })))
+    }
+    if (event.type === 'tool/result' && event.data?.turn === request.turn) {
+      for (const part of event.data.message?.content ?? []) {
+        if (part.type !== 'tool-result' || part.isError || !request.calls.has(part.toolCallId)) continue
+        for (const block of part.content ?? []) if (block.type === 'image') {
+          try { outputs.push({ ownerSessionId: intent.sessionId, ref: imageRef(block.attachment) }) } catch {}
+        }
+      }
+    }
     if (event.type === 'emate/image-output' && event.data?.schema_version === 2 && event.data.status === 'completed'
       && event.data.parent_session_id === intent.sessionId && request.calls.has(event.data.call_id)
       && session.events.some(call => call.type === 'tool/call' && call.data.callId === event.data.call_id && call.data.name === 'imagegen')) {

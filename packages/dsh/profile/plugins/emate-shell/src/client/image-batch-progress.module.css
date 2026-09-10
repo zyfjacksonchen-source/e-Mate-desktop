@@ -137,8 +137,7 @@
   pointer-events: none;
 }
 .card:hover .canvasAction,
-.card:focus-within .canvasAction,
-.canvasAction[data-pending='true'] {
+.canvasAction:has(button:focus-visible) {
   opacity: 1;
   pointer-events: auto;
 }

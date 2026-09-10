@@ -10,6 +10,7 @@ import {
   FORBIDDEN_MACOS_UNIVERSAL_ENTRIES,
   MACOS_UNIVERSAL_NATIVE_ENTRIES,
 } from './mac-universal.ts'
+import { verifyUniverNativeRuntime, type UniverNativeTarget } from './univer-native-runtime.ts'
 
 /** AfterPack fields consumed without importing Electron Builder's incomplete declaration graph. */
 export interface PackagedRuntimeContext {
@@ -65,6 +66,13 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'build/tray-iconTemplate.png',
   'build/tray-icon-blue.png',
   'build/e-mate-profile/component-inventory.json',
+  'build/e-mate-profile/bundles/univer-office/package.json',
+  'build/e-mate-profile/bundles/univer-office/lib/index.js',
+  'build/e-mate-profile/bundles/univer-office/lib/client.js',
+  'build/e-mate-profile/bundles/univer-office/artifacts/gateway.cjs',
+  'build/e-mate-profile/bundles/univer-office/artifacts/unit-content-worker.mjs',
+  'build/e-mate-profile/bundles/univer-office/artifacts/viewer/index.html',
+  'build/e-mate-profile/bundles/univer-office/artifacts/render-machine/index.html',
   'build/e-mate-profile/bundles/cdp/package.json',
   'build/e-mate-profile/bundles/cdp/lib/index.mjs',
   'build/e-mate-profile/bundles/pet/lib/assets/xiaoxin-v2.json',
@@ -533,11 +541,22 @@ export function verifyPackagedFeishuNotices(context: PackagedRuntimeContext): vo
  * @returns A promise that rejects before signing when the runtime is incomplete.
  */
 export async function afterPack(context: PackagedRuntimeContext): Promise<void> {
+  verifyPackagedUniver(context)
   preparePackagedFeishu(context)
   verifyPackagedFeishuNotices(context)
   verifyPackagedRuntime(context)
   verifyPackagedVision(context)
   verifyPackagedNodePty(context)
+}
+
+/** Check the final physical Office closure for every requested application architecture. */
+export function verifyPackagedUniver(context: PackagedRuntimeContext): void {
+  const targets: UniverNativeTarget[] = context.electronPlatformName === 'darwin'
+    ? context.arch === 4 ? ['darwin-arm64', 'darwin-x64']
+      : context.arch === 3 ? ['darwin-arm64'] : context.arch === 1 ? ['darwin-x64'] : []
+    : context.electronPlatformName === 'win32' && context.arch === 1 ? ['win32-x64-msvc'] : []
+  if (targets.length === 0) throw new Error('Univer native runtime cannot verify an unsupported or unspecified platform')
+  verifyUniverNativeRuntime(join(resolvePackagedUnpackedRoot(context), 'build/e-mate-profile/bundles/univer-office'), targets)
 }
 
 /** Reject incomplete offline visual dependencies in the actual unpacked bundle. */

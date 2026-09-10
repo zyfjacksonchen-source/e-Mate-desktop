@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   hydrateImageReceiptProjections,
   imageReceiptsProjectionDefinition,
-} from '../profile/plugins/image-generation.js'
+} from '../profile/plugins/image-history.js'
 
 const schema = {
   finite() { return this },
@@ -22,10 +22,10 @@ const z = {
 const projection = imageReceiptsProjectionDefinition(z)
 const header = id => ({ id, origin: 'subagent' })
 
-test('native receipt face exposes running work but terminal state never regresses to running', () => {
-  assert.equal(projection.stateVersion, 2)
+for (const schemaVersion of [2, 3]) test(`schema ${schemaVersion} receipt exposes running work but terminal state never regresses`, () => {
+  assert.equal(projection.stateVersion, 3)
   const event = (status, revision, seq) => ({type:'emate/image-output',seq,time:seq * 100,
-    data:{schema_version:2,revision,call_id:'call',parent_session_id:'a',operation:'edit',status}})
+    data:{schema_version:schemaVersion,revision,call_id:'call',parent_session_id:'a',operation:'edit',status}})
   const running = projection.apply(projection.init(), event('running',1,1))
   assert.equal(projection.view(running)[0].receipt.operation,'edit')
   for (const status of ['completed','needs-review','failed','cancelled','unknown']) {
@@ -34,6 +34,34 @@ test('native receipt face exposes running work but terminal state never regresse
     assert.equal(projection.apply(terminal,event('running',1,3)),terminal)
     assert.equal(projection.apply(terminal,event('running',3,4)),terminal)
   }
+})
+
+test('new multi-image Code receipts coexist with historical receipts through replay without changing attachment ownership', () => {
+  const image = value => ({ type: 'image', attachment: { attachmentId: `sha256:${value.repeat(64)}`, mediaType: 'image/png', bytes: 8, width: 1, height: 1 } })
+  const old = { type: 'emate/image-output', seq: 1, time: 100,
+    data: { schema_version: 2, revision: 2, call_id: 'old', status: 'completed',
+      parent_session_id: 'session', content: [image('a')] } }
+  const running = { type: 'emate/image-output', seq: 2, time: 200,
+    data: { schema_version: 3, revision: 1, call_id: 'nested', root_call_id: 'code',
+      parent_session_id: 'session', tool_name: 'generate_image', task_id: 'task', turn: 2,
+      status: 'running', sources: [], content: [] } }
+  const completed = { ...running, seq: 3, time: 300,
+    data: { ...running.data, revision: 2, status: 'completed', content: [
+      image('b'),
+      image('c'),
+    ] } }
+  const log = [old, running, completed]
+  const before = JSON.stringify(log)
+  const replay = () => log.reduce((state, event) => projection.apply(state, event), projection.init())
+  const state = replay()
+  assert.deepEqual(projection.view(state), [
+    { seq: 1, createdAt: 100, receipt: old.data },
+    { seq: 3, createdAt: 200, receipt: completed.data },
+  ])
+  assert.deepEqual(replay(), state)
+  assert.equal(projection.apply(state, completed), state)
+  assert.equal(projection.apply(state, { ...running, seq: 4 }), state)
+  assert.equal(JSON.stringify(log), before)
 })
 
 function context(headers, cachedSnapshots = new Map(), coldSnapshot = async () => {}) {

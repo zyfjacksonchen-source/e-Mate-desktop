@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as guiCollector from './project-release-evidence.mjs'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { NATIVE_EXECUTION } from '../image-single/native-fixture.mjs'
 import { CLAIM, DESKTOP_REFERENCE, HARNESS_COMMIT, createOpenManifest, projectManifest, validateManifest, validateRawEvidence } from './release-evidence-protocol.mjs'
 
 const MANIFEST = new URL('../../../docs/2.0.17/evidence-manifests/performance.json', import.meta.url)
@@ -70,6 +76,18 @@ function currentStudy() {
   const value = validStudy()
   value.provenance.version = '2.0.18'
   for (const layer of [value, value.local, value.staging, value.production, value.macos_gui]) layer.ticket = 'EM218-502'
+  value.local.schema_version = 3
+  value.local.execution_contract = NATIVE_EXECUTION
+  value.local.samples = Array.from({ length: 100 }, (_, index) => {
+    const count = [2, 4, 5, 8][index % 4], toolCounts = count <= 4 ? [count] : [4, count - 4]
+    return { batch: index + 1, task_count: count, tool_counts: toolCounts, terminal_status: 'completed',
+      first_completed_receipt_ms: 1, all_terminal_ms: 2, tool_terminal_ms: toolCounts.map(() => 1),
+      receipt_projection_lower_bound_ms: 0.1, success_count: count, failure_count: 0, max_active: Math.min(4, count) }
+  })
+  value.local.tasks = value.local.samples.reduce((sum, sample) => sum + sample.task_count, 0)
+  value.local.provider_calls = value.local.tasks
+  const summary = x => ({ p50_ms: x, p95_ms: x, exact_observed_interval_ms: [x, x] })
+  value.local.metrics = { first_completed_receipt: summary(1), all_terminal: summary(2), tool_terminal: summary(1), receipt_projection_lower_bound: summary(0.1) }
   for (const batch of value.macos_gui.batches) batch.provider_billing_counts = Array(batch.task_count).fill(1)
   return value
 }
@@ -146,4 +164,55 @@ test('strict immutable URI rejects credentials, query strings, and non-HTTPS sto
   for (const uri of ['http://evidence.example/raw.json', 'https://user@evidence.example/raw.json', 'https://evidence.example/raw.json?q=1']) {
     assert.throws(() => validateRawEvidence(raw, { ...descriptor, uri }))
   }
+})
+
+
+test('current native source refuses retagged legacy batches, forged counts, timing and queue capacity', () => {
+  for (const mutate of [
+    value => { value.local.schema_version = 2; delete value.local.execution_contract },
+    value => { value.local.samples[2].tool_counts = [5] },
+    value => { value.local.samples[2].max_active = 5 },
+    value => { value.local.metrics.all_terminal.p95_ms = 1 },
+    value => { value.local.source_state = 'UNVERIFIED' },
+    value => { value.local.provider_calls += 1 },
+  ]) {
+    const value = currentStudy(); mutate(value)
+    const encodedValue = encoded(value)
+    assert.throws(() => validateRawEvidence(encodedValue.raw, encodedValue.descriptor))
+  }
+})
+
+
+test('GUI projection binds reviewed installed bytes and measurements instead of checkout HEAD', () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'emate-gui-provenance-'))
+  try {
+    const app = join(temporary, 'e-Mate.app'); mkdirSync(app)
+    mkdirSync(join(app, 'Contents')); writeFileSync(join(app, 'Contents', 'app.asar'), 'installed94')
+    const measurements = Buffer.from('{"measured_at":"2026-09-10T00:00:00Z","fixed_set_sha256":"' + 'a'.repeat(64) + '","batches":[]}')
+    const provenance = { emate_commit: '9'.repeat(40), harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: '2.0.18' }
+    const sourcePath = join(temporary, 'source-install.json')
+    writeFileSync(sourcePath, JSON.stringify({ source_commit: provenance.emate_commit, installed_app: app, full_file_hashes_match: true }))
+    const receipt = { schema_version: 1, provenance, installed_app: app, source_evidence: { path: sourcePath, sha256: digest(readFileSync(sourcePath)) },
+      installed_tree_sha256: guiCollector.hashInstalledTree(app), measurements_sha256: digest(measurements) }
+    const path = join(temporary, 'installed.json'); writeFileSync(path, JSON.stringify(receipt))
+    const env = { EMATE_EVIDENCE_INSTALLED_RECEIPT: path, EMATE_EVIDENCE_INSTALLED_RECEIPT_SHA256: digest(readFileSync(path)) }
+    assert.deepEqual(guiCollector.installedGuiProvenance(measurements, env), provenance)
+    const measurementsPath = join(temporary, 'measurements.json'); writeFileSync(measurementsPath, measurements)
+    const provenancePath = join(temporary, 'provenance.json'); writeFileSync(provenancePath, JSON.stringify(provenance))
+    const boundPath = join(temporary, 'bound.json')
+    const commandReceipt = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./project-release-evidence.mjs', import.meta.url)), 'bind-installed', measurementsPath, app, provenancePath, sourcePath, boundPath], { encoding: 'utf8' }))
+    assert.equal(commandReceipt.source_commit, provenance.emate_commit)
+    assert.deepEqual(guiCollector.installedGuiProvenance(measurements, { EMATE_EVIDENCE_INSTALLED_RECEIPT: boundPath, EMATE_EVIDENCE_INSTALLED_RECEIPT_SHA256: commandReceipt.receipt_sha256 }), provenance)
+    assert.throws(() => guiCollector.installedGuiProvenance(measurements, {}), /installed provenance receipt/u)
+    assert.throws(() => guiCollector.installedGuiProvenance(Buffer.from('changed'), env), /measurement.*hash/u)
+    assert.throws(() => guiCollector.installedGuiProvenance(measurements, { ...env, EMATE_EVIDENCE_INSTALLED_RECEIPT_SHA256: '0'.repeat(64) }), /receipt.*hash/u)
+    writeFileSync(sourcePath, '{}')
+    assert.throws(() => guiCollector.installedGuiProvenance(measurements, env), /source receipt hash/u)
+    writeFileSync(sourcePath, JSON.stringify({ source_commit: provenance.emate_commit, installed_app: app, full_file_hashes_match: true }))
+    writeFileSync(join(app, 'Contents', 'app.asar'), 'tampered')
+    assert.throws(() => guiCollector.installedGuiProvenance(measurements, env), /installed.*hash/u)
+    writeFileSync(join(app, 'Contents', 'app.asar'), 'installed94')
+    symlinkSync('/outside-app', join(app, 'escaped'))
+    assert.throws(() => guiCollector.installedGuiProvenance(measurements, env), /symlink/u)
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
 })

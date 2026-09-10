@@ -431,7 +431,7 @@ export function CanvasPanel({ sessionId, bridge, initialProjectId, initialAsset,
         }}>
         <div className={css.tools} role="toolbar" aria-label="图片标注工具">
           {([['selection', '选择'], ['hand', '平移'], ['arrow', '箭头'], ['text', '文字']] as const).map(([tool, title]) => <button key={tool} aria-pressed={activeTool === tool} onClick={() => chooseTool(tool)}>{title}</button>)}
-          <label>箭头颜色<input type="color" aria-label="箭头颜色" value={arrowColor} onChange={event => {
+          <label className={css.arrowColor} title="箭头颜色"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M5 19 19 5M7 5h12v12" /></svg><input type="color" aria-label="箭头颜色" title="箭头颜色" value={arrowColor} onChange={event => {
             const color = event.target.value
             setArrowColor(color)
             const editor = api.current
