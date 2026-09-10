@@ -1125,4 +1125,35 @@ slot_error_client_sha256: sha256(join(assembled, 'node_modules', SLOT_ERROR_PACK
 
 截至本轮：fork 重做已完成并验证；适配器 3 条完成、1 条判定废除（待移除）、另有 1 条已定精度方案、
 3 条为结构性重写（`conversation` 47 处、`artifact-deliverables`、`session-export`）。
-Round 10 已量化适配器总面约 74 处。**剩余工作仍以"多轮"计**，不表述为接近完成。
+Round 10 已量化适配器总面约 74 处。**剩余工作仍以"多轮"计**，不表述为接近完成。### 21.25 Round 13：`slot-error` 移除已完成
+
+共 **6 个文件 / 14 处**（含逐行清理）已处理，工作区干净、零残留引用、5 个受影响文件 `node --check` 全部通过。
+
+| 文件 | 处理 |
+|---|---|
+| `scripts/harness-slot-error-adapter.mjs` | **删除** |
+| `scripts/harness-provenance.mjs` | import、materialize 块、三元分支、校验块（4 处） |
+| `scripts/harness-runtime-adapters.mjs` | import、`replaceRuntimeFile` 块（2 处） |
+| `scripts/build-harness-runtime.mjs` | import、写适配器、回执两字段（4 处） |
+| `scripts/harness-runtime-adapters.test.mjs` | import、entries 项、8 条断言（12 行） |
+| `scripts/harness-conversation-adapter.test.mjs` | 2 条 fixture |
+
+**回执契约变更**：`slot_error_adapter_sha256` 与 `slot_error_client_sha256` 两个字段已移除。
+这是本节最需要留意的部分 —— 它同时是**必须做**的（0.1.5 无 `dsh-client-runtime`，回执对 `lib/client.js` 求 sha 会直接抛错），
+又是**验收链契约**的改动。已完成且语法验证通过。
+
+### 21.26 适配器进度（Round 13 末）
+
+| 适配器 | 判定 | 状态 |
+|---|---|---|
+| `fs-bytes` | 精度修正 | **完成** |
+| `fs-escalation` | 本就可用 | **完成** |
+| `session-title` | API 已改，已重写 | **完成** |
+| `slot-error` | 上游吸收 | **完成（已移除）** |
+| `artifact-links` | 精度 + 注入点重设计（21 处） | 待办 |
+| `artifact-deliverables` | 节点定义重构 | 待办 |
+| `conversation` | 节点定义重构（**47 处**） | 待办 |
+| `session-export` | 宿主消失（6 处） | 待办 |
+
+**4 条已收口，4 条待办（含 1 条 47 处的结构性重写）。**
+注意：本轮移除**不改变"约 74 处接缝"的总量口径** —— 移除的是 2 处，剩余待重写仍约 68 处。
