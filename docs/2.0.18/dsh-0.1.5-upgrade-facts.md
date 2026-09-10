@@ -666,3 +666,39 @@ shell 42 / profile-core 35 / desktop 55 / enterprise 29 / scripts 59，插件侧
 - 分支 `dsh-v0.1.5-rc.1-emate`，**11 个提交**，头部 SHA 见仓库
 - 双构建面 0 错误；`ui-conversation` 23/23 通过
 - 与 0.1.5 的净差异见 `git diff --stat 183f08e9 HEAD`
+---
+
+## 20. Round 3：回归参照集建立 + 6 个 harness 适配器的目标核查
+
+### 20.1 回归参照集（见 `regression-baseline.md`）
+基线 `pnpm run test:fast` = **EXIT=0，71/71 + 5/5 全绿**。这是升级后不得跌破的通过集。
+
+**本轮踩到并修正了一个我自己造成的陷阱**：首次跑基线是 70/71，失败项断言 harness 提交号不符。
+根因不是代码 —— 是我早前用 `worktrees/emate-2.0.18-rc7-tidychat/upstream/deepseek-harness` 这个**共享克隆**做调查时，
+把 checkout 切到了 `1d3824bcd340`，而该 worktree 的 gitlink 固定为 `4da69d7c3522`。恢复后即全绿。
+
+> **规则**：跑任何基线/回归比对前，先确认子模块 checkout == gitlink 且工作区干净，
+> 否则会把自身扰动误判成基线缺陷或升级回归。
+
+### 20.2 151 个守卫文件的可得性
+其中 **122 个存在于 2.0.18 基线树**（29 个属未集成分支，不在本树）。
+分布：packages/dsh 23、desktop 19、enterprise/apps 18、tests/performance 14、knowledge 8、canvas 6、pet 4、其余插件 1–3。
+**其中 6 个是 `scripts/harness-*-adapter.test.mjs`** —— 即 harness 源码适配器自身的守卫，与 20.3 直接对应。
+
+### 20.3 六个 harness 源码适配器的目标核查
+方法：把每个适配器的目标包对 0.1.5 的实际供应做存在性检查。
+
+| 适配器 | 目标包 | 0.1.5 | 结论 |
+|---|---|---|---|
+| `harness-conversation-adapter` | `dsh-client-ui-conversation` | 存在 | 需核对接缝字符串 |
+| `harness-artifact-links-adapter` | `ui-primitives` + `ui-deliverables`（含渲染器路径 `packages/client/ui-primitives/src/markdown/render.tsx`） | 存在 | 需核对接缝字符串 |
+| `harness-fs-bytes-adapter` | `dsh-fs-local` | 存在 | 需核对接缝 |
+| `harness-runtime-adapters` | `dsh-fs`（提权接缝）+ `dsh-session-title`（自动标题接缝） | 存在 | 需核对接缝 |
+| `harness-session-export-adapter` | **`dsh-host-apiproxy`** | **不存在** | **必须重定目标**（被 `api-gateway` / `api-*-controller` 取代） |
+| `harness-slot-error-adapter` | **`dsh-client-runtime`** | **不存在** | **必须重定目标**（0.1.5 已改名，候选 `client-store` / `client-web`） |
+
+**2/6 的宿主消失**，与前面「session 冷列表隔离」那条淘汰同源：0.1.5 重构了 host 侧 api 分层与 client 侧 runtime 分层。
+
+### 20.4 另一个需要注意的耦合
+`harness-provenance.mjs:233` 会读取 `packages/client/ui-model-selection/src/client/service.ts` 作为 **listener 证据**，
+而 fork 分支上「models 目录刷新」的修复已移植进该文件。**适配器证迹与 fork 改动存在交叉**，重 derive 适配器时必须同时验证这条。
