@@ -345,7 +345,7 @@ function pluginBundleCheck(root = join(packageRoot, 'profile', 'bundles')) {
       const slug = name.slice('@e-mate/dsh-plugin-'.length)
       const bundleRoot = join(root, slug)
       const manifest = readJson(join(bundleRoot, 'package.json'))
-      if (manifest?.name !== name || manifest?.version !== VERSION || manifest?.license !== (['@e-mate/dsh-plugin-imagegen', '@e-mate/dsh-plugin-univer-office'].includes(name) ? 'Apache-2.0' : 'MIT')
+      if (manifest?.name !== name || manifest?.version !== VERSION || manifest?.license !== (name === '@e-mate/dsh-plugin-imagegen' ? 'Apache-2.0' : 'MIT')
         || typeof manifest?.main !== 'string' || !existsSync(join(bundleRoot, manifest.main))
         || typeof manifest?.dsh?.bundle?.patch !== 'string'
         || !existsSync(join(bundleRoot, manifest.dsh.bundle.patch))) {

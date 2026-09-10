@@ -206,7 +206,7 @@ try {
     || !['generate_image', 'edit_image', 'get_image_generation_task', 'cancel_image_generation_task'].every(name => initialToolNames.has(name))
     || ['imagegen', 'image_batch', 'image_pack'].some(name => initialToolNames.has(name))
     || !['job_output', 'job_list', 'job_kill'].every(name => initialToolNames.has(name))
-    || initialToolNames.has('univer_new')) {
+    || initialToolNames.has('skill_find') || initialToolNames.has('univer_new')) {
     throw new Error('assembled Profile did not apply progressive Tool disclosure')
   }
 
@@ -243,12 +243,12 @@ try {
   const disclosure = await ctx.tools.execute({
     callId: CallId('profile-smoke-tool-search'),
     name: 'tool_search',
-    arguments: { query: 'univer_new', limit: 1 },
+    arguments: { query: 'skill_find', limit: 1 },
     agent: disclosureAgent,
     signal: new AbortController().signal,
   })
-  if (disclosure.isError || !ctx.tools.schemas(disclosureAgent).some(schema => schema.name === 'univer_new')) {
-    throw new Error(`assembled Profile Tool Search did not reveal the native univer_new Tool: ${JSON.stringify(disclosure)}`)
+  if (disclosure.isError || !ctx.tools.schemas(disclosureAgent).some(schema => schema.name === 'skill_find')) {
+    throw new Error(`assembled Profile Tool Search did not reveal the native skill_find Tool: ${JSON.stringify(disclosure)}`)
   }
   const response = await fetch(expectedUrl)
   const html = await response.text()
@@ -261,11 +261,11 @@ try {
   }
   const graph = JSON.parse(bootMatch[1])
   const ids = new Set(graph.entries.map(entry => entry.id))
+  if (ids.has('@e-mate/dsh-plugin-univer-office') || ids.has('dsh-univer-office')) throw new Error('optional Univer plugin is unexpectedly bundled')
   if (ids.has('@kelearns/dsh-navigation-bar')) throw new Error('retired navigation plugin is still active')
   for (const id of [
     '@e-mate/desktop',
     '@e-mate/dsh-plugin-file-import',
-    '@e-mate/dsh-plugin-univer-office',
     '@e-mate/dsh-plugin-skill-hub',
     '@e-mate/dsh-plugin-genui',
     '@e-mate/dsh-plugin-vision-toolkit',

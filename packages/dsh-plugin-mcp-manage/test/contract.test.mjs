@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, symlinkSync, lstatSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import test from 'node:test'
 import { readCollectedOutput } from '../lib/collected-output.mjs'
 import { parseOAuthCallback } from '../lib/oauth-callback.mjs'
-import { validatePluginInstall, validatePluginPackageName } from '../lib/plugin-source.mjs'
+import { OPTIONAL_UNIVER_PACKAGE, pluginPlatformSupported, validatePluginInstall, validatePluginManagement, validatePluginPackageName } from '../lib/plugin-source.mjs'
 import { isMcpServerActive, validXinPrincipal, verifiedXinCapabilities, hasUnexpiredOAuthAccess, oauthFailureKind, parseXinCapabilities } from '../lib/status.mjs'
-import { createXinConnection, XIN_SERVICE, oauthRequestFetch, revokeXinCredential } from '../lib/index.mjs'
+import { createXinConnection, XIN_SERVICE, oauthRequestFetch, revokeXinCredential, manageDshPlugin, preparePluginArtifact } from '../lib/index.mjs'
 import { feishuConnectionState, readFeishuConnection } from '../lib/feishu-status.mjs'
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
@@ -91,7 +92,8 @@ test('MCP management keeps native DSH ownership and secrets out of settings', ()
   assert.match(source, /ctx\.interval/u)
   assert.match(source, /enum: \['list', 'install', 'connect', 'ensure', 'remove'\]/u)
   assert.match(source, /name: 'dsh_plugin_manage'/u)
-  assert.match(source, /AUDITED_PLUGIN_SOURCES\.get\(packageName\)/u)
+  assert.match(source, /catalog: ReadonlyMap<string, PluginSource> = AUDITED_PLUGIN_SOURCES/u)
+  assert.match(source, /catalog\.get\(packageName\)/u)
   assert.match(source, /MCP_CATALOG\.get\(args\.name\)/u)
   assert.match(source, /current\(\)\.servers\.filter\(supportedServer\)/u)
   assert.match(source, /if \(!supportedServer\(existing\)\) throw new Error\(UNSUPPORTED_MCP\)/u)
@@ -148,6 +150,181 @@ test('optional DSH plugins require a valid package name and exact GitHub commit'
   assert.throws(() => validatePluginInstall('@xmanrui/dsh-im', 'github:zyfjacksonchen-source/dsh-im#main'), /固定 GitHub 提交/u)
   assert.throws(() => validatePluginInstall('@xmanrui/dsh-im', 'https://user:secret@example.com/plugin.git'), /固定 GitHub 提交/u)
   assert.throws(() => validatePluginPackageName('../plugin'), /包名无效/u)
+})
+
+const pluginBytes = Buffer.from('reviewed optional-plugin archive fixture')
+const pluginArchive = { kind: 'https-archive', version: '2.0.18', description: 'Fixture Office bundle', platforms: ['darwin-arm64', 'win32-x64'],
+  artifact: { url: 'https://plugins.example.invalid/releases/' + 'immutable/'.repeat(20) + 'office.tgz', sha256: createHash('sha256').update(pluginBytes).digest('hex') } }
+const pluginGithub = 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'
+function pluginHarness(t, fault) {
+  const root = mkdtempSync(join(tmpdir(), 'emate-plugin-contract-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const profileDir = join(root, 'profiles', 'e-mate')
+  mkdirSync(profileDir, { recursive: true })
+  const original = { name: 'fixture-profile', dependencies: { '@e-mate/kept': '2.0.18' }, dsh: { profile: { bundles: ['@e-mate/kept'] } } }
+  const write = value => writeFileSync(join(profileDir, 'package.json'), JSON.stringify(value))
+  write(original)
+  const calls = []; const scheduled = []; let confirmed = true; let restarts = 0
+  const outcome = () => ({ stdout: (async function* () {})(), stderr: (async function* () {})(), done: Promise.resolve({ exitCode: 0 }), cancel() { calls.push(['cancel']) } })
+  const pnpm = {
+    profileDir,
+    async runPluginInstall(args, invokingDir, recovery, signal) {
+      signal?.throwIfAborted()
+      calls.push(['install', args, recovery, invokingDir])
+      const packageName = recovery.packageName
+      if (!args[2].startsWith('github:')) {
+        assert(isAbsolute(args[2])); assert.equal(lstatSync(args[2]).isFile(), true)
+        assert.equal(createHash('sha256').update(readFileSync(args[2])).digest('hex'), pluginArchive.artifact.sha256)
+        assert.equal(recovery.packageVersion, '2.0.18')
+      }
+      const directory = join(profileDir, 'node_modules', packageName)
+      mkdirSync(directory, { recursive: true })
+      const installed = { name: packageName, version: packageName === OPTIONAL_UNIVER_PACKAGE ? '2.0.18' : '0.1.0', dsh: { bundle: { patch: './cordis.patch.yml' } } }
+      const after = structuredClone(original)
+      after.dependencies[packageName] = args[2].startsWith('github:') ? args[2] : `file:${relative(profileDir, args[2])}`
+      after.dsh.profile.bundles.push(packageName)
+      if (fault === 'name') installed.name = '@other/plugin'
+      if (fault === 'version') installed.version = '0.2.14'
+      if (fault === 'declaration') delete installed.dsh.bundle
+      if (fault === 'dependency') delete after.dependencies[packageName]
+      if (fault === 'source') after.dependencies[packageName] = 'file:../other.tgz'
+      if (fault === 'registration') after.dsh.profile.bundles.pop()
+      writeFileSync(join(directory, 'package.json'), JSON.stringify(installed))
+      if (fault !== 'patch-file') writeFileSync(join(directory, 'cordis.patch.yml'), 'fixture: true\n')
+      write(after)
+      return outcome()
+    },
+    async rollbackPluginInstall(receipt) { calls.push(['rollback', receipt]); write(original); return true },
+    runPlugin(args) { calls.push(['remove', args]); write(original); return outcome() },
+  }
+  const ctx = { get: name => name === 'desktopPnpm' ? pnpm : name === 'desktopRuntime' ? { async requestRestart() { restarts++ } } : undefined,
+    userQuestions: { async ask() { calls.push(['confirm']); return { answers: [{ selected: confirmed ? ['确认'] : ['取消'] }] } } },
+    timeout: callback => scheduled.push(callback),
+  }
+  return { root, profileDir, pnpm, ctx, calls, scheduled, original, manifest: () => JSON.parse(readFileSync(join(profileDir, 'package.json'))),
+    decline: () => { confirmed = false }, restarts: () => restarts,
+    cache: join(root, 'e-mate', 'cache', 'plugin-artifacts'), catalog: new Map([[OPTIONAL_UNIVER_PACKAGE, pluginArchive], ['@xmanrui/dsh-im', pluginGithub]]) }
+}
+
+test('archive catalog admits only the exact optional package and actual supported platforms', () => {
+  assert.doesNotThrow(() => validatePluginInstall(OPTIONAL_UNIVER_PACKAGE, pluginArchive))
+  assert.doesNotThrow(() => validatePluginManagement(OPTIONAL_UNIVER_PACKAGE, pluginArchive))
+  for (const name of ['@e-mate/other', '@deepseek-ai/dsh', '@e-mate/dsh-plugin-univer-office-extra', 'dsh-at-file', '@kelearns/dsh-navigation-bar']) {
+    assert.throws(() => validatePluginManagement(name, pluginArchive), /托管插件/u)
+  }
+  assert.throws(() => validatePluginManagement(OPTIONAL_UNIVER_PACKAGE, pluginGithub), /托管插件/u)
+  assert.throws(() => validatePluginManagement(OPTIONAL_UNIVER_PACKAGE, { ...pluginArchive, version: '0.2.14' }), /托管插件/u)
+  for (const platform of ['darwin-arm64', 'win32-x64']) assert.equal(pluginPlatformSupported(pluginArchive, platform), true)
+  for (const platform of ['darwin-x64', 'linux-x64', 'win32-arm64']) assert.equal(pluginPlatformSupported(pluginArchive, platform), false)
+  for (const artifact of [{ ...pluginArchive.artifact, url: 'http://example.com/archive.tgz' }, { ...pluginArchive.artifact, url: 'https://user:secret@example.com/archive.tgz' },
+    { ...pluginArchive.artifact, sha256: 'unverified' }]) assert.throws(() => validatePluginInstall(OPTIONAL_UNIVER_PACKAGE, { ...pluginArchive, artifact }), /HTTPS.*SHA256/u)
+  assert.throws(() => validatePluginInstall(OPTIONAL_UNIVER_PACKAGE, { ...pluginArchive, artifact: undefined }), /尚未发布/u)
+})
+
+test('archive download is private, hash checked, cancellation aware and reuses only a verified regular cache file', async t => {
+  const h = pluginHarness(t); let requests = 0
+  const request = async (url, init) => { requests++; assert.equal(url, pluginArchive.artifact.url); assert.equal(init.redirect, 'error'); return new Response(pluginBytes) }
+  const path = await preparePluginArtifact(h.profileDir, pluginArchive, undefined, request)
+  assert.equal(isAbsolute(path), true); assert.deepEqual(readFileSync(path), pluginBytes)
+  if (process.platform !== 'win32') { assert.equal(lstatSync(h.cache).mode & 0o077, 0); assert.equal(lstatSync(path).mode & 0o077, 0) }
+  assert.equal(await preparePluginArtifact(h.profileDir, pluginArchive, undefined, request), path); assert.equal(requests, 1)
+  writeFileSync(path, 'corrupt cache')
+  await assert.rejects(preparePluginArtifact(h.profileDir, pluginArchive, undefined, request), /SHA256/u); assert.equal(requests, 1)
+  rmSync(path); const elsewhere = join(h.root, 'outside.tgz'); writeFileSync(elsewhere, pluginBytes); symlinkSync(elsewhere, path)
+  await assert.rejects(preparePluginArtifact(h.profileDir, pluginArchive, undefined, request), /常规归档/u); assert.equal(requests, 1)
+  rmSync(path)
+  await assert.rejects(preparePluginArtifact(h.profileDir, pluginArchive, undefined, async () => new Response('bad hash')), /SHA256/u)
+  assert.deepEqual(readdirSync(h.cache), [])
+  const controller = new AbortController(); controller.abort()
+  await assert.rejects(preparePluginArtifact(h.profileDir, pluginArchive, controller.signal, request), { name: 'AbortError' }); assert.equal(requests, 1)
+  const during = new AbortController(); let pulls = 0
+  await assert.rejects(preparePluginArtifact(h.profileDir, pluginArchive, during.signal, async () => new Response(new ReadableStream({
+    pull(stream) { if (++pulls === 1) stream.enqueue(pluginBytes.subarray(0, 4)); else { during.abort(); stream.close() } },
+  }))), { name: 'AbortError' })
+  assert.deepEqual(readdirSync(h.cache), []); assert.deepEqual(h.manifest(), h.original)
+})
+
+test('optional archive installation enters native recovery only after hash verification and checks installed bytes before restart', async t => {
+  const h = pluginHarness(t)
+  await preparePluginArtifact(h.profileDir, pluginArchive, undefined, async () => new Response(pluginBytes))
+  const result = await manageDshPlugin(h.ctx, { action: 'install', packageName: OPTIONAL_UNIVER_PACKAGE }, {}, h.catalog)
+  assert.deepEqual(result, { status: 'installed', packageName: OPTIONAL_UNIVER_PACKAGE, version: '2.0.18', registered: true, activation: 'pending-restart', restart: 'scheduled' })
+  assert.equal(h.calls.filter(call => call[0] === 'install').length, 1); assert.equal(h.calls.some(call => call[0] === 'rollback'), false)
+  assert.equal(h.scheduled.length, 1); assert.equal(h.restarts(), 0); h.scheduled[0](); await Promise.resolve(); assert.equal(h.restarts(), 1)
+  const list = await manageDshPlugin(h.ctx, { action: 'list' }, {}, h.catalog)
+  assert.deepEqual(list.plugins.find(item => item.packageName === OPTIONAL_UNIVER_PACKAGE), { packageName: OPTIONAL_UNIVER_PACKAGE, active: true, registered: true, activation: 'registered-unverified' })
+  assert.deepEqual(Object.keys(list.available[0]).sort(), ['description', 'packageName', 'supported', 'version'])
+  assert.equal(list.available[0].supported, true); assert.doesNotMatch(JSON.stringify(list), /https:|sha256|immutable/u)
+})
+
+test('bad SHA, declined confirmation and unsupported Intel Host never install, restart or mutate the profile', async t => {
+  const h = pluginHarness(t)
+  const path = await preparePluginArtifact(h.profileDir, pluginArchive, undefined, async () => new Response(pluginBytes))
+  writeFileSync(path, 'corrupt cache')
+  await assert.rejects(manageDshPlugin(h.ctx, { action: 'install', packageName: OPTIONAL_UNIVER_PACKAGE }, {}, h.catalog), /SHA256/u)
+  assert.equal(h.calls.some(call => call[0] === 'install' || call[0] === 'rollback'), false); assert.equal(h.scheduled.length, 0)
+  assert.deepEqual(h.manifest(), h.original)
+  rmSync(path)
+  const previousFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () => new Response('bad downloaded bytes')
+    await assert.rejects(manageDshPlugin(h.ctx, { action: 'install', packageName: OPTIONAL_UNIVER_PACKAGE }, {}, h.catalog), /SHA256/u)
+    assert.deepEqual(readdirSync(h.cache), []); assert.deepEqual(h.manifest(), h.original)
+  } finally { globalThis.fetch = previousFetch }
+  h.decline(); assert.equal((await manageDshPlugin(h.ctx, { action: 'install', packageName: OPTIONAL_UNIVER_PACKAGE }, {}, h.catalog)).status, 'cancelled')
+  const arch = Object.getOwnPropertyDescriptor(process, 'arch'), platform = Object.getOwnPropertyDescriptor(process, 'platform')
+  try {
+    Object.defineProperty(process, 'platform', { value: 'darwin' }); Object.defineProperty(process, 'arch', { value: 'x64' })
+    assert.equal((await manageDshPlugin(h.ctx, { action: 'list' }, {}, h.catalog)).available[0].supported, false)
+    await assert.rejects(manageDshPlugin(h.ctx, { action: 'install', packageName: OPTIONAL_UNIVER_PACKAGE }, {}, h.catalog), /尚不支持当前平台 darwin-x64/u)
+  } finally { Object.defineProperty(process, 'arch', arch); Object.defineProperty(process, 'platform', platform) }
+  assert.equal(h.calls.some(call => call[0] === 'install' || call[0] === 'rollback'), false); assert.equal(h.scheduled.length, 0)
+  assert.deepEqual(h.manifest(), h.original)
+})
+
+test('installed package identity, version, dependency and bundle failures use native rollback without restart', async t => {
+  for (const fault of ['name', 'version', 'declaration', 'dependency', 'source', 'registration', 'patch-file']) {
+    const h = pluginHarness(t, fault)
+    await preparePluginArtifact(h.profileDir, pluginArchive, undefined, async () => new Response(pluginBytes))
+    await assert.rejects(manageDshPlugin(h.ctx, { action: 'install', packageName: OPTIONAL_UNIVER_PACKAGE }, {}, h.catalog))
+    assert.equal(h.calls.filter(call => call[0] === 'rollback').length, 1, fault)
+    assert.equal(h.calls.find(call => call[0] === 'rollback')[1], h.calls.find(call => call[0] === 'install')[2].receiptId)
+    assert.equal(h.scheduled.length, 0, fault); assert.deepEqual(h.manifest(), h.original)
+  }
+})
+
+test('the existing pinned GitHub install keeps its source and recovery semantics while protected packages remain blocked', async t => {
+  const h = pluginHarness(t)
+  const result = await manageDshPlugin(h.ctx, { action: 'install', packageName: '@xmanrui/dsh-im' }, {}, h.catalog)
+  assert.equal(result.status, 'installed')
+  const install = h.calls.find(call => call[0] === 'install')
+  assert.equal(install[1][2], pluginGithub); assert.equal(install[2].packageVersion, pluginGithub)
+  for (const packageName of ['@e-mate/dsh-plugin-mcp-manage', '@deepseek-ai/dsh', 'dsh-visualize']) {
+    await assert.rejects(manageDshPlugin(h.ctx, { action: 'remove', packageName }, {}, h.catalog), /托管插件/u)
+  }
+  assert.equal(h.calls.filter(call => call[0] === 'install').length, 1)
+})
+
+test('output failure waits for native process-tree settlement before profile rollback', async t => {
+  for (const overflow of [false, true]) {
+    const h = pluginHarness(t)
+    let finishExit, cancelled
+    const stopped = new Promise(resolve => { cancelled = resolve })
+    const done = new Promise(resolve => { finishExit = resolve })
+    h.pnpm.runPluginInstall = async () => ({
+      stdout: (async function* () { if (overflow) yield 'x'.repeat(128 * 1024 + 1); else throw Error('synthetic output failure') })(),
+      stderr: (async function* () {})(), done,
+      cancel() { h.calls.push(['cancel']); cancelled() },
+    })
+    const rejected = assert.rejects(manageDshPlugin(h.ctx, { action: 'install', packageName: '@xmanrui/dsh-im' }, {}, h.catalog),
+      overflow ? /输出超过安全上限/u : /synthetic output failure/u)
+    await stopped
+    assert.equal(h.calls.some(call => call[0] === 'rollback'), false, 'pnpm is still settling')
+    assert.equal(h.scheduled.length, 0)
+    finishExit({ exitCode: 1 }); await rejected
+    assert.equal(h.calls.filter(call => call[0] === 'rollback').length, 1)
+    assert.equal(h.scheduled.length, 0); assert.deepEqual(h.manifest(), h.original)
+  }
 })
 
 test('OAuth callback accepts one matching state and rejects callback smuggling', () => {

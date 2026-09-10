@@ -51,11 +51,15 @@ function continuityState(value, label) {
 }
 function receipt(value, platform, manifest, artifactRow) {
   const label = platform + ' receipt'
-  const row = exact(value, ['schema_version', 'platform', 'source_commit', 'version', 'installer', 'native_download', 'native_install', 'normal_launch', 'continuity', 'debug', ...(manifest.schema_version === 2 ? ['source_companion'] : [])], label)
+  const row = exact(value, ['schema_version', 'platform', 'source_commit', 'version', 'installer', 'native_download', 'native_install', 'normal_launch', 'continuity', 'debug', ...(manifest.schema_version === 2 ? ['source_companion'] : []), ...(Object.hasOwn(manifest, 'univer_plugin') ? ['univer_plugin'] : [])], label)
   if (row.schema_version !== manifest.schema_version || row.platform !== platform || row.source_commit !== manifest.source_commit || row.version !== manifest.version) fail(label + ' identity mismatch')
   if (manifest.schema_version === 2) {
     const companion = artifact(row.source_companion, label + '.source_companion', manifest.source_companion.key)
     if (companion.bytes !== manifest.source_companion.bytes || companion.sha256 !== manifest.source_companion.sha256) fail(label + ' source companion identity mismatch')
+  }
+  if (Object.hasOwn(manifest, 'univer_plugin')) {
+    const plugin = artifact(row.univer_plugin, label + '.univer_plugin', manifest.univer_plugin.key)
+    if (plugin.bytes !== manifest.univer_plugin.bytes || plugin.sha256 !== manifest.univer_plugin.sha256) fail(label + ' Univer plugin identity mismatch')
   }
   const installer = exact(row.installer, ['bytes', 'sha256'], label + '.installer')
   const download = exact(row.native_download, ['succeeded', 'bytes', 'sha256'], label + '.native_download')
@@ -79,7 +83,7 @@ function receipt(value, platform, manifest, artifactRow) {
 export function validateCandidateManifest(manifestValue) {
   const schema = record(manifestValue, 'manifest').schema_version
   if (schema !== 1 && schema !== 2) fail('manifest schema_version mismatch')
-  const manifest = exact(manifestValue, ['schema_version', 'source_commit', 'version', 'artifacts', ...(schema === 2 ? ['source_companion'] : [])], 'manifest')
+  const manifest = exact(manifestValue, ['schema_version', 'source_commit', 'version', 'artifacts', ...(schema === 2 ? ['source_companion', ...(Object.hasOwn(manifestValue, 'univer_plugin') ? ['univer_plugin'] : [])] : [])], 'manifest')
   text(manifest.source_commit, SOURCE, 'manifest.source_commit')
   text(manifest.version, VERSION, 'manifest.version')
   const [major, minor, patch] = manifest.version.split('.').map(BigInt)
@@ -89,6 +93,7 @@ export function validateCandidateManifest(manifestValue) {
   artifact(artifacts.darwin, 'manifest.artifacts.darwin', root + 'darwin/e-Mate-' + manifest.version + '-mac-universal.dmg')
   artifact(artifacts.win32, 'manifest.artifacts.win32', root + 'win32/e-Mate-' + manifest.version + '-win-x64-Setup.exe')
   if (schema === 2) artifact(manifest.source_companion, 'manifest.source_companion', root + 'sources/e-Mate-' + manifest.version + '-runtime-sources.tar')
+  if (Object.hasOwn(manifest, 'univer_plugin')) artifact(manifest.univer_plugin, 'manifest.univer_plugin', root + 'plugins/e-mate-dsh-plugin-univer-office-' + manifest.version + '.tgz')
   return manifest
 }
 
@@ -108,6 +113,10 @@ export function validateUpdateAcceptance(manifestValue, macValue, windowsValue) 
     ...(manifest.schema_version === 2 ? {
       candidate_source_companion: Object.freeze({ ...manifest.source_companion }),
       release_source_companion: releaseArtifact(manifest.source_companion),
+    } : {}),
+    ...(Object.hasOwn(manifest, 'univer_plugin') ? {
+      candidate_univer_plugin: Object.freeze({ ...manifest.univer_plugin }),
+      release_univer_plugin: Object.freeze({ ...manifest.univer_plugin, key: 'desktop/plugins/univer-office/' + manifest.version + '/' + manifest.univer_plugin.sha256 + '.tgz' }),
     } : {}),
     promotion: Object.freeze({ atomic: false, aliases: Object.freeze(['desktop/downloads/mac', 'desktop/downloads/windows']), read_back_aliases: true, version_last: 'desktop/version.json' }),
   })

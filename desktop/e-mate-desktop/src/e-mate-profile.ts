@@ -629,10 +629,11 @@ function installedProfileCurrent(profile: string, dshHome: string): boolean {
     }
     const dependencies = manifest.dependencies ?? {}
     for (const name of PLUGIN_PACKAGES) {
-      if (dependencies[name] !== packageVersion(bundledComponentSource(name), name)) return false
+      if (dependencies[name] !== undefined) return false
+      packageVersion(bundledComponentSource(name), name)
     }
     for (const plugin of ECOSYSTEM_PLUGIN_PACKAGES) {
-      if (dependencies[plugin.name] !== plugin.version) return false
+      if (dependencies[plugin.name] !== undefined) return false
     }
     for (const name of RETIRED_PROFILE_PACKAGES) {
       if (dependencies[name] !== undefined) return false
@@ -732,15 +733,14 @@ export function installEmateDesktopProfile(
   const externalBundles = (Array.isArray(previous.dsh?.profile?.bundles) ? previous.dsh.profile.bundles : [])
     .filter((name): name is string => typeof name === 'string' && !OWNED_PROFILE_PACKAGES.has(name)
       && name !== '@deepseek-ai/dsh-base' && name !== '@deepseek-ai/dsh-web-app')
+  for (const name of PLUGIN_PACKAGES) packageVersion(bundledComponentSource(name), name)
   atomicWrite(join(profile, 'package.json'), `${JSON.stringify({
     name: 'dsh-profile-e-mate',
     private: true,
     type: 'module',
-    dependencies: Object.fromEntries([
-      ...PLUGIN_PACKAGES.map(name => [name, packageVersion(bundledComponentSource(name), name)]),
-      ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => [plugin.name, plugin.version]),
-      ...externalDependencies,
-    ]),
+    // Like the Base, desktop-owned bundles are materialized by the installer.
+    // Only external plugins belong to the native pnpm dependency graph.
+    dependencies: Object.fromEntries(externalDependencies),
     dsh: {
       profile: {
         bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PROFILE_PLUGIN_PACKAGES, ...externalBundles],

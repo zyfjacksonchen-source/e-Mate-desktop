@@ -89,6 +89,44 @@ describe('desktop profile composition', () => {
     expect(repaired.custom.preserved).toBe(true)
   })
 
+  it('completes native pnpm configuration when the product manifest already exists', () => {
+    const home = temporaryHome()
+    const dir = join(home, 'profiles', 'e-mate')
+    mkdirSync(dir, { recursive: true })
+    const manifest = `${JSON.stringify({
+      name: 'dsh-profile-e-mate',
+      private: true,
+      dependencies: { 'third-party-plugin': '^1.2.3' },
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'third-party-plugin'] } },
+      custom: { preserved: true },
+    }, null, 2)}\n`
+    writeFileSync(join(dir, 'package.json'), manifest)
+
+    expect(ensureDesktopProfile(home)).toBe(dir)
+
+    expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(manifest)
+    const native = join(home, 'native-reference')
+    initProfile(native, PROFILE_TEMPLATES.web!)
+    for (const name of ['pnpm-workspace.yaml', 'cordis.patch.yml']) {
+      expect(readFileSync(join(dir, name), 'utf8')).toBe(readFileSync(join(native, name), 'utf8'))
+    }
+  })
+
+  it('preserves existing manifest, workspace and patch when native initialization runs again', () => {
+    const home = temporaryHome()
+    const dir = ensureDesktopProfile(home)
+    const files = {
+      'package.json': readFileSync(join(dir, 'package.json'), 'utf8'),
+      'pnpm-workspace.yaml': 'packages:\n  - .\nnodeLinker: hoisted\nautoInstallPeers: false\nonlyBuiltDependencies:\n  - third-party-plugin\n',
+      'cordis.patch.yml': '- id: user-plugin\n  disabled: true\n',
+    }
+    for (const [name, value] of Object.entries(files)) writeFileSync(join(dir, name), value)
+
+    ensureDesktopProfile(home)
+
+    for (const [name, value] of Object.entries(files)) expect(readFileSync(join(dir, name), 'utf8')).toBe(value)
+  })
+
   it('rejects malformed persistent bundle metadata', () => {
     const home = temporaryHome()
     const dir = ensureDesktopProfile(home)

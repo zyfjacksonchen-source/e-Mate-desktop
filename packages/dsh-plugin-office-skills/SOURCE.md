@@ -1,6 +1,6 @@
 # Source and licensing record
 
-This package is an original e-Mate MIT adapter for the pinned DeepSeek Harness 0.1.0-rc.7 native Skill registry. It contributes only meeting-summary and lieflat-charts; it has no Office executor, Tool/Job registration, client preview, Calc runtime, or bundled Office dependencies. The historical package name is retained for the existing Profile entry.
+This package is an original e-Mate MIT adapter for the pinned DeepSeek Harness 0.1.0-rc.7 native Skill registry. It contributes meeting-summary, lieflat-charts and optional Univer installation guidance; it has no Office executor, Tool/Job registration, client preview, Calc runtime, or bundled Office dependencies. The historical package name is retained for the existing Profile entry.
 
 ## Meeting summary preset
 
@@ -20,3 +20,8 @@ This package is an original e-Mate MIT adapter for the pinned DeepSeek Harness 0
 - Existing provider and Host guidance only; no new Tool or runtime. Browser-dependent templates retain their network requirements.
 
 Office data and output requests load the Univer Skill and the relevant Unit Skill, then use the existing univer_* tools. This host guidance does not modify the preserved meeting or Lieflat resources or establish installed Univer acceptance.
+
+
+## Optional Office discovery
+
+`install-univer-office` is first-party e-Mate guidance for the existing native `dsh_plugin_manage` catalog and recoverable plugin install. The rc.7-compatible Univer package is a separate installable archive, absent from the application bundle. The guidance distinguishes catalog presence, installation, restart, actual tool loading and completed Office output. No original upstream Skill or resource is changed by this discovery entry.

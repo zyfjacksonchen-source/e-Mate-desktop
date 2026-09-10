@@ -4,7 +4,6 @@ import { cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { copyGatewayDependencies } from '../packages/dsh-plugin-univer-office/scripts/copy-gateway-dependencies.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const inventory = JSON.parse(await readFile(join(root, 'packages', 'dsh', 'profile', 'component-inventory.json'), 'utf8'))
@@ -39,7 +38,7 @@ export async function syncEmatePluginBundles({ target = 'cli', destination } = {
     const slug = name.slice('@e-mate/dsh-plugin-'.length)
     const source = join(root, component.root)
     const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
-    if (manifest.name !== name || manifest.version !== '2.0.18' || manifest.license !== (['@e-mate/dsh-plugin-imagegen', '@e-mate/dsh-plugin-univer-office'].includes(name) ? 'Apache-2.0' : 'MIT')) {
+    if (manifest.name !== name || manifest.version !== '2.0.18' || manifest.license !== (name === '@e-mate/dsh-plugin-imagegen' ? 'Apache-2.0' : 'MIT')) {
       throw new Error(`${source} package identity is invalid`)
     }
     if (typeof manifest.main !== 'string') throw new Error(`${name} has no main entry`)
@@ -55,7 +54,6 @@ export async function syncEmatePluginBundles({ target = 'cli', destination } = {
       }
       await copyEntry(join(source, entry), join(componentTarget, entry))
     }
-    if (name === '@e-mate/dsh-plugin-univer-office') copyGatewayDependencies(componentTarget)
     receipts.push({ name, version: manifest.version, directory: basename(componentTarget) })
   }
 

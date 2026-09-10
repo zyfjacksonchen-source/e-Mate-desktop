@@ -1,7 +1,7 @@
 /** Native desktop profile composition over the official Web bundle and user plugins. */
 
 import { createRequire, findPackageJSON } from 'node:module'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { evaluate, isJsExpr, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -172,7 +172,7 @@ function sameList(left: readonly string[], right: readonly string[]): boolean {
  */
 export function ensureDesktopProfile(home: string = resolveDshHome()): string {
   const dir = resolveProfileDir(DESKTOP_PROFILE_NAME, home)
-  if (!existsSync(join(dir, 'package.json'))) initProfile(dir, REQUIRED_BUNDLES)
+  initProfile(dir, REQUIRED_BUNDLES)
   const manifest = readProfileManifest(BIN_NAME, dir)
   const rawBundles = (manifest.dsh?.profile as { bundles?: unknown } | undefined)?.bundles
   if (rawBundles !== undefined

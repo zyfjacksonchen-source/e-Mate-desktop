@@ -14,7 +14,7 @@ import * as Presets from '../lib/index.js'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 
-test('native registry loads only the two preserved Skills, registers no Tools, and disposes its provider', async t => {
+test('native registry exposes preserved Skills and optional plugin discovery without installing or registering Tools', async t => {
   const ctx = new Context()
   const fibers = []
   t.after(async () => { for (const fiber of fibers.reverse()) await fiber.dispose() })
@@ -27,13 +27,13 @@ test('native registry loads only the two preserved Skills, registers no Tools, a
   assert.equal(ctx.get('tools'), undefined)
   assert.equal(ctx.get('jobs'), undefined)
   const skills = await ctx.skills.list({})
-  assert.deepEqual(skills.map(skill => skill.name), ['lieflat-charts', 'meeting-summary'])
+  assert.deepEqual(skills.map(skill => skill.name), ['install-univer-office', 'lieflat-charts', 'meeting-summary'])
   for (const skill of skills) {
     assert.equal(skill.provider, 'emate-office-skills')
     assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
     const loaded = await ctx.skills.get(skill.name, {})
     assert.ok(loaded.content.length > 300)
-    assert.equal(loaded.metadata.adapter, 'upstream')
+    assert.equal(loaded.metadata.adapter, skill.name === 'install-univer-office' ? 'e-mate' : 'upstream')
     assert.equal(loaded.metadata.state, 'ready')
     assert.equal(loaded.resourceBase.kind, 'directory')
     assert.ok(loaded.content.includes(loaded.resourceBase.path))
@@ -49,7 +49,7 @@ test('native registry loads only the two preserved Skills, registers no Tools, a
       for (const resource of ['references/canvas_ui_guide.md', 'references/quality_checklist.md', 'references/transcript_formats.md', 'templates/meeting_dashboard_template.html']) {
         assert.ok((await readFile(join(loaded.resourceBase.path, resource))).length > 0)
       }
-    } else {
+    } else if (skill.name === 'lieflat-charts') {
       assert.match(loaded.content, /先加载 univer，再加载对应 Unit Skill/u)
       assert.match(loaded.content, /univer-sheet.*univer-doc.*univer-slide/u)
       assert.match(loaded.content, /univer_\*/u)
@@ -86,9 +86,9 @@ test('Lieflat retains all 125 recorded resource hashes, license and real templat
   assert.equal(validation.status, 0, validation.error?.message ?? validation.stderr + validation.stdout)
 })
 
-test('the package has only the two Skill resource trees and no old executor or client distribution', async () => {
+test('the package contains support and installation Skills without any old Office executor or client', async () => {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
-  assert.deepEqual((await readdir(join(root, 'skills'))).sort(), ['lieflat-charts', 'meeting-summary'])
+  assert.deepEqual((await readdir(join(root, 'skills'))).sort(), ['install-univer-office', 'lieflat-charts', 'meeting-summary'])
   assert.deepEqual(await readdir(join(root, 'src')), ['index.ts'])
   assert.equal(pkg.dependencies, undefined)
   assert.equal(pkg.devDependencies, undefined)

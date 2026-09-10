@@ -83,8 +83,10 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
 
     const profile = installEmateDesktopProfile(home)
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>
       dsh: { profile: { bundles: string[] } }
     }
+    expect(manifest.dependencies).toEqual({})
     expect(manifest.dsh.profile.bundles).toEqual([
       '@deepseek-ai/dsh-base',
       '@deepseek-ai/dsh-web-app',
@@ -127,13 +129,9 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     for (const skill of ['meeting-summary', 'lieflat-charts']) {
       expect(existsSync(join(supportSkills, 'skills', skill, 'SKILL.md'))).toBe(true)
     }
-    const univer = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-univer-office')
-    for (const asset of ['lib/index.js', 'lib/client.js', 'artifacts/gateway.cjs',
-      'artifacts/unit-content-worker.mjs', 'artifacts/viewer/index.html', 'artifacts/render-machine/index.html',
-      'node_modules/libsql/package.json', 'node_modules/@univerjs-pro/engine-formula-rust-binding/package.json',
-      'node_modules/@univerjs-pro/exchange-node-binding/package.json']) {
-      expect(existsSync(join(univer, asset)), asset).toBe(true)
-    }
+    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-univer-office')
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-univer-office'))).toBe(false)
+    expect(existsSync(join(profile, 'node_modules', 'dsh-univer-office'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', 'dsh-at-file', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-better-sidebar', 'lib', 'client.js'))).toBe(true)
@@ -240,10 +238,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(rows.find(row => row.id === 'emate-office-skills')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
     }))
-    expect(rows.find(row => row.id === 'univer')).toEqual(expect.objectContaining({
-      name: '@e-mate/dsh-plugin-univer-office',
-      config: expect.objectContaining({ telemetry: false }),
-    }))
+    expect(rows.some(row => row.id === 'univer')).toBe(false)
     const agentOperations = rows.find(row => row.id === 'emate-agent-operations')
     expect(agentOperations).toEqual(expect.objectContaining({
       name: './plugins/agent-operations.js',
@@ -663,6 +658,53 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       cleanup_attempts?: Record<string, number>
     }
     expect(Object.values(receipt.cleanup_attempts ?? {})).toContain(EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS)
+  })
+
+  it('migrates managed bundle dependencies while retaining their packages and external plugins', () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const profile = installEmateDesktopProfile(home)
+    const manifestPath = join(profile, 'package.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      dsh: { profile: { bundles: string[] } }
+    }
+    const managed = manifest.dsh.profile.bundles.slice(2)
+    const snapshot = (name: string) => {
+      const root = join(profile, 'node_modules', ...name.split('/'))
+      return {
+        inode: lstatSync(root).ino,
+        manifest: readFileSync(join(root, 'package.json'), 'utf8'),
+        patch: readFileSync(join(root, 'cordis.patch.yml'), 'utf8'),
+      }
+    }
+    const before = managed.map(snapshot)
+    for (const [index, name] of managed.entries()) {
+      manifest.dependencies[name] = (JSON.parse(before[index]!.manifest) as { version: string }).version
+    }
+    const external = {
+      '@xmanrui/dsh-im': 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062',
+      '@e-mate/dsh-plugin-univer-office': 'file:/reviewed/plugin.tgz',
+    }
+    Object.assign(manifest.dependencies, external)
+    manifest.dsh.profile.bundles.push(...Object.keys(external))
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+    const externalFile = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-univer-office', 'user.txt')
+    mkdirSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-univer-office'), { recursive: true })
+    writeFileSync(externalFile, 'external plugin payload')
+
+    installEmateDesktopProfile(home)
+
+    const repaired = JSON.parse(readFileSync(manifestPath, 'utf8')) as typeof manifest
+    expect(repaired.dependencies).toEqual(external)
+    expect(repaired.dsh.profile.bundles).toEqual(manifest.dsh.profile.bundles)
+    expect(managed.map(snapshot)).toEqual(before)
+    expect(readFileSync(externalFile, 'utf8')).toBe('external plugin payload')
+    const oldTime = new Date('2020-01-01T00:00:00Z')
+    utimesSync(manifestPath, oldTime, oldTime)
+    installEmateDesktopProfile(home)
+    expect(statSync(manifestPath).mtimeMs).toBe(oldTime.getTime())
+    expect(managed.map(snapshot)).toEqual(before)
   })
 
   it('preserves a native DSH plugin dependency and bundle across managed profile repair', () => {

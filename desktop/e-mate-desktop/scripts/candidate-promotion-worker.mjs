@@ -9,7 +9,7 @@ const MAX_JSON_BYTES = 64 * 1024
 const MAX_TOKEN_TTL_MS = 15 * 60 * 1000
 const RELEASE_RECORD_KEY = 'desktop/releases/release-record.json'
 const PLATFORM = Object.freeze({ darwin: 'mac', win32: 'windows' })
-const CONTENT_TYPE = Object.freeze({ darwin: 'application/x-apple-diskimage', win32: 'application/vnd.microsoft.portable-executable', sources: 'application/x-tar' })
+const CONTENT_TYPE = Object.freeze({ darwin: 'application/x-apple-diskimage', win32: 'application/vnd.microsoft.portable-executable', sources: 'application/x-tar', univer_plugin: 'application/gzip' })
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'
 const encoder = new TextEncoder()
 
@@ -54,17 +54,19 @@ function identity(object, expected, httpMetadata) {
 }
 function artifactIdentity(value) { return exact(value, ['bytes', 'sha256']) && Number.isSafeInteger(value.bytes) && value.bytes > 0 && typeof value.sha256 === 'string' && HASH.test(value.sha256) }
 function releaseIdentity(value) {
-  return exact(value, ['version', 'source_commit', 'artifacts', ...(value?.source_companion !== undefined ? ['source_companion'] : [])]) && typeof value.version === 'string' && VERSION.test(value.version)
+  return exact(value, ['version', 'source_commit', 'artifacts', ...(value?.source_companion !== undefined ? ['source_companion'] : []), ...(value?.univer_plugin !== undefined ? ['univer_plugin'] : [])]) && typeof value.version === 'string' && VERSION.test(value.version)
     && typeof value.source_commit === 'string' && SOURCE.test(value.source_commit) && exact(value.artifacts, ['darwin', 'win32'])
     && artifactIdentity(value.artifacts.darwin) && artifactIdentity(value.artifacts.win32)
     && (value.source_companion === undefined || artifactIdentity(value.source_companion))
+    && (value.univer_plugin === undefined || value.source_companion !== undefined && artifactIdentity(value.univer_plugin))
 }
 function sameIdentity(left, right) { return JSON.stringify(left) === JSON.stringify(right) }
 function candidateIdentity(accepted) {
   return { version: accepted.version, source_commit: accepted.source_commit, artifacts: {
     darwin: { bytes: accepted.candidate_artifacts.darwin.bytes, sha256: accepted.candidate_artifacts.darwin.sha256 },
     win32: { bytes: accepted.candidate_artifacts.win32.bytes, sha256: accepted.candidate_artifacts.win32.sha256 },
-  }, ...(accepted.candidate_source_companion ? { source_companion: { bytes: accepted.candidate_source_companion.bytes, sha256: accepted.candidate_source_companion.sha256 } } : {}) }
+  }, ...(accepted.candidate_source_companion ? { source_companion: { bytes: accepted.candidate_source_companion.bytes, sha256: accepted.candidate_source_companion.sha256 } } : {}),
+  ...(accepted.candidate_univer_plugin ? { univer_plugin: { bytes: accepted.candidate_univer_plugin.bytes, sha256: accepted.candidate_univer_plugin.sha256 } } : {}) }
 }
 async function loadJsonObject(bucket, key) {
   const object = await bucket.get(key)
@@ -144,8 +146,10 @@ function completionReceipt(accepted) {
   return { schema_version: accepted.candidate_source_companion ? 2 : 1, status: 'promotion-complete', atomic: false, source_commit: accepted.source_commit, version: accepted.version,
     artifacts: { darwin: { bytes: accepted.release_artifacts.darwin.bytes, sha256: accepted.release_artifacts.darwin.sha256 }, win32: { bytes: accepted.release_artifacts.win32.bytes, sha256: accepted.release_artifacts.win32.sha256 } },
     ...(accepted.release_source_companion ? { source_companion: accepted.release_source_companion } : {}),
+    ...(accepted.release_univer_plugin ? { univer_plugin: accepted.release_univer_plugin } : {}),
     completed_operations: [
       ...(accepted.release_source_companion ? [{ phase: 'immutable', platform: 'sources', key: accepted.release_source_companion.key, read_back: true }] : []),
+      ...(accepted.release_univer_plugin ? [{ phase: 'immutable', platform: 'univer_plugin', key: accepted.release_univer_plugin.key, read_back: true }] : []),
       { phase: 'immutable', platform: 'darwin', key: accepted.release_artifacts.darwin.key, read_back: true }, { phase: 'immutable', platform: 'win32', key: accepted.release_artifacts.win32.key, read_back: true },
       { phase: 'alias', platform: 'darwin', key: 'desktop/downloads/mac', read_back: true }, { phase: 'alias', platform: 'win32', key: 'desktop/downloads/windows', read_back: true }, { phase: 'version', platform: null, key: 'desktop/version.json', read_back: true },
     ] }
@@ -185,9 +189,9 @@ export async function handleRequest(request, env) {
     const accepted = validateUpdateAcceptance(manifest.value, mac.value, windows.value)
     if (accepted.source_commit !== env.SOURCE_COMMIT) reject('fixed_source_mismatch')
     const candidate = candidateIdentity(accepted), candidates = {}
-    const kinds = accepted.candidate_source_companion ? ['sources', 'darwin', 'win32'] : ['darwin', 'win32']
-    const privateArtifacts = { ...accepted.candidate_artifacts, sources: accepted.candidate_source_companion }
-    const releaseArtifacts = { ...accepted.release_artifacts, sources: accepted.release_source_companion }
+    const kinds = [...(accepted.candidate_source_companion ? ['sources'] : []), ...(accepted.candidate_univer_plugin ? ['univer_plugin'] : []), 'darwin', 'win32']
+    const privateArtifacts = { ...accepted.candidate_artifacts, sources: accepted.candidate_source_companion, univer_plugin: accepted.candidate_univer_plugin }
+    const releaseArtifacts = { ...accepted.release_artifacts, sources: accepted.release_source_companion, univer_plugin: accepted.release_univer_plugin }
     for (const platform of kinds) candidates[platform] = await candidateObject(env.CANDIDATES, privateArtifacts[platform], accepted)
     phase = 'claim'; claim = await claimRelease(env.CANDIDATES, candidate)
     phase = 'immutable-preflight'

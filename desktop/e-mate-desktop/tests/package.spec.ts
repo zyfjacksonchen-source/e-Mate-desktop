@@ -1,5 +1,7 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
@@ -602,4 +604,124 @@ describe('published package surface', () => {
     expect(installed).toContain('args.justification === void 0 || redundantEscalation')
   })
 
+})
+
+describe('materialized production package licenses', () => {
+  function fixture() {
+    const root = mkdtempSync(join(tmpdir(), 'emate-package-licenses-'))
+    function writePackage(directory: string, value: Record<string, unknown>) {
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(join(directory, 'package.json'), JSON.stringify(value))
+    }
+    const scripts = join(root, 'scripts')
+    mkdirSync(scripts)
+    const script = join(scripts, 'verify-licenses.mjs')
+    copyFileSync(new URL('scripts/verify-licenses.mjs', packageRoot), script)
+    writePackage(root, {
+      name: '@e-mate/desktop', version: '2.0.18',
+      dependencies: { shared: '1.0.0', 'shared-alias': 'npm:shared@1.0.0' },
+      devDependencies: { 'dev-only': '1.0.0' },
+    })
+    const shared = join(root, 'node_modules/shared')
+    writePackage(shared, { name: 'shared', version: '1.0.0', license: 'MIT', exports: {} })
+    symlinkSync(shared, join(root, 'node_modules/shared-alias'), 'junction')
+    writePackage(join(root, 'node_modules/dev-only'), { name: 'dev-only', license: 'UNLICENSED' })
+
+    const bundles = join(root, 'build/e-mate-profile/bundles')
+    const component = join(bundles, 'component')
+    writePackage(component, {
+      name: '@e-mate/dsh-plugin-fixture', version: '1.0.0', license: 'MIT',
+      dependencies: { shared: '2.0.0', parent: '1.0.0', 'compiled-only': '1.0.0' },
+      bundledDependencies: ['shared', 'parent'],
+    })
+    const registry = join(bundles, 'registry.json')
+    writeFileSync(registry, JSON.stringify({
+      schema_version: 1,
+      packages: [{ name: '@e-mate/dsh-plugin-fixture', version: '1.0.0', directory: 'component' }],
+    }))
+    const privateShared = join(component, 'node_modules/shared')
+    writePackage(privateShared, { name: 'shared', version: '2.0.0', license: 'Apache-2.0' })
+    const parent = join(component, 'node_modules/parent')
+    writePackage(parent, {
+      name: 'parent', version: '1.0.0', license: 'MIT',
+      dependencies: { leaf: '1.0.0' },
+      optionalDependencies: { 'optional-present': '1.0.0', 'optional-absent': '1.0.0' },
+      peerDependencies: { 'peer-only': '1.0.0' },
+    })
+    const leaf = join(parent, 'node_modules/leaf')
+    writePackage(leaf, { name: 'leaf', version: '1.0.0', license: 'MIT' })
+    writePackage(join(parent, 'node_modules/optional-present'), {
+      name: 'optional-present', version: '1.0.0', license: 'LGPL-3.0-or-later',
+    })
+    // The materializer's physical output is authoritative, even for an extra
+    // private package not referenced by the component's source manifest.
+    writePackage(join(component, 'node_modules/physical-extra'), {
+      name: 'physical-extra', version: '1.0.0', license: 'ISC',
+    })
+    const nativeNotices = join(root, 'third-party-notices/feishu-cli/1.0.88')
+    mkdirSync(nativeNotices, { recursive: true })
+    writeFileSync(join(nativeNotices, 'manifest.json'), JSON.stringify({
+      package: 'fixture-native', version: '1.0.88', binarySha256: {}, files: [], targetModules: {},
+    }))
+    return {
+      root, registry, component, privateShared, leaf, writePackage,
+      run: (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' }),
+    }
+  }
+
+  it('checks materialized private versions and keeps physical aliases, optional and inlined dependencies distinct', () => {
+    const tree = fixture()
+    try {
+      const passing = tree.run('--notices', 'notices.md')
+      expect(passing.stderr).toBe('')
+      expect(passing.status).toBe(0)
+      expect(passing.stdout).toContain('7 production packages checked; 1 use notice-required licenses')
+      const notices = readFileSync(join(tree.root, 'notices.md'), 'utf8')
+      expect(notices).toContain('| shared | 1.0.0 | MIT |')
+      expect(notices).toContain('| shared | 2.0.0 | Apache-2.0 |')
+      expect(notices).toContain('| physical-extra | 1.0.0 | ISC |')
+      expect(notices).not.toMatch(/shared-alias|dev-only|peer-only|compiled-only|optional-absent/u)
+
+      tree.writePackage(tree.privateShared, { name: 'shared', version: '2.0.0', license: 'UNLICENSED' })
+      tree.writePackage(tree.leaf, { name: 'leaf', version: '1.0.0' })
+      const denied = tree.run()
+      expect(denied.status).toBe(1)
+      expect(denied.stderr).toContain('2 production package(s) need attention')
+      expect(denied.stderr).toMatch(/shared@2\.0\.0 .*license "UNLICENSED" is not on the redistribution allowlist/u)
+      expect(denied.stderr).toMatch(/leaf@1\.0\.0 .*no license field and no LICENSE file/u)
+      expect(denied.stderr).toContain(join('bundles/component/node_modules/shared/package.json'))
+
+      writeFileSync(join(tree.leaf, 'LICENSE'), 'fixture license text')
+      expect(tree.run().stderr).toContain('1 production package(s) need attention')
+      rmSync(tree.privateShared, { recursive: true })
+      const missing = tree.run()
+      expect(missing.status).toBe(1)
+      expect(missing.stderr).toContain('shared: bundled dependency was not materialized')
+    } finally {
+      rmSync(tree.root, { recursive: true, force: true })
+    }
+  })
+
+  it('fails when the materialized registry or a declared private tree is absent', () => {
+    const tree = fixture()
+    try {
+      const component = JSON.parse(readFileSync(join(tree.component, 'package.json'), 'utf8'))
+      delete component.license
+      tree.writePackage(tree.component, component)
+      const unlicensed = tree.run()
+      expect(unlicensed.status).toBe(1)
+      expect(unlicensed.stderr).toMatch(/@e-mate\/dsh-plugin-fixture@1\.0\.0 .*no license field and no LICENSE file/u)
+      rmSync(join(tree.component, 'node_modules'), { recursive: true })
+      const missing = tree.run()
+      expect(missing.status).toBe(1)
+      expect(missing.stderr).toContain('shared: bundled dependency was not materialized')
+      expect(missing.stderr).toContain('parent: bundled dependency was not materialized')
+      rmSync(tree.registry)
+      const noRegistry = tree.run()
+      expect(noRegistry.status).toBe(1)
+      expect(noRegistry.stderr).toContain('registry.json')
+    } finally {
+      rmSync(tree.root, { recursive: true, force: true })
+    }
+  })
 })

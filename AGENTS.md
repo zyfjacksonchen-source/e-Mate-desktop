@@ -4,7 +4,7 @@ These rules are the repository's highest-priority engineering contract. Historic
 
 The current source target for the e-Mate desktop application is version `2.0.18` in the GitHub repository `zyfjacksonchen-source/e-Mate-desktop`. The stable Electron product name and installed application name remain `e-Mate`; “Desktop” describes the repository scope and does not rename the app or its installation locations. This identity is not evidence that a candidate was built, installed, or publicly released.
 
-At source level, 2.0.18 includes the pinned `dickpy/dsh-imagegen` generation and edit Tools, the pinned `dream-num/dsh-univer-office` Office component, native PTC as the default Agent preset, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This is a source capability and compatibility statement only; it makes no candidate, installed, or public-production claim.
+At source level, 2.0.18 includes the pinned `dickpy/dsh-imagegen` generation and edit Tools, discovery and native on-demand installation of the rc.7-compatible `dream-num/dsh-univer-office` plugin, native PTC as the default Agent preset, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This is a source capability and compatibility statement only; it makes no candidate, installed, or public-production claim.
 
 ## First principle: sole main-agent governance
 

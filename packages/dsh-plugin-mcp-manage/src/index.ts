@@ -1,7 +1,7 @@
 import { createGrantLedger, validXinGrant, type XinGrant, type GrantLedgerState } from './xin-grant-ledger.ts'
 import { createHash, randomBytes } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readFile, realpath, stat } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -14,7 +14,9 @@ import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import { readCollectedOutput } from './collected-output.ts'
 import { startOAuthCallback } from './oauth-callback.ts'
-import { validatePluginInstall, validatePluginPackageName } from './plugin-source.ts'
+import { OPTIONAL_UNIVER_PACKAGE, pluginPlatformSupported, validatePluginInstall, validatePluginManagement, type PluginSource } from './plugin-source.ts'
+import { preparePluginArtifact } from './plugin-artifact.ts'
+export { preparePluginArtifact } from './plugin-artifact.ts'
 import { isMcpServerActive, validXinPrincipal, parseXinCapabilities, hasUnexpiredOAuthAccess, oauthFailureKind, type XinCapabilityProof } from './status.ts'
 import { readFeishuConnection } from './feishu-status.ts'
 
@@ -34,10 +36,18 @@ const OAUTH_CALLBACK_TIMEOUT_MS = 10 * 60_000
 const OAUTH_REFRESH_SKEW_MS = 5 * 60_000
 const OAUTH_RESPONSE_MAX = 1024 * 1024
 const PLUGIN_OUTPUT_MAX = 128 * 1024
-const PROTECTED_PLUGIN_PREFIXES = ['@deepseek-ai/', '@e-mate/']
 const UNSUPPORTED_MCP = '2.0.18 仅允许受审计 HTTPS MCP；旧本地或自定义连接已停用，可安全删除。'
-const AUDITED_PLUGIN_SOURCES = new Map([
+const AUDITED_PLUGIN_SOURCES = new Map<string, PluginSource>([
   ['@xmanrui/dsh-im', 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'],
+  [OPTIONAL_UNIVER_PACKAGE, {
+    kind: 'https-archive', version: '2.0.18', description: 'Univer Office：适配 DSH rc.7 的文档、表格和演示文稿工具。',
+    platforms: ['darwin-arm64', 'win32-x64'],
+    // Immutable candidate target; available only after promotion publishes these exact app-matched bytes.
+    artifact: {
+      url: 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/plugins/univer-office/2.0.18/ba68601dcf59efd2c54bda28ee2d6a2b900be6feae86e56ac03d64b0691c1baa.tgz',
+      sha256: 'ba68601dcf59efd2c54bda28ee2d6a2b900be6feae86e56ac03d64b0691c1baa',
+    },
+  }],
 ])
 export const XIN_SERVICE = 'xin-business-assistant'
 const MCP_CATALOG = new Map<string, McpServerSpec>([
@@ -48,15 +58,6 @@ const MCP_CATALOG = new Map<string, McpServerSpec>([
   }],
 ])
 const TENCENT_DOCS_AUTH_URL = new URL('https://docs.qq.com/open/auth/mcp.html')
-const PROTECTED_PLUGIN_NAMES = new Set<string>([
-  // Retired built-in: prevent manual reinstallation beside the inventory-owned tidychat.
-  '@kelearns/dsh-navigation-bar',
-  '@omdsh-dev/dsh-genui',
-  'dsh-at-file',
-  'dsh-better-sidebar',
-  'dsh-file-viewer',
-  'dsh-visualize',
-])
 type UserQuestionAgent = Parameters<Context['userQuestions']['ask']>[0]['agent']
 
 const serverSchema = z.object({
@@ -225,8 +226,94 @@ async function runProfilePlugin(
     }
   } catch (error) {
     operation.cancel()
+    // Native done includes waitForExit and recovery settlement. Never restore
+    // the profile while the cancelled pnpm process tree can still write it.
+    await operation.done.catch(() => {})
     throw error
   }
+}
+
+async function installedPluginVersion(pnpm: DesktopPnpmLike, packageName: string, source: PluginSource, installedSource: string): Promise<string> {
+  const after = await profileManifest(pnpm)
+  const dependency = after.dependencies[packageName]
+  const sameSource = typeof source === 'string' ? dependency === source
+    : typeof dependency === 'string' && dependency.startsWith('file:') && resolve(pnpm.profileDir, dependency.slice(5)) === installedSource
+  if (!sameSource || !after.bundles.includes(packageName)) throw new Error('DSH 插件安装后的依赖或 bundle 登记不符合目录。')
+  // Resolve only this profile's actual dependency, never a bundled/global fallback.
+  const directory = await realpath(join(pnpm.profileDir, 'node_modules', packageName))
+  const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown; dsh?: { bundle?: { patch?: unknown } } }
+  const patch = manifest.dsh?.bundle?.patch
+  if (manifest.name !== packageName || typeof manifest.version !== 'string'
+    || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(manifest.version)
+    || typeof source !== 'string' && manifest.version !== source.version
+    || typeof patch !== 'string' || patch === '' || isAbsolute(patch) || patch.split(/[/\\]/u).includes('..')) {
+    throw new Error('DSH 插件真实包名、版本或 dsh.bundle 声明不符合目录。')
+  }
+  const patchPath = await realpath(resolve(directory, patch))
+  const withinPackage = relative(directory, patchPath)
+  if (withinPackage.startsWith('..') || isAbsolute(withinPackage) || !(await stat(patchPath)).isFile()) throw new Error('DSH 插件 bundle patch 不是包内常规文件。')
+  return manifest.version
+}
+
+/** One native plugin workflow; the Tool supplies only action and packageName. */
+export async function manageDshPlugin(
+  ctx: Context,
+  args: { action: 'list' | 'install' | 'remove'; packageName?: string },
+  exec: { signal?: AbortSignal; agent?: UserQuestionAgent },
+  catalog: ReadonlyMap<string, PluginSource> = AUDITED_PLUGIN_SOURCES,
+): Promise<Record<string, unknown>> {
+  const { pnpm, runtime } = desktopServices(ctx)
+  exec.signal?.throwIfAborted()
+  if (args.action === 'list') {
+    const manifest = await profileManifest(pnpm)
+    return {
+      status: 'listed',
+      plugins: Object.keys(manifest.dependencies).map(packageName => {
+        const registered = manifest.bundles.includes(packageName)
+        // Keep the legacy field for existing Skills; it is registration, not live loading.
+        return { packageName, active: registered, registered, activation: registered ? 'registered-unverified' : 'not-registered' }
+      }),
+      available: [...catalog].map(([packageName, source]) => ({ packageName,
+        version: typeof source === 'string' ? null : source.version,
+        description: typeof source === 'string' ? '固定 GitHub 提交的受审计 DSH 插件。' : source.description,
+        supported: pluginPlatformSupported(source),
+      })),
+    }
+  }
+  const packageName = args.packageName ?? ''
+  const source = catalog.get(packageName)
+  validatePluginManagement(packageName, source)
+  if (args.action === 'remove') {
+    const before = await profileManifest(pnpm)
+    if (before.dependencies[packageName] === undefined) return { status: 'not-found', packageName }
+    if (!await confirmed(ctx, `删除按需 DSH 插件“${packageName}”并重启 e-Mate？`, packageName, exec.signal, exec.agent)) return { status: 'cancelled', packageName }
+    await runProfilePlugin(pnpm, ['remove', packageName], exec.signal)
+    const after = await profileManifest(pnpm)
+    if (after.dependencies[packageName] !== undefined || after.bundles.includes(packageName)) throw new Error('DSH 插件删除后仍在 profile 中。')
+    ctx.timeout(() => { void runtime.requestRestart().catch(() => {}) }, 2_000)
+    return { status: 'removed', packageName, restart: 'scheduled' }
+  }
+  if (source === undefined) throw new Error('该 DSH 插件不在可信可选目录中。')
+  if (!pluginPlatformSupported(source)) throw new Error(`Univer Office 尚不支持当前平台 ${process.platform}-${process.arch}；仅支持 Apple Silicon macOS 和 x64 Windows。`)
+  validatePluginInstall(packageName, source)
+  if (!await confirmed(ctx, `安装按需 DSH 插件“${packageName}”并重启 e-Mate？`, packageName, exec.signal, exec.agent)) return { status: 'cancelled', packageName }
+  const installSource = typeof source === 'string' ? source : await preparePluginArtifact(pnpm.profileDir, source, exec.signal)
+  exec.signal?.throwIfAborted()
+  const receiptId = `mcp-manage:${randomBytes(16).toString('hex')}`
+  let version: string
+  try {
+    await runProfilePlugin(pnpm, ['add', '--save-exact', installSource], exec.signal, {
+      packageName, packageVersion: typeof source === 'string' ? source : source.version, receiptId,
+    })
+    exec.signal?.throwIfAborted()
+    version = await installedPluginVersion(pnpm, packageName, source, installSource)
+    exec.signal?.throwIfAborted()
+  } catch (error) {
+    await pnpm.rollbackPluginInstall(receiptId)
+    throw error
+  }
+  ctx.timeout(() => { void runtime.requestRestart().catch(() => {}) }, 2_000)
+  return { status: 'installed', packageName, version, registered: true, activation: 'pending-restart', restart: 'scheduled' }
 }
 
 async function confirmed(
@@ -1175,7 +1262,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
   ctx.systemPrompt.section({
     name: 'emate:mcp-manage',
     order: 181,
-    text: 'When a user asks for a capability that is not installed, use skill_find for discovery and Skill Hub for Skill lifecycle. A selected Skill may call dsh_plugin_manage to install an audited DSH bundle pinned to one exact GitHub commit; that tool uses the Desktop native plugin CLI, preserves the managed profile, and restarts e-Mate. If the Skill requires an MCP server, call mcp_manage only for an audited HTTPS catalog entry. For xin-business-assistant call mcp_manage ensure first: UI and Agent share the same current-account connection; do not reconnect an already ready service. Prefer OAuth: mcp_manage opens the provider authorization page and stores credentials without exposing authorization URLs, codes, or tokens to the Agent. Never ask for tokens in chat. Only report an MCP connection effective when mcp_manage list returns active=true.',
+    text: 'When a user asks for a capability that is not installed, use skill_find for discovery and Skill Hub for Skill lifecycle. A selected Skill may call dsh_plugin_manage to install an audited DSH bundle pinned to one exact GitHub commit or a catalog HTTPS archive verified by SHA256; that tool uses the Desktop native plugin CLI, preserves the managed profile, and restarts e-Mate. If the Skill requires an MCP server, call mcp_manage only for an audited HTTPS catalog entry. For xin-business-assistant call mcp_manage ensure first: UI and Agent share the same current-account connection; do not reconnect an already ready service. Prefer OAuth: mcp_manage opens the provider authorization page and stores credentials without exposing authorization URLs, codes, or tokens to the Agent. Never ask for tokens in chat. Only report an MCP connection effective when mcp_manage list returns active=true.',
   })
 
   ctx.tools.register(defineTool({
@@ -1190,61 +1277,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
     async execute(args, exec) {
-      const { pnpm, runtime } = desktopServices(ctx)
-      if (args.action === 'list') {
-        const manifest = await profileManifest(pnpm)
-        return {
-          status: 'listed',
-          plugins: Object.keys(manifest.dependencies).map(packageName => ({
-            packageName,
-            active: manifest.bundles.includes(packageName),
-          })),
-        }
-      }
-      const packageName = args.packageName ?? ''
-      if (PROTECTED_PLUGIN_NAMES.has(packageName)
-        || PROTECTED_PLUGIN_PREFIXES.some(prefix => packageName.startsWith(prefix))) {
-        throw new Error('e-Mate 与 DSH 托管插件不能通过按需插件工具修改。')
-      }
-      if (args.action === 'remove') {
-        validatePluginPackageName(packageName)
-        const before = await profileManifest(pnpm)
-        if (before.dependencies[packageName] === undefined) {
-          return { status: 'not-found', packageName }
-        }
-        if (!await confirmed(ctx, `删除按需 DSH 插件“${packageName}”并重启 e-Mate？`, packageName, exec.signal, exec.agent)) {
-          return { status: 'cancelled', packageName }
-        }
-        await runProfilePlugin(pnpm, ['remove', packageName], exec.signal)
-        const after = await profileManifest(pnpm)
-        if (after.dependencies[packageName] !== undefined || after.bundles.includes(packageName)) {
-          throw new Error('DSH 插件删除后仍在 profile 中。')
-        }
-        ctx.timeout(() => { void runtime.requestRestart().catch(() => {}) }, 2_000)
-        return { status: 'removed', packageName, restart: 'scheduled' }
-      }
-      const source = AUDITED_PLUGIN_SOURCES.get(packageName) ?? ''
-      validatePluginInstall(packageName, source)
-      if (!await confirmed(ctx, `安装按需 DSH 插件“${packageName}”并重启 e-Mate？`, packageName, exec.signal, exec.agent)) {
-        return { status: 'cancelled', packageName }
-      }
-      const receiptId = `mcp-manage:${randomBytes(16).toString('hex')}`
-      try {
-        await runProfilePlugin(pnpm, ['add', '--save-exact', source], exec.signal, {
-          packageName,
-          packageVersion: source,
-          receiptId,
-        })
-        const after = await profileManifest(pnpm)
-        if (after.dependencies[packageName] !== source || !after.bundles.includes(packageName)) {
-          throw new Error('DSH 插件没有作为 profile bundle 激活。')
-        }
-      } catch (error) {
-        await pnpm.rollbackPluginInstall(receiptId)
-        throw error
-      }
-      ctx.timeout(() => { void runtime.requestRestart().catch(() => {}) }, 2_000)
-      return { status: 'installed', packageName, restart: 'scheduled' }
+      return manageDshPlugin(ctx, args, exec)
     },
   }))
 

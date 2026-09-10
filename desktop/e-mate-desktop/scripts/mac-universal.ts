@@ -2,7 +2,6 @@
 
 import { chmodSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { verifyUniverNativeRuntime } from './univer-native-runtime.ts'
 export {
   FORBIDDEN_MACOS_UNIVERSAL_ENTRIES,
   MACOS_UNIVERSAL_NATIVE_ENTRIES,
@@ -45,6 +44,5 @@ export function prepareMacUniversalRuntime(
 
 /** Prepare the installed workspace dependency tree for universal packaging. */
 export function prepareInstalledMacUniversalRuntime(desktopRoot: string): void {
-  verifyUniverNativeRuntime(join(desktopRoot, 'build/e-mate-profile/bundles/univer-office'), ['darwin-arm64', 'darwin-x64'])
   prepareMacUniversalRuntime({ desktopRoot, exists: existsSync, chmod: chmodSync })
 }

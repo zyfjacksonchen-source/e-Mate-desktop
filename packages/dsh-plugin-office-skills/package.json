@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-office-skills",
   "version": "2.0.18",
-  "description": "Native meeting-summary and Lieflat Charts Skill provider for e-Mate",
+  "description": "Support Skills and optional Univer plugin discovery for e-Mate",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -52,6 +52,7 @@
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
     "baseImports": [
+      "@deepseek-ai/cordis",
       "@deepseek-ai/dsh-skill"
     ]
   },

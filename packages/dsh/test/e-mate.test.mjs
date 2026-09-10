@@ -246,7 +246,6 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-tidychat',
       '@e-mate/dsh-plugin-imagegen',
-      '@e-mate/dsh-plugin-univer-office',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
@@ -978,7 +977,6 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-mcp-manage',
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
-      '@e-mate/dsh-plugin-univer-office',
       '@e-mate/dsh-plugin-schedules',
     ]
     for (const name of packages) {

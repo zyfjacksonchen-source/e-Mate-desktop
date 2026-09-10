@@ -3,20 +3,22 @@
  * carries a permissive license that allows redistribution.
  *
  * Walks the production dependency graph (dependencies + optionalDependencies,
- * excluding dev/peer) starting from this package manifest. Fails when a
- * package has no license field and no LICENSE file, or when its license is
- * not on the redistribution allowlist.
+ * excluding dev/peer) starting from this package manifest and the private
+ * node_modules materialized by sync-emate-plugin-bundles. Component roots are
+ * also checked; this does not inventory dependencies inlined into their code.
+ * Fails when a package has no license field and no LICENSE file, or when its
+ * license is not on the redistribution allowlist.
  *
  * @module scripts/verify-licenses
  */
 
-import { createRequire } from 'node:module'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-const rootManifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
+const rootManifestPath = realpathSync(join(packageRoot, 'package.json'))
+const rootManifest = JSON.parse(readFileSync(rootManifestPath, 'utf8'))
 
 /** Licenses accepted for redistribution inside the desktop installers. */
 const ALLOWED_LICENSES = new Set([
@@ -82,40 +84,72 @@ function licenseExpression(manifest) {
 const failures = []
 const seen = new Set()
 const manifests = []
-const queue = [{ name: rootManifest.name ?? '@e-mate/desktop', manifestPath: join(packageRoot, 'package.json') }]
+const queue = [{ name: rootManifest.name ?? '@e-mate/desktop', manifestPath: rootManifestPath }]
+
+// Inspect the exact component trees selected and materialized by the native
+// Desktop build, including their private nested dependencies. Do not resolve
+// these from the source workspace or rebuild a second bundle selection graph.
+const bundlesRoot = join(packageRoot, 'build/e-mate-profile/bundles')
+const registry = JSON.parse(readFileSync(join(bundlesRoot, 'registry.json'), 'utf8'))
+if (registry.schema_version !== 1 || !Array.isArray(registry.packages)) {
+  throw new Error('verify-licenses: bundled component registry is invalid')
+}
+for (const component of registry.packages) {
+  queue.push({ name: component.name, manifestPath: join(bundlesRoot, component.directory, 'package.json'), component: true })
+}
 
 for (let index = 0; index < queue.length; index += 1) {
   const current = queue[index]
-  if (current === undefined || seen.has(current.name)) continue
-  seen.add(current.name)
-  const manifest = JSON.parse(readFileSync(current.manifestPath, 'utf8'))
+  if (current === undefined) continue
+  const manifestPath = realpathSync(current.manifestPath)
+  if (seen.has(manifestPath)) continue
+  seen.add(manifestPath)
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const label = `${current.name}@${manifest.version ?? 'unknown'} (${relative(packageRoot, manifestPath)})`
 
-  if (current.name !== rootManifest.name) {
+  if (manifestPath !== rootManifestPath) {
     const license = licenseExpression(manifest)
-    const hasLicenseFile = existsSync(join(dirname(current.manifestPath), 'LICENSE'))
-      || existsSync(join(dirname(current.manifestPath), 'LICENSE.md'))
-      || existsSync(join(dirname(current.manifestPath), 'LICENSE.txt'))
+    const hasLicenseFile = existsSync(join(dirname(manifestPath), 'LICENSE'))
+      || existsSync(join(dirname(manifestPath), 'LICENSE.md'))
+      || existsSync(join(dirname(manifestPath), 'LICENSE.txt'))
     if (license === undefined && !hasLicenseFile) {
-      failures.push(`${current.name}: no license field and no LICENSE file`)
+      failures.push(`${label}: no license field and no LICENSE file`)
     } else if (license !== undefined && license.startsWith('SEE LICENSE IN ')) {
       if (!hasLicenseFile) {
-        failures.push(`${current.name}: license refers to ${JSON.stringify(license)} but no LICENSE file is shipped`)
+        failures.push(`${label}: license refers to ${JSON.stringify(license)} but no LICENSE file is shipped`)
       }
     } else if (license !== undefined && !ALLOWED_LICENSES.has(license) && !NOTICE_LICENSES.has(license)) {
-      failures.push(`${current.name}: license ${JSON.stringify(license)} is not on the redistribution allowlist`)
+      failures.push(`${label}: license ${JSON.stringify(license)} is not on the redistribution allowlist`)
     }
     manifests.push({ name: current.name, version: manifest.version, license: license ?? 'SEE LICENSE FILE' })
   }
 
-  const requireFrom = createRequire(current.manifestPath)
-  void requireFrom
+  if (current.component) {
+    const modulesRoot = join(dirname(manifestPath), 'node_modules')
+    const names = existsSync(modulesRoot) ? readdirSync(modulesRoot)
+      .filter(name => !name.startsWith('.'))
+      .flatMap(name => name.startsWith('@')
+        ? readdirSync(join(modulesRoot, name)).map(child => `${name}/${child}`)
+        : [name]) : []
+    for (const name of names) {
+      const path = join(modulesRoot, name, 'package.json')
+      if (existsSync(path)) queue.push({ name, manifestPath: path })
+    }
+    for (const name of manifest.bundledDependencies ?? []) {
+      if (!existsSync(join(modulesRoot, name, 'package.json'))) {
+        failures.push(`${label} -> ${name}: bundled dependency was not materialized`)
+      }
+    }
+    continue
+  }
+
   for (const section of ['dependencies', 'optionalDependencies']) {
     for (const name of Object.keys(manifest[section] ?? {})) {
-      const resolved = resolvePackageManifest(name, current.manifestPath)
+      const resolved = resolvePackageManifest(name, manifestPath)
       if (resolved === undefined) {
         // Optional dependencies may legitimately be absent on this platform.
         if (section === 'optionalDependencies') continue
-        failures.push(`${current.name} -> ${name}: could not locate its manifest`)
+        failures.push(`${label} -> ${name}: could not locate its manifest`)
         continue
       }
       queue.push({ name, manifestPath: resolved })
