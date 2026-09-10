@@ -418,6 +418,15 @@ test('mixed steering sends the composed draft, native ids and delivery mode thro
   assert.deepEqual(shell.snapshot.fileRefs, [])
 })
 
+// KNOWN GAP (0.1.5): a draft holding only files, with an empty composer, is not
+// delivered. The machine refuses an empty draft (`onEnter`: `if (trimmed ===
+// "") return []`) and the attachment-only branch calls defaultSink directly, so
+// nothing reaches sinkSerialized — the one composer of the @path mentions. It is
+// reachable from dsh-plugin-file-import, which calls addFiles() with no draft.
+// Fixing it needs files to participate in the 0.1.5 merged attachmentIds model,
+// not a condition tweak; the former facade/file-only-submit seam was removed
+// because it entered that branch without being able to carry the files.
+
 test('durable image send clears refs on success and a failed text send restores its native ids', async () => {
   const durableClear = '\t\t\t\tconst durable = this.durableImages.flatMap(item => { const id = this.durableImageIds.get(item.draft_key); return id !== undefined && submitted.has(id) ? [{ item, id }] : []; });'
   const durableRestore = '\t\t\t\tthis.restoreFiles(record.files ?? []);\n\t\t\t\tthis.restoreAttachments(record.attachmentIds);'

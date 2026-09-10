@@ -267,8 +267,11 @@ export function adaptHarnessConversationSource(source) {
   change('\t\t\tsubmit(mode = "queue") {\n\t\t\t\tif (this.snapshot.draft.trim() === "" && this.attachmentIds.length > 0) {',
     '\t\t\tsubmit(mode = "queue") {\n\t\t\t\tif (this.imageStagePending || this.durableImages.some(item => !this.durableImageIds.has(item.draft_key))) { if (!this.hydrationNotice) { this.hydrationNotice = true; this.notify("info", "图片草稿正在恢复，请稍候。"); } return; }\n\t\t\t\tif (this.snapshot.draft.trim() === "" && this.attachmentIds.length > 0) {', 'facade/hydration-submit')
 
-  change('if (this.snapshot.draft.trim() === "" && this.attachmentIds.length > 0)',
-    'if (this.snapshot.draft.trim() === "" && (this.attachmentIds.length > 0 || this.fileRefs.length > 0))', 'facade/file-only-submit')
+  // A file-only draft must NOT take the attachment-only branch. That branch
+  // calls defaultSink directly and so never reaches sinkSerialized, the one
+  // place that composes the @path mentions, and its defaultSink("", [], ...)
+  // is short-circuited by InputHub.sink: the files were silently dropped.
+  // sinkSerialized already handles an empty draft with files via filter(Boolean).
 
   change('\t\t\t\t\tattachmentIds: this.attachmentIds,',
     '\t\t\t\t\tattachmentIds: this.attachmentIds,\n\t\t\t\t\tfileRefs: this.fileRefs,\n\t\t\t\t\timageRefs: this.durableImages,\n\t\t\t\t\thydratedImageKeys: this.durableImages.filter(item => this.durableImageIds.has(item.draft_key)).map(item => item.draft_key),\n\t\t\t\t\truntimeOnlyImageIds: this.attachmentIds.filter(id => ![...this.durableImageIds.values()].includes(id)),\n\t\t\t\t\timageStagePending: this.imageStagePending,', 'facade/snapshot')
