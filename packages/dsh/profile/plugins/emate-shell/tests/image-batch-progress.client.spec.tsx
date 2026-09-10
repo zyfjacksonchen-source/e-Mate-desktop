@@ -3,7 +3,7 @@ import { createPetWorkFactsReader } from '../src/client/pet-image-facts.ts'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { useRef, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProjectionValueStore } from '../../../../../../upstream/deepseek-harness/packages/api/session-controller/src/client/sessions/projection-store.ts'
 import { ConversationNodeAssembler } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation/assembler.ts'
@@ -17,20 +17,46 @@ import {
 } from '../src/client/image-batch-progress.tsx'
 import { ArtifactTerminal, imageCallsDefinition, selectArtifactTerminal } from '../src/client/image-gallery.tsx'
 
-vi.mock('@deepseek-ai/dsh-client-ui-attachment', async () => {
-  const { useEffect } = await import('react')
-  return {
-    MessageImage: ({ attachment, load, labels }: {
-      attachment: { attachmentId?: string; name?: string }
-      load: (attachment: unknown) => Promise<string>
-      labels: { openNamed: (name: string) => string }
-    }) => {
-      useEffect(() => { void load(attachment) }, [attachment, load])
-      return <button type="button" aria-label={labels.openNamed(attachment.name ?? 'image')}
-        data-attachment-id={attachment.attachmentId}>{attachment.name}</button>
-    },
-  }
-})
+// 0.1.5 stopped value-importing the attachment plugin: the batch card and the
+// artifact gallery now reach images through the native conversation.message.images
+// slot. This stand-in mirrors the shipped slot owner (ui-attachment's MessageImages
+// over MessageImage): one tile per image, loaded through the owner's loader, with
+// labels resolved from the conversation dictionary. data-attachment-id is test
+// instrumentation the native thumbnail does not carry.
+const SLOT_LABELS = {
+  image: '图片',
+  open: '查看原图',
+  openNamed: (label: string) => label + '，点击查看原图',
+  loading: '正在加载图像…',
+  loadFailed: '图像加载失败，点击重试',
+  lightbox: { dialog: '原图预览', close: '关闭原图预览' },
+}
+
+type SlotImageAttachment = { attachmentId?: string; name?: string }
+type SlotImagesOwner = {
+  images: readonly { attachment: SlotImageAttachment }[]
+  loadImage: (attachment: unknown) => Promise<string>
+  compact?: boolean
+}
+
+function SlotImage({ attachment, loadImage, variant }: {
+  attachment: SlotImageAttachment
+  loadImage: SlotImagesOwner['loadImage']
+  variant: 'single' | 'tile'
+}) {
+  useEffect(() => { void loadImage(attachment) }, [attachment, loadImage])
+  return <button type="button" data-variant={variant}
+    title={SLOT_LABELS.open}
+    aria-label={SLOT_LABELS.openNamed(attachment.name ?? SLOT_LABELS.image)}
+    data-attachment-id={attachment.attachmentId}>{attachment.name}</button>
+}
+
+function renderImagesSlot(name: string, owner: SlotImagesOwner) {
+  if (name !== 'conversation.message.images') return null
+  const variant = owner.compact === true || owner.images.length > 1 ? 'tile' : 'single'
+  return owner.images.map((image, index) =>
+    <SlotImage key={index} attachment={image.attachment} loadImage={owner.loadImage} variant={variant} />)
+}
 
 afterEach(cleanup)
 
@@ -172,7 +198,7 @@ function renderProgress(
       batches={view.batches.filter(batch => batch.parentCallId === parentCallId)}
       useSessions={sessions.useSessions}
       loadImage={loadImage}
-      renderSlot={(() => null) as never}
+      renderSlot={renderImagesSlot as never}
       {...addImageToCanvas ? { addImageToCanvas } : {}}
     />
   }
@@ -202,7 +228,7 @@ describe('live image batch progress', () => {
     }
     expect(add).toHaveBeenCalledTimes(3)
     expect(screen.getAllByRole('article')).toHaveLength(3)
-    expect(screen.getAllByRole('button', { name: /^查看原图/ })).toHaveLength(3)
+    expect(screen.getAllByRole('button', { name: /点击查看原图/u })).toHaveLength(3)
   })
 
   it('keeps unresolved or review images disabled and reports canvas failures without replaying duplicate clicks', async () => {
@@ -298,14 +324,14 @@ describe('live image batch progress', () => {
     const sessions = sessionHarness(emptySessions())
     const loadImage = vi.fn(async () => 'blob:image')
     renderProgress(store, sessions, loadImage)
-    expect(screen.queryByRole('button', { name: '查看原图：first.png' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'first.png，点击查看原图' })).toBeNull()
 
     await act(async () => {
       sessions.set({ ...emptySessions(), byId: { 'child-1': { projectionValues: { eMateImageReceipts: [{
         seq: 9, createdAt: 10, receipt: imageReceipt(),
       }] } } } } as never)
     })
-    const preview = screen.getByRole('button', { name: '查看原图：first.png' })
+    const preview = screen.getByRole('button', { name: 'first.png，点击查看原图' })
     expect(screen.getByLabelText('图片批次，共 2 张').getAttribute('aria-busy')).toBe('false')
     preview.click()
     expect(loadImage).toHaveBeenCalledWith(attachment, 'child-1')
@@ -331,7 +357,7 @@ describe('live image batch progress', () => {
       useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
       useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
       addImageToDraft: vi.fn(async () => {}), addImageToCanvas: vi.fn(async () => {}), draftBytes: () => 0, notify: vi.fn(), runResource: vi.fn(async () => {}),
-      renderSlot: (() => null) as never,
+      renderSlot: renderImagesSlot as never,
     }
     const openMatch = { callIds: [], batchCallIds: [parentCallId], paths: [], childSessionIds: [] }
     const view = render(<ArtifactTerminal {...common as never} matched={openMatch} turn={{
@@ -340,8 +366,8 @@ describe('live image batch progress', () => {
     const batchCard = screen.getByRole('article', { name: '第 1 张图片：已完成' })
     await act(async () => fireEvent.click(within(batchCard).getByRole('button', { name: '加入画布：图片 1' })))
     expect(common.addImageToCanvas).toHaveBeenCalledWith(attachment, 'child-1')
-    expect(screen.getAllByRole('button', { name: '查看原图：first.png' })).toHaveLength(1)
-    expect(screen.queryByRole('button', { name: '查看原图：unrelated.png' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'first.png，点击查看原图' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'unrelated.png，点击查看原图' })).toBeNull()
 
     view.rerender(<ArtifactTerminal {...common as never} matched={{
       ...openMatch, childSessionIds: ['child-1', 'child-unrelated'],
@@ -349,9 +375,9 @@ describe('live image batch progress', () => {
       turn: 1, status: 'closed', start: undefined, end: undefined, steps: [], data: { get: () => undefined },
     } as never} />)
     expect(screen.getByRole('article', { name: '第 1 张图片：已完成' })).toBe(batchCard)
-    expect(screen.getAllByRole('button', { name: '查看原图：first.png' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'first.png，点击查看原图' })).toHaveLength(1)
     const unrelated = within(screen.getByRole('region', { name: '图片结果' }))
-      .getByRole('button', { name: /^查看原图：/u })
+      .getByRole('button', { name: /点击查看原图/u })
     expect(unrelated.getAttribute('data-attachment-id')).toBe(unrelatedAttachment.attachmentId)
     expect(unrelated.getAttribute('aria-label')).toMatch(/子任务02-生成/u)
 
@@ -360,7 +386,7 @@ describe('live image batch progress', () => {
     }} turn={{
       turn: 1, status: 'closed', start: undefined, end: undefined, steps: [], data: { get: () => undefined },
     } as never} seq={21} />)
-    expect(screen.getAllByRole('button', { name: '查看原图：first.png' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'first.png，点击查看原图' })).toHaveLength(1)
     expect(screen.getAllByLabelText('图片批次进度')).toHaveLength(1)
   })
 
@@ -385,7 +411,7 @@ describe('live image batch progress', () => {
       useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
       useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
       addImageToDraft: vi.fn(async () => {}), draftBytes: () => 0, notify: vi.fn(), runResource: vi.fn(async () => {}),
-      renderSlot: (() => null) as never,
+      renderSlot: renderImagesSlot as never,
     }
     render(<ArtifactTerminal {...props as never} />)
     const count = () => document.querySelectorAll('[data-attachment-id]').length
@@ -411,7 +437,7 @@ describe('live image batch progress', () => {
     store.apply('eMateImageBatches', projection(['completed', 'failed'], { revisions: [3, 3] }), 1)
     const view = renderProgress(store, sessions)
     const cards = screen.getAllByRole('article')
-    expect(screen.queryByRole('button', { name: '查看原图：first.png' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'first.png，点击查看原图' })).toBeNull()
 
     await act(async () => {
       store.apply('eMateImageBatches', projection(['completed', 'failed'], { revisions: [3, 3], terminal: true }), 2)
@@ -464,7 +490,7 @@ describe('live image batch progress', () => {
     const view = renderProgress(store, sessionHarness(projectedSessions([
       'completed', 'completed', 'completed', 'completed', 'failed',
     ])))
-    expect(screen.getAllByRole('button', { name: /^查看原图：/u })).toHaveLength(4)
+    expect(screen.getAllByRole('button', { name: /点击查看原图/u })).toHaveLength(4)
     expect(screen.getAllByRole('article')).toHaveLength(5)
     const summary = screen.getByRole('region', { name: '批次未完成项目：1 项' })
     expect(summary.textContent).toBe('未完成 1 项图片 5：生成失败（代码：task-failed）')
@@ -485,7 +511,7 @@ describe('live image batch progress', () => {
       { revisions: [3, 3], terminal: true, imageBearingFailures: [2] },
     ), 1)
     const view = renderProgress(store, sessionHarness(projectedSessions(['completed', 'completed'])))
-    expect(screen.getAllByRole('button', { name: /^查看原图：/u })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /点击查看原图/u })).toHaveLength(2)
     expect(screen.getByRole('article', { name: '第 2 张图片：生成失败' })).toBeTruthy()
     expect(screen.getByRole('region', { name: '批次未完成项目：1 项' })).toBeTruthy()
     view.unmount()
@@ -513,7 +539,7 @@ describe('live image batch progress', () => {
     renderProgress(store, sessionHarness(projectedSessions(['failed', 'completed'])))
     expect(screen.getByText('结果不确定，未自动重复生成')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '准备重新生成此项' })).toBeNull()
-    expect(screen.getByRole('button', { name: /^查看原图：/u })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /点击查看原图/u })).toBeTruthy()
   })
 
   it('keeps eight card subscriptions bounded and delegates URL lifecycle to native owners', async () => {
@@ -542,15 +568,19 @@ describe('live image batch progress', () => {
     const batchSource = readFileSync(resolve('src/client/image-batch-progress.tsx'), 'utf8')
     const messageImage = readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-attachment/src/MessageImage.tsx'), 'utf8')
     const conversation = readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/service.ts'), 'utf8')
+    // 0.1.5 moved the session-scoped durable image URL cache out of the
+    // Conversation service into its own owner.
+    const historicalImages = readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/conversation/historical-images.ts'), 'utf8')
     const batchCss = readFileSync(resolve('src/client/image-batch-progress.module.css'), 'utf8')
     const gallerySource = readFileSync(resolve('src/client/image-gallery.tsx'), 'utf8')
-    expect(batchSource).toContain('variant="tile"')
+    expect(batchSource).toContain('compact: true')
     expect(batchSource).not.toMatch(/createObjectURL|revokeObjectURL|IntersectionObserver|imageUrls/u)
     expect(messageImage).toContain('onClick={request}')
-    expect(messageImage).toContain('if (live) setSrc(url)')
-    expect(conversation).toContain('private readonly imageUrls = new Map')
-    expect(conversation).toContain('releaseSessionImages(sessionId')
-    expect(conversation).toContain('revokePreview(url)')
+    expect(messageImage).toContain('if (live) setLoaded(url)')
+    expect(historicalImages).toContain('private readonly entries = new Map<string, ImageUrlEntry>()')
+    expect(historicalImages).toContain('this.release(sessionId)')
+    expect(historicalImages).toContain('private releaseUrl(url: string): void')
+    expect(conversation).toContain('function revokePreview(url: string): void {')
     expect(batchCss).toContain('@media (prefers-reduced-motion: reduce)')
     expect(batchCss).toContain('.failures:focus-visible')
     expect(gallerySource).toContain('snapshot.chat.timeline.turnOrder.at(-1)')
@@ -563,14 +593,14 @@ describe('live image batch progress', () => {
     const acceptedSessions = sessionHarness(projectedSessions(['needs-review', 'failed']))
     const accepted = renderProgress(acceptedStore, acceptedSessions)
     const acceptedCard = screen.getByRole('article', { name: '第 1 张图片：待确认' })
-    expect(screen.getByRole('button', { name: '查看原图：image-1.png' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'image-1.png，点击查看原图' })).toBeTruthy()
     await act(async () => {
       acceptedSessions.set(projectedSessions(['completed', 'failed']))
       acceptedStore.apply('eMateImageBatches', projection(['completed', 'failed'], { revisions: [3, 3], terminal: true }), 2)
       await Promise.resolve()
     })
     expect(screen.getByRole('article', { name: '第 1 张图片：已完成' })).toBe(acceptedCard)
-    expect(screen.getAllByRole('button', { name: '查看原图：image-1.png' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'image-1.png，点击查看原图' })).toHaveLength(1)
     accepted.unmount()
 
     const rejectedStore = new ProjectionValueStore()
@@ -578,7 +608,7 @@ describe('live image batch progress', () => {
     const rejectedSessions = sessionHarness(projectedSessions(['needs-review', 'failed']))
     const rejected = renderProgress(rejectedStore, rejectedSessions)
     const rejectedCard = screen.getByRole('article', { name: '第 1 张图片：待确认' })
-    expect(screen.getByRole('button', { name: '查看原图：image-1.png' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'image-1.png，点击查看原图' })).toBeTruthy()
     await act(async () => {
       rejectedSessions.set(projectedSessions(['failed', 'failed']))
       rejectedStore.apply('eMateImageBatches', projection(['failed', 'failed'], { revisions: [3, 3], terminal: true }), 2)
@@ -774,9 +804,9 @@ function univerPetChat(calls: { name: string; content?: unknown[]; error?: boole
   for (const [index, call] of calls.entries()) {
     const root = 'root-' + index
     add('tool/call', { turn: 1, step: 1, callId: root, name: code ? 'run_code' : call.name, arguments: '{}' })
-    if (code) add('tool/code-dispatch-start', { rootCallId: root, parentCallId: root, subCallId: 'same-child', name: call.name, arguments: { path: '/unverified.xlsx' } })
+    if (code) add('tool/ptc-dispatch-start', { rootCallId: root, parentCallId: root, subCallId: 'same-child', name: call.name, arguments: { path: '/unverified.xlsx' } })
     if (call.content) {
-      if (code) add('tool/code-dispatch', { rootCallId: root, parentCallId: root, subCallId: 'same-child', name: call.name,
+      if (code) add('tool/ptc-dispatch', { rootCallId: root, parentCallId: root, subCallId: 'same-child', name: call.name,
         arguments: {}, isError: call.error === true, content: call.content })
       add('tool/result', { turn: 1, step: 1, message: { source: { callId: root }, content: [{ type: 'tool-result', isError: code ? rootError : call.error === true,
         content: code ? [{ type: 'text', text: 'Code complete' }] : call.content }] } })
@@ -784,8 +814,9 @@ function univerPetChat(calls: { name: string; content?: unknown[]; error?: boole
   }
   if (closed) { add('step/end', { turn: 1, step: 1 }); add('turn/end', { turn: 1, reason: { kind: aborted ? 'aborted' : 'completed' } }) }
   const assembler = new ConversationNodeAssembler({ entries: () => [toolDefinition], fallbackEntry: () => undefined } as never, { entries: () => [chatViewDefinition] } as never)
-  if (incremental) for (const event of events) { assembler.append({ event, view: undefined }); assembler.flush() }
-  else assembler.replaceWindow(events.map(event => ({ event, view: undefined })), false)
+  assembler.activateTarget('chat')
+  if (incremental) for (const event of events) { assembler.append({ type: 'event', event }); assembler.flush() }
+  else assembler.replaceWindow(events.map(event => ({ type: 'event', event })), false)
   assembler.flush()
   return assembler.snapshot('chat')
 }
