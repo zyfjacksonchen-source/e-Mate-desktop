@@ -28,14 +28,15 @@ export function adaptHarnessFsSource(source) {
 export const SESSION_TITLE_PACKAGE = '@deepseek-ai/dsh-session-title'
 export const SESSION_TITLE_ADAPTER_PATH = 'scripts/harness-runtime-adapters.mjs'
 
-const TITLE_SCHEDULE = '\t\t\tif (registration.provider.automatic === "all-prompts" || session.header.parentSession === void 0 && messages.length === 1 && this.get(session) === void 0) {'
+const TITLE_SCHEDULE = '			if (registration.provider.automatic === "all-prompts" || session.header.parentSession === void 0 && count === 1 && this.get(session) === void 0) {'
 const TITLE_SCHEDULE_GROUNDED = String.raw`			// Preserve a complete compact human title instead of asking a model to expand it.
-			const firstText = messages.length === 1 ? messages[0].text : "";
+			const titleInput = this.titleInputOf(session);
+			const firstText = titleInput.count === 1 && titleInput.first !== null ? titleInput.first.text : "";
 			const normalized = normalizeSessionTitle(firstText, Number.MAX_SAFE_INTEGER);
 			const compactHumanTitle = normalized.length > 0 && !/[\r\n\u2028\u2029]/u.test(firstText)
 				&& event.data.content.every(block => block.type === "text") && !event.data.source.mentions?.length
 				&& normalized === fallbackSessionTitle(firstText, this.config.fallbackMaxWords, this.config.fallbackMaxBytes);
-			if (registration.provider.automatic === "all-prompts" || !compactHumanTitle && session.header.parentSession === void 0 && messages.length === 1 && this.get(session) === void 0) {`
+			if (registration.provider.automatic === "all-prompts" || !compactHumanTitle && session.header.parentSession === void 0 && count === 1 && this.get(session) === void 0) {`
 
 /** Adapt only the deployed rc.7 title scheduler; fallback, explicit refresh and rename remain native. */
 export function adaptHarnessSessionTitleSource(source) {
