@@ -961,4 +961,41 @@ return renderImage(definition.url, node.alt ?? "", key, context);
 | `artifact-links` | 已查明冲突点，待重新设计注入方式 |
 | `artifact-deliverables` | 待查顺序依赖 |
 | `conversation` | 待重写 |
-| `slot-error` / `session-export` | 待重定目标 |
+| `slot-error` / `session-export` | 待重定目标 |### 21.17 Round 9：更正 Round 7 的"顺序依赖"判断 + deliverables 的真实结构
+
+#### 更正：不存在顺序依赖，是我误读了自己的插桩输出
+Round 7 我据"接缝在原文存在 1 次、检查却报 0"推出"存在替换顺序依赖"。
+重读适配器流程后发现：那 1 次命中属于**第 1 步**（`deliverables/native-results`），它**成功了**；
+报 0 的是**第 2 步**（`deliverables/tail-selector`，接缝 `select: selectProducedFiles,`）。
+**两个不同步骤的接缝被我当成同一个**，于是生造出一个并不存在的问题。
+
+> 教训：插桩输出必须**按步骤分组**，不能把整条流水线的接缝混在一个列表里看。
+
+#### `adaptHarnessArtifactDeliverablesSource` 的真实状态（6 步）
+
+| 步 | owner | 0.1.5 读数 | 判读 |
+|---|---|---|---|
+| 1 | `deliverables/native-results` | 接缝 `function selectProducedFiles(owner) {` **命中** | 可用 |
+| 2 | `deliverables/tail-selector` | `select: selectProducedFiles,` **0 命中** | **0.1.5 改名为 `select: selectDeliverables,`**（lib/client.js:935） |
+| 3 | `deliverables/mention-selector` | 待查 | — |
+| 4 | `deliverables/library-definition` | `const deliverablesDefinition = {` **命中** | 可用 |
+| 5 | `deliverables/library-close` | `value: { produced: context.state.produced }` **0 命中** | 视图节点值结构已变 |
+| 6 | （步骤顺序见适配器） | — | — |
+
+**结论：`deliverables` 与 `conversation` 同类 —— 0.1.5 重构了会话节点定义**，
+不只是接缝改名：`select` 指向的函数被重命名，视图节点的值结构也变了。
+需按 0.1.5 的新定义重新安置 e-Mate 的 Univer/Office 产出注入。
+
+### 21.18 适配器进度（Round 9 末）
+
+| 适配器 | 分类 | 状态 |
+|---|---|---|
+| `fs-bytes` | 精度 | **完成** |
+| `fs-escalation` | 本就可用 | **完成** |
+| `session-title` | API 已改 | **完成** |
+| `artifact-links` | 精度但注入点需重设计 | 冲突点已查明 |
+| `artifact-deliverables` | **节点定义重构** | 需重新安置注入 |
+| `conversation` | **节点定义重构** | 待重写 |
+| `slot-error` / `session-export` | 宿主消失 | 待重定目标 |
+
+**3/8 完成。剩下 5 条中，2 条是"节点定义重构"（同一根因：0.1.5 重写会话节点层），2 条是宿主消失，1 条是注入点重设计。**
