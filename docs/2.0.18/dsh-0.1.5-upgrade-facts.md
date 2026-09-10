@@ -910,4 +910,55 @@ function renderAnchor(url, children, key, glyph = true) {
 | `slot-error` | 重定目标 | 待办 |
 | `session-export` | 重定目标 | 待办 |
 
-**3/8 完成，2 条已定成本（低成本），3 条待重写/重定目标。**
+**3/8 完成，2 条已定成本（低成本），3 条待重写/重定目标。**### 21.16 Round 8：artifact-links 是 6 步顺序流水线，且 0.1.5 已独立演化
+
+#### 适配器结构（`adaptHarnessArtifactLinksSource`，lib 面）
+它是 6 个 `change(before, after, owner)` 的**顺序流水线**，每步 `replaceOnce` 失败即抛出：
+
+| 步 | owner | 作用 |
+|---|---|---|
+| 1 | `renderer/anchor` | 把 `renderAnchor(url, children, key)` 改成带 `context` 版本，并注入 e-Mate 的文件提及按钮 |
+| 2 | `renderer/link` | 调用点补传 `context` |
+| 3 | `renderer/reference` | 同上 |
+| 4 | `renderer/image` | 把 `renderImage(url, alt, key)` 改成带 `context` 版本 |
+| 5 | `renderer/image-node` | 调用点补传 `context` |
+| 6 | `renderer/image-reference` | 同上 |
+
+另有一套平行的 `adaptHarnessArtifactLinksRendererSource` 作用于 **TS 源码** `packages/client/ui-primitives/src/markdown/render.tsx`（vite 插件用），步骤一一对应。
+
+#### 0.1.5 的实际形状（关键）
+
+```js
+function renderSafeLink(href, children, key, glyph = true) { ... }      // 新增 glyph
+function renderAnchor(url, children, key, glyph = true) {              // 新增 glyph 并透传
+  return renderSafeLink(normalizeUri(url), children, key, glyph);
+}
+function renderImage(url, alt, key, context) { ... }                   // 已带 context
+function anchorWrapsOnlyImages(children) { ... }                       // 新增
+```
+
+调用点（0.1.5）：
+```js
+case "link": return renderAnchor(node.url, ..., key, !anchorWrapsOnlyImages(node.children));
+case "image": return renderImage(node.url, node.alt ?? "", key, context);
+return renderImage(definition.url, node.alt ?? "", key, context);
+```
+
+#### 两个必须处理的冲突点
+1. **形参位次冲突**：适配器把 `context` 插在第 4 位，而 0.1.5 的第 4 位是 `glyph`。直接照搬会让两者撞位 ——
+   `renderAnchor` 的 `context` 必须排到 `glyph` **之后**，且透传 `glyph` 不能丢。
+2. **部分意图已被上游取代**：0.1.5 **已经给 `renderImage` 传 `context`** 并在调用点传参，
+   所以适配器第 4–6 步（`renderer/image*`）的"补 context"目的**已由上游实现**；
+   剩下的只有"注入 e-Mate 文件提及处理"这一部分。
+
+**结论：这不是改接缝签名就能了事，需要在 0.1.5 已演化出的结构上重新决定注入方式。**
+本轮**不实施**，避免在无验证预算下硬套 6 步流水线。
+
+#### 进度（Round 8 末）
+| 适配器 | 状态 |
+|---|---|
+| `fs-bytes` / `fs-escalation` / `session-title` | **完成（3/8）** |
+| `artifact-links` | 已查明冲突点，待重新设计注入方式 |
+| `artifact-deliverables` | 待查顺序依赖 |
+| `conversation` | 待重写 |
+| `slot-error` / `session-export` | 待重定目标 |
