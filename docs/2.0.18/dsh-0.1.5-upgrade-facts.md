@@ -1382,3 +1382,43 @@ entriesOfSlot 对 chain 直接返回全部条目，对其它 kind 做去重后�
 以上只解决了「呈现注入点」。适配器里还有与呈现无关的部分（例如 conversation 的 47 处中包含 stores、facade、hub、queue 等状态与持久化逻辑），
 那些**不能**用 slot 贡献替代，仍需按源码逐处适配。
 因此本轮**不宣称**最后两条的成本已大幅下降，只确认「呈现部分找到了正规入口」。
+
+### 21.37 Round 25：conversation 适配器 47 处的性质分类（真实剩余工作量）
+
+| 前缀 | 处数 | 性质 |
+|---|---|---|
+| facade | 14 | 状态/持久化 |
+| canvas | 8 | 呈现为主 |
+| queue | 6 | 状态/持久化 |
+| images | 5 | 呈现为主 |
+| stores | 3 | 状态/持久化 |
+| artifacts | 2 | 呈现 |
+| hub | 2 | 状态/持久化 |
+| session | 2 | 状态/持久化 |
+| apply | 2 | 呈现（composer 声明） |
+| turn-error | 1 | 呈现 |
+| input-bar | 1 | 呈现 |
+| message | 1 | 呈现 |
+| 合计 | 47 | |
+
+**归并后：呈现类约 20 处，状态/持久化类约 27 处。**
+
+这印证了 Round 24 画的边界：**过半工作（27 处）属于状态与持久化**，
+它们把 e-Mate 的草稿/文件/图像状态管理接进 harness 的 chat store，
+**无法用 slot 贡献或事件注册替代**，必须按源码逐处适配。
+
+呈现类的 20 处则有望走正规入口（事件注册 / slot 贡献），成本结构完全不同。
+
+#### 一个好消息：事件注册契约仍在
+
+0.1.5 的 ui-conversation 仍导出 ConversationEventRegistry（来自 conversation/event-registry.ts）。
+也就是说「注册会话节点定义」这条路径没有被取消，只是服务名/导出形式可能变了。
+e-Mate 插件目前用的是 ctx.conversationEvents.register，需核对该服务名在 0.1.5 是否仍成立。
+
+#### 结论（不夸大）
+
+conversation 适配器**不能**用「注册贡献」整体替代：
+- 约 20 处呈现 → 可走正规入口，成本低
+- 约 27 处状态/持久化 → 必须逐处源码适配，是剩余工作的大头
+
+artifact-deliverables 则**整条都是呈现性质**（产出文件的呈现与打开），因此它有望被完整替换为一次 slot 贡献注册。
