@@ -1508,10 +1508,15 @@ describe('dsh-imagegen native receipt integration', () => {
       tool_name: name === 'edit_image' ? 'edit_image' : 'generate_image', operation: name === 'edit_image' ? 'edit' : 'generate',
       requested_count: 4, returned_count: 4, content: images.map(attachment => ({ type: 'image', attachment })) })
     const events: any[] = []
-    const createAssembler = () => new ConversationNodeAssembler({
-      entries: () => [assistantDefinition, toolDefinition, adaptedTurnTailDefinition(), imageCallsDefinition, toolImagesDefinition],
-      fallbackEntry: () => unknownFallbackDefinition,
-    }, { entries: () => [chatViewDefinition] })
+    const createAssembler = () => {
+      const created = new ConversationNodeAssembler({
+        entries: () => [assistantDefinition, toolDefinition, adaptedTurnTailDefinition(), imageCallsDefinition, toolImagesDefinition],
+        fallbackEntry: () => unknownFallbackDefinition,
+      }, { entries: () => [chatViewDefinition] })
+      // 0.1.5 publishes a target's snapshot only after it is activated.
+      created.activateTarget('chat')
+      return created
+    }
     const assembler = createAssembler()
     assembler.replaceWindow([], false); assembler.flush()
     const append = (type: string, data: unknown, surfaceOp?: 'append') => {
@@ -1576,8 +1581,9 @@ describe('dsh-imagegen native receipt integration', () => {
         entries: () => [toolDefinition, adaptedTurnTailDefinition(), imageCallsDefinition, toolImagesDefinition],
         fallbackEntry: () => unknownFallbackDefinition,
       }, { entries: () => [chatViewDefinition] })
-      if (incremental) { assembler.replaceWindow([], false); for (const event of events) { assembler.append({ event }); assembler.flush() } }
-      else { assembler.replaceWindow(events.map(event => ({ event, view: undefined })), false); assembler.flush() }
+      assembler.activateTarget('chat')
+      if (incremental) { assembler.replaceWindow([], false); for (const event of events) { assembler.append({ type: 'event', event }); assembler.flush() } }
+      else { assembler.replaceWindow(events.map(event => ({ type: 'event', event })), false); assembler.flush() }
       const snapshot = assembler.snapshot('chat') as any, nodes = [...snapshot.nodes.values()]
       const tail = nodes.find(node => node.kind === 'turn-tail' && node.data.turn === 1)
       const matched = selectArtifactTerminal({ turn: tail.location.turn, nodes, seq: 2 } as never)!
@@ -1630,7 +1636,8 @@ it('a paged history window with only the v3 terminal receipt still restores its 
   const payload = v3Receipt({ request_receipts: [{ client_request_id: 'request-1', task_id: 'request-1', trace_id: 'request-1', provider_request_id: 'provider-1' }] })
   const assembler = new ConversationNodeAssembler({ entries: () => [toolImagesDefinition], fallbackEntry: () => unknownFallbackDefinition },
     { entries: () => [chatViewDefinition] })
-  assembler.replaceWindow([{ event: event(payload), view: undefined }] as never, false); assembler.flush()
+  assembler.activateTarget('chat')
+  assembler.replaceWindow([{ type: 'event', event: event(payload) }] as never, false); assembler.flush()
   const nodes = [...(assembler.snapshot('chat') as any).nodes.values()]
   expect(galleryImageItems(nodes)).toMatchObject([{ callId: payload.call_id, attachment }])
   expect(terminalImageItems(nodes, [payload.call_id], 1)).toHaveLength(1)

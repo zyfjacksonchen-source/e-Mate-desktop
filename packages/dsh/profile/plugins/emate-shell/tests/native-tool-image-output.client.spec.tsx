@@ -22,6 +22,7 @@ it('replays the actual QR result through native projection and native generic to
   const start = { type: 'turn/start', seq: 2000, time: 1788882660000, data: { turn: 3 } }
   const assembler = new ConversationNodeAssembler({ entries: () => [toolDefinition, turnTailDefinition, imageCallsDefinition, toolImagesDefinition], fallbackEntry: () => unknownFallbackDefinition }, { entries: () => [chatViewDefinition] })
   // 0.1.5 requires the coarse transport discriminator on every entry.
+  assembler.activateTarget('chat')
   assembler.replaceWindow([start, ...events].map(event => ({ type: 'event', event })), false)
   assembler.flush()
   const chat = assembler.snapshot('chat') as any
@@ -33,6 +34,10 @@ it('replays the actual QR result through native projection and native generic to
   expect(matched).toMatchObject({ callIds: [callId] })
   expect(terminalImageItems(nodes, matched!.callIds, 3)).toMatchObject([{ callId, attachment, status: 'completed' }])
   const view = render(<ToolCallTree node={tool} t={key => key} openFile={() => {}} inspectCall={() => {}}
+    // 0.1.5 ToolTreeProps also carries the host-info hook, the image loader and
+    // the file-mention resolver.
+    useHostInfo={(select: (info: { home: string }) => unknown) => select({ home: '/home' })}
+    loadImage={async () => 'blob:image'} fileMentions={() => undefined}
     renderSlot={(_key: string, _owner: unknown, options: any) => options.fallback} /> as any)
   expect(screen.queryByRole('img')).toBeNull()
   const disclosure = view.container.querySelector('[data-disclosure-row]')!
