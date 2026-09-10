@@ -149,3 +149,42 @@ git merge-base --is-ancestor 99f6f02f 183f08e9 && echo linear
 # 未集成分支
 git cherry feat/2.0.18/rc7-tidychat <branch>
 ```
+
+---
+
+## 9. 在线更新硬约束（用户要求：2.0.16 / 2.0.17 用户必须能在线更新到 2.0.18）
+
+### 9.1 现有在线更新链（实测，全部与内核无关）
+
+| 环节 | 实现 | 是否受本次升级影响 |
+|---|---|---|
+| 版本检查端点 | `update-checker.ts` → `DESKTOP_VERSION_ENDPOINT = https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/version.json` | **否** |
+| 请求 | GET + `X-e-Mate-Version` + 安装 ID header，`redirect: error`，4 KiB 上限 | **否** |
+| 响应 | `{ "version": "<stable semver>" }` | **否** |
+| 判定 | 严格 SemVer 比较：**仅当 latest > current** 才 `update-available` | **否** |
+| 下载地址 | `DESKTOP_DOWNLOAD_URLS`：`…/desktop/downloads/mac` 与 `…/desktop/downloads/windows`（**固定，不随版本变化**） | **否** |
+| 文件名 | `e-Mate-<version>-<platform>.dmg|.exe` | **否** |
+| 产物校验 | 稳定 SemVer（禁止 prerelease）+ dmg / PE 校验 | **否** |
+| 更新服务实现 | `candidate-update-worker.mjs`：`/desktop/version.json` 直接返回 `manifest.version` | **否** |
+
+**结论：整条链是"候选清单 version 字段"的纯函数，不依赖 DSH 版本、cordis 版本、base-contract id 或 profile 格式。**
+
+### 9.2 为什么 16/17 → 18 天然成立
+- 端点与下载 URL 常量自 `f876f01d82`（**2.0.16 发布提交，2026-09-03**）引入后**从未改动**：`git log f876f01d82..HEAD -- desktop/e-mate-desktop/src/update-checker.ts desktop/e-mate-desktop/src/update-download.ts` 为空。
+- 因此 2.0.16、2.0.17、2.0.18 基线共用同一端点与同一 URL 约定。
+- 2.0.18 > 2.0.16、2.0.18 > 2.0.17 均为**严格更新**，在线更新路径直接成立。
+- 保持版本号 **2.0.18**（而非跳号）使这条需求无需任何额外机制。
+
+### 9.3 发布时必须同时做到（否则需求不成立）
+1. `desktop/version.json` 返回 `{"version":"2.0.18"}`；
+2. `/desktop/downloads/mac` 提供 2.0.18 的 **macOS universal DMG**；
+3. `/desktop/downloads/windows` 提供 2.0.18 的 **NSIS 安装程序**；
+4. 文件名严格为 `e-Mate-2.0.18-mac.dmg` / `e-Mate-2.0.18-win.exe` 形式；
+5. 版本号必须是**稳定版**（不可带 prerelease）。
+
+### 9.4 本机 2.0.18 测试机构不能走在线更新
+本机已装 2.0.18 候选，目标是另一个 2.0.18 → `latest == current` → `up-to-date`，**不会提示更新**。
+这是**同版本替换**场景，走官方手动下载页路径，不是用户面对的路径，也不得为其新增第二条 feed。
+
+### 9.5 不得触碰
+`update-checker.ts` 与 `update-download.ts` 的端点/URL/文件名/校验逻辑**在本次升级中保持零改动**。
