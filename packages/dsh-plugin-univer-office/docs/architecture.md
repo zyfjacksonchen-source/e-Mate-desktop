@@ -19,7 +19,7 @@
 - `workers/unit-content` 是一次性 Unit Content Worker 的子进程入口；
 - `client` 负责 DSH 浏览器端的预览、实时 worktree 窗口和用户审阅界面；
 - `shared/wire` 只存放 Host 与 Client 共享的纯 JSON 数据类型；
-- `telemetry` 提供 best-effort 的匿名产品遥测，只在 Host 与包卸载入口发送，发布包不声明 `postinstall`，任何失败都不影响启动与卸载。
+- `telemetry` 提供默认关闭的 best-effort 匿名产品遥测；显式启用后由 Host 发送。包不声明安装或卸载钩子，保留的独立入口只有显式调用才运行，任何失败都不影响启动与卸载。
 
 用户只安装本插件即可使用全部功能。全局 `univer` CLI 不属于运行依赖；Unit 的导入、检查、执行和导出由插件内置的一次性 Unit Content Worker 完成。
 
@@ -381,9 +381,9 @@ Client 必须满足：
 
 ## 12. 构建与发布
 
-`src` 包含插件发布的所有 application 源码；Viewer application、machine render page、render preset 和 IMPORTRANGE plugin 源码从 `univer-cli` 复制到本仓库后直接维护。`packages/unit-comparison-viewer` 与 `univer-workspace`、`univer-cli` 中的同名可复制组件保持行为同步，并针对本仓库的 React 18 Host 做兼容。`pnpm run build` 生成 Host/Client bundle、Unit Content Worker、Gateway、machine render page 和 Viewer；`lib` 与 `artifacts` 都被 gitignore，并在打包前重新生成。Host 构建为 Node ESM，Client 构建为 DSH ModuleLoader 可加载的浏览器 bundle，Gateway 构建为 Node CJS 子进程，Worker 构建为 Node ESM 子进程，machine render page 与 Viewer 构建为 Vite 静态资产。lib 构建同时生成 `lib/telemetry-entry.js`（卸载 hook 发送入口）与 `lib/build-info.json`（包版本、构建 commit 与遥测 endpoint）。
+`src` 包含插件发布的所有 application 源码；Viewer application、machine render page、render preset 和 IMPORTRANGE plugin 源码从 `univer-cli` 复制到本仓库后直接维护。`packages/unit-comparison-viewer` 与 `univer-workspace`、`univer-cli` 中的同名可复制组件保持行为同步，并针对本仓库的 React 18 Host 做兼容。`pnpm run build` 生成 Host/Client bundle、Unit Content Worker、Gateway、machine render page 和 Viewer；`lib` 与 `artifacts` 都被 gitignore，并在打包前重新生成。Host 构建为 Node ESM，Client 构建为 DSH ModuleLoader 可加载的浏览器 bundle，Gateway 构建为 Node CJS 子进程，Worker 构建为 Node ESM 子进程，machine render page 与 Viewer 构建为 Vite 静态资产。lib 构建同时生成 `lib/telemetry-entry.js`（无自动钩子的显式调用入口）与 `lib/build-info.json`（包版本、构建 commit 与遥测 endpoint）。
 
-发布包包含运行所需的 Gateway、Viewer、Unit Content Worker、Office 转换器、平台依赖、Univer license 与 bundled Skills。Gateway、Worker、Viewer 和 Host 直接使用 manifest 中精确版本的 Univer SDK/API Reference packages；JavaScript SDK 被 bundle，平台原生 package 由包管理器为目标机器安装。发布时只打包从当前源码生成的运行产物。
+发布包包含 Host/Client、Gateway、Viewer、Unit Content Worker、Render Machine、现有 license/notice 和八个 Skills。Gateway、Worker、Viewer 和 Host 使用 manifest 中精确版本的 Univer SDK/API Reference packages；JavaScript SDK 被内联构建，六个外置运行依赖保留在 `dependencies`，由用户主机的原生包管理器在安装时按操作系统和架构解析。`pnpm pack` 按 `package.json#files` 生成正常 TGZ，不设置 `bundledDependencies`，不复制构建机的 `node_modules` 或原生库，不生成额外 ZIP。`scripts/build-dist.sh` 只负责完整 build 和同一条 pack 命令，不发布或安装。
 
 原生公式引擎、Office 转换器与 SQLite 依赖仍具有平台属性。release workflow 必须在目标平台安装 lockfile 所指定的依赖后构建和测试，不能把一个平台的 `node_modules` 复制为通用发布物。
 
@@ -416,9 +416,9 @@ Client 必须满足：
 
 ## 15. 产品遥测
 
-产品遥测是 best-effort 的匿名活跃与卸载统计，只用于看趋势，不用于精确计量。发布包不声明 `postinstall`，以兼容 DSH profile 的依赖构建脚本审批策略。遥测绝不影响插件启动或卸载：所有失败静默吞掉，发送有 5 秒超时，无重试、无队列、无锁。
+产品遥测是默认关闭的 best-effort 匿名统计，只用于看趋势，不用于精确计量。发布包不声明 `postinstall` 或 `uninstall`；Host 只有显式配置 `telemetry: true` 才启用，历史独立入口保留供显式调用。遥测绝不影响插件启动或卸载：所有失败静默吞掉，发送有 5 秒超时，无重试、无队列、无锁。
 
-- 事件共三个，统一经 `lib/build-info.json` 中写死的 Univer 代理 endpoint 上报（版本与 commit 也取自该文件），客户端不持有任何分析平台凭证。发送只发生在安装后的插件激活与卸载钩子，开发 checkout 不会触发任何发送；telemetry smoke 断言构建产物中的 endpoint 等于写死地址，防止回归为静默构建。运行时显式设置 `UNIVER_TELEMETRY_ENDPOINT`（含空值）优先于写死值，用作测试重定向与应急开关。服务端 allowlist 必须先于带 endpoint 的构建部署，否则事件会被整包拒绝且因 at-most-once 永久丢失；
+- 事件共三个，统一经 `lib/build-info.json` 中写死的 Univer 代理 endpoint 上报（版本与 commit 也取自该文件），客户端不持有任何分析平台凭证。发送发生在显式启用的已安装插件 Host 激活或独立入口被显式调用时，开发 checkout 不会自动发送；telemetry smoke 断言构建产物中的 endpoint 等于写死地址。运行时显式设置 `UNIVER_TELEMETRY_ENDPOINT`（含空值）优先于写死值，用作测试重定向与应急开关。服务端 allowlist 必须先于带 endpoint 的构建部署，否则事件会被整包拒绝且因 at-most-once 永久丢失；
 - `dsh_plugin_activated`（Host 激活，每安装身份一次）、`dsh_plugin_daily_active`（Host 激活时检查，每安装身份每本地日一次）、`dsh_plugin_uninstall_hook`（包 uninstall，不去重，因为 state 跨重装存活，一次性标记会掩盖后续卸载）；
 - payload 只允许 `distinctId`（随机 UUID）、事件名与白名单属性（package name/version、build commit、platform、arch、Node major version、event source、state schema version），禁止路径、workspace、session、文件内容与环境变量。服务端代理对未知键整包拒绝；
 - 去重只在本机 state（`$DSH_HOME/telemetry/dsh-univer-office/state.json`，沿用 `config.ts` 的 `DSH_HOME` 约定）中做，先落盘标记再发送（at-most-once：崩溃宁可丢事件不重发，标记写失败时同样放弃发送）；并发启动的毫秒级竞态接受偶发双发；
@@ -442,6 +442,6 @@ Client 必须满足：
 
 This vendored component is pinned to upstream `f3a8845dd4c863072b0ae555cdb6a58076c165e7` and e-Mate's existing Harness `0.1.0-rc.7`. Host imports resolve through the declared Base ABI; Client uses rc.7's combined conversation/runtime services and native hidden Chat projections, including rootCallId-bound Code subcalls. The mature Gateway, Worker, Render Machine and Viewer remain their original owners.
 
-The six locked runtime dependencies and their nested transitive dependencies are materialized inside the component package. The Profile resolver permits declared package-local dependencies only when their resolved real paths remain inside that component; DSH services still come exclusively from the Base. No runtime package installation or alternate Office executor is added. The pinned formula/conversion bindings have no macOS Intel target, which remains a universal release limitation.
+The package is an on-demand npm TGZ named `@e-mate/dsh-plugin-univer-office@2.0.18`, separate from the e-Mate application bundle. Its six exact runtime dependencies are installed by the user's native package manager for that host; no source-machine `node_modules` or native binaries are copied into the archive. The root patch keeps the bare package name so native DSH plugin installation discovers its Host and Client. Existing rc.7 peers remain provided by the host, and no alternate Office executor is added. The pinned formula/conversion bindings have no macOS Intel target, which remains a plugin platform limitation rather than an app packaging dependency.
 
 The e-Mate configuration and schema default telemetry to false, and no automatic install/uninstall telemetry hook is registered. Explicit opt-in retains the upstream allowlist and all opt-out behavior described above. Historical telemetry entry scripts remain inert unless explicitly invoked.

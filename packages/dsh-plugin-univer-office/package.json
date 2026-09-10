@@ -9,7 +9,6 @@
     "docs",
     "skills",
     "artifacts",
-    "scripts/copy-gateway-dependencies.mjs",
     "scripts/telemetry-entry.mjs",
     "README.md",
     "README.zh-CN.md",
@@ -306,13 +305,5 @@
     ],
     "upstreamVersion": "0.2.14",
     "upstreamCommit": "f3a8845dd4c863072b0ae555cdb6a58076c165e7"
-  },
-  "bundledDependencies": [
-    "@puppeteer/browsers",
-    "@univerjs-pro/cli-assets",
-    "@univerjs-pro/engine-formula-rust-binding",
-    "@univerjs-pro/exchange-node-binding",
-    "libsql",
-    "puppeteer-core"
-  ]
+  }
 }

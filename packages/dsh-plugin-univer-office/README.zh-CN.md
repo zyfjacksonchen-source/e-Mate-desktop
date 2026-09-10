@@ -8,11 +8,11 @@
 
 [English](README.md) · 简体中文
 
-[![npm](https://img.shields.io/npm/v/dsh-univer-office)](https://www.npmjs.com/package/dsh-univer-office)
+[上游项目](https://github.com/dream-num/dsh-univer-office)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.19-339933?logo=node.js&logoColor=white)](package.json)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-`dsh-univer-office` 是 DeepSeek Harness（DSH）的 Univer 办公插件。告诉 Agent 你想要什么，它可以创建和编辑电子表格、文档、演示文稿、多维表格与画布，也可以处理现有的 Excel、Word 和 PowerPoint 文件。所有修改都会经过校验，并留在会话中供你预览、确认或放弃。
+`@e-mate/dsh-plugin-univer-office` 将 Univer 办公插件适配到 e-Mate 固定的 DeepSeek Harness（DSH）`0.1.0-rc.7` 运行时。告诉 Agent 你想要什么，它可以创建和编辑电子表格、文档、演示文稿、多维表格与画布，也可以处理现有的 Excel、Word 和 PowerPoint 文件。所有修改都会经过校验，并留在会话中供你预览、确认或放弃。
 
 安装后直接用自然语言描述目标即可。Agent 会完成创建、编辑和校验，你可以在会话中实时查看过程、审阅结果，并把电子表格导出为 Excel（`.xlsx`），或按需交付 Word（`.docx`）和 PowerPoint（`.pptx`）文件。
 
@@ -105,9 +105,9 @@ Agent 可以根据主题、受众、页数、内容结构和视觉要求生成�
 
 ## 3 分钟上手
 
-### 1. 打开 e-Mate
+### 1. 按需安装 e-Mate 插件
 
-本组件随 e-Mate 2.0.18 内置，使用固定的 DeepSeek Harness `0.1.0-rc.7` 运行时。安装对应的应用更新后打开 e-Mate，无需单独安装插件。
+本插件与 e-Mate 应用分开发行。需要时，通过 e-Mate 原生插件安装流程安装已核验的 `@e-mate/dsh-plugin-univer-office@2.0.18` TGZ。主机包管理器会按用户的操作系统与架构安装运行依赖，因此需要网络和依赖仓库访问权限。上游 `dsh-univer-office@0.2.14` 并非这个 rc.7 适配包；公开目录可用性与安装验收独立于本地归档构建。
 
 ### 2. 直接描述需求
 
@@ -165,7 +165,8 @@ DSH 会自动选择这些工具，日常使用不需要手动调用。
 
 ## 要求与限制
 
-- e-Mate 运行时，以及 Node.js `>=22.19.0`。
+- e-Mate Harness `0.1.0-rc.7` 运行时，以及 Node.js `>=22.19.0`。
+- 运行依赖在用户主机安装。TGZ 包含应用代码、资源与 Skills，不包含预装的 `node_modules` 树或原生库。
 - 固定版本的公式与文档转换原生库提供 macOS ARM64 和 Windows x64 构建，但没有 macOS Intel 构建；该依赖版本尚不满足完整的 Intel 办公支持。
 - 支持 PDF 打印；本组件不提供对已有 PDF 文件的任意编辑。
 - 部分 Slide 布局检查和 SVG 文字度量需要本机 Chrome/Chromium；也可以通过 `UNIVER_RENDER_BROWSER` 指定浏览器路径。
@@ -201,7 +202,7 @@ e-Mate 默认关闭遥测，包不声明安装或卸载遥测钩子。只有显�
 
 ## 更新与移除
 
-本组件由 e-Mate 管理，版本和文件随应用一同更新。
+通过 e-Mate 原生插件管理流程更新或移除这个单独安装的插件。更新 e-Mate 应用本身不会自动安装或更新该插件。
 
 ## 开发
 
@@ -217,16 +218,12 @@ pnpm run build
 pnpm run test
 ```
 
-## 官方包名
+完整测试通过后，执行 `pnpm pack --pack-destination <输出目录>`，即可按 manifest 的文件白名单生成 TGZ。`bash scripts/build-dist.sh [输出目录]` 会先重建全部应用，再执行同一个打包命令。两种命令都不会发布或安装插件。
 
-请只安装 `dsh-univer-office`。以下相似名称是本项目为防止仿冒而保留的 deprecated npm 占位包，不包含插件代码：
+## 包身份
 
-- `dsh-univer-plugin`
-- `dsh-univer-office-suite`
-- `dsh-univer-suite`
-- `univer-office-suite`
-- `univer-office`
+本适配包为 `@e-mate/dsh-plugin-univer-office@2.0.18`，基于上游 `dsh-univer-office@0.2.14`。安装时应同时核验包名、版本和已审阅归档的哈希。本地生成 TGZ 不代表已经发布到 npm，也不代表原版上游包与 e-Mate 兼容。
 
 ## 许可
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](LICENSE) 适用于上游插件源码。Univer Pro 依赖保留各自的授权与许可条款，此许可证不改变这些依赖的许可。详见 [SOURCE.md](SOURCE.md)。

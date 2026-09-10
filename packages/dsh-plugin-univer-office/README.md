@@ -8,11 +8,11 @@
 
 English · [简体中文](README.zh-CN.md)
 
-[![npm](https://img.shields.io/npm/v/dsh-univer-office)](https://www.npmjs.com/package/dsh-univer-office)
+[Upstream project](https://github.com/dream-num/dsh-univer-office)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.19-339933?logo=node.js&logoColor=white)](package.json)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-`dsh-univer-office` is the Univer office plugin for DeepSeek Harness (DSH). Tell the agent what you need and it can create or edit spreadsheets, documents, presentations, multidimensional tables, and canvases, or work with existing Excel, Word, and PowerPoint files. Every change is verified and stays in the conversation for you to preview, approve, or discard.
+`@e-mate/dsh-plugin-univer-office` adapts the Univer office plugin to e-Mate's fixed DeepSeek Harness (DSH) `0.1.0-rc.7` runtime. Tell the agent what you need and it can create or edit spreadsheets, documents, presentations, multidimensional tables, and canvases, or work with existing Excel, Word, and PowerPoint files. Every change is verified and stays in the conversation for you to preview, approve, or discard.
 
 After installation, describe the result you want in natural language. The agent handles creation, editing, and verification while you follow the work live and review the result in the conversation. Deliver spreadsheets as Excel (`.xlsx`), documents as Word (`.docx`), and presentations as PowerPoint (`.pptx`) files when needed.
 
@@ -105,9 +105,9 @@ Every content type supports isolated draft editing, side-by-side semantic compar
 
 ## Get started in 3 minutes
 
-### 1. Open e-Mate
+### 1. Install the e-Mate plugin when needed
 
-This component is bundled with e-Mate 2.0.18 and uses its fixed DeepSeek Harness `0.1.0-rc.7` runtime. Open e-Mate after installing the matching application update; no separate plugin installation is needed.
+This plugin is distributed separately from the e-Mate application. Install the reviewed `@e-mate/dsh-plugin-univer-office@2.0.18` TGZ through e-Mate's native plugin installation flow. The host package manager installs its runtime dependencies for your operating system and architecture; network and registry access are required. The upstream `dsh-univer-office@0.2.14` package is not this rc.7 adaptation. Public catalog availability and installation acceptance are separate from building a local archive.
 
 ### 2. Describe what you need
 
@@ -165,7 +165,8 @@ DSH selects these tools automatically; you normally do not need to call them man
 
 ## Requirements and current limits
 
-- The e-Mate runtime and Node.js `>=22.19.0`.
+- The e-Mate Harness `0.1.0-rc.7` runtime and Node.js `>=22.19.0`.
+- Runtime dependencies are installed on the user host. The TGZ contains application code, assets, and Skills, without a preinstalled `node_modules` tree or native libraries.
 - The pinned formula and document-conversion native libraries provide macOS ARM64 and Windows x64 builds, but no macOS Intel build. Full Intel Office support remains unavailable with this dependency version.
 - PDF printing is supported; this component does not provide arbitrary editing of existing PDF files.
 - Some Slide layout checks and SVG text measurement require a local Chrome/Chromium executable. Set `UNIVER_RENDER_BROWSER` to use a specific browser path.
@@ -201,7 +202,7 @@ Telemetry is disabled by default in e-Mate. The package declares no install or u
 
 ## Updates and removal
 
-This is a managed e-Mate component. Its version and files are updated together with the application.
+Use e-Mate's native plugin management flow to update or remove this separately installed plugin. An e-Mate application update does not itself install or update the plugin.
 
 ## Development
 
@@ -217,16 +218,12 @@ pnpm run build
 pnpm run test
 ```
 
-## Official package name
+After the complete test suite passes, `pnpm pack --pack-destination <output-directory>` creates the TGZ from the manifest's file allowlist. `bash scripts/build-dist.sh [output-directory]` rebuilds all applications and runs the same pack command. Neither command publishes or installs the package.
 
-Install only `dsh-univer-office`. The following similar names are deprecated npm placeholders reserved by this project to prevent impersonation; they contain no plugin code:
+## Package identity
 
-- `dsh-univer-plugin`
-- `dsh-univer-office-suite`
-- `dsh-univer-suite`
-- `univer-office-suite`
-- `univer-office`
+This adaptation is `@e-mate/dsh-plugin-univer-office@2.0.18`, based on upstream `dsh-univer-office@0.2.14`. Keep the package name, version, and reviewed archive hash together when installing it. A locally built TGZ does not establish npm publication or compatibility of an upstream package with e-Mate.
 
 ## License
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](LICENSE) covers the upstream plugin source. Univer Pro dependencies retain their own authorization and licensing terms; this license does not relicense those packages. See [SOURCE.md](SOURCE.md).
