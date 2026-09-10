@@ -1244,7 +1244,8 @@ describe('completed artifact terminal', () => {
     expect(contract).toContain("kind: 'subagent'")
     expect(contract).not.toMatch(/childSessionId|delegations/u)
     expect(`${source}\n${contract}`).not.toMatch(/indexedDB|localStorage|sessionStorage|tombstone|\bfetch\s*\(|WebSocket|EventSource|setTimeout|setInterval/u)
-    expect(source).toContain('<MessageImage')
+    // 0.1.5 forbids value-importing another feature plugin's component.
+    expect(source).toContain("renderSlot('conversation.message.images'")
     expect(source).toContain("visibility: 'hidden'")
     const apply = readFileSync(resolve('src/client/index.ts'), 'utf8')
     expect(apply).toContain("ctx.slots.inject('conversation.view'")

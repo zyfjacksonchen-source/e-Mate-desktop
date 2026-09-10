@@ -238,12 +238,12 @@ describe('desktop header controls', () => {
     type RootProps = PropsRenderSlots<'shell.overlay'>
     const Root = ({ renderSlot }: RootProps) => renderSlot('shell.overlay', {})
     const runtime = await SlotTestRuntime.create()
-    runtime.provide('theme', {
+    runtime.ctx.provide('theme', {
       getTheme: () => ({ active: { colorScheme: 'dark' } }),
       setTheme: vi.fn(),
     } as never)
-    runtime.provide('connection', { rpc: { call: vi.fn() } } as never)
-    runtime.provide('sessionLogDownload', {
+    runtime.ctx.provide('connection', { rpc: { call: vi.fn() } } as never)
+    runtime.ctx.provide('sessionLogDownload', {
       store: { getSnapshot: () => ({ bySession: {} }), subscribe: () => () => {} },
       download: vi.fn(),
       dismiss: vi.fn(),
@@ -326,7 +326,7 @@ describe('desktop header controls', () => {
     const runtime = await SlotTestRuntime.create()
     const closeDetails = vi.fn()
     const openSettingsSection = vi.fn()
-    runtime.provide('layout', { closeDetails } as never)
+    runtime.ctx.provide('layout', { closeDetails } as never)
     await runtime.root.declare({
       conversation: { kind: 'single', scope: 'root' },
       details: { kind: 'single', scope: 'root' },

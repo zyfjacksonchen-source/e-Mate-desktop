@@ -301,7 +301,7 @@ it.each(['darwin', 'win32'])('native %s pick inserts and submits a selected CU r
     } }, connection: { rpc: { call } } })
     try {
       input.setDraft('请保留正文 @ 后续文字')
-      input.addImages(['attachment-image', 'attachment-file'] as never)
+      input.addAttachments(['attachment-image', 'attachment-file'] as never)
       const initial = input.state.getSnapshot(), caret = initial.draft.indexOf('@') + 1
       controller.track(initial.draft, caret, { tier: 'plain' }, initial.draftRev)
       await vi.waitFor(() => expect(controller.menu.getSnapshot().groups[0]?.status).toBe('ready'))
