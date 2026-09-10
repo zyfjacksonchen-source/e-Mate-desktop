@@ -743,4 +743,28 @@ shell 42 / profile-core 35 / desktop 55 / enterprise 29 / scripts 59，插件侧
 ### 21.5 一个架构观察（供后续决策，不在本轮实施）
 适配器做的是"对编译产物做字符串手术"。由于 e-Mate 本来就从自己的 fork 构建 harness，
 **这些改动原则上可作为 fork 源码提交存在**，比手术编译产物更稳、更可测。
-但改变这一架构超出本次升级范围，本轮不实施；仅记录为后续可评估项。
+但改变这一架构超出本次升级范围，本轮不实施；仅记录为后续可评估项。### 21.6 Round 4 进展：第 1 条适配器重定完成（安全攸关那条）
+
+`adaptHarnessFsBytesSource`（`@deepseek-ai/dsh-fs-local`）已在升级树修好并通过验证。
+
+**诊断**：对 0.1.5 编译产物逐条件统计接缝出现次数：
+
+| 接缝成分 | 0.1.5 出现次数 | 适配器要求 | 结论 |
+|---|---|---|---|
+| `async function readWholeBytes(target, signal, maxBytes, internals = {}) {` | 1 | 1 | ✓ |
+| `\tconst info = await statRegularFile(target, "read", signal);` | 1 | 1 | ✓ |
+| `import { createReadStream } from "node:fs";` | 1 | 1 | ✓ |
+| `\treturn Buffer.concat(chunks, bytes);\n}` | **2** | **1** | ✗ 唯一失败原因 |
+
+而适配器后面本就用 `indexOf(ending, start)` **把结束标记限定在函数内**查找，
+所以"全文件唯一"这个前置条件是**多余且过严**的 —— 这是**接缝精度问题，不是语义重写**。
+
+**修法**：只放宽该前置条件。保留全部真正证明形状的检查（首行仍须全局唯一、`statRegularFile` 首行与 `node:fs` 导入仍必需、
+抽出的函数体仍要含 `createReadStream` 与 `inspectReadBytesAfterStat`），**漂移仍然失败即关闭**。
+
+**验证**：
+- 适配器已能接受 0.1.5 编译产物（实测从"抛错"变为"接缝找到"）
+- 其守卫测试 `scripts/harness-fs-bytes-adapter.test.mjs` **9/9 通过**（在基线树临时覆盖实跑，之后逐字节还原并用 `cmp` 校验）
+- 基线树保持 0 改动，harness 子模块仍在 `4da69d7c3522`
+
+**这一条同时建立了后续 7 条的方法**：先对 0.1.5 产物逐成分统计接缝命中，再判断是"精度问题"还是"语义已变"。
