@@ -119,7 +119,7 @@ describe('published package surface', () => {
     expect(manifest.optionalDependencies ?? {}).not.toHaveProperty('dshmarket')
   })
 
-  it('runs only the pinned rc.7 Harness packages', () => {
+  it('runs only the pinned 0.1.5 Harness packages', () => {
     const runtime = Object.entries(manifest.dependencies ?? {})
       .filter(([name]) => name.startsWith('@deepseek-ai/dsh'))
     expect(runtime.length).toBeGreaterThan(0)
@@ -471,7 +471,7 @@ describe('published package surface', () => {
     expect(manifest.dependencies).not.toHaveProperty('electron')
     expect(manifest.peerDependencies?.electron).toBe('43.4.0')
     expect(manifest.devDependencies?.electron).toBe('43.4.0')
-    expect(manifest.dependencies?.pnpm).toBe('11.7.0')
+    expect(manifest.dependencies?.pnpm).toBe('11.8.0')
   })
 
   it('packages the native-compiled Koffi Windows runtime', () => {
@@ -509,7 +509,7 @@ describe('published package surface', () => {
     expect(lockfile).not.toContain('dsh-better-sidebar@')
   })
 
-  it('binds empty machine patch handling to the pinned rc.7 app-boot patch', () => {
+  it('binds empty machine patch handling to the pinned 0.1.5 app-boot patch', () => {
     const patchResolution = 'patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.5-rc.1#./patches/dsh-app-boot@0.1.5-rc.1.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const patch = readFileSync(new URL('patches/dsh-app-boot@0.1.5-rc.1.patch', workspaceRoot), 'utf8')

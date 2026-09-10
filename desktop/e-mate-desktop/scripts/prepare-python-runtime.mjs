@@ -1,4 +1,4 @@
-/** Download the fixed Python bootstrap exposed to the rc.7 Vision component. */
+/** Download the fixed Python bootstrap exposed to the 0.1.5 Vision component. */
 
 import { createHash } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'

@@ -1,7 +1,7 @@
 export const FS_BYTES_PACKAGE = '@deepseek-ai/dsh-fs-local'
 export const FS_BYTES_ADAPTER_PATH = 'scripts/harness-fs-bytes-adapter.mjs'
 
-// An owner-local replacement for rc.7 readWholeBytes, not another FS API.
+// An owner-local replacement for 0.1.5 readWholeBytes, not another FS API.
 // Binary reads (including read_image) deliberately reject multiply linked files:
 // a workspace path must not silently grant publication of an outside hardlink.
 function readWholeBytesSource() {
@@ -54,14 +54,14 @@ export function adaptHarnessFsBytesSource(source) {
     throw new Error('Harness binary-read adapter expected one unmodified readWholeBytes seam')
   }
   const imports = 'import { createReadStream } from "node:fs";'
-  if (source.split(imports).length !== 2) throw new Error('Harness binary-read adapter expected one rc.7 node:fs import')
+  if (source.split(imports).length !== 2) throw new Error('Harness binary-read adapter expected one 0.1.5 node:fs import')
   source = source.replace(imports, 'import { createReadStream, constants as emateReadConstants } from "node:fs";')
   const start = source.indexOf(begin)
   const end = source.indexOf(ending, start) + ending.length
-  if (end <= start) throw new Error('Harness binary-read adapter missing end of rc.7 readWholeBytes')
+  if (end <= start) throw new Error('Harness binary-read adapter missing end of 0.1.5 readWholeBytes')
   const original = source.slice(start, end)
   if (!original.includes('createReadStream(target.targetKey, {') || !original.includes('await internals.inspectReadBytesAfterStat?.(target);')) {
-    throw new Error('Harness binary-read adapter rc.7 readWholeBytes has drifted')
+    throw new Error('Harness binary-read adapter 0.1.5 readWholeBytes has drifted')
   }
   return source.slice(0, start) + readWholeBytesSource() + source.slice(end)
 }

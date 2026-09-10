@@ -53,7 +53,7 @@ function measuredOpen(control = {}) {
   } }
 }
 
-test('pre-existing outside hardlink is reproduced on native rc.7 and refused before any adapted content I/O', async t => {
+test('pre-existing outside hardlink is reproduced on native 0.1.5 and refused before any adapted content I/O', async t => {
   const { directory, filename, target } = await fixture(t)
   const outside = path.join(directory, 'outside-private.pdf')
   await fs.writeFile(outside, 'secret')

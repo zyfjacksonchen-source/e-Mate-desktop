@@ -4,7 +4,7 @@ The current Profile is the only UI source of truth. Historical e-Mate checkouts,
 
 ## Native owners
 
-- DSH rc.7 owns Workspace, Session, Conversation, Composer, Tool, approval, Job, Skill, settings, and client slot behavior.
+- DSH 0.1.5 owns Workspace, Session, Conversation, Composer, Tool, approval, Job, Skill, settings, and client slot behavior.
 - `packages/dsh/profile/plugins/emate-shell` owns e-Mate branding and product presentation through those native slots.
 - Other bundled Profile packages may contribute only through their declared Harness services, Tools, and slots.
 - Browser code does not create a second transport, event projection, store, router, updater, or fake activity state.

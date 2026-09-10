@@ -4,7 +4,7 @@ These rules are the repository's highest-priority engineering contract. Historic
 
 The current source target for the e-Mate desktop application is version `2.0.18` in the GitHub repository `zyfjacksonchen-source/e-Mate-desktop`. The stable Electron product name and installed application name remain `e-Mate`; “Desktop” describes the repository scope and does not rename the app or its installation locations. This identity is not evidence that a candidate was built, installed, or publicly released.
 
-At source level, 2.0.18 includes the pinned `dickpy/dsh-imagegen` generation and edit Tools, discovery and native on-demand installation of the rc.7-compatible `dream-num/dsh-univer-office` plugin, native PTC as the default Agent preset, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This is a source capability and compatibility statement only; it makes no candidate, installed, or public-production claim.
+At source level, 2.0.18 includes the pinned `dickpy/dsh-imagegen` generation and edit Tools, discovery and native on-demand installation of the 0.1.5-compatible `dream-num/dsh-univer-office` plugin, native PTC as the default Agent preset, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This is a source capability and compatibility statement only; it makes no candidate, installed, or public-production claim.
 
 ## First principle: sole main-agent governance
 
@@ -15,7 +15,7 @@ Subagents execute development only inside their assigned work order and write se
 ## Native baseline: return to the pinned owner
 
 1. Read `desktop/e-mate-desktop/base-contract.json` before changing runtime behavior. The only accepted Harness baseline is `@deepseek-ai/dsh@0.1.5-rc.1`, repository commit `78a2b98562185d6fe46f4071653cae61132bf1ea`. The only accepted Desktop reference is `anywhere-labs/deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517`.
-2. Trace the complete rc.7 native path before adding code. Reuse its Agent Loop, Session, event projection, Tool, approval, Job, Skill, workspace, storage, settings, plugin, slot, and lifecycle owners. Fix a shared native defect at its owner when possible; keep an e-Mate adapter only for a real product-specific difference.
+2. Trace the complete 0.1.5 native path before adding code. Reuse its Agent Loop, Session, event projection, Tool, approval, Job, Skill, workspace, storage, settings, plugin, slot, and lifecycle owners. Fix a shared native defect at its owner when possible; keep an e-Mate adapter only for a real product-specific difference.
 3. Never infer native behavior from a floating branch, another release candidate, a newer DSH version, or a historical e-Mate implementation. Do not add parallel UI, stores, routers, transports, Host or Agent Loop paths, Tool registries, updaters, package managers, or fallbacks. Delete divergence and route callers back to the pinned native owner.
 
 ## Sole Desktop owner
@@ -32,7 +32,7 @@ Subagents execute development only inside their assigned work order and write se
 ## Source and extension boundaries
 
 - Keep e-Mate product behavior in existing Profile plugins, Cordis services, Harness Tools, and client slots. Prefer deletion to wrappers and positive reuse to compatibility shims.
-- Preserve exact dependency pins and lockfiles. `pnpm@11.7.0` and DSH `0.1.5-rc.1` are fixed; any rc.8 DSH dependency is a contract failure.
+- Preserve exact dependency pins and lockfiles. Root and Desktop `pnpm@11.8.0` follow the pinned dsh-desktop reference, and DSH `0.1.5-rc.1` is fixed; the Harness fork keeps its own upstream `pnpm@11.7.0` through `pinnedPnpmInvocation`, and any rc.8 DSH dependency is a contract failure.
 - Generated build output, installers, local run receipts, caches, and acceptance screenshots do not belong in source control.
 - Historical documents are context only. Current code, `base-contract.json`, this file, and `docs/target-contract.md` define the active repository contract.
 
@@ -58,8 +58,8 @@ Subagents execute development only inside their assigned work order and write se
 - Never discard another worktree's uncommitted changes. Remove old worktrees only after proving them clean; build output and dependency caches are rebuildable.
 - Only the main agent may authorize integration, cleanup, or push. Before an authorized push, inspect `git status`, the actual diff, and the focused checks; never invent release evidence.
 
-## Current release direction: rc.7 and one tidychat plugin
+## Current release direction: 0.1.5-rc.1 and one tidychat plugin
 
-The user explicitly cancelled the 0.1.5 migration. Keep Harness 0.1.5-rc.1 at 78a2b98562185d6fe46f4071653cae61132bf1ea and the existing native dsh-desktop reference. The Agent Loop must remain unmodified; image/Vision capabilities use native plugin/Tool interfaces. Preserve existing image reference, edit routing, terminal deduplication and recovery fixes when selecting changes from the frozen migration tree.
+The user directed the 0.1.5 migration onto the accepted baseline. Keep Harness 0.1.5-rc.1 at 78a2b98562185d6fe46f4071653cae61132bf1ea and the native dsh-desktop reference. The Agent Loop must remain unmodified; image/Vision capabilities use native plugin/Tool interfaces. Preserve existing image reference, edit routing, terminal deduplication and recovery fixes carried over from the 0.1.5 migration tree.
 
 Use dsh-tidychat for both message-process folding and conversation navigation. Do not install a second owner for either function. Automatic older-history loading is disabled, including restoration of previous autoLoad=true settings; preserve the native manual load action. Project file browsing is a separate capability and is not removed as a substitute for conversation navigation. Build, install and release acceptance still require the existing native Desktop owners and dual-platform evidence.

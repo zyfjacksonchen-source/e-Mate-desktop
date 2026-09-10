@@ -123,7 +123,7 @@ export const REQUIRED_MACOS_UNIVERSAL_ENTRIES = [
   ...MACOS_UNIVERSAL_NATIVE_ENTRIES.map(entry => entry.path),
 ] as const
 
-/** Fixed Python bootstrap executables exposed to the rc.7 Vision component. */
+/** Fixed Python bootstrap executables exposed to the 0.1.5 Vision component. */
 export const REQUIRED_PYTHON_RUNTIME_ENTRIES = {
   'darwin-arm64': 'python-runtime/darwin-arm64/python/bin/python3',
   'darwin-x64': 'python-runtime/darwin-x64/python/bin/python3',

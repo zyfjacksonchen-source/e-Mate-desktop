@@ -13,7 +13,7 @@ This is the active repository contract. It supersedes historical release-train n
 
 ### Source capability and compatibility
 
-The 2.0.18 source capability/compatibility surface includes the pinned `dickpy/dsh-imagegen` generation and edit Tools, discovery and native on-demand installation of the rc.7-compatible `dream-num/dsh-univer-office` plugin, native PTC as the default Agent preset, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This states source capability only and makes no candidate, installed, or public-production claim.
+The 2.0.18 source capability/compatibility surface includes the pinned `dickpy/dsh-imagegen` generation and edit Tools, discovery and native on-demand installation of the 0.1.5-compatible `dream-num/dsh-univer-office` plugin, native PTC as the default Agent preset, zero image/edit confirmation, universal ordinary-file upload, the pinned Windows source backend, enterprise authentication recovery, and bounded direct-image latency. This states source capability only and makes no candidate, installed, or public-production claim.
 
 All maintained application source is TypeScript/TSX. Generated JavaScript and packaged assets are build output, not a second implementation.
 
@@ -25,7 +25,7 @@ Subagents may change only their assigned write set and run the narrowest relevan
 
 ## Ownership
 
-Pinned DSH rc.7 owns the Agent Loop, Sessions, durable events, model calls, Tools, approvals, attachments, Jobs, schedules, Skills, plugin loading, workspace state, and persistence. e-Mate extends those owners through existing Cordis/Profile seams and does not clone them.
+Pinned DSH 0.1.5 owns the Agent Loop, Sessions, durable events, model calls, Tools, approvals, attachments, Jobs, schedules, Skills, plugin loading, workspace state, and persistence. e-Mate extends those owners through existing Cordis/Profile seams and does not clone them.
 
 Pinned DSH and `deepseek-harness-desktop` are the only native standards. There is no parallel UI, store, router, transport, Host, Agent Loop, updater, package manager, or fallback. Delete divergent paths and return callers to their native owner.
 
@@ -41,7 +41,7 @@ Desktop-owned plugin files are materialized by the installer and registered as n
 
 ## Build and delivery
 
-- Development uses Node 24.x, root `pnpm@11.7.0`, and the Desktop Yarn lock.
+- Development uses Node 24.x, root `pnpm@11.8.0`, and the Desktop Yarn lock.
 - Main-agent-authorized macOS packaging runs with process workdir `desktop` and uses `corepack yarn dist:mac` locally on macOS.
 - Main-agent-authorized Windows packaging runs with process workdir `desktop` and uses `corepack yarn dist:win` on the existing signed-in `win-codex` Windows host. The user explicitly selected its public SSH path for this continuation. Actual GUI and installation evidence must still come from that interactive Windows session, not merely a successful remote command.
 - GitHub `e-Mate-desktop` stores source identity, review, and source CI. GitHub Actions, artifacts, tags, and releases are not installer production, installed acceptance, or the public release transport.

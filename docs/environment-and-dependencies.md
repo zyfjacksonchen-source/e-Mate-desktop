@@ -11,7 +11,7 @@
 ## Development environment
 
 - Node 24.x.
-- Corepack with exact root `pnpm@11.7.0`.
+- Corepack with exact root `pnpm@11.8.0`.
 - Desktop Yarn project and immutable lock under `desktop/`.
 - Harness `0.1.5-rc.1@78a2b98562185d6fe46f4071653cae61132bf1ea`.
 - Desktop reference `anywhere-labs/deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517`.

@@ -10,13 +10,13 @@ e-Mate 保留一个公开目录与不可变版本模型，不创建第二套市�
 - 同机服务与迁移：`enterprise/apps/skill-hub-service`；旧 Worker 仅承担迁移前绑定适配和受控固定转发；
 - Host、Agent 与客户端投影：`packages/dsh-plugin-skill-hub`；
 - 用户流程：当前 Profile 的原生 Harness Connection、Job、Skill provider 与客户端 slot；
-- 本地解析与调用：固定 rc.7 的 `@deepseek-ai/dsh-skill-filesystem`、`ctx.skills` 与 `@deepseek-ai/dsh-tool-skill`。
+- 本地解析与调用：固定 0.1.5 的 `@deepseek-ai/dsh-skill-filesystem`、`ctx.skills` 与 `@deepseek-ai/dsh-tool-skill`。
 
 | 对象 | 运行方式 | 安装位置 | 发布边界 |
 |---|---|---|---|
 | Skill Hub ZIP | DSH Skill provider 与 `skill` Tool | `$DSH_HOME/skills/<slug>/` | Markdown 指令及相对资源；不能携带 Cordis JS 或原生可执行文件 |
 | Cordis 插件 | DSH Profile/Cordis guard | Desktop 内置 Profile | 独立组件 ABI、权限与构建验证 |
-| Desktop Base | deepseek-harness-desktop rc.7 封装 | 应用安装目录 | 只提供稳定系统、窗口、更新和 Profile seam |
+| Desktop Base | deepseek-harness-desktop 0.1.5 封装 | 应用安装目录 | 只提供稳定系统、窗口、更新和 Profile seam |
 
 ## 2. 同一条用户链路
 
@@ -27,7 +27,7 @@ e-Mate 保留一个公开目录与不可变版本模型，不创建第二套市�
   -> emateIdentity 认证的 Skill Hub HTTPS API
   -> ZIP 摘要与供应链校验
   -> 每 slug 锁 + 持久 WAL + 原子目录切换
-  -> 固定 rc.7 DSH provider readback
+  -> 固定 0.1.5 DSH provider readback
   -> DSH Job 终态与 receipt/inventory 投影
 ```
 
@@ -37,7 +37,7 @@ e-Mate 保留一个公开目录与不可变版本模型，不创建第二套市�
 - 共享 Skill：`e_mate_skill_hub_download`、`install`、`update`、`enable`、`disable`、`uninstall`；
 - 当前用户发布：`e_mate_skill_hub_publish`、`e_mate_skill_hub_delete_publication`。
 
-所有 mutation 都由当前 Agent 所有的原生 DSH Job 执行。Tool 会先解析精确 slug、版本和 SHA-256，再通过 `ctx.userQuestions` 展示目标；发布只接受原生 provider 当前可见的已安装 slug，或当前会话文件导入链产生的精确 `.e-mate/imports/*.zip` identity，不接受任意主机路径。候选 ZIP 必须先由固定 rc.7 `FileSystemSkillProvider` 成功解析；确认同时绑定规范内容摘要和实际 ZIP 字节摘要，确认后字节变化即拒绝上传。删除 Tool 只接收用户/模型选择的 slug/version，必须先从 `GET /publications/mine` 按当前身份回读精确 owned publication，再展示服务端摘要并执行删除；模型不能提供或猜测所有权摘要。删除发布不等于本地卸载。
+所有 mutation 都由当前 Agent 所有的原生 DSH Job 执行。Tool 会先解析精确 slug、版本和 SHA-256，再通过 `ctx.userQuestions` 展示目标；发布只接受原生 provider 当前可见的已安装 slug，或当前会话文件导入链产生的精确 `.e-mate/imports/*.zip` identity，不接受任意主机路径。候选 ZIP 必须先由固定 0.1.5 `FileSystemSkillProvider` 成功解析；确认同时绑定规范内容摘要和实际 ZIP 字节摘要，确认后字节变化即拒绝上传。删除 Tool 只接收用户/模型选择的 slug/version，必须先从 `GET /publications/mine` 按当前身份回读精确 owned publication，再展示服务端摘要并执行删除；模型不能提供或猜测所有权摘要。删除发布不等于本地卸载。
 
 ## 3. 线上 API 合同
 
@@ -59,7 +59,7 @@ T07 只验证当前仓库 Worker、组件源码和内存 D1/R2 deterministic fix
 
 1. 从严格目录投影选择 exact slug/version/digest；不支持当前运行时的候选在下载后、安装前失败。
 2. 下载到 mode-0600 缓存，校验长度、响应摘要、本地摘要和 ZIP 边界。
-3. 解压到候选目录，由固定 rc.7 `FileSystemSkillProvider` 解析并回读唯一 `SKILL.md`；第二套 frontmatter parser 不能作为提交依据。
+3. 解压到候选目录，由固定 0.1.5 `FileSystemSkillProvider` 解析并回读唯一 `SKILL.md`；第二套 frontmatter parser 不能作为提交依据。
 4. 安装/更新先取得远端 completion receipt，再原子切换候选；固定 `ctx.skills` 必须从目标路径读到相同 Skill，才可提交本地 receipt。
 5. 远端 completion 明确接受后清理上代；明确拒绝则恢复上代。响应未知时立即恢复上代、保留 WAL，并返回 `recovery-pending`，绝不报告 completed/killed。
 6. 重启扫描 WAL，向服务端 reconcile；只有远端确认为 installed 才重新激活候选，否则保持上代或继续 pending。
@@ -86,7 +86,7 @@ Skill Hub 是用户主动使用的产品能力，不属于管理端的 `emate.id
 
 ## 7. 构建与验收
 
-Skill Hub Host、Agent、RPC 和 UI 作为同一个 Desktop 内置 Profile 组件构建。变更必须验证固定 rc.7 ABI、原生 parser/provider、Agent Tool/Job、并发、取消、崩溃恢复、界面 remount 和一次性下载行为，并随完整 Desktop Profile 通过启动检查。
+Skill Hub Host、Agent、RPC 和 UI 作为同一个 Desktop 内置 Profile 组件构建。变更必须验证固定 0.1.5 ABI、原生 parser/provider、Agent Tool/Job、并发、取消、崩溃恢复、界面 remount 和一次性下载行为，并随完整 Desktop Profile 通过启动检查。
 
 线上关闭仍需真实账号证明发布者所有权、跨用户搜索和安装、原生 `skill`/Agent 调用、更新、禁用、重启、启用、卸载及 owned-publication 删除。源码或 fixture 通过不能替代线上和安装态证据。
 

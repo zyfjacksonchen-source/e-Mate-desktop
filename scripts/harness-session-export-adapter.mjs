@@ -119,7 +119,7 @@ export async function* emateExportFiles(deps, content, sessionId, archivePrefix,
 export function adaptHarnessSessionExportSource(source) {
   const change = (before, after, name) => {
     const count = source.split(before).length - 1
-    if (count !== 1) throw new Error(`Harness export adapter expected one rc.7 ${name} seam, found ${count}`)
+    if (count !== 1) throw new Error(`Harness export adapter expected one 0.1.5 ${name} seam, found ${count}`)
     source = source.replace(before, after)
   }
   change('function sessionLogExportDeps(ctx) {', `const ALLOWED_MEDIA_BY_EXTENSION = ${JSON.stringify(ALLOWED_MEDIA_BY_EXTENSION)};\nconst MAX_FILE_BYTES = ${MAX_FILE_BYTES};\n${normalizedSafeFileName.toString()}\n${emateExportContent.toString()}\n${emateExportFileRefs.toString()}\n${emateExportFiles.toString()}\nfunction sessionLogExportDeps(ctx) {`, 'helpers')

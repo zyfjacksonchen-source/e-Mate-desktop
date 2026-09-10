@@ -146,9 +146,9 @@ test('a missing workspace/native fs or oversize file cannot silently omit a type
 })
 
 test('all patch seams fail closed when pinned source drifts or is applied twice', () => {
-  assert.throws(() => adaptHarnessSessionExportSource('future'), /expected one rc.7/)
+  assert.throws(() => adaptHarnessSessionExportSource('future'), /expected one 0.1.5/)
   assert.throws(() => adaptHarnessSessionExportSource(native + native), /found 2/)
-  assert.throws(() => adaptHarnessSessionExportSource(adapted), /expected one rc.7/)
+  assert.throws(() => adaptHarnessSessionExportSource(adapted), /expected one 0.1.5/)
 })
 
 

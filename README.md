@@ -44,7 +44,7 @@ e-Mate 桌面应用的 `2.0.17` 是 [GitHub `e-Mate-desktop`](https://github.com
 
 主代理是唯一监督管理者，负责 worktree、基线、互斥写集、工单、审查、整合、证据门禁、安装验收、发布和回滚。子代理只在工单写集内开发并运行最窄相关测试，不得自行扩域、改版本、构建安装包、安装、部署、推送、清理或判断发布合同已通过。
 
-Harness 输入继续使用 Node 24.x 与精确 `pnpm@11.7.0`。经主代理授权时，桌面封装只使用 dsh-desktop 的 Yarn workspace 命令：
+Harness 输入继续使用 Node 24.x 与精确 `pnpm@11.8.0`。经主代理授权时，桌面封装只使用 dsh-desktop 的 Yarn workspace 命令：
 
 ```bash
 cd desktop
