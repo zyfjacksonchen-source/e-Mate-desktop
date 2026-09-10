@@ -12,7 +12,7 @@ English · [简体中文](README.zh-CN.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.19-339933?logo=node.js&logoColor=white)](package.json)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-`@e-mate/dsh-plugin-univer-office` adapts the Univer office plugin to e-Mate's fixed DeepSeek Harness (DSH) `0.1.0-rc.7` runtime. Tell the agent what you need and it can create or edit spreadsheets, documents, presentations, multidimensional tables, and canvases, or work with existing Excel, Word, and PowerPoint files. Every change is verified and stays in the conversation for you to preview, approve, or discard.
+`@e-mate/dsh-plugin-univer-office` adapts the Univer office plugin to e-Mate's fixed DeepSeek Harness (DSH) `0.1.5-rc.1` runtime. Tell the agent what you need and it can create or edit spreadsheets, documents, presentations, multidimensional tables, and canvases, or work with existing Excel, Word, and PowerPoint files. Every change is verified and stays in the conversation for you to preview, approve, or discard.
 
 After installation, describe the result you want in natural language. The agent handles creation, editing, and verification while you follow the work live and review the result in the conversation. Deliver spreadsheets as Excel (`.xlsx`), documents as Word (`.docx`), and presentations as PowerPoint (`.pptx`) files when needed.
 
@@ -165,7 +165,7 @@ DSH selects these tools automatically; you normally do not need to call them man
 
 ## Requirements and current limits
 
-- The e-Mate Harness `0.1.0-rc.7` runtime and Node.js `>=22.19.0`.
+- The e-Mate Harness `0.1.5-rc.1` runtime and Node.js `>=22.19.0`.
 - Runtime dependencies are installed on the user host. The TGZ contains application code, assets, and Skills, without a preinstalled `node_modules` tree or native libraries.
 - The pinned formula and document-conversion native libraries provide macOS ARM64 and Windows x64 builds, but no macOS Intel build. Full Intel Office support remains unavailable with this dependency version.
 - PDF printing is supported; this component does not provide arbitrary editing of existing PDF files.

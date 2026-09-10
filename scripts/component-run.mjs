@@ -18,8 +18,8 @@ if (!['build', 'check'].includes(command) || positionals.length !== 1) {
 const inventory = JSON.parse(readFileSync(new URL('../packages/dsh/profile/component-inventory.json', import.meta.url), 'utf8'))
 const baseContract = JSON.parse(readFileSync(new URL('../desktop/e-mate-desktop/base-contract.json', import.meta.url), 'utf8'))
 if (inventory.schema_version !== 1 || !Array.isArray(inventory.components)
-  || baseContract.harness_version !== '0.1.0-rc.7'
-  || baseContract.harness_commit !== '4da69d7c3522ee51de12822c917c503a124f7a7d') {
+  || baseContract.harness_version !== '0.1.5-rc.1'
+  || baseContract.harness_commit !== '78a2b98562185d6fe46f4071653cae61132bf1ea') {
   throw new Error('bundled Profile inventory or pinned Base contract is invalid')
 }
 const components = inventory.components.filter(component => component.desktop !== 'blocked'
@@ -52,7 +52,7 @@ function run(args, env = process.env) {
 for (const component of components) {
   const manifest = JSON.parse(readFileSync(resolve(component.root, 'package.json'), 'utf8'))
   if (manifest.name !== component.id || manifest.version !== '2.0.18'
-    || manifest.eMate?.harnessVersion !== '0.1.0-rc.7'
+    || manifest.eMate?.harnessVersion !== '0.1.5-rc.1'
     || !Array.isArray(manifest.eMate?.baseImports)) {
     throw new Error(`bundled Profile package identity is invalid: ${component.id}`)
   }

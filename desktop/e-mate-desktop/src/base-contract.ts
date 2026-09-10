@@ -4,12 +4,12 @@ const BASE_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u
 const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
 const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|@e-mate\/desktop\/vision-toolkit|react(?:-dom)?)$/u
 const MAX_BASE_CONTRACT_BYTES = 64 * 1024
-const HARNESS_VERSION = '0.1.0-rc.7'
-const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
+const HARNESS_VERSION = '0.1.5-rc.1'
+const HARNESS_COMMIT = '78a2b98562185d6fe46f4071653cae61132bf1ea'
 const DESKTOP_REPOSITORY = 'anywhere-labs/deepseek-harness-desktop'
-const DESKTOP_COMMIT = '6074088f5b660206e404b3591fab51fb99c69add'
+const DESKTOP_COMMIT = '166c16cfc38c51d32c2316715548c0f8271db517'
 const UPSTREAM_HARNESS_REPOSITORY = 'deepseek-ai/deepseek-harness'
-const UPSTREAM_HARNESS_COMMIT = '99f6f02fecdb7dff40c3fbc9470f5907c29f74ca'
+const UPSTREAM_HARNESS_COMMIT = '183f08e9c6dde7e36cd2318eaee70b0da08fb35e'
 
 export interface ProfileBaseContract {
   readonly schema_version: 1

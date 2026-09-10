@@ -23,7 +23,7 @@ test('computer-use adapter keeps pinned owners, exact captures and dual platform
   const bundle = await readFile(new URL('lib/index.js', root), 'utf8')
   assert.equal(pkg.version, '2.0.18')
   assert.equal(pkg.dsh.upstream.commit, '76bfe8607f61945c1cbb84e73976e601100c13a2')
-  assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
+  assert.equal(pkg.eMate.harnessVersion, '0.1.5-rc.1')
   assert.match(patch, /disabled: !!js Array\.of\('darwin', 'win32'\)\.includes\(process\.platform\) === false/u)
   assert.doesNotMatch(patch, /!!js\s+!/u)
   assert.match(patch, /process\.platform === 'win32' \? 'hidden' : 'visible'/u)

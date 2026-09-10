@@ -1,6 +1,6 @@
 # Source and licensing record
 
-This package is an original e-Mate MIT adapter for the pinned DeepSeek Harness 0.1.0-rc.7 native Skill registry. It contributes meeting-summary, lieflat-charts and optional Univer installation guidance; it has no Office executor, Tool/Job registration, client preview, Calc runtime, or bundled Office dependencies. The historical package name is retained for the existing Profile entry.
+This package is an original e-Mate MIT adapter for the pinned DeepSeek Harness 0.1.5-rc.1 native Skill registry. It contributes meeting-summary, lieflat-charts and optional Univer installation guidance; it has no Office executor, Tool/Job registration, client preview, Calc runtime, or bundled Office dependencies. The historical package name is retained for the existing Profile entry.
 
 ## Meeting summary preset
 

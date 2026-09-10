@@ -30,8 +30,8 @@ export const PRODUCT = 'e-Mate'
 export const VERSION = '2.0.18'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
-export const HARNESS_VERSION = '0.1.0-rc.7'
-export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
+export const HARNESS_VERSION = '0.1.5-rc.1'
+export const HARNESS_COMMIT = '78a2b98562185d6fe46f4071653cae61132bf1ea'
 const packageRoot = resolve(import.meta.dirname, '..')
 const componentInventory = JSON.parse(
   readFileSync(join(packageRoot, 'profile', 'component-inventory.json'), 'utf8'),

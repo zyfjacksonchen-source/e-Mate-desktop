@@ -12,7 +12,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.19-339933?logo=node.js&logoColor=white)](package.json)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-`@e-mate/dsh-plugin-univer-office` 将 Univer 办公插件适配到 e-Mate 固定的 DeepSeek Harness（DSH）`0.1.0-rc.7` 运行时。告诉 Agent 你想要什么，它可以创建和编辑电子表格、文档、演示文稿、多维表格与画布，也可以处理现有的 Excel、Word 和 PowerPoint 文件。所有修改都会经过校验，并留在会话中供你预览、确认或放弃。
+`@e-mate/dsh-plugin-univer-office` 将 Univer 办公插件适配到 e-Mate 固定的 DeepSeek Harness（DSH）`0.1.5-rc.1` 运行时。告诉 Agent 你想要什么，它可以创建和编辑电子表格、文档、演示文稿、多维表格与画布，也可以处理现有的 Excel、Word 和 PowerPoint 文件。所有修改都会经过校验，并留在会话中供你预览、确认或放弃。
 
 安装后直接用自然语言描述目标即可。Agent 会完成创建、编辑和校验，你可以在会话中实时查看过程、审阅结果，并把电子表格导出为 Excel（`.xlsx`），或按需交付 Word（`.docx`）和 PowerPoint（`.pptx`）文件。
 
@@ -165,7 +165,7 @@ DSH 会自动选择这些工具，日常使用不需要手动调用。
 
 ## 要求与限制
 
-- e-Mate Harness `0.1.0-rc.7` 运行时，以及 Node.js `>=22.19.0`。
+- e-Mate Harness `0.1.5-rc.1` 运行时，以及 Node.js `>=22.19.0`。
 - 运行依赖在用户主机安装。TGZ 包含应用代码、资源与 Skills，不包含预装的 `node_modules` 树或原生库。
 - 固定版本的公式与文档转换原生库提供 macOS ARM64 和 Windows x64 构建，但没有 macOS Intel 构建；该依赖版本尚不满足完整的 Intel 办公支持。
 - 支持 PDF 打印；本组件不提供对已有 PDF 文件的任意编辑。

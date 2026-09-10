@@ -33,7 +33,7 @@ function analyze(record = study()) {
 function study({ count = 60, singleScore = 4, batchScore = 4 } = {}) {
   const record = {
     schema_version: 1,
-    provenance: { emate_commit: 'a'.repeat(40), harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d', desktop_reference: '6074088f5b660206e404b3591fab51fb99c69add', version: '2.0.17' },
+    provenance: { emate_commit: 'a'.repeat(40), harness_commit: '78a2b98562185d6fe46f4071653cae61132bf1ea', desktop_reference: '166c16cfc38c51d32c2316715548c0f8271db517', version: '2.0.17' },
     environment: { layer: 'production-provider', environment_name_sha256: hex('production'), gateway_origin_sha256: hex('gateway'), deployment_fingerprint_sha256: hex('deployment') },
     protocol: {
       minimum_pairs: 50,

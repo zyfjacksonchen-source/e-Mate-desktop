@@ -1,6 +1,6 @@
 /** Read-only adaptation of pinned dsh-pet's Session/Conversation host.
  * Runtime sources: sessions/service.ts, sessions/conversation.ts and
- * sessions/projection-store.ts at Harness 4da69d7c3522. No domain is folded here.
+ * sessions/projection-store.ts at Harness 78a2b9856218. No domain is folded here.
  */
 import { EMPTY_PROJECTION, type PetTaskProjection, type PetWorkFactsReader } from '../projection.ts'
 import type { OfficeScene } from '../scenes.ts'

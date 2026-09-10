@@ -13,11 +13,11 @@
     "test": "node --test test/*.test.mjs",
     "test:types": "../../upstream/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json"
   },
-  "peerDependencies": { "@deepseek-ai/cordis": "4.0.1", "@deepseek-ai/dsh-attachment": "0.1.0-rc.7", "@deepseek-ai/dsh-tools": "0.1.0-rc.7" },
+  "peerDependencies": { "@deepseek-ai/cordis": "4.0.1", "@deepseek-ai/dsh-attachment": "0.1.5-rc.1", "@deepseek-ai/dsh-tools": "0.1.5-rc.1" },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "eMate": {
-    "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
+    "harnessVersion": "0.1.5-rc.1",
+    "harnessCommit": "78a2b98562185d6fe46f4071653cae61132bf1ea",
     "baseImports": ["@deepseek-ai/cordis", "@deepseek-ai/dsh-attachment", "@deepseek-ai/dsh-tools"],
     "excludedFeatures": ["studio", "sidebar-entry", "standalone-gallery", "standalone-canvas", "settings", "template-sync", "updater", "user-api-keys", "model-fallback"]
   },

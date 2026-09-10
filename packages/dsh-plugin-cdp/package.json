@@ -38,14 +38,14 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-settings": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "3.18.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-brand": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-invariants": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-settings": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-brand": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "3.18.1"
   },
   "scripts": {
@@ -59,8 +59,8 @@
     }
   },
   "eMate": {
-    "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
+    "harnessVersion": "0.1.5-rc.1",
+    "harnessCommit": "78a2b98562185d6fe46f4071653cae61132bf1ea",
     "baseImports": [
       "@deepseek-ai/dsh-settings",
       "@deepseek-ai/schemastery"

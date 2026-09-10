@@ -62,7 +62,7 @@ test('pins one clean native model-directory refresh owner', () => {
 test('Desktop session archives use the same native export adapter and record its file-import contract', () => {
   const runtime = readFileSync(join(root, 'scripts/harness-runtime-adapters.mjs'), 'utf8')
   const desktop = readFileSync(join(root, 'scripts/harness-provenance.mjs'), 'utf8')
-  assert.equal(SESSION_EXPORT_PACKAGE, '@deepseek-ai/dsh-host-apiproxy')
+  assert.equal(SESSION_EXPORT_PACKAGE, '@deepseek-ai/dsh-session-log-export')
   assert.equal(SESSION_EXPORT_ADAPTER_PATH, 'scripts/harness-session-export-adapter.mjs')
   assert.match(runtime, /adaptHarnessSessionExportSource\(await readFile\(exportTarget/u)
   assert.match(desktop, /adaptHarnessSessionExportSource\(readFileSync\(entry/u)
@@ -127,10 +127,10 @@ test('runs manager-free Harness build scripts in order through inherited pnpm an
 
 test('keeps exactly the four pinned Desktop overlays', () => {
   assert.deepEqual([...DESKTOP_OVERLAYS], [
-    ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.0-rc.7.patch'],
-    ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.0-rc.7.patch'],
-    ['@deepseek-ai/dsh-sandbox-windows-acl', 'desktop/patches/dsh-sandbox-windows-acl@0.1.0-rc.7.patch'],
-    ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.0-rc.7-redundant-escalation.patch'],
+    ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.5-rc.1.patch'],
+    ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.5-rc.1.patch'],
+    ['@deepseek-ai/dsh-win32-process', 'desktop/patches/dsh-win32-process@0.1.5-rc.1.patch'],
+    ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch'],
   ])
 
   const appBoot = readFileSync(join(harnessRoot, 'packages/boot/app-boot/src/index.ts'), 'utf8')
@@ -222,7 +222,7 @@ test('discovers root and nested physical Desktop Harness packages', () => {
   const directory = mkdtempSync(join(tmpdir(), 'e-mate-desktop-closure-'))
   const writePackage = (path, name) => {
     mkdirSync(path, { recursive: true })
-    writeFileSync(join(path, 'package.json'), `${JSON.stringify({ name, version: '0.1.0-rc.7' })}\n`)
+    writeFileSync(join(path, 'package.json'), `${JSON.stringify({ name, version: '0.1.5-rc.1' })}\n`)
   }
   try {
     writePackage(join(directory, '@deepseek-ai/dsh-session'), '@deepseek-ai/dsh-session')

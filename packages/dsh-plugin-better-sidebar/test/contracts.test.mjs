@@ -15,7 +15,7 @@ test('uses target Connection RPC and conversation view without terminal transpor
   assert.match(host, /connection\.rpc\.handle\(/)
   assert.match(client, /connection\.rpc\.call\(/)
   assert.match(client, /name:\s*'conversation\.view'/)
-  assert.equal(manifest.eMate.harnessVersion, '0.1.0-rc.7')
+  assert.equal(manifest.eMate.harnessVersion, '0.1.5-rc.1')
   assert.equal(manifest.dependencies, undefined)
   assert.doesNotMatch(`${host}\n${client}`, /node-pty|new WebSocket|\/sidebar\/api|\/sidebar\/ws/)
   assert.deepEqual(manifest.eMate.excludedUpstreamFeatures, ['terminal', 'node-pty', 'standalone-websocket', 'standalone-http-api'])

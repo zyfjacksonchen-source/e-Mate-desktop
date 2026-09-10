@@ -61,8 +61,8 @@ export async function syncEmatePluginBundles({ target = 'cli', destination } = {
     schema_version: 1,
     product: 'e-Mate',
     version: '2.0.18',
-    harness_version: '0.1.0-rc.7',
-    harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d',
+    harness_version: '0.1.5-rc.1',
+    harness_commit: '78a2b98562185d6fe46f4071653cae61132bf1ea',
     packages: receipts,
   }, null, 2)}\n`)
 }

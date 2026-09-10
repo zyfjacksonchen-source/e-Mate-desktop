@@ -42,7 +42,7 @@ test('all pause conditions and corrupt persisted positions are bounded',()=>{
 })
 test('fixed license provenance and component boundaries remain explicit',async()=>{
   const root=new URL('../',import.meta.url);const pkg=JSON.parse(await readFile(new URL('package.json',root),'utf8'))
-  assert.equal(pkg.eMate.upstreamCommit,'f501139cfb155fd46717a79bb1c158da064dce15');assert.equal(pkg.eMate.harnessVersion,'0.1.0-rc.7')
+  assert.equal(pkg.eMate.upstreamCommit,'f501139cfb155fd46717a79bb1c158da064dce15');assert.equal(pkg.eMate.harnessVersion,'0.1.5-rc.1')
   const sources=await Promise.all(['src/client/native-projection.ts','src/client/index.ts','src/index.ts'].map(path=>readFile(new URL(path,root),'utf8')))
   for(const source of sources)assert.doesNotMatch(source,/new WebSocket|EventSource|localStorage|sessionStorage|createRoot|defineTool|registerTool/)
   assert.match(sources[0],/faceOf\('goal'\)/);assert.match(sources[0],/faceOf\('todos'\)/)

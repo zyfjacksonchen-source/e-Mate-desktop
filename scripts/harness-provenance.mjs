@@ -22,8 +22,8 @@ import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSourc
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessFsBytesSource, FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 
-export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
-export const HARNESS_VERSION = '0.1.0-rc.7'
+export const HARNESS_COMMIT = '78a2b98562185d6fe46f4071653cae61132bf1ea'
+export const HARNESS_VERSION = '0.1.5-rc.1'
 
 export function assertNativeAgentLoop(packages) {
   const loops = packages.filter(value => value.name === '@deepseek-ai/dsh-agent-loop')
@@ -39,10 +39,10 @@ const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/updated", refresh);'
 const BUILD_RECEIPT = '.release-cache/harness-build.json'
 const DESKTOP_RECEIPT = 'desktop/e-mate-desktop/build/harness-runtime-provenance.json'
 export const DESKTOP_OVERLAYS = new Map([
-  ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.0-rc.7.patch'],
-  ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.0-rc.7.patch'],
-  ['@deepseek-ai/dsh-sandbox-windows-acl', 'desktop/patches/dsh-sandbox-windows-acl@0.1.0-rc.7.patch'],
-  ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.0-rc.7-redundant-escalation.patch'],
+  ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.5-rc.1.patch'],
+  ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.5-rc.1.patch'],
+  ['@deepseek-ai/dsh-win32-process', 'desktop/patches/dsh-win32-process@0.1.5-rc.1.patch'],
+  ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch'],
 ])
 
 function compareText(left, right) {

@@ -490,7 +490,7 @@ test('packaged runtime verifies the adapter and actual client hashes instead of 
     mkdirSync(join(root, 'apps/cli/lib'), { recursive: true })
     mkdirSync(join(root, 'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib'), { recursive: true })
     writeFileSync(join(root, 'apps/cli/lib/bin.js'), '')
-    writeFileSync(join(root, 'apps/cli/package.json'), JSON.stringify({ version: '0.1.0-rc.7' }))
+    writeFileSync(join(root, 'apps/cli/package.json'), JSON.stringify({ version: '0.1.5-rc.1' }))
     const adapter = readFileSync(new URL('./harness-conversation-adapter.mjs', import.meta.url))
     writeFileSync(join(root, 'e-mate-conversation-adapter.mjs'), adapter)
     writeFileSync(client, adapted)

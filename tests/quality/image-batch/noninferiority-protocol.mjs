@@ -12,8 +12,8 @@ const OVERALL_MEAN_MARGIN = -0.2
 const CI_LOWER_MARGIN = -0.3
 const MAX_RAW_BYTES = 4 * 1024 * 1024
 const MAX_PAIRS = 1000
-export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
-export const DESKTOP_REFERENCE = '6074088f5b660206e404b3591fab51fb99c69add'
+export const HARNESS_COMMIT = '78a2b98562185d6fe46f4071653cae61132bf1ea'
+export const DESKTOP_REFERENCE = '166c16cfc38c51d32c2316715548c0f8271db517'
 
 function fail(message) { throw new Error(message) }
 function require(condition, message) { if (!condition) fail(message) }

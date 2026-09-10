@@ -556,7 +556,7 @@ export function apply(ctx: any): void {
     if (config.fold) {
       interface TurnGroup { rows: Element[]; tail: Element | null; whole: Element[]; inline: Array<{ row: Element; think: Element }>; answerRow: Element | null }
       const byTurn = new Map<number, TurnGroup>()
-      // 旧版 DSH（0.1.0-rc.7 ~ 0.1.1-rc.x）的聊天 DOM 没有 data-chat-turn（0.1.2+ 的 dsh-client-ui-chat 才输出）。
+      // 旧版 DSH（0.1.5-rc.1 ~ 0.1.1-rc.x）的聊天 DOM 没有 data-chat-turn（0.1.2+ 的 dsh-client-ui-chat 才输出）。
       // 这里做兼容回退：有 data-chat-turn 走新逻辑；没有则按 v0.2.5 的方式从 data-chat-anchor-key 解析 turn，
       // 并顺序沿用当前 turn（tool-call / turn-tail 等行没有 info），遇到 user 行重置为 null。
       let fallbackTurn: number | null = null

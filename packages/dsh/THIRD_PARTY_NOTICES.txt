@@ -1,6 +1,6 @@
-e-Mate includes the DeepSeek Harness 0.1.0-rc.7 runtime assembled
-from downstream commit 4da69d7c3522ee51de12822c917c503a124f7a7d, based on upstream commit
-99f6f02fecdb7dff40c3fbc9470f5907c29f74ca, with the accepted bounded prompt,
+e-Mate includes the DeepSeek Harness 0.1.5-rc.1 runtime assembled
+from downstream commit 78a2b98562185d6fe46f4071653cae61132bf1ea, based on upstream commit
+183f08e9c6dde7e36cd2318eaee70b0da08fb35e, with the accepted bounded prompt,
 redundant-permission, session draft and attachment isolation, bounded and
 cleared Composer notice, native Computer Use mention identity, and current-Turn
 turn-tail node-currency boundaries.

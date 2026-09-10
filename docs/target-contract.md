@@ -7,9 +7,9 @@ This is the active repository contract. It supersedes historical release-train n
 - Product name: `e-Mate`
 - Product version: `2.0.18`
 - GitHub repository: `zyfjacksonchen-source/e-Mate-desktop`
-- DSH package baseline: `@deepseek-ai/dsh@0.1.0-rc.7`
-- Harness: `zyfjacksonchen-source/deepseek-harness@4da69d7c3522ee51de12822c917c503a124f7a7d`
-- Desktop reference: `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`
+- DSH package baseline: `@deepseek-ai/dsh@0.1.5-rc.1`
+- Harness: `zyfjacksonchen-source/deepseek-harness@78a2b98562185d6fe46f4071653cae61132bf1ea`
+- Desktop reference: `anywhere-labs/deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517`
 
 ### Source capability and compatibility
 
@@ -67,7 +67,7 @@ These are required release gates, not evidence that the candidate or promotion i
 
 ## Compatibility boundaries
 
-- DSH `0.1.0-rc.7` is fixed. rc.8 packages, peers, fixtures, or inferred behavior are rejected.
+- DSH `0.1.5-rc.1` is fixed. rc.8 packages, peers, fixtures, or inferred behavior are rejected.
 - Existing user data is read and mutated only through native DSH owners. Legacy imports remain read-only at their source.
 - Enterprise services may authenticate, apply bounded model/search policy, lease credentials, and append redacted audit. They never execute local Tools, mutate Sessions, install Skills, or control the Desktop updater.
 - Browser plugins use Harness Connection, services, events, and slots. They do not open a parallel WebSocket/SSE transport or manufacture Session, Tool, approval, retry, or completion state.

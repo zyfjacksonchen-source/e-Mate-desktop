@@ -14,7 +14,7 @@ The following are prohibited:
 
 ## Native-first changes
 
-Before changing a plugin, compare the complete owner path with pinned DSH `0.1.0-rc.7`. Reuse the native service, Tool, event, slot, and lifecycle. An e-Mate adapter may narrow or present native behavior, but cannot replace it.
+Before changing a plugin, compare the complete owner path with pinned DSH `0.1.5-rc.1`. Reuse the native service, Tool, event, slot, and lifecycle. An e-Mate adapter may narrow or present native behavior, but cannot replace it.
 
 `packages/dsh/profile/component-inventory.json` is the one first-party Profile roster. Every active entry is built into the Desktop Profile; the inventory is not an independent updater or publication channel. Platform components declare their exact target and native closure, while portable components remain target-neutral.
 

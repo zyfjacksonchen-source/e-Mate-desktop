@@ -189,5 +189,5 @@ corepack.cmd yarn dist:win
 - `dshmarket@1.2.3` 仍是用户可选安装的第三方 package，而不是内置 marketplace。只有重新审计的版本同时消费可选 Desktop service、保留普通 DSH fallback，并包含再分发所需的完整 license notice 后，才会重新评估预装。
 - macOS 包未签名，不是 Developer ID 签名，也没有公证，因此安装时可能需要按系统提示仅批准该 App；更新会打开 DMG，不会自动替换应用。Windows `dist:win` 同样未签名，publisher 身份与 SmartScreen 信誉仍是发布边界。
 - 共享 carrier 使用 loopback HTTP 与 WebSocket，而不是 Electron IPC。替换它需要上游 DSH 提供 transport 扩展点，不属于该独立包的范围。
-- 本项目固定使用 `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add` 对应的 DSH `0.1.0-rc.7` family。e-Mate 保留已验收的 rc.7 Harness fork 提交，并校验相同的 Desktop ABI 与生命周期合同。
+- 本项目固定使用 `anywhere-labs/deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517` 对应的 DSH `0.1.5-rc.1` family。e-Mate 保留已验收的 rc.7 Harness fork 提交，并校验相同的 Desktop ABI 与生命周期合同。
 - `package:dir` 是用于 smoke 的未封装产物。`dist:win` 会额外生成未签名的 NSIS 测试安装包，但不会建立 Authenticode 身份或 SmartScreen 信誉。安装与升级行为、原生通知与终端、Windows ACL sandbox，以及每台目标机器上的原生材质外观仍属于目标平台验证边界。

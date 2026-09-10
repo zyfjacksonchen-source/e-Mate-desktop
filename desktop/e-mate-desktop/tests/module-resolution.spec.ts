@@ -81,13 +81,13 @@ try {
       await writeFile(join(directory, 'index.js'), source)
     }
     await writePackage(root, { name: 'fixture', eMate: { baseImports: [] }, dependencies: {
-      parent: '1.0.0', leaf: '1.0.0', escape: '1.0.0', '@deepseek-ai/dsh-tools': '0.1.0-rc.7',
+      parent: '1.0.0', leaf: '1.0.0', escape: '1.0.0', '@deepseek-ai/dsh-tools': '0.1.5-rc.1',
     } }, "export const value = await Promise.all([import('parent'), import('leaf')]).then(([a,b]) => [a.value,b.value])\n")
     await writePackage(join(root, 'node_modules', 'parent'), { name: 'parent', version: '1.0.0', dependencies: { leaf: '2.0.0' } }, "export { value } from 'leaf'\n")
     await writePackage(join(root, 'node_modules', 'leaf'), { name: 'leaf', version: '1.0.0' }, 'export const value = 1\n')
     await writePackage(join(root, 'node_modules', 'parent', 'node_modules', 'leaf'), { name: 'leaf', version: '2.0.0' }, 'export const value = 2\n')
     await writePackage(join(root, 'node_modules', 'undeclared'), { name: 'undeclared', version: '1.0.0' }, 'export const value = 3\n')
-    await writePackage(join(root, 'node_modules', '@deepseek-ai', 'dsh-tools'), { name: '@deepseek-ai/dsh-tools', version: '0.1.0-rc.7' }, 'export const value = 4\n')
+    await writePackage(join(root, 'node_modules', '@deepseek-ai', 'dsh-tools'), { name: '@deepseek-ai/dsh-tools', version: '0.1.5-rc.1' }, 'export const value = 4\n')
     await writePackage(join(temporary, 'outside'), { name: 'escape', version: '1.0.0' }, 'export const value = 5\n')
     await symlink(join(temporary, 'outside'), join(root, 'node_modules', 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
     for (const [file, name] of [['unlisted', 'undeclared'], ['escape', 'escape'], ['harness', '@deepseek-ai/dsh-tools']]) {

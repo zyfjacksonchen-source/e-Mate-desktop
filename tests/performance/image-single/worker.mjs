@@ -368,7 +368,7 @@ async function main() {
   assert.ok(Number.isSafeInteger(repetition) && repetition >= 1 && repetition <= REPETITIONS, 'worker repetition is invalid')
   assert.match(emateCommit ?? '', /^[0-9a-f]{40}$/u)
   const base = JSON.parse(readFileSync(PATHS.baseContract, 'utf8'))
-  assert.equal(base.harness_version, '0.1.0-rc.7')
+  assert.equal(base.harness_version, '0.1.5-rc.1')
   assert.equal(base.harness_commit, HARNESS_COMMIT)
   const fixtures = { small: { data: SMALL_PNG }, max: { data: createExactMaxPng() } }
   for (const fixture of Object.values(fixtures)) {

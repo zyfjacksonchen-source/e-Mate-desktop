@@ -57,7 +57,7 @@ export function assertExactBuiltProvenance() {
 
 export function sourceSmoke() {
   const base = JSON.parse(readFileSync(join(ROOT, 'desktop/e-mate-desktop/base-contract.json'), 'utf8'))
-  assert.equal(base.harness_version, '0.1.0-rc.7')
+  assert.equal(base.harness_version, '0.1.5-rc.1')
   assert.equal(base.harness_commit, HARNESS_COMMIT)
   const contract = readFileSync(join(ROOT, 'docs/2.0.17/contracts/single-image-latency.md'), 'utf8')
   assert.match(contract, /has no native image-generation Tool/u)

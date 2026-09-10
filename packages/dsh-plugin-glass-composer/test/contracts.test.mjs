@@ -35,7 +35,7 @@ test('keeps one native Composer owner and decorates its semantic frame host', as
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
   assert.match(css, /@media \(forced-colors: active\)/)
   assert.doesNotMatch(`${host}\n${client}\n${css}`, /MutationObserver|localStorage|tapIndex|backdrop-filter/)
-  assert.equal(manifest.eMate.harnessCommit, '4da69d7c3522ee51de12822c917c503a124f7a7d')
+  assert.equal(manifest.eMate.harnessCommit, '78a2b98562185d6fe46f4071653cae61132bf1ea')
 })
 
 test('emitted client retains the native frame animation and reduced-motion rule', async () => {

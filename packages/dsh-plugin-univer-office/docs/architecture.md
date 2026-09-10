@@ -440,7 +440,7 @@ Client 必须满足：
 
 ## e-Mate rc.7 packaging adaptation
 
-This vendored component is pinned to upstream `f3a8845dd4c863072b0ae555cdb6a58076c165e7` and e-Mate's existing Harness `0.1.0-rc.7`. Host imports resolve through the declared Base ABI; Client uses rc.7's combined conversation/runtime services and native hidden Chat projections, including rootCallId-bound Code subcalls. The mature Gateway, Worker, Render Machine and Viewer remain their original owners.
+This vendored component is pinned to upstream `f3a8845dd4c863072b0ae555cdb6a58076c165e7` and e-Mate's existing Harness `0.1.5-rc.1`. Host imports resolve through the declared Base ABI; Client uses rc.7's combined conversation/runtime services and native hidden Chat projections, including rootCallId-bound Code subcalls. The mature Gateway, Worker, Render Machine and Viewer remain their original owners.
 
 The package is an on-demand npm TGZ named `@e-mate/dsh-plugin-univer-office@2.0.18`, separate from the e-Mate application bundle. Its six exact runtime dependencies are installed by the user's native package manager for that host; no source-machine `node_modules` or native binaries are copied into the archive. The root patch keeps the bare package name so native DSH plugin installation discovers its Host and Client. Existing rc.7 peers remain provided by the host, and no alternate Office executor is added. The pinned formula/conversion bindings have no macOS Intel target, which remains a plugin platform limitation rather than an app packaging dependency.
 

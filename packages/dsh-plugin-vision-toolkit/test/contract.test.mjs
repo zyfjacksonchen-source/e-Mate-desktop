@@ -61,7 +61,7 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
   assert.equal(pkg.dsh.visionToolkit.upstreamCommit, 'bc9803d7d6300c864d17460ecbb33540b26638e0')
   assert.equal(pkg.dsh.upstream.commit, '29850a83871d4b7a7cc13e251420c5a440e2f69e')
   assert.equal(pkg.dependencies.saxes, '6.0.0')
-  assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
+  assert.equal(pkg.eMate.harnessVersion, '0.1.5-rc.1')
   assert.equal(pkg.exports['./client'], './lib/client.js')
   assert.deepEqual(pkg.dsh.client, {
     inject: [

@@ -2,7 +2,7 @@
 
 ## Runtime ownership
 
-DeepSeek Harness `0.1.0-rc.7` is the only runtime core. It owns Agent execution, Sessions, durable events, model calls, Tools, approvals, attachments, Jobs, Skills, schedules, workspaces, plugin loading, and persistence.
+DeepSeek Harness `0.1.5-rc.1` is the only runtime core. It owns Agent execution, Sessions, durable events, model calls, Tools, approvals, attachments, Jobs, Skills, schedules, workspaces, plugin loading, and persistence.
 
 e-Mate adds product behavior through ordinary Cordis/Profile plugins and native client slots. Browser code consumes Harness Connection and projections; it does not create another transport, event model, or state owner.
 

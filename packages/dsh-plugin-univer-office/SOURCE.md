@@ -2,7 +2,7 @@
 
 Vendored from dream-num/dsh-univer-office 0.2.14 at commit `f3a8845dd4c863072b0ae555cdb6a58076c165e7` under Apache-2.0. `upstream-manifest.json` records the original tracked bytes. Application artifacts are built from the local source; native dependencies are installed separately on the user host.
 
-This is an on-demand npm plugin for frozen DSH 0.1.0-rc.7 services, installed through e-Mate's native plugin workflow. It is not included in the e-Mate application bundle. The adaptations below retain the pinned upstream application owners. No separate Office Tool implementation is retained.
+This is an on-demand npm plugin for frozen DSH 0.1.5-rc.1 services, installed through e-Mate's native plugin workflow. It is not included in the e-Mate application bundle. The adaptations below retain the pinned upstream application owners. No separate Office Tool implementation is retained.
 
 ## Local adaptations
 
