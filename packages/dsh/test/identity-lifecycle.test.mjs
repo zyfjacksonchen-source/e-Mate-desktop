@@ -193,6 +193,19 @@ test('expired remembered identity stays locally available but cannot claim enter
   assert.equal(values.has(SESSION_REF), true, 'nonauthoritative remembered metadata may remain refreshable')
 })
 
+test('an unexpired remembered identity keeps enterprise authentication when the control plane is unreachable', async () => {
+  const { createEnterpriseIdentityProvider: createProvider } = await loadEnterpriseProviderSource()
+  const provider = createProvider(options(mapCredentials(new Map([[SESSION_REF, stored()]])), async () => {
+    throw new Error('control plane offline')
+  }))
+  // The installed client shows its login page only for a bootstrap that reports authenticated=false.
+  // A control-plane outage must therefore never be reported as a signed-out state while a usable
+  // remembered lease exists; only the expiry case above may drop enterprise authentication.
+  const state = await provider.bootstrap()
+  assert.equal(state.authenticated, true)
+  assert.equal(state.workspace_unlocked, true)
+})
+
 test('a valid model lease reaches the live Gateway during control outage but not at expiry', async () => {
   const { createEnterpriseIdentityProvider: createProvider } = await loadEnterpriseProviderSource()
   let clock = NOW

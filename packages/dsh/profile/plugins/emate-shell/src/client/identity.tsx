@@ -58,6 +58,11 @@ export type RpcResult =
   | { ok: false; error?: { message?: string } }
 
 export const IDENTITY_CHANGED_EVENT = 'emate:identity-changed'
+export function openLoginPage() {
+  history.pushState(null, '', '/login')
+  dispatchEvent(new PopStateEvent('popstate'))
+}
+
 export const REMOTE_LOGOUT_UNKNOWN_MESSAGE = '本机已退出；企业会话撤销状态未知，请稍后重新登录确认。'
 export const LOGOUT_INCOMPLETE_MESSAGE = '当前应用已停止使用此登录；本机凭据清理或远端撤销未确认完成，请勿关闭或重启应用并联系管理员。'
 
@@ -200,9 +205,9 @@ export function IdentityGate({ callIdentity }: Props) {
   const enterpriseRoute = routePath === '/login' || routePath === '/register' || routePath === '/agreement'
   const mode = state?.authenticated === true && state.workspace_unlocked
     ? 'unlocked'
-    : state?.authenticated === true && routePath === '/agreement'
+    : state?.authenticated === true
       ? 'agreement'
-      : enterpriseRoute
+      : enterpriseRoute || state?.ready === true
         ? 'login'
         : 'local'
 
@@ -222,6 +227,10 @@ export function IdentityGate({ callIdentity }: Props) {
         history.replaceState(null, '', path)
         setRoutePath(path)
       }
+    }
+    if (mode === 'agreement' && routePath !== '/agreement') {
+      history.replaceState(null, '', '/agreement')
+      setRoutePath('/agreement')
     }
   }, [authView, mode, returnPath, routePath, state])
 

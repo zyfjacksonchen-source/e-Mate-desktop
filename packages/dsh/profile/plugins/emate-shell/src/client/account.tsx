@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { IconPlusOutline16, IconUserOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   IDENTITY_CHANGED_EVENT,
+  openLoginPage,
   type IdentityBootstrap,
   type RpcResult,
   validBootstrap,
@@ -221,7 +222,10 @@ export function AccountControl({ callIdentity, wide, placement = 'sidebar', User
               setConfirming(true)
               details.current?.removeAttribute('open')
             }}>退出登录</button>
-          ) : <p role={identityError ? 'status' : undefined}>{identityError ?? '登录状态由企业身份服务提供。'}</p>}
+          ) : <>
+            <p role={identityError ? 'status' : undefined}>{identityError ?? '登录状态由企业身份服务提供。'}</p>
+            {(state !== null || identityError !== null) && <button type="button" onClick={openLoginPage}>前往登录</button>}
+          </>}
         </div>
       )}
     </details>
@@ -349,6 +353,7 @@ export function AccountSettings({ callIdentity }: Props) {
           ? `每周 Token 额度 ${state.weekly_token_limit === Number.MAX_SAFE_INTEGER ? '不限' : state.weekly_token_limit === undefined ? '—' : formatTokenCount(state.weekly_token_limit)}；${state.agreement_exempt ? '管理员无需签署用户协议。' : state.agreement_receipt_id ? '首次使用协议已归档。' : '尚无有效协议归档凭证。'}`
           : status ?? (state === null ? null : '请完成企业登录后再修改密码。')}
       </p>
+      {!state?.authenticated && (state !== null || status !== null) && <button type="button" onClick={openLoginPage}>前往登录</button>}
       {state?.authenticated ? <UsageHeatmap callIdentity={callIdentity} /> : null}
       {state?.authenticated ? (
         <form className={css.passwordForm} onSubmit={event => { void changePassword(event) }}>

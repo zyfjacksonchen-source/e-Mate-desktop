@@ -39,6 +39,51 @@ afterEach(() => {
 })
 
 describe('e-Mate 2.0.17 identity and settings fidelity', () => {
+  it.each(['/', '/chat/existing-session', '/settings'])('opens login after a confirmed signed-out bootstrap at %s', async path => {
+    history.replaceState(null, '', path)
+    const callIdentity = vi.fn(async (): Promise<RpcResult> => ({
+      ok: true,
+      value: { schema_version: 1, ready: true, authenticated: false, workspace_unlocked: false, agreements },
+    }))
+    render(<IdentityGate callIdentity={callIdentity} />)
+
+    expect(await screen.findByRole('heading', { name: '欢迎回来' })).toBeTruthy()
+    expect(screen.getByLabelText('账号或邮箱')).toBeTruthy()
+    expect(screen.getByLabelText('密码')).toBeTruthy()
+    expect(location.pathname).toBe('/login')
+    expect(callIdentity).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['account', 'settings'] as const)('keeps local work available during an identity outage with a working %s login entry', async entry => {
+    history.replaceState(null, '', '/chat/existing-session')
+    const callIdentity = vi.fn(async (): Promise<RpcResult> => ({ ok: false, error: { message: '企业身份服务暂不可用。' } }))
+    render(<>
+      <IdentityGate callIdentity={callIdentity} />
+      {entry === 'account'
+        ? <AccountControl callIdentity={callIdentity} wide UserIcon={() => <svg />} expandSidebar={() => {}} />
+        : <AccountSettings callIdentity={callIdentity} />}
+    </>)
+    if (entry === 'account') fireEvent.click(await screen.findByLabelText('用户中心，账号状态暂不可用'))
+    const login = await screen.findByRole('button', { name: '前往登录' })
+    expect(document.querySelector('[data-emate-identity-gate]')).toBeNull()
+    expect(location.pathname).toBe('/chat/existing-session')
+
+    fireEvent.click(login)
+    expect(await screen.findByRole('heading', { name: '登录服务尚未就绪' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '重新检查' })).toBeTruthy()
+    expect(location.pathname).toBe('/login')
+  })
+
+  it('requires the pending agreement when an authenticated session starts on a chat route', async () => {
+    history.replaceState(null, '', '/chat/existing-session')
+    render(<IdentityGate callIdentity={async () => ({
+      ok: true, value: { ...signedIn, workspace_unlocked: false, agreement_receipt_id: undefined },
+    })} />)
+    expect(await screen.findByRole('heading', { name: '首次使用协议确认' })).toBeTruthy()
+    expect(location.pathname).toBe('/agreement')
+    expect(screen.queryByRole('heading', { name: '欢迎回来' })).toBeNull()
+  })
+
   it('keeps the AURA login contract and current SettingsDialog copy', () => {
     const identity = readFileSync(join(process.cwd(), 'src/client/identity.module.css'), 'utf8')
     const identityView = readFileSync(join(process.cwd(), 'src/client/identity.tsx'), 'utf8')
@@ -478,7 +523,8 @@ describe('e-Mate 2.0.17 identity and settings fidelity', () => {
 
   })
 
-  it('projects an unknown remote logout as locally signed out without a receipt or a 500 error', async () => {
+  it.each(['unknown', 'revoked'] as const)('returns to login after a valid %s logout', async remoteRevocation => {
+    history.replaceState(null, '', '/chat/existing-session')
     const signedOut: IdentityBootstrap = {
       schema_version: 1,
       ready: true,
@@ -495,7 +541,8 @@ describe('e-Mate 2.0.17 identity and settings fidelity', () => {
           ok: true,
           value: {
             schema_version: 1,
-            remote_revocation: 'unknown',
+            remote_revocation: remoteRevocation,
+            ...(remoteRevocation === 'revoked' ? { receipt_id: 'logout-receipt' } : {}),
             state: signedOut,
           },
         }
@@ -511,8 +558,11 @@ describe('e-Mate 2.0.17 identity and settings fidelity', () => {
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '退出登录' }))
 
     await waitFor(() => { expect(screen.getByLabelText('用户中心，未登录')).toBeTruthy() })
-    expect(screen.queryByRole('heading', { name: '欢迎回来' })).toBeNull()
-    expect(screen.getByRole('alert').textContent).toBe('本机已退出；企业会话撤销状态未知，请稍后重新登录确认。')
+    expect(await screen.findByRole('heading', { name: '欢迎回来' })).toBeTruthy()
+    expect(location.pathname).toBe('/login')
+    if (remoteRevocation === 'unknown') {
+      expect(screen.getByRole('alert').textContent).toBe('本机已退出；企业会话撤销状态未知，请稍后重新登录确认。')
+    }
     expect(document.body.textContent).not.toContain('500')
     expect(callIdentity.mock.calls.filter(([endpoint]) => endpoint === 'session.logout')).toHaveLength(1)
   })

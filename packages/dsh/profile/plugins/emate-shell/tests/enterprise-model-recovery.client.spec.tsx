@@ -59,7 +59,10 @@ describe('enterprise model recovery identity boundary', () => {
     localTool.textContent = 'Local Tool'
     shell.append(localTool)
     document.body.append(shell)
-    const callIdentity = vi.fn(async (): Promise<RpcResult> => ({ ok: true, value: signedOut }))
+    // Management/control outage: the bootstrap call itself fails, so enterprise auth is
+    // neither confirmed signed-out nor confirmed signed-in. Local work must stay usable.
+    // A *confirmed* signed-out bootstrap instead opens login (identity-settings-fidelity).
+    const callIdentity = vi.fn(async (): Promise<RpcResult> => ({ ok: false, error: { message: '企业身份服务暂不可用。' } }))
 
     render(<IdentityGate callIdentity={callIdentity} />)
     await waitFor(() => expect(callIdentity).toHaveBeenCalledOnce())
