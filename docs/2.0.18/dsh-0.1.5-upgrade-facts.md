@@ -794,4 +794,41 @@ shell 42 / profile-core 35 / desktop 55 / enterprise 29 / scripts 59，插件侧
 1. 按**函数级**（而非模块级）重做抽取，得到 `fs-escalation` 与 `session-title` 的可靠读数；
 2. 人工读 `artifact-links` 与 `artifact-deliverables` 的接缝常量；
 3. 按判读结果分类：**精度问题**（低成本，如 fs-bytes）vs **语义已变**（需重写）；
-4. `conversation` 已确认属后者，单独立项。
+4. `conversation` 已确认属后者，单独立项。### 21.10 Round 5 函数级读数（精确，可直接据此动手）
+
+| 适配器 | 接缝常量 | 0.1.5 读数 | 判读 |
+|---|---|---|---|
+| `session-title` | `TITLE_SCHEDULE`（整行含 `messages.length === 1`） | **整行 0 命中，但前缀存在** | **精度问题**：0.1.5 把 `messages.length` 改成了 `count`，见下 |
+| `fs-escalation` | `FS_OLD` 首行 `\tasync resolvePolicy(toolName, args, exec) {` | **0 命中，且 `resolvePolicy` 在 dsh-fs 里完全不存在** | **语义已变**，需重定 |
+| `artifact-links` / `deliverables` | 显式传入 `replaceOnce(source, before, after, owner)`，见 21.11 | 待逐条计数 | 待判 |
+
+#### session-title 的确切差异
+```js
+// rc.7 / fork
+if (registration.provider.automatic === "all-prompts" || session.header.parentSession === void 0 && messages.length === 1 && this.get(session) === void 0) {
+// 0.1.5（lib/index.js:386）
+if (registration.provider.automatic === "all-prompts" || session.header.parentSession === void 0 && count === 1 && this.get(session) === void 0) {
+```
+**唯一差异是 `messages.length` → `count`。** 这与 `fs-bytes` 同类：低成本精度修正，而非重写。
+动手前需确认替换产物 `TITLE_SCHEDULE_GROUNDED` 不依赖旧变量名。
+
+### 21.11 artifact-links 的接缝清单（可直接逐条计数）
+适配器用 `replaceOnce(source, before, after, owner)` 显式传参，owner 名即接缝名：
+
+- `deliverables/tail-selector`：`function selectProducedFiles(owner) {\n\t\t\tconst paths = producedForClosing(owner.turn.data.get("deliverables"), owner.seq);`
+- `deliverables/mention-selector`：`const paths = selectProducedFiles(owner);`
+- `deliverables/session-owner`：`\t\t\t"connection"\n\t\t];`
+- `deliverables/library-definition`：`const deliverablesDefinition = {`
+- `deliverables/library-close`：`\t\t\t\tvalue: { produced: context.state.produced }\n\t\t\t}\n\t\t};`
+
+另有 `renderer/anchor`（`ui-primitives` 的 `renderer` 相关）与 `ui-primitives` 的 `change(before, after, owner)` 调用点，需一并计数。
+
+### 21.12 当前 8 条适配器的分类（Round 5 末）
+
+| 分类 | 条目 | 成本 |
+|---|---|---|
+| **已修好并验证** | `fs-bytes` | 已完成 |
+| **精度问题（低成本）** | `session-title`（`messages.length`→`count`） | 一条替换 |
+| **语义已变（需重写/重定）** | `fs-escalation`（`resolvePolicy` 消失）、`conversation`（`turn-tail` 节点与图像工具名消失） | 高 |
+| **宿主消失（需重定目标）** | `slot-error`（`client-runtime`）、`session-export`（`apiproxy`） | 中 |
+| **待判** | `artifact-links`、`artifact-deliverables` | 待逐条计数 |
