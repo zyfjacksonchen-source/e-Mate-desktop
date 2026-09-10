@@ -172,6 +172,7 @@ function renderProgress(
       batches={view.batches.filter(batch => batch.parentCallId === parentCallId)}
       useSessions={sessions.useSessions}
       loadImage={loadImage}
+      renderSlot={(() => null) as never}
       {...addImageToCanvas ? { addImageToCanvas } : {}}
     />
   }

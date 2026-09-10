@@ -8,10 +8,9 @@ const upstreamPrimitives = fileURLToPath(new URL(
   '../../../../../upstream/deepseek-harness/packages/client/ui-primitives/lib/index.js',
   import.meta.url,
 ))
-const upstreamRuntime = fileURLToPath(new URL(
-  '../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/index.ts',
-  import.meta.url,
-))
+// 0.1.5 removed @deepseek-ai/dsh-client-runtime and dsh-client-web-react. Their
+// aliases named source paths that no longer exist, which broke resolution for
+// every transitive import in the suite.
 const upstreamAttachment = fileURLToPath(new URL(
   '../../../../../upstream/deepseek-harness/packages/client/ui-attachment/lib/index.js',
   import.meta.url,
@@ -31,8 +30,6 @@ export default {
       '@testing-library/react': `${upstreamModules}@testing-library/react`,
       '@deepseek-ai/dsh-client-ui-primitives': upstreamPrimitives,
       '@deepseek-ai/dsh-client-ui-attachment': upstreamAttachment,
-      '@deepseek-ai/dsh-client-runtime/client': upstreamRuntime,
-      '@deepseek-ai/dsh-client-web-react': fileURLToPath(new URL('../../../../../upstream/deepseek-harness/packages/client/web-react/src/index.ts', import.meta.url)),
       '@deepseek-ai/cordis': upstreamCordis,
     },
   },
