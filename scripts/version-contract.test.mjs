@@ -24,7 +24,7 @@ test('keeps current e-Mate source owners on 2.0.18', () => {
   assert.equal(contract.id, 'e-mate-desktop-profile-v18-dsh-4da69d7c3522')
   assert.equal(contract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.18')
   assert.equal(contract.harness_version, '0.1.0-rc.7')
-  assert.equal(json('package.json').packageManager, 'pnpm@11.7.0')
+  assert.equal(json('package.json').packageManager, 'pnpm@11.8.0')
   assert.equal(json('desktop/package.json').packageManager, 'yarn@4.18.0')
 })
 
