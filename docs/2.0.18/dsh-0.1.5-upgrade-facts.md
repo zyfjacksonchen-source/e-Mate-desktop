@@ -488,3 +488,51 @@ e-Mate 2.0.18 **已经移除了 probation 语义**，因此闸门、降级门禁
 
 13.2 表里这 6 条大多标着"缺失 N/N"，容易被读成"必须重做"。
 **"0.1.5 缺失"只是必要信息，不是充分结论** —— 还要过 13.1 的第 3 步（e-Mate 是否真的消费）。本例中缺的正是 e-Mate 已经不要的东西。
+
+---
+
+## 15. harness fork 21 条最终裁决表（全部有证据）
+
+### 15.1 重做（10 条）
+
+| 提交 | 能力锚点 | 证据 |
+|---|---|---|
+| `fix(conversation): expose semantic composer frame host` | `data-emate-composer-frame-host` | 0.1.5 无；e-Mate 两处 CSS + 七条断言消费；0.1.5 `ConversationRoot.tsx:347` 结构相同 → 一行属性增量 |
+| `fix(jobs): close queued owner teardown race` | `spec.run.bind(spec)`、teardown 先取消 waiting | 0.1.5 无；jobs-local 真实并发缺陷；**其测试直接用 `kind: emate-image`** |
+| `feat(jobs): add cross-owner kind admission` | `startWhenAvailable`, `admissionQueues`, `MAX_WAITING_TASKS_PER_KIND` | 0.1.5 **四个符号全无**；e-Mate 用 `ctx.jobs.start({kind:'emate-image'})` + `attachController`；即生图"同 kind 单活跃"机制 |
+| `fix(jobs): register queued admission jobs` | `JobAdmission {id, admitted}` | 0.1.5 无；上一条的语义修正 |
+| `fix(session): isolate corrupt cold list artifacts` | `locate()` try/catch + warn | 0.1.5 无；**其测试用 `cwd: /profile/e-mate/general`**；一个损坏会话不得毁掉整个会话列表 |
+| `feat(tools): expose registration provenance` | `dsh-tool-provenance-`, `toolRuntime.provenance` | 0.1.5 无；e-Mate 消费 |
+| `fix(models): refresh directories after credential commits` | `credentials/updated` 刷新 | 0.1.5 无该刷新点；e-Mate 企业身份换证后必须刷新模型目录 |
+| `feat(llm): add registration-bound wire transform` | `INVALID_WIRE_REQUEST`, `llm/wire` | 0.1.5 无；e-Mate 网关线上变换依赖 |
+| `fix(settings): expose stable section ids` | `data-settings-section-id`, `dataset.settingsSectionId` | 0.1.5 无；e-Mate 设置外壳依赖稳定导航元数据 |
+| `feat(ui-conversation): add declarative hero content slot` | `conversation.hero.content`, `css.heroContent` | 0.1.5 有 hero 概念但无该槽位；e-Mate 首页/外壳依赖 |
+
+### 15.2 淘汰（11 条）
+
+| 提交 | 淘汰理由 |
+|---|---|
+| `feat(imagegen): gate image edits on native review` | **产品淘汰**：2.0.18 两处明文要求 `zero image/edit confirmation`；fork 未接入任何工具 |
+| `test(client): repair image review fixtures` | 随上条一起淘汰（其测试对象已不存在） |
+| `docs(imagegen): refresh review contracts` | 随上条一起淘汰（纯文档） |
+| `feat(schedule): gate delivery startup admission` | probation 语义已从 e-Mate 移除，零消费方 |
+| `fix(schedule): honor startup delivery admission` | 同上 |
+| `test(schedule): make downgrade gate hermetic` | 服务于已不存在的协议 floor |
+| `test(schedule): gate built downgrade compatibility` | 同上 |
+| `fix(schedule): make delivery rollback fail closed` | 作用于 fork 自有 v2 协议；e-Mate 零 v2 引用；0.1.5 用 `transaction.ts` 另解 |
+| `fix(schedule): make reminder delivery crash safe` | 同上 |
+| `fix(ui): make attachment drop overlay dismissible (#1)` | 0.1.5 已有等价实现（drop overlay / dismiss 语义）；**需用其自带测试最终确认后才可删** |
+| `fix(conversation): isolate session drafts on workspace switch` | 0.1.5 的 `draft` 契约已存在（`contract/input.ts`、`contract/slots.ts`、`contract/views.ts`）；**需用其自带测试最终确认** |
+
+### 15.3 两条待最终确认的淘汰项
+
+`attachment drop overlay` 与 `session draft isolation` 两条，0.1.5 侧有同语义实现但形态不同。
+按 13.1 第 4 步，**必须用它们自带的测试在 0.1.5 上跑通**才允许正式删除；未通过则转入重做。
+这是本次唯一允许"先删后验"的两条，且验证未过必须回退。
+
+### 15.4 净结果
+
+- 21 条 → **10 条重做 + 11 条淘汰**。
+- 重做集中在 jobs(3)、conversation/UI 契约(3)、tools/models/llm/settings(4)。
+- 淘汰最大一块是 **schedule 6 条**（probation 已移除）与 **imagegen review 3 条**（产品要求零确认）。
+- 与 `AGENTS.md` 中"fork 只多了 session-draft 隔离"的说法相比，真实 fork delta 为 21 提交；其中近半因产品演进已自然失效。
