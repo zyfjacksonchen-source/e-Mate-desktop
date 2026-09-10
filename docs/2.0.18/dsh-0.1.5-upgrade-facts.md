@@ -1296,3 +1296,33 @@ Round 10 记的"`artifact-links` 21 处"是**整个模块**的总数（lib 面 6
 
 #### 状态
 工作区零改动，未留半成品。`artifact-links` 仍是 6/6 失配，但方案已定稿、每处都有精确两侧文本。
+
+### 21.33 Round 22：artifact-deliverables 判定为结构性重写（非接缝替换）
+
+3 处失配逐一查证后，性质明确了：它不是 artifact-links 那种签名级改动。
+
+| # | 接缝 | 0.1.5 实际情况 | 判读 |
+|---|---|---|---|
+| 1 | select 指向 selectProducedFiles | 第 935 行为 select: selectDeliverables，且位于 ctx.slots.inject 的 register 调用内 | 注册方式从 conversation-events 定义改为 slot register |
+| 2 | connection 依赖声明形态 | 该形态不存在；0.1.5 的 inject 列表在第 911 行，内容不同 | 依赖声明结构已变 |
+| 3 | value 单行 produced | 第 433 行 buildLocationData 的 value 为多行，且多了 presented 分支 | 视图节点值结构已变 |
+
+**关键区别**：0.1.5 同时保留 deliverablesDefinition（第 365 行）和新增 slot 注册（第 933-945 行）。
+适配器的 6 步是按 rc.7 的单一注册形态写的，因此在 0.1.5 上需要重新决定注入点 ——
+与 conversation（47 处）同一类工作量，而不是签名替换。
+
+### 21.34 适配器总账（Round 22 末）
+
+| 适配器 | 判定 | 状态 |
+|---|---|---|
+| fs-bytes | 精度修正 | 收口 |
+| fs-escalation | 本就可用 | 收口 |
+| session-title | API 已改 | 收口 |
+| slot-error | 上游吸收 | 收口（已移除） |
+| session-export | 重定目标 + 2 处重推 | 收口 |
+| artifact-links | 精度修正（双面） | 收口 |
+| artifact-deliverables | 结构性重写 | 待办（注入点需重新设计） |
+| conversation | 结构性重写（47 处） | 待办 |
+
+**7 条收口，剩 2 条同属「0.1.5 重构了会话节点/slot 注册层」这一类。**
+建议这两条一起设计注入点 —— 一次结构决策解两条，避免各做一遍。
