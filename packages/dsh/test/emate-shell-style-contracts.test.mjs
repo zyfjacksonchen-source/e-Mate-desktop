@@ -57,3 +57,23 @@ test('the gallery actions do not overlay the carousel controls', () => {
   const spaced = /margin-top/u.test(rule[0]) || /padding:\s*[^;]*\d/u.test(rule[0])
   assert.ok(spaced, 'the actions lost the spacing that clears the carousel controls')
 })
+
+// Ledger entries 680b68950 and 820267ca3 share this stylesheet: the batch action is hidden
+// by default and must be reachable by pointer AND keyboard, so the reveal rule needs both a
+// hover path and a focus path. A hover-only reveal locks keyboard users out of the action.
+const batchStyles = readFileSync(fileURLToPath(new URL(
+  '../profile/plugins/emate-shell/src/client/image-batch-progress.module.css',
+  import.meta.url,
+)), 'utf8')
+
+test('the batch action reveals on hover and on focus', () => {
+  const hidden = new RegExp(String.raw`\.canvasAction\s*\{[^}]*\}`, 'u').exec(batchStyles)
+  assert.notEqual(hidden, null, 'the batch action rule disappeared')
+  assert.match(hidden[0], /opacity:\s*0/u, 'the action is no longer hidden by default')
+  assert.match(hidden[0], /pointer-events:\s*none/u, 'the hidden action still accepts pointer events')
+  const reveal = /[^{}]*\.canvasAction[^{}]*\{[^}]*opacity:\s*1[^}]*\}/u.exec(batchStyles)
+  assert.notEqual(reveal, null, 'no rule reveals the batch action')
+  assert.match(reveal[0], /:hover/u, 'the action no longer reveals on hover')
+  assert.match(reveal[0], /:focus/u, 'the action no longer reveals on keyboard focus')
+  assert.match(reveal[0], /pointer-events:\s*auto/u, 'the revealed action stays unclickable')
+})
