@@ -4,27 +4,15 @@
 [submodule "upstream/plugins/ego-lite"]
 	path = upstream/plugins/ego-lite
 	url = https://github.com/citrolabs/ego-lite.git
-[submodule "upstream/plugins/dsh-vision-toolkit"]
-	path = upstream/plugins/dsh-vision-toolkit
-	url = https://github.com/Anionex/dsh-vision-toolkit.git
 [submodule "upstream/plugins/dsh-memory-evolve"]
 	path = upstream/plugins/dsh-memory-evolve
 	url = https://github.com/csyangwen/dsh-memory-evolve.git
 [submodule "upstream/plugins/dsh-genui"]
 	path = upstream/plugins/dsh-genui
 	url = https://github.com/omdsh-dev/dsh-genui.git
-[submodule "upstream/plugins/dsh-better-sidebar"]
-	path = upstream/plugins/dsh-better-sidebar
-	url = https://github.com/omdsh-dev/DSH-better-sidebar.git
-[submodule "upstream/plugins/dsh-computer-use"]
-	path = upstream/plugins/dsh-computer-use
-	url = https://github.com/Anionex/dsh-computer-use.git
 [submodule "upstream/plugins/dsh-find-skill"]
 	path = upstream/plugins/dsh-find-skill
 	url = https://github.com/zyfjacksonchen-source/dsh-find-skill.git
 [submodule "upstream/plugins/dsh-im"]
 	path = upstream/plugins/dsh-im
 	url = https://github.com/zyfjacksonchen-source/dsh-im.git
-[submodule "upstream/plugins/computer-user"]
-	path = upstream/plugins/computer-user
-	url = https://github.com/jing-hy/computer-user.git

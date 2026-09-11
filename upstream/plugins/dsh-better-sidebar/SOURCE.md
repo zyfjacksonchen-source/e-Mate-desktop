@@ -1,0 +1,210 @@
+# Vendored: dsh-better-sidebar
+
+Third-party source copy, vendored by e-Mate following the same spirit as
+`upstream/deepseek-harness/vendor/README.md`: the copied tree is auditable and
+pinned, divergence from upstream is logged here, and every file hash is recorded
+so a later sync can prove what changed.
+
+## Provenance
+
+| Field | Value |
+|---|---|
+| npm / package name | `dsh-better-sidebar` |
+| Version | `0.12.2` |
+| Repository | https://github.com/omdsh-dev/DSH-better-sidebar |
+| Commit | `494b67638b7aba5fef0656854eaf96b0721f79cb` |
+| Commit subject / date | `0.1.5 compat: replace the removed settingsNamespace() with the plain namespace string` — 2026-09-11T13:32:01+08:00 |
+| Commit author | e-Mate migration |
+| Upstream commit it sits on | 5d2d6e580143dc6ad95c015feb2909ec60afdf77 — `Merge pull request #88 from omdsh-dev/feat/title-bar-compat` |
+| License | MIT License — Copyright (c) 2026 dsh-external (`LICENSE` in this directory) |
+| Vendored by | e-Mate 2.0.18 (`docs/2.0.18/submodule-vendoring.md`) |
+
+The vendored tree contains **tracked upstream content only**: no `.git`, no
+`.gitignore`-hidden build output and no `node_modules`. The file set, the file
+modes (`100644` / `100755`) and every byte match the pinned commit exactly; the
+sha256 inventory at the end of this file is the proof.
+
+## Why it is vendored rather than depended on
+
+The pinned commit is an **e-Mate commit** that does not exist on the third-party
+upstream: `git for-each-ref --contains 494b6763 refs/remotes` inside the former
+submodule returns **0 refs**, so a fresh clone cannot materialise this tree and the
+root build stops at the first empty one. Carrying the pinned content as ordinary
+files is what makes a fresh clone buildable with no manual file transfer.
+
+## Consumers in this repository
+
+No build script reads this tree today. It is retained under e-Mate control because the
+pinned commit is e-Mate's own 0.1.5 compatibility work and because the shipped
+`@e-mate/dsh-plugin-better-sidebar` is e-Mate's own implementation of the same
+product surface (`packages/dsh-plugin-better-sidebar/THIRD_PARTY_NOTICES.md` records the
+upstream), while `desktop/e-mate-desktop/src/e-mate-profile.ts:88` still names the
+retired `dsh-better-sidebar` package in its retirement list.
+
+## Local modifications vs upstream
+
+None. The tree is the pinned revision verbatim, taken from the submodule working
+tree that was already materialised at that commit and copied unchanged.
+
+## File inventory (sha256 of the vendored content)
+
+```
+cff9d3714ef079706989fcf27b956f0a1b493d9d22f136f4849545d809bf7d22  .github/workflows/ci.yml
+b254783a71027b317a6b72d0bd00354eee6a82c6588daf824982354b34b8c364  .gitignore
+636eb4296521540282cae0e7b43c7ecbf36d9f229c4dda88b51abca463225b26  AGENTS.md
+f4d265194e0824721af0592462a71fe750c04db3565c23c5d6c65fdee25fb4b0  LICENSE
+3a484c58072cdc74178bce1f027ba4c0b11814b1aa250ece15549f249b1b1367  README.md
+c52307718e08bece45275fc56ecfba186c8a7c4f8a5760ede5592f31407cd962  README_EN.md
+69af4cb83fd0a5972ca9f75b1f949eea0cdef85f6c1f9c436914ca9486d24d9e  cordis.patch.yml
+db30eb84b52c7889b4ea9eb1936f7a04fef614b7d90c90e615c160d847bb5fd6  docs/external-plugin-guide.md
+935871fd78d7598ff753868a3ba884a39d7a93eb4a908d99a9b69eaf9626acd1  docs/plans/2026-08-10-docx-zoom-pdf-drag-design.md
+4d20162329a3519f6e570b45c3aa9fe45842b1232744f24a87028387004ef466  docs/plans/2026-08-10-office-preview-design.md
+8305316c0afade17f10698f7fa47c03111046355909673c1dc1d4a436cbc2c03  docs/plans/2026-08-10-pdf-preview-design.md
+d66187441f1a1cdf4aa175f5d5a1f15f969faa70db308461e2a35ac677b4b9a9  docs/plans/2026-08-10-pptx-preview-design.md
+59c11c3adc19b964a0b3eaa52bd218f0df2ae3efa4f8338e9aeefe128ac45aa6  docs/plans/2026-08-11-declarative-sidebar-settings-design.md
+d26c713c78aa5eb62a9d86acb439d1a35c56a767a60e7b77e19887d684c87b0c  docs/plans/2026-08-11-html-browser-builtins-design.md
+6fcc4eb2c70580082e9c337b770911044e11018c0c48bfa8f4051f872225fdfd  docs/plans/2026-08-11-service-registry-design.md
+468f931f345e7d0733a618a67ca21db8ae8cccd4be85aa3e16d61655f548bbd7  docs/plans/2026-08-12-follow-dsh-i18n-design.md
+6ee932d34375c1da450afb7c2a44607cf23276c1c0256a953cc56d8aa6833835  docs/plans/2026-08-12-lazy-chunks-design.md
+c71e416540763e37f9dc1a5abbdeb3024417c919cc199d85bc27382494544628  docs/plans/2026-08-12-mobile-layout-design.md
+0faa42e41d622b9eef369899e2ba266211b56e189800bf99f642701ce26a6a54  docs/plans/2026-08-12-subagent-background-tasks-design.md
+17671b42532a20bf10ee94d80e13201eb8756fda346a2a9daa3daecc3af192ac  docs/plans/2026-08-14-add-plugins-modal-design.md
+641f3d3ef415b7d72e6e3986dd91417c286c314967db34d5204564780b8c8116  docs/plans/2026-08-14-issue-42-verify-design.md
+b25b9f3f5f1fc94deefe4bd22d7057b514b56fb7fe2feb28e1567b39ce776179  docs/plans/2026-08-14-terminal-font-design.md
+7e9fd11adb9751325498d6459c1898c0c5af205484200423315c56da39aee66a  docs/plans/2026-08-14-terminal-open-when-sized-design.md
+6df2b9381c04f0fb17c229592aa03243b3f446f53ac342119c5205627a7cd718  docs/plans/2026-08-15-url-target-browser-settings-design.md
+ea15090b9f32a618d7b592e3c6998ab72bc36f4c10c6ab5a97243370285105b3  dsh.plugin.json
+92d0338f8ef72d2c09ba27df3cb9917a1c756a68d9b5e63d62c4eeff7508ceb9  package.json
+8abe93bcc92b91ea96c8adc8ef75dde33048beaa681778b7191c151409080958  playwright.config.ts
+0886ae63e0c2779dd913a7ff2a3d93056d5b4dc3454b7a2618b900a6d256377e  pnpm-lock.yaml
+d3754faff90872c23c9a4779edf2c0a511f609f3c52ee6dce1bd1ea1de20df84  pnpm-workspace.yaml
+7dabc53efbb5d97bd28502d32bed5a6cb9a7bf910db4c386f26e39dcaed94b62  scripts/check-consumer-types.sh
+b2727df66152a60863fa136ebee2c31b30aae6d626ed40629eb5907f72ebb1b0  scripts/e2e-mount.sh
+412e7ed6200f7392ae59fcfb10298c079748f535508d6447b9e1a79a7d2fda48  scripts/install.ps1
+2e1c29303fce2f86ab09630ce7186108462aef4da17b1d118db3463e02eb5ca5  scripts/install.sh
+07112bfb8dc7e2239aa2c5c4eded533f639a60cbb5294db35e4f88b3f839f76e  scripts/package-registry.mjs
+948f457e30003d81e60d53668af7ac2e2ce82892d4b3c392600d70db8ffe7977  src/agent-pty.ts
+a0c475c00893ff9ff185be36d20fbea08532deefb4023c99a958d4223b1099e7  src/browser-probe.ts
+f0dcb28315246d7a11609a042105dbbe65c9a8c218b0d7a193ca91a76d833547  src/bundle-route.ts
+15ca970b2b35eec762bb62e43c7ada0a4d2d5e46cfb921c5f8e2a5c88ff07f0f  src/client/BrowserView.tsx
+6fb2ac90e902a632517abbf358365d271c22450a3535eafbedfaa7b2d1d627de  src/client/DiffTab.tsx
+273ec9e95c5382728943f83906e04d6e8aa2bde28d10c04c5954c9ea13c981ad  src/client/DiffView.tsx
+8322d70ad1cb3e593cd975e6539eed5ef1c0cc0b90b6fc96efe964fd314cec75  src/client/EditorHost.tsx
+6dcf8b22bc3526cb410dab6ddf8e3e042e8492384ec02c9caa1ea6748e008013  src/client/ExplorerView.tsx
+a8db2a931e1f01328db738f6f6e43a43a6064ad72ee8ced57b536dd80b1e0339  src/client/GitView.tsx
+3f416e20c7e4d754e3ce8072fd2601dade5c66be819cd3892187b0ceacb2d0b3  src/client/OrphanedTab.tsx
+0871920c1fac42a7c47926f5abd8dc1c48fe0a28493f3ce576777dc58b9fa093  src/client/PdfView.tsx
+af277b8bed031aa127806d9aac863d301e6f106763fa6dac9bea09f2ba65868d  src/client/RenderBoundary.tsx
+1e994eff3ad41c80a66843341da2fb773511ec1c8d567be20e47c13ae26b1012  src/client/SandboxStatusBar.tsx
+8f60aff85f942024ee67b91faf42500320c369a71370d88c1c345c3745c4b184  src/client/SideCardSection.module.css
+eb00955f20b81acf42278c34297283ec9d4b4b8bf66ec37d2ef9fc1f0231f3a7  src/client/SideCardSection.tsx
+c4636bb348386d68385d2f1e94cf79cb8b1c7cb7fc6f93e414a37644f7de9208  src/client/Sidebar.tsx
+8ac47573fa2827d8abb3f1eec13c5268faf5e41e1d8af7a45ea1462ecbb3f50c  src/client/SubagentView.module.css
+54983e5321ee3bac08f08d595d491c9a9eaca381ab361ff6a9d8a55e63f14c59  src/client/SubagentView.tsx
+63aee72f3dbcb0dd5c931fc3e69369e4caa81934aa4d3912465a894a852cc966  src/client/TabBar.tsx
+97057df6e26fc5aced2d9cd41d8065055f3c7b0d41fb9dc974e1669ce93188f9  src/client/TerminalView.tsx
+e34d064440852e5fe2c81dcfda3e9d3d0bf1fdbcfde6401ab1910d05164cac97  src/client/TextEditor.tsx
+e19ffc2b1e4eccfb77f206f7888cfa644116d69e6cf5a35b0d4d0eea44affc41  src/client/add-plugin-modal.tsx
+ab5b57986952205c755004041b8a1f82bd3df1b422a3da08d11e2d5dbede3dad  src/client/api.ts
+92877065ba1ae75a2419fb1a0d8d1ce2d3ea1190a869a70c63779c5b966c7eb7  src/client/binary-download.tsx
+e27072ef7f73f4c55568a56e8d9d826a0a800cba97126a29536b785b46c3d0f1  src/client/breakpoints.ts
+5f0c7d5d7d11346000a2e41918c39ce199a200eaf64407fd75b773f0d0ae5c00  src/client/browser.ts
+d34595ea335fbb04ad2c706052d5bca7efae20345a249dd0ea58a77d6f9f58d2  src/client/builtins/index.ts
+99496af779c9c664af8e21939db1bf2a612d59cab757f72ce00a2750a4f91cd6  src/client/builtins/tabs.tsx
+7b2d169c93e1868efa67b49d306546aa8efd98d65777d24262dd4eaf61e27bfe  src/client/builtins/viewers.tsx
+972b712f76775e261a2f6b9ce448cf0806972d41c48cb62330ce7aabb9a24b8f  src/client/chunk-loader.ts
+3263d6ed95e31a7029e64b9efa639d5c53b7bdcd2eea500710f1c63e7759a60b  src/client/chunks/editor.tsx
+cf97e78be26a6771ec1a446a58f4387692e35b4e2c49cef0cff562bd54f4cbe0  src/client/chunks/terminal.tsx
+9b6ea69de24020009a3d64ddd9467379bafa9ae0cebce170b5fa84cfbbc768a0  src/client/cm-themes.ts
+3610feb1e850daa13696c6241c54019a5e792e0d4a802a4ab2e655ce5b6d376f  src/client/conversation-draft.ts
+ae4a6fc200e9bc81fee07d86e088a2158ede12e8317a0b66d68c6d040dce73b8  src/client/css-modules.d.ts
+4963ea670468425cacbd3f176084ca0d397ae86bb8f957e26845c53e2ce08fab  src/client/editor-load.ts
+c60731360c6cc08339af28d6daa4d6154b5ab64d6fef3c3ad17ea765d00c2588  src/client/icons.tsx
+b84183a2d0043cf836fc1136c8b58d9b974a40f4145e3d2418ee2e064219e21d  src/client/image-types.ts
+e6540317925299b90d387dbb73af635d287428cc0aca105dded582f0c594e5d7  src/client/ime-guard.ts
+2b6c3f2dc7899cbadbfa3607aec3561a70aaf9d9bab09144728413628fb4d934  src/client/index.tsx
+1cf952a124dc2ba1fb9b5e7991fa3a1ecc2ca232382146c8b1f959d8476c9998  src/client/intercept.tsx
+7bb8427dd2ce5d582dfc11b25f4dd0d542f168d74354025db3450cffe14b36e2  src/client/lang.ts
+030f0eaa4ff9bf8c5b7b106d93754ded6f345129f4c69368fff01b9ba882fe65  src/client/layout.css
+2944994c258eb733462a8fd61f68fccc492672aa8fe721ca440198cfda74196a  src/client/lazy-chunk.tsx
+3d90862ecfdf884e434625001c7259b08aaf8700e7a8cfd0b3d7b25f9cd1c7e7  src/client/link-intercept.ts
+7d65c83de8be5ed42bbc872c53188827c27eebddd4012542d46319d693d8c644  src/client/locales.ts
+3ed1dd02f253c1ddd7c80ea1a9aace10c96f8cdf6c96bb7a41e388fd72f9c0a8  src/client/open-when-sized.ts
+98f12bd29034874029f3db40da5647a85cac86cd1843a9e8270ed261110d5b33  src/client/openpath-intercept.ts
+bfb2646822e808e568bd75fbecacc24e1df9eaf394f1a2f89a798fecf952ad41  src/client/paths.ts
+bed3758346f5ff6f8442e9de343b722c971413df84faa4e5a9c234105f9f5077  src/client/pdf-types.ts
+7b8c682be2bf143f131f94b52a2f2f0ffd3e0cfd6a7e26fbb2ce19a2eba68a3f  src/client/plugins-shared.ts
+7354282624dddb8b1ea78849a9edcf9f58569e10fbd1c7d3c7ce2f404830cfc4  src/client/plugins-tabs.ts
+d07d888460fde86668f016ed91aaa6b0bb354f5f11c1a5fa3b837bee8d05bc3a  src/client/plugins-viewers.ts
+aeeb20e20a61715ee8e7e254493661ff580209fe212ced501fb8741e92227d7e  src/client/prefs.ts
+539ae1ff5f1403e7f87545d1a23a451122b2e97bd4bc147b21cf35f52e5711cc  src/client/produced-files.ts
+47de370074d0d530d3a21f5ea63b4e9c9b85040dc8a1f73fc4cf80ebaf7164db  src/client/selection-payload.ts
+1a21eb0f4595d81050f949d8bbfc6eaa9e6745cfd7974b9d724987257a473396  src/client/service.ts
+aface3857b88ff0092dbbfff23e4f7693364e2acbedce2e9f19a1b4d4325c53b  src/client/sidebar.module.css
+81c222dcb6f3cc2ee9b808ed3543af387a38fa21ee409371d1c455966d7e7bd0  src/client/split-pane.tsx
+ea45a6eb38f7e1a3f78ab1b30ce7c916ebf321d357c33288a749cd997bf16497  src/client/state.ts
+40735ed1aa80c69dbe90f10a12c37429497d4b2dcaf6fd7673ea458e987037f7  src/client/subagent-activity.ts
+2037e3c0adbc63dce353d0ae730ebc04139b1cff3ff7e8fbada44b66cd439679  src/client/subagent-detect.ts
+b5ca2e1b69405c21454718c4e681f36080fddde5f975b54285a3c546c711f329  src/client/subagent-jobs.ts
+59b0b0e2f4e5003c358c2822cba59e1ae3b484131af72d112a81097f4b0ea6b5  src/client/terminal-font.ts
+72f478841d1dfca6ff391d548fe21df9032e04c095a00e7e39975aa92de52d1c  src/client/theme.ts
+2e8b56f55f173fc670cfb6daadaef45f4b2944fd4ce339d407dc9550379f7de6  src/config.ts
+31a0bef02f249578545f42568241817ad10a2e2a393b430e14bd32865940c8a5  src/context-types.ts
+d99e099ea4f245ea120b22adf4ac9f297d08ef98cc4936fff0029df44c5d48ac  src/fs-tree.ts
+8aff7f3fdb34e48a625ea7181f6df49d0b52923337a73e6615b464d05069356a  src/git.ts
+091c8389a5fcb1a632750aa5298a9597c9c8b945e3393f37407747651248e164  src/html-route.ts
+1eb081c66c83e69815962fb6d96a760cc9642eff42f724ce83b959db4e3b237f  src/index.ts
+9a55603261bf1af4decbf7675eb5a9b3daf0c9720619bed962c4931d303dcf1d  src/invariant.ts
+20159dc67de09aaa51973ec17983fb297c29564685233b7d8de73082da494423  src/jobs-routes.ts
+35a8f2ccb293b6f03d120fc04ac5b8b043dd44e5937c1a3ad7208c9077429622  src/prefs-shared.ts
+a0f2bb57271eeda4c9acedf5f13a9e962994e24592a98fdf844e5e325617b454  src/pty-manager.ts
+22ccd66135931d796f0d2201ef760dbac7b5546dde61e0a4e2da9e1e7fb5e922  src/tools.ts
+f5b103dd59f9a52008b638d39b68509a2fbe69752e8ad73ea9db0d8d77b1ce72  src/trust-fence.ts
+fba4c423ad6c3f34b481cf7f9ed28b4b814c8be2ca846c2fee792c9cac7139f2  src/wire.ts
+65d0e87b366ef30c42725c476fa5d52e8d381871c0110aff57cf336cf98afc22  tests/add-plugin-modal.spec.tsx
+4a1142f1c5369221f1deaf7c9dd1824985db6497bf5eb4ea24df942c5b945ab5  tests/agent-pty.spec.ts
+aa9397d9c360914937a11a4340047756e36643cda8da468be83258d1635b8858  tests/api-surface.spec.ts
+97bdf7cfdc108027b653ab40c23c4458fe35adfbe780ace6ed7da51c60d75710  tests/bottom-auto-terminal.spec.tsx
+8b51e661f72eff0c10329aad27c6031320b2061f39759a61a35ee8b89eb39685  tests/breakpoints.spec.ts
+f86780f8cf6b388595c19942fae707327acad28c703be672c82218a2e0b025a1  tests/browser-globals.ts
+0c43fcb670bc2267d5968be8cf732d9bbc517c42ab8b46099e68e28bd1c42771  tests/browser-probe.spec.ts
+e96fbe92d81b0378e9118cba45dc8fb66056720d90913465430ef5eb92155f3c  tests/browser.spec.ts
+4921a7f396743006c0f5eda0b66bd51fe1252fac6e4162c91caf1dd1b6cadfa3  tests/builtins.spec.ts
+c304ccaf46ab7973ae6a862f0d1fbc4b98fb399e520e4502cfe96da1a8efbdba  tests/bundle-route.spec.ts
+de73244455d4ca778c5f689099e99a80f4ec21bc07a6b6b8b75a41c2b414f78f  tests/chunk-artifact.spec.ts
+6583678318a6cca779816815c24004f0fb87560af9e35d523afc18ae83f764c1  tests/chunk-loader.spec.ts
+9a628fa14478c3eb6aef963ec65a3eb1efb471f9b4253022596d680976654014  tests/consumer-types.ts
+2aca8694e3f9acdcb94260089b67104fa7a0f938ce82136d15ab89e7d65d1174  tests/e2e/mount.e2e.ts
+d46c2210c08fa8b254c63116c46c44c21817487d82d878b77accbd1b49db2b15  tests/editor-load.spec.ts
+2280f5c63ea0327bd61ed5e8b33005da5081f8a90bd241bc3c7b07aa8bd7c8b3  tests/html-route.spec.ts
+c560104e8e1e02f51d60d506e265c11d9a6f6a9faa1f27278b5086b49bfb9b37  tests/ime-guard.spec.ts
+a0cf9866dcced59d472bf26c53d4876eb2e3c089bce66fcbb52b728d129faacf  tests/jobs-routes.spec.ts
+9a160ba134d85f8b8adf444f562a446344241da3ad6b502d90566a8101e01ff0  tests/lazy-chunk.spec.tsx
+bc4f1fa8e9f5199ec175f36257aeca3a86fc09381b5df407fc2e60e170470ed8  tests/link-intercept.spec.ts
+0ba2f79f1a947e99d220efd919fe7700830b109178388a0350370e671dc737c2  tests/locales.spec.ts
+a684cda05388be7e6ee34477dbb6c29bc370563b486e651dc42f1dce69055669  tests/manifest-consistency.spec.ts
+98253455a61378aaa4eee04231c3a179bab88cd9de8f73b15f2804de669ab596  tests/markdown-copy-labels.spec.tsx
+b10569a5680557a003a47a8107cf23bcf2465434249fccf791ab1d07ec3c4967  tests/open-when-sized.spec.ts
+73562ad0b999f3405249c2af51ec657040df4399d558581b4890edfc2436f526  tests/orphaned-tab.spec.tsx
+e8384e445e696d8baa444f6d64385be4ba2011e04e7fa2f0825198001ce82db3  tests/plugin-list.spec.ts
+e200fc05cacbc3fb9853c593b3bd928bb19ed49495e49489f577cb9952b08696  tests/plugin-shape.spec.ts
+b15638220e9a5ac0b0b264f6429db08c9bea445322f2891a0106a46d96df7121  tests/sandbox-views.spec.tsx
+25d90d026a145b7ca9685e365f1b8bfdebb1ea69167702015eb25bc2b240b145  tests/selection-payload.spec.ts
+276726500dbf96f0711a06bc119f6388d34ce63c9afede4e9d66c74549c159cd  tests/service.spec.ts
+90e87e08c83c14318038032a455aa9deec189b1409600570ba78e06aa366abe7  tests/side-card-section-rows.spec.tsx
+74c7d31b643c308c198d1297888f28f85413ca2196d95ad68e9490c6004859ad  tests/side-card-section.spec.tsx
+2505aea19f8a9c735c862a5dcab91ff9899ad0ff6154be12caca3783c7f18738  tests/sidebar-crash.spec.tsx
+51dd490009cc4bc24f392eb99cd11222e0245cd348e765404eaa65bde39515bb  tests/smoke.spec.ts
+9b0fe95ed4f708d091aa8229ae1afb454ec13455526285c5de30187d6b6f7586  tests/subagent-jobs-view.spec.tsx
+9b9ad31081071b57236d5ce1083ca17717f2747d5c169ac4c4fe8198350055cc  tests/subagent-jobs.spec.ts
+9509354fcbdd17497ec577d43b258a7c2491b1f44fa1376ad0b22de89d69f339  tests/tab-bar-wheel.spec.tsx
+71641e7bf0f17336f7e17e9b16ab2bb722c6b8f6f981b72d835f031b640fbcab  tests/terminal-font.spec.ts
+c4adbc3749139fddcc2eee6f0e54eaa835a8f1378a7a68c3afece19184f41533  tests/tools.spec.ts
+95b78390c04b83a52056cb9b1e5ec655ce01bdcc2f33c14574091f5b53d85fed  tests/trusted-hosts.spec.ts
+61c5c3bfc061da358e5300f2bf25f9720b75e299f6cde9d21f7cec4b771c2e6b  tests/turn-tail-intercept.spec.ts
+9a6ae8ba7478de7928a36f99e66ae3609ed3d43af2182990176ac6693ef9859d  tests/unit.spec.ts
+aea8aa2fac726d12317d4bd77e5cbdf8f6747ad57909d862aad8ca51c20cefe8  tsconfig.build.json
+71ffa32d2eeb083c41b2d8c11dbeb8d13b049b54e6cb7196065aa2dd4040b9d7  tsconfig.json
+7c026813c9e740075a2c7adeb68aaf8498c320e392a8ac328b2c2b6eeb2905a8  tsdown.config.ts
+7444fd708f36fb2ea5579a70c6e0575b116fc64ddb6a270518b17c15bd825705  vitest.config.ts
+```

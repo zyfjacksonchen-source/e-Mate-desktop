@@ -1,0 +1,268 @@
+# Vendored: dsh-vision-toolkit
+
+Third-party source copy, vendored by e-Mate following the same spirit as
+`upstream/deepseek-harness/vendor/README.md`: the copied tree is auditable and
+pinned, divergence from upstream is logged here, and every file hash is recorded
+so a later sync can prove what changed.
+
+## Provenance
+
+| Field | Value |
+|---|---|
+| npm / package name | `@anionex/dsh-vision-toolkit` |
+| Version | `0.1.7` |
+| Repository | https://github.com/Anionex/dsh-vision-toolkit |
+| Commit | `5cbce73bdec538e35012992dc241c8f0f6790c30` |
+| Commit subject / date | `0.1.5 compat: replace the removed settingsNamespace() with the plain namespace string` — 2026-09-11T13:32:01+08:00 |
+| Commit author | e-Mate migration |
+| Upstream commit it sits on | 29850a83871d4b7a7cc13e251420c5a440e2f69e — `release: prepare v0.1.7 (#32)` |
+| License | MIT License — Copyright (c) 2026 Anionex (`LICENSE` in this directory) |
+| Vendored by | e-Mate 2.0.18 (`docs/2.0.18/submodule-vendoring.md`) |
+
+The vendored tree contains **tracked upstream content only**: no `.git`, no
+`.gitignore`-hidden build output and no `node_modules`. The file set, the file
+modes (`100644` / `100755`) and every byte match the pinned commit exactly; the
+sha256 inventory at the end of this file is the proof.
+
+## Why it is vendored rather than depended on
+
+The pinned commit is an **e-Mate commit** that does not exist on the third-party
+upstream: `git for-each-ref --contains 5cbce73b refs/remotes` inside the former
+submodule returns **0 refs**, so a fresh clone cannot materialise this tree and the
+root build stops at the first empty one. Carrying the pinned content as ordinary
+files is what makes a fresh clone buildable with no manual file transfer.
+
+## Consumers in this repository
+
+- `packages/dsh-plugin-vision-toolkit/scripts/build.mjs:7` resolves this tree and copies
+  `lib/`, `package.json`, `runtime/` and `vendor/` out of it, then rewrites the pinned
+  `lib/` sources by exact-once replacement (every mismatch throws
+  `pinned dsh-vision-toolkit … contract changed`).
+- `packages/dsh-plugin-vision-toolkit/scripts/build.mjs:666` uses the pinned Harness
+  `tsdown` from `upstream/deepseek-harness`.
+
+## Local modifications vs upstream
+
+None. The tree is the pinned revision verbatim, taken from the submodule working
+tree that was already materialised at that commit and copied unchanged.
+
+## File inventory (sha256 of the vendored content)
+
+```
+1364f008b48e2ade6585e7ebd8cfbda8c7681cddbb6baf288ec9fd8592455316  .gitattributes
+0dd325e5bb3b94cb3bdcfa789b8a0d2bb77c87f9e1d78a57c900a36c1b28b39e  .github/FUNDING.yml
+98161dd48cac1553c2f864670c0f9690c6f00b36a97fce9587484f6fcee5f44c  .github/ISSUE_TEMPLATE/bug_report.yml
+ad1b6db6a15d9c88c9dbd06f611bd919408e755c5f316e17165d9a3d7cbaef25  .github/ISSUE_TEMPLATE/config.yml
+898603752c711c7cba24b2f298cb8dd53a138e5ce7edad42e66726894b872af8  .github/ISSUE_TEMPLATE/feature_request.yml
+5636671ae7a2f75c0363afdb529a01107672d432b85a876b02e3bd4eb9631b79  .github/ISSUE_TEMPLATE/question.yml
+377e503f6b69aba8b23254f3b82a7b9cb2180ac9559a965472979a1b2fcbe50a  .github/PULL_REQUEST_TEMPLATE.md
+9d8e0994ae4f2eb17980de0fab30456d103e8172742add15d3e29d941eacb65d  .github/workflows/ci.yml
+f73fe90a0b59220dfee7668941f1f6ca3033ac34692d3b73854d604cbb956f1a  .github/workflows/pages.yml
+bcdfc2645a905e4f654e94eff8abb6b0c3b79d13707439039ee6259359cc0d45  .gitignore
+9ce018b6855f22393228f7ec9d54ac06f9603d73aca349b395bffc30f9792b56  CHANGELOG.md
+34bf41f1449d02dae159489986767f658a2245be42561477efdb137f05b45b1c  CODE_OF_CONDUCT.md
+ea1d45660754567ac312336c75ddd6b2472ae0aecda3fc19c4e96e95ff5cde1d  CONTRIBUTING.md
+7762cc066d4e35b2580edfc34069c4be1b892f2f1c925bee839ffe0c7623e885  FUNDING.md
+6f9c6c3e17f4022960800cf48ce228c77cf62b4e3ee9dd289efe1cc9a16b1ec2  LICENSE
+d8e1fc25fc1550bcbdddbb7efd6ba3cd0d2e44926110aa7002472ae12e18e88e  README.i18n.yaml
+f5e00fc7c920713fcdc62a112609e8767f89ebd1bb716efc28501d8f369c2f14  README.md
+f8faa51cacb19ceaa221aa2a8ce657a62c697ef456c21eb14676784ebb0bdd17  README.zh.md
+963d72aa8198ccb98207c49df2c8bea24e9936ee74b5311e11c33ea44cb51cb9  SECURITY.md
+42d1c1ff44cdb96d350478da66028ae130dd4dca93975fa52dcbcfdd3a5ca25b  SUPPORT.md
+0bb6e1a9a2e48c8a58ddbfbf2993809c30ed39ba6443fa8e3dd3014f8f2248a0  assets/dsh-conversation-artifact.png
+4aab833ffe4af147641208b3354393b798788e6cf9081c34279c36c9ff81076d  assets/dsh-conversation-image-qa-top.png
+71048fb255825c384e057e349ab7c31361cd164da42166e68b9fa1440617442d  assets/dsh-conversation-image-qa.png
+f4580e7370799494456253a6374d1d7791e7952aee2e73e9a2ff67c2e2bdb341  assets/dsh-conversation-pixel-diff.png
+eb75caa7e7950f6a9a90945c38e47ba9648e7786336500d7a406ca02204f0863  assets/dsh-conversation-screenshot-debugging-top.png
+f14a36698c480ead419415bb95159793464705577606a5215709586d9832935e  assets/dsh-conversation-screenshot-debugging.png
+c9e49938c29bfa356903d5ee64eced0d0dc255d94a16354d6e24505eb15603fd  assets/dsh-conversation-tool-call.png
+6d54810f711643b38c306d1f3df47f261e4c11d5328f35a087785db50b6860f4  assets/dsh-conversation-vision-trace.png
+179d0c5f003287b7cdc79a83655022b2ce257e4185379a1119b1aa088d5d0a10  assets/hero.png
+566c539b1d927069b0c2993aee5ba60e8728a6f5f50a8a22eef15c52bc598cfc  assets/social-preview.png
+f89c98e8d22991b545db146fbfdc686415614f66c1138ac9cbe8916ac769cc94  assets/upstream/README.md
+2131f0887892a037a9513db66d717fab617cec4e7443c0df9c8a750b529f8ea2  assets/upstream/image-qa.webp
+2fbb3f876c30e364639c9f65821b9a609bc9b38a3d59c7917bfea172d49ba9e2  assets/upstream/infographic-reference.webp
+a4c6ba0856d333ec03a239d2d8702924967bcfdbdb779c623fd07f64bdf6643e  assets/upstream/infographic-result.webp
+fd91294316f88f9a34de6983fd25b7311564ce818f973a8c7a8b3cbfe672e17e  assets/upstream/screenshot-debugging.webp
+9265d8404241ad14ec33cbc4eca33f3850d84e840ad63bcb1e8e183fe3bd2e85  assets/upstream/ui-result.webp
+35869ad33a19739b5aa3b11a4bbc3e12dd531d4005c544f5946fa4cc41ba18cb  assets/upstream/ui-sketch.webp
+6ce7fae83636707ce5a69a662b6aefe710ddc2b33d1ff6cc46b28653f0c66067  assets/vision-settings.png
+e90874b7800da096cb106012624df2c3853749cac09bcd5b6b66cf752cf5b95a  cordis.patch.yml
+ddc79f83eae9f81b34ba77f3617aad8d2b408043a492923c4475142a3a67fed2  docs/assets/vision-settings.png
+9139c5b451764f3a56ac6fcd6ba03eb936c0004426e50cf52749611c9593d7d4  docs/requirements-traceability/README.i18n.yaml
+e995c86d7a5581ebcfda43d718f5f3801749c6439be990097cdb161435b94ded  docs/requirements-traceability/README.md
+5112cec8df45a42dcb638bcce45c79963d16d99656775504f3cca4f2af15efdc  docs/requirements-traceability/README.zh.md
+b832cfaadfa7d68612f1cdd3d1c814f3712f3bbbb4cf5e3490672a238cce3494  examples/ui-restoration/README.i18n.yaml
+730940b3b307469f046cd81af8ae458332fe02ec22ffc2e0353a9538e45ee903  examples/ui-restoration/README.md
+cf47f2f35bede427cd023fdc65f59148731f5f07b9e6463388835e674e63cbc4  examples/ui-restoration/README.zh.md
+9bdd713f844970d51ed481b2bdfac360e02f341caf219bfbcb54e722ab02e611  examples/ui-restoration/assets/final-heatmap.png
+7f8bd655e5f87a3037da93a91e19c45616299836518ab147f54db36c2befe63d  examples/ui-restoration/assets/final-report.json
+e38433026a1740114609f366e2a3e031543c13853f2f072479c54aded73d26ef  examples/ui-restoration/assets/implementation.png
+970abc429df5007c707baeaf2827c026fbc1d084d9be219a79607987f6b85819  examples/ui-restoration/assets/initial-heatmap.png
+b69c10dd3e58f08be9892596603f86feb27fd34c14e9d0f3f23a90f112f599b4  examples/ui-restoration/assets/initial-report.json
+da05cecab243eaf5bee2e84dbdb7881bc379f1e77900c3543f469ca9f8c13194  examples/ui-restoration/assets/initial.png
+fbdaa78e650ca3b6a532d2cdae77127858bbb1645843ebef4f5269c92c03ab23  examples/ui-restoration/assets/metrics.json
+e38433026a1740114609f366e2a3e031543c13853f2f072479c54aded73d26ef  examples/ui-restoration/assets/reference.png
+f014879d786803f6343d1c5fd5952a73f8eadbde7fe2103db0f90316a173dfbe  examples/ui-restoration/implementation.html
+b387479fb2fa40cba3949cddd9e2fd5d3a70aacdc75d0bbda1fc4b4f44ea094c  examples/ui-restoration/initial.html
+726cff589d24d825daf32bb7796b315b6f34c5d19ac157136306046181056668  index.html
+daff2b7d77383252995497ea31c2b352bf5233dd4c7fbdf2ef1c538a5ad549fe  lib/artifact-access.js
+33a76a1ecccfb8d01c93a88b4a2b62c9e264e2436c4157a896c52e4097eb3a54  lib/artifact-access.js.map
+641cd764967aef420fe77ac1c2f0c7cedeb4c716246d404d317aacc1c59efea8  lib/artifacts.js
+a725dd0bb1712bf85501ad4de8d72086a1c2ad9fa0b7f8ad99f3d79eb0609a7c  lib/artifacts.js.map
+1bb078f5aa31b7c9bdf6e4965f4f4e633a5f0832c0069f2703dd5360fc333c20  lib/client.js
+5513771a6397f54025e510e697eb7fc42c63a92b96b71854ca8d6d825d0c8e11  lib/client.js.map
+5d33feba2f27b2d283eba997016dc33951c802a8745f33cfe3fa79e225160c3c  lib/config.js
+cd3c44046a70e0c23126c952e9f1da837b472d4defd5187ed4633f8862f56215  lib/config.js.map
+ed9c2375463ff46493beb1c57f122efd6e919f8f256235d59d09c18dfc84b8ad  lib/errors.js
+7d18ff11915d5d0e2f2a3ef51100942f328be29defe6abc63477f4aeb76b9a04  lib/errors.js.map
+96a322c35dfae5337ac3998e0217dad0f251dcc6c7fe55dd53f058d5b0718f40  lib/exposure.js
+159d77b8642879e23e048420401bf933374144fcec561f54623dcb72336448c6  lib/exposure.js.map
+b3301bbb7597e5a502024553d628c3d8a79ea27404ed657347af15f01e25d35b  lib/index.js
+bc96c2663bb880f87f3375038d0c30b40ce9025039a86fe570e68b41992e8b8e  lib/index.js.map
+afd42188c4c0be861b2b448cf224390b5f5e76d6bfd995c84165e8bb00abcf91  lib/paste-images.js
+1a7e2315d789b9598f4290db10b8538e66c90ea6c1e54f7d2be452d232f0138d  lib/paste-images.js.map
+2188b86bac71858f4dc745e3f4b4c6c2247b3c1e325ebebc650181ceffc7ecfc  lib/paths.js
+dcb3825b0b0bd3a290d19b6d7f1fa26b511cffbb3a57e5d0efc202b15ee8b90d  lib/paths.js.map
+62de362fe471f572b34ea07935d19589a984cbd463c9e88bc06682c6df632452  lib/runtime-install.js
+19180a6d48fbb073fc0a059aaaf10a8f94205a658b7fadfc61db3f996e3690e1  lib/runtime-install.js.map
+98b020deb3a4f9f2075008b341612cc2c96f22f203c997cbd66f94c4352322ea  lib/runtime-manager.js
+5450fcfef545e67f772e5f58b50667281ac6312828142933717dc667e6473a02  lib/runtime-manager.js.map
+6f2ba48e79adad51ede47050a9ef6f54cd6d75443aa2e4f8e84f07832abc7776  lib/runtime.js
+cabec688e71573228c0aaeff01ad97c3a3e01d3ac93de412b3cedebdadcf8443  lib/runtime.js.map
+f28577aa8a7abc7f9deb4b94f0880c1b8bdacdbb3696de7f91dc637e709e7575  lib/skill.js
+77d09bd1edeb2a9efab06e8828393481ea56f540aa1fce75a32e9062f8d0adc1  lib/skill.js.map
+a7e74332c837538470f5ad8f0da4297f9fec87fc1cc19ca5b0da52f7476ce316  lib/tools.js
+dcb418ce8849d74eb87e5d0c888fe9d70d6263f5950d85bf724d2bf60c3690f0  lib/tools.js.map
+63f2bc7211273d3695a321bfe3bd05da2a57b393ed8458bf8c1f48b8732032ae  lib/types/artifact-access.d.ts
+411df6b8aa8756ceca6185c291a47a88187809281b8e7b3762f1337ab05cd6d2  lib/types/artifact-access.d.ts.map
+b3f6f6b960fdef487ebccfa78308c4dcb27694d8e5fbdbd0ad9e63e0731a8230  lib/types/artifacts.d.ts
+f93546ed7f172e46420acecaf3feec6d2b2a26cc0adfe1c892875758c3ec2809  lib/types/artifacts.d.ts.map
+990566d4d19e6b5909ef63ce603585bd7ad82c2d949e13aef603dcfda5898be2  lib/types/client/index.d.ts
+59cb2956a9908d4216cb966accbbb8f3f58512cccded4c030cd2c3a6fcb2bb50  lib/types/client/index.d.ts.map
+17d43439f09f5c1c0524f867d4217794ec2d873d7918b3fb6adc766a10b8aadc  lib/types/client/paste-images.d.ts
+be7b921f812970b669c5d9639b8f442cb09a12dca5f0169cb8529be99b3d9824  lib/types/client/paste-images.d.ts.map
+45c7624cacbd0f3d74a81bfb47f3d34bff79c1aa4f369bb34abbaa5f0ceb6dca  lib/types/config.d.ts
+7046956e4198c37bc52ec919c6f6d63bf2ba7d2a9c83e4eacff8640a27fb82ff  lib/types/config.d.ts.map
+523a447077b72555ec87084d0ccc7197920e96849e2d211d5cd3cdc63bdc49e6  lib/types/errors.d.ts
+c5e4c1e89f73647226176cac58f232d3ba0d9ad456023f4fb451fef9e9f9c365  lib/types/errors.d.ts.map
+b7c86c1fa5f7468d8dea68f2daa006d684d8bbfbc94a2d0aa0d05d02d9b7af89  lib/types/exposure.d.ts
+8f8de25644ad73d78f51139003d808101d0c007c49dd299c70029d9100a4cc7f  lib/types/exposure.d.ts.map
+6ab7044fb374716d699784b7f3fa85df7daade59e51f79afdf0aacaca1534b09  lib/types/index.d.ts
+0c61d9fe113c5c055c92b0900568cee2370eb2ba8d5d685974dd0cd721839299  lib/types/index.d.ts.map
+6c37c5452ff07cd0e36763558a23152827ca8d3eb53d65890b11a692a5f3ce80  lib/types/paste-images.d.ts
+73043138f0557c869ecfdd658c47fa1414116569e6c0ffd66765b7aff7cc5685  lib/types/paste-images.d.ts.map
+65e72df3bcf8fe12f65c6090ded6390a21dba3b23a0e3e7c0f84e87f70704307  lib/types/paths.d.ts
+91d672c1f689db9bb6d244e2f838c25db345bf760cd91c660d03ede060e97e1c  lib/types/paths.d.ts.map
+d36ae6663741501a713ac9a3063e5035f341b20ef98cf4f79199de954443e8de  lib/types/runtime-install.d.ts
+50a7dc6d29a492eba72f26504ed7d9812a1656fc47cd6032ccb1ec0439d58093  lib/types/runtime-install.d.ts.map
+2d9945c15da9f3bca52c3e32272e690afb9d148b26c1124dbb720c7f250950c6  lib/types/runtime-manager.d.ts
+f8971e03cca2597d41097b10cc21417de5ca42dbbb65ad09e58303d22567a495  lib/types/runtime-manager.d.ts.map
+197a00fae2c834c7a436064cce6e20497def8dc31fa16518dde7d7a977a623be  lib/types/runtime.d.ts
+843d7fc68760b0b51e375ec49ef47d39f34766addfce204d0bf8089b472ddf3a  lib/types/runtime.d.ts.map
+21eff44055d4ff1801edc3cf038abba5f8c83b1ed16ba518e5ec01cb5f8ab816  lib/types/skill.d.ts
+baf90927bc25bdc541e646fc850f79f26cdad115501d19f6e6049b1992253cc6  lib/types/skill.d.ts.map
+fa28f8b7f581175a003b09de6bd08e319ec15949a743d2935d899fb0ce1f312e  lib/types/tools.d.ts
+3368bc746b68c426988085262a5fd5a39fc0b4671054f38ec4357e3d9cbe2689  lib/types/tools.d.ts.map
+02ef2a3efed36ca736ef6cf8686907d9d3a0a0cbd15c7e6d808c66e76c58983f  lib/types/upstream.d.ts
+5aa502cc48465d1af981a2026af4c8e1872a422d8716208ea1dc2b55c2f54e81  lib/types/upstream.d.ts.map
+e82ea4ffd7a402a5379b2ba622722bd02205c1c175f1f9f400a2d153ee40e45c  lib/types/version.d.ts
+a3ef68378e0765006a6ca89bdc3a4cb83b508a8473294ec47d6c52819536c2d9  lib/types/version.d.ts.map
+3b8a4497d2438be61a9cc81ffd1ce2bab0725fdffa16c05a1b26f2f3e10aeefe  lib/types/web-request.d.ts
+cd6c1913edebc2937d09b0dad448dbcb3c59b0bd319432d78a9d9162cf9357e7  lib/types/web-request.d.ts.map
+2875949737f5d76abc6237117a2e2d4beea1bf0a1e4d8e721cd08e0b95e0aa0c  lib/types/web.d.ts
+d8f82e5558f47edcfb0468fc3454537033889f145da9a0b1d3a06bb22e435c7c  lib/types/web.d.ts.map
+d93026132b6fded8c301cce6d69adbac700545c382b5c2290f77d54ac5c07fe6  lib/upstream.js
+5e217aa186c0f357f69a14783ec96f89444518f34c16f0d9f7689f4a34c70d0e  lib/upstream.js.map
+f7351662cf46f4ab279727a29b5f080bafc277b058140125c8879753c640c7d2  lib/version.js
+2dc61bfd2288ac8a7ee42796e6f881126f8e87ea1abfef3fd92ad46197ec36a5  lib/version.js.map
+41d49f741db8658b1ff0eacda66df31bee0c804f107aeef6d7e563d181cac266  lib/web-request.js
+8bc1a0b9af5539ecfda3926e9bccdee280e70b6be1790983b75f09c65db6f666  lib/web-request.js.map
+abed5120f65f41da3ca69541ca3acb9969456c4a65c1e473d43eaf3c1a6dc9f2  lib/web.js
+53de004fb1342cb4dc73c0838f7f188548091449c47e1449c359a807b64382e2  lib/web.js.map
+c5af86a669c7ac71e5bdbdb1031c00ab718908a57dfff5a328b1d9e8693ea4d4  package.json
+511860bb2f3f021e4d0be944be5aa70f0270de59b0b121882611cb96e42d38b1  pnpm-lock.yaml
+fe6a47d7ee4ed1c3d20aacd91dfe0eefd003a1e9ab4e4fae418be4c265e0f037  pnpm-workspace.yaml
+0074ead2ac20343030914213b436e869ac49c9039d2cd6083af514644302c912  runtime/requirements.lock
+3acc4234fcacd6fb2364786fe582ae2ae4985eb354d707fb36a7242a96d5b326  scripts/build-client.mjs
+5ff5b20f7f75fc53e82c6a3f2150c71cec3981772ceb1389717f2a2e5bb5545d  scripts/clean-build.mjs
+d0524fa0bce611d48ad8b0b30ad424e58c5fd1270e08ed0377a2acb6d12a90f3  scripts/run-ui-restoration-example.mjs
+1522abf0d472d6dc2a454e1ec0a40b165bf1ccc5a616253576bd6206af0ae9ef  scripts/sync-upstream.mjs
+1fb54d8b82c5807fdbc90af903e6f2bf0967e6bad77e1544111ae8590d098a1e  scripts/ui-restoration-example.ts
+3a264cf8f70a8af6c1df6df892b87f2fc0b8025453247ec37ae63f57e20962b2  scripts/upstream-manifest.mjs
+30273dbb3885c146e8a256d9da49dbbf2f3989143d26074fba96c2d8bb5b436e  scripts/verify-portable.mjs
+ab6a3d87f95f3da6ea97de9726d73f6aa03af0915b1ef59f3ab9b2bdd102c7b2  src/artifact-access.ts
+748a94e51918553dbac3b9f56bfb7fc180fe4d9b70be786ffd58d01718ddbf39  src/artifacts.ts
+b5ea9b501415de6a3ea9e47fcb9b8bd6add562941c8e3315d705606dad25d19c  src/client/index.tsx
+aac7ad8e449754542aebf3501163fdb8fc72e2d731c9e6480dc6a9c9b78ee8e3  src/client/paste-images.tsx
+6b11f032e849d69e494a4106d9274158c7ee43c14813c73e651ac54459162c08  src/config.ts
+ec4a66a31fe187b807c89bea951172b9a7b5659dff635dd0a2f28d60700f4af7  src/errors.ts
+c35d731c71fa1ff03404d004cbd432b6ea3514ac1fc5361ac193fe6242426957  src/exposure.ts
+ae02278c1af5168d8b78a65bd2b862b77f43c959197d2a4c890fb67c65d0aea1  src/index.ts
+0ad98d63989bb7a28e3000b8a05dbedc7797db0a228e183e86de31fc6494e4de  src/paste-images.ts
+76740816e3e6722fd9500f6784b940390883d1a7782e5d3fed8422778b87af33  src/paths.ts
+d0c5be4c29d9f84892fa9c82edb86f5f33e2de7263aae7d334cfb49b39af5d44  src/runtime-install.ts
+c70fcf642fd955b1f158e8bc0813d45a82ad74cc71b2fbaa6157082d0451d977  src/runtime-manager.ts
+a797c06c0b091c82e1909fa75f9020ca813509f2d0c1bb7fa0c24cdc6dcdbd7c  src/runtime.ts
+567ba0bbfc8cd3147356c9f4cc62674fa07933cd2f8d5b253a1fb5aa2c3d73e3  src/skill.ts
+9a5a98e84e8fe99b51e7b6efebd9d742da106c515026925624bb7891da7f2c2f  src/tools.ts
+3fbaa45047886502772fe3e5a8d974120c63b0e935aa1c9f84624a6b7746fe7a  src/upstream.ts
+70ad943920f6c24a2d6ba32ec1424993ea656ef13e86fb87ab43f480b3acfb47  src/version.ts
+d2433b843f51d27688a4d3f3af01d70baa344b5d2cbe7ff3b23b5d60baacaa78  src/web-request.ts
+2e1dd84236077b5504b6ae9654275ddca16a528137fb741785336dc8927de4d1  src/web.ts
+f14bbfb8a0410543875b37831ae470edd9f47ad2017ede8daac62e4013efc8a3  tests/artifact-access.spec.ts
+1ad0c417ef042180787f17d85cdea3abd9eb761bf41e66135ed3ede9049f70f5  tests/artifacts.spec.ts
+ccec9e4c800d293081a2131795a979b5bdfeee90b88b5a2ae38acf7cfd21d53e  tests/client-ui-primitives-stub.tsx
+36c84c8cd407430f597593ebe47f95c5009d53b383ea6a85d64e69081643b92c  tests/client.spec.ts
+fd7f1776aea009a7ecb56fa634bd792380a8974c1980f19bfe27e97422f0163e  tests/config.spec.ts
+89b79e315fd8e49e0f019dbc225bbad2020898e765ef6f602984e1216eff3e8f  tests/errors.spec.ts
+295be0356ade856a977e7afea9bae37cf91e405e2f01dad6f09fefcc2f2ab7ab  tests/fixtures/sample.png
+1fedfcae730395825cd46d9aab5a6aad94ec44f4065e3dc24629915b8bb62608  tests/fixtures/ui-restoration-reference.html
+67c23fbcdaf387aa89ab1ba6d3b0ba7941914c12456f6cdd9e59f10ccccbb311  tests/fixtures/upstream/VERSION
+70d0a860d2e454ab686b21dcb83edecbc73aaf101f7d43f59d278f71da655026  tests/fixtures/upstream/bin/crop
+12677ae01a9d0415a23b543b6a0deaceee7c51bbf432c3dc1aef3f644055eb79  tests/fixtures/upstream/bin/detect
+b9594650dcc12639cfd36aeba0c607e9a1e8779f7cb6acf457b4577522935e8c  tests/fixtures/upstream/bin/glance
+addbc6980c73db11dd8ec7a2af8f803c947025d82cd7df5d90be5d90875d328b  tests/fixtures/upstream/bin/ground
+27d35e193324f26895156deea560c8cd15b65d3d17615e93ec11a9ee42484595  tests/fixtures/upstream/bin/trace
+d1e677cf1f842f38ad4b76f89ac47a6c88073af445843e5684aa4574a28b0bdb  tests/fixtures/upstream/skills/vision-tools/scripts/dominant_colors.py
+72a216451aa23039fa3f30b42273a31eedb15afbfc967158911ead93f1a55cbf  tests/fixtures/upstream/skills/vision-tools/scripts/extract_fg.py
+6a174f706dc8ec6ed2c40189779d2bb8dae171737e82940adb0690685a940455  tests/fixtures/upstream/skills/vision-tools/scripts/html_shot.py
+2c0efb0bcb7c30026a1eec7a5e6a0e656350eaeb2578007f6e942c7c76043bdc  tests/fixtures/upstream/skills/vision-tools/scripts/long_screenshot_ocr.py
+695afb9dce7bd69122e327a5871dd558c2f0cfd13ab90ede74ebd6a40f7c65cb  tests/fixtures/upstream/skills/vision-tools/scripts/pixel_diff.py
+151f947b60213c8b51b0c7e8d9d424f1e71b0de95fdec13c7190b537b15d1eb6  tests/html-screenshot-guard.spec.ts
+06def45d5876da90c914c123fb690607399749bd8ff003370f00506520c3450f  tests/package-layout.spec.ts
+5f4afe41a6c2c6bbe7c944ab827a311ef672ad8918a5f6b38cec519c8a590895  tests/paste-images-client.spec.ts
+0d524aad4a0b9db61e8534e900703b7119e32ccde439f00279f0b106b15984d4  tests/paste-images.spec.ts
+2b1ec3c5728f491ec448753ecfad3711727f4b4d33fb15acf53914613eb84cc4  tests/paths.spec.ts
+0475579b4846d694305a1c22cff405ce0a4bf8fde0c84e76e83961c51f37506a  tests/profile-install.e2e.spec.ts
+f3462dba849594429310f85cb5825c2ae0e2c3022eaf5096f643473f1cd1bcde  tests/runtime-install.spec.ts
+5380017451bea97a56dd991fca7ef94ed9b83154911d63d938c29648de14622d  tests/runtime-manager.spec.ts
+c4ad12d76c9053b4a5fb482e1b3fc6c8d9d9341893936a29d41607dc37d9efed  tests/runtime.spec.ts
+ce3c4f54c9dedaf03f71596d6ae039887aefc26eb5b61c103120d00c1d6dbd2f  tests/tools.spec.ts
+d6fb11c0841c02c851abdb4a6e1e6dab12639cc60e1779cd20ae0278f4b43c5b  tests/ui-restoration-example.spec.ts
+ca5a349def73ae08915a141c12acca8b1b5843b1df3129fa475bd6d9c4be212f  tests/upstream.spec.ts
+1c50381db0b518d9565f64244cefdb8abdf1abb2a84073ffbfea8437501a0d75  tests/vision-prompt-guard.spec.ts
+aa8feea4e4b98a841f79052b6216eaf6121990763137eef64163854219c803a4  tests/web.spec.ts
+ceffffe61423e9420727dd1619b21a6225b6404ed95f914b00a7af62dfb60999  tsconfig.client.json
+17f09d67845b99dfe19f0cb49b0f7682ef8e4545409f6bdef281694775e5d817  tsconfig.client.public.json
+fbf0db9cabc70fd5ef01ad7d2d498f4760a895a169763457c0382ed295884171  tsconfig.json
+0bb23408797c8e5389abc0b34d47b43907316f8bd106420e4c05f25606bccde1  vendor/agent-vision-toolkit/CHANGELOG.md
+6f9c6c3e17f4022960800cf48ce228c77cf62b4e3ee9dd289efe1cc9a16b1ec2  vendor/agent-vision-toolkit/LICENSE
+55d880175b51d288f5b817d064ebb79e6c8663ee0bb1817f4a0390ab18b5c3ee  vendor/agent-vision-toolkit/README.md
+a09e9dbd0f79e117531c952e13434c5dc365273e6763f72b8efbf82edc671cba  vendor/agent-vision-toolkit/UPSTREAM_MANIFEST.json
+e3c23d880164bcf52b95c50c8497ef0b4457c1f0a15e165a85af8b9b61913251  vendor/agent-vision-toolkit/bin/crop
+89ea7e8d2040b9c9d8fbc75339e85d20326a95a6b5f4635b74677f1b6b755077  vendor/agent-vision-toolkit/bin/detect
+fa4ba52e8e180475b948daec817151d893d957f973f7d9df1b8bbf201051cefc  vendor/agent-vision-toolkit/bin/glance
+93ca432de98ac34d3fef91db2b85fb2d53328fe58d6d7ad41ec454275b1a7e85  vendor/agent-vision-toolkit/bin/ground
+9c473dbd4cc35085fa0a81ea08cf3cfd76dbacd0f75cbacbb7288efa28dfe371  vendor/agent-vision-toolkit/bin/trace
+0e79f6cfbeb27d52cea57a6a642bb658d9c9d3f10e175416c320d91affc1d562  vendor/agent-vision-toolkit/detect.py
+52c1b69f3c78f37acd33f7f542bdbceeabb3546e8e28be7278d72e04024699b9  vendor/agent-vision-toolkit/ground.py
+a78474b9df93320a7b8fdf8ed2d345fd60038182059ee92ca6101b9c93cb7041  vendor/agent-vision-toolkit/skills/vision-tools/scripts/dominant_colors.py
+1831b50237c9e215c7202f4350723bb420a4a85bbc059fb2f5a31f118bdbf62b  vendor/agent-vision-toolkit/skills/vision-tools/scripts/extract_fg.py
+22f796dc6afaa791bbd9acc9bf87bc4914c4157e726f0132f7465f0e3d4d2894  vendor/agent-vision-toolkit/skills/vision-tools/scripts/html_shot.py
+f0edfa2135891a75c030fa21405528344f45549cd077fecd26fb60df5986233c  vendor/agent-vision-toolkit/skills/vision-tools/scripts/long_screenshot_ocr.py
+70e04fea9bf452f35d12bed0c19c7e2be46934a5423caa778b24da82b78f2251  vendor/agent-vision-toolkit/skills/vision-tools/scripts/pixel_diff.py
+eb31118751a5724385f486b98d45af83cad1cf7e4506b79ddf9a840d08f22367  vendor/agent-vision-toolkit/tests/test_vision_client.py
+7a899d08b1c65721c9fdfd42d9d3288671c149fdc919b5dedb5b36cc6b06ddce  vendor/agent-vision-toolkit/vision_client.py
+82bde38dd1d07e3d80821455a615369f57f57e72a99faf009cb7ac93bb4f995b  vitest.config.ts
+```

@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "commonjs",
+    "moduleResolution": "bundler",
+    "ignoreDeprecations": "6.0",
+    "jsx": "react-jsx",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true,
+    "types": [
+      "node",
+      "react"
+    ],
+    "rootDir": "src/client",
+    "outDir": ".client-build",
+    "declarationDir": "lib/types/client",
+    "noEmitOnError": true
+  },
+  "include": [
+    "src/client/**/*.tsx",
+    "src/client/**/*.ts"
+  ]
+}
