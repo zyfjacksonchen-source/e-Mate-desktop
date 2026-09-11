@@ -19,6 +19,12 @@ import LocalFs from '../../../upstream/deepseek-harness/packages/fs/fs-local/lib
 import { createKnowledgeWorkflow, recoverNativeClaims, normalizeCheckpoint, BENCHMARK_CLAIM_TEXT } from '../src/workflow.ts'
 import { collectOriginals, digest, events, graphOptions, graphReceipt } from '../src/imports.ts'
 
+/** 0.1.5 reads a stored session through one owned handle instead of the removed readFrom. */
+async function storedEvents(ctx, id) {
+  const handle = await ctx.sessionPersistence.open(id, 'read')
+  try { return { meta: handle.header, events: [...(await handle.read(0)).events] } } finally { await handle.close() }
+}
+
 // Captured from B 92b50d9 KnowledgeCheckpointData.model_validate({}).model_dump(mode='json').
 const bCheckpointDefaults = { child_session_id: null, completed_units: [], message_id: null, session_id: null, unknown_submission: false }
 const source = { source_id: '11111111-1111-4111-8111-111111111111', source_version: 'a'.repeat(64), parse_revision: 'b'.repeat(64) }
@@ -491,7 +497,7 @@ test('benchmark selections produce only the fixed Host explanation, never model-
   assert.equal(revision.claims[1].text, ordinaryClaim.text)
   assert.equal(revision.markdown, BENCHMARK_CLAIM_TEXT + '\n\n' + ordinaryClaim.text)
   assert.doesNotMatch(revision.markdown, /100|CTR|denominator/)
-  assert.match(run.adapter.requests[0].system, /只在 benchmark_query_ids 选择真实 query_id/)
+  assert.match(run.adapter.requests[0].messages[0].content[0].text, /只在 benchmark_query_ids 选择真实 query_id/)
   const schema = run.adapter.requests[0].tools.find(tool => tool.name === 'structured_output').parameters
   assert.match(schema.properties.claims.items.properties.text.description, /结构化指标见下方快照/)
 })
@@ -622,7 +628,7 @@ test('canonical user-stop is durable and blocks automatic recovery; explicit res
   const started = await run.workflow.start({ agent: run.caller }, request()); await done(run, started)
   const canonical = run.ctx.agents.get(started.session_id)
   await run.workflow.stop({ agent: run.caller }, started.compilation_id)
-  const stored = await run.ctx.sessionPersistence.readFrom(canonical.id, 0)
+  const stored = await storedEvents(run.ctx, canonical.id)
   const stop = stored.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop')
   assert.equal(stop.data.compilationId, started.compilation_id)
   assert.deepEqual(stop.data.scope, { kind: 'public' })
@@ -696,7 +702,7 @@ test('local stop ends a real model stream before network status and durable inte
   assert(run.adapter.requests[0].signal.aborted)
   assert(observed.length > 0 && observed.every(call => call.modelAborted === true))
   assert(!JSON.stringify(stopped).includes('private service'))
-  const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
+  const stored = await storedEvents(run.ctx, started.session_id)
   assert(stored.events.some(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop' && event.data.compilationId === started.compilation_id))
   const directory = run.root
   await run.dispose(); offline = false
@@ -735,7 +741,7 @@ test('revoked project authorization cannot prevent stopping this owners local na
   assert.deepEqual(stopped.scope, scope)
   assert.equal((await done(run, started)).status, 'killed')
   assert(deniedCalls.length > 0 && deniedCalls.every(call => call.modelAborted === true))
-  const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
+  const stored = await storedEvents(run.ctx, started.session_id)
   assert.deepEqual(stored.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop').data.scope, scope)
   revoked = false
   await assert.rejects(run.workflow.resume({ agent: run.caller }, started.compilation_id, scope, { automatic: true }), { code: 'cancelled' })
@@ -751,7 +757,7 @@ test('stopping a committed compilation preserves published state and does not ap
   assert.equal(stopped.state, 'committed')
   assert.equal(run.backend.compilation.state, 'committed')
   assert(run.backend.calls.slice(before).every(call => call.method === 'GET'))
-  const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
+  const stored = await storedEvents(run.ctx, started.session_id)
   assert.equal(stored.events.some(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop'), false)
   assert.equal(run.adapter.requests.length, 1)
 })
@@ -763,7 +769,7 @@ test('a replacement enterprise owner cannot record a stop in the previous owners
   run.changeAccount()
   await assert.rejects(run.workflow.stop({ agent: run.caller }, started.compilation_id))
   await done(run, started)
-  const stored = await run.ctx.sessionPersistence.readFrom(started.session_id, 0)
+  const stored = await storedEvents(run.ctx, started.session_id)
   assert.equal(stored.events.some(event => event.type === 'knowledge/workflow' && event.data.kind === 'user-stop'), false)
 })
 
@@ -846,7 +852,7 @@ test('cold project compilation verifies the canonical Xin fingerprint before lea
   const scope = { kind: 'project', project_id: 42 }
   const result = await first.workflow.start({ agent: first.caller }, { ...request(), scope })
   assert.equal((await done(first, result)).status, 'failed')
-  const stored = await first.ctx.sessionPersistence.readFrom(result.session_id, 0)
+  const stored = await storedEvents(first.ctx, result.session_id)
   assert.equal(stored.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'compilation-session').data.xin_subject, subject)
   await first.dispose()
   const second = await runtime(t, isolated, first.root, dependencies)

@@ -339,8 +339,8 @@ test('Job completion during a cached recovery batch restarts both directory read
   let lists = 0, found = false, finished = false, release
   let entered; const atFirstBatch = new Promise(resolve => { entered = resolve })
   const gate = new Promise(resolve => { release = resolve })
-  run.ctx.sessionPersistence.listSnapshots = async () => { lists++; return structuredClone(snapshots) }
-  run.ctx.sessionPersistence.readFrom = async id => ({ meta: { id }, events: id === added.header.id ? [{ type: 'knowledge/workflow', time: 100, data: marker }] : [] })
+  run.ctx.sessionPersistence.list = async () => { lists++; return structuredClone(snapshots) }
+  run.ctx.sessionPersistence.open = async id => ({ header: { id }, read: async () => ({ events: id === added.header.id ? [{ type: 'knowledge/workflow', time: 100, data: marker }] : [] }), close: async () => {} })
   const ui = run.ctx.emateKnowledgeUi, recovery = run.ctx.emateKnowledgeRecovery
   const originalImport = ui.recover.bind(ui), originalCompilation = recovery.scan.bind(recovery)
   const imports = [], compilations = []

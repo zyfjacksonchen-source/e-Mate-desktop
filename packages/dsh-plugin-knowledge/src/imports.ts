@@ -77,6 +77,18 @@ export async function persist(ctx: any, agent: any, data: Record<string, unknown
   if (!await ctx.sessions.flush(agent.session)) fail('durability-unavailable', '知识任务需要原生会话持久化。')
 }
 export function events(agent: any): any[] { return agent.session.snapshotEvents().filter((event: any) => event.type === 'knowledge/workflow').map((event: any) => event.data) }
+/** 0.1.5 removed readFrom: a stored log is read through one owned handle and always closed. */
+export async function readStoredSession(ctx: any, id: string, signal?: AbortSignal): Promise<{ meta: any; events: any[] }> {
+  const handle = await ctx.sessionPersistence.open(id, 'read', { signal })
+  try {
+    const stored = await handle.read(0, undefined, { signal })
+    return { meta: handle.header, events: [...stored.events] }
+  } finally { await handle.close() }
+}
+/** 0.1.5 lists snapshots ({ header, revision }) directly from the service. */
+export function listStoredSessions(ctx: any, signal?: AbortSignal): Promise<any[]> {
+  return ctx.sessionPersistence.list({ signal })
+}
 export function createKnowledgeTransport(identity: any) {
   let lifetime = new AbortController(); let owner = ownerOf(identity); let disposed = false
   const changed = () => { const next = ownerOf(identity); if (next !== owner) { owner = next; lifetime.abort(); lifetime = new AbortController() } }

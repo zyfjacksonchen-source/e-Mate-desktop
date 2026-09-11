@@ -1,4 +1,4 @@
-import { digest, OPERATION, ownerOf, UUID, type Scope, type Execution } from './imports.ts'
+import { digest, listStoredSessions, OPERATION, ownerOf, readStoredSession, UUID, type Scope, type Execution } from './imports.ts'
 import type { SessionPersistenceSnapshot } from '../../../upstream/deepseek-harness/packages/session/session-persistence'
 
 const EVENT = 'knowledge/workflow'
@@ -108,7 +108,7 @@ export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Work
   })
   async function run(expected: string, signal: AbortSignal): Promise<KnowledgeRecoveryResult> {
     if (!snapshots) {
-      const listed = await ctx.sessionPersistence.listSnapshots(signal) as SessionPersistenceSnapshot[]; check(expected, signal)
+      const listed = await listStoredSessions(ctx, signal) as SessionPersistenceSnapshot[]; check(expected, signal)
       snapshots = listed.sort((a, b) => b.header.createdAt - a.header.createdAt || a.header.id.localeCompare(b.header.id))
       cursor = 0
       const known = new Set<string>(snapshots.map(entry => entry.header.id))
@@ -120,7 +120,7 @@ export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Work
       check(expected, signal)
       if (snapshot.header.parentSession || revisions.get(snapshot.header.id) === snapshot.revision) continue
       try {
-        const stored = await ctx.sessionPersistence.readFrom(snapshot.header.id, 0, signal); check(expected, signal)
+        const stored = await readStoredSession(ctx, snapshot.header.id, signal); check(expected, signal)
         record(stored, expected); revisions.set(snapshot.header.id, snapshot.revision)
         while (revisions.size > CACHE_LIMIT) revisions.delete(revisions.keys().next().value!)
       } catch (error) { check(expected, signal) /* Corrupt/unsupported native logs remain unread, never repaired by discovery. */ }
@@ -142,7 +142,7 @@ export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Work
       let handle: any
       try {
         // Fresh canonical stop/outcome check is required even when the revision cache was unchanged.
-        const stored = await ctx.sessionPersistence.readFrom(cached.sessionId, 0, signal); check(expected, signal)
+        const stored = await readStoredSession(ctx, cached.sessionId, signal); check(expected, signal)
         const fresh = candidateOf(stored, expected)
         if (!fresh || fresh.compilationId !== cached.compilationId || digest(fresh.selection) !== digest(cached.selection)) { item(cached, 'unavailable', 'local-receipt-changed'); continue }
         if (fresh.stopped || fresh.unknown || fresh.committed || fresh.locallyPaused && !fresh.controlKnown) {
@@ -167,7 +167,7 @@ export function createKnowledgeRecovery(ctx: any, { workflow }: { workflow: Work
         if (status.checkpoint?.session_id && status.checkpoint.session_id !== cached.sessionId) { item(cached, 'unavailable', 'different-coordinator'); continue }
         if (status.job_id || busy(expected)) { item(cached, 'running'); continue }
         // Status may have awaited the network while the user stopped this task.
-        const beforeResume = candidateOf(await ctx.sessionPersistence.readFrom(cached.sessionId, 0, signal), expected); check(expected, signal)
+        const beforeResume = candidateOf(await readStoredSession(ctx, cached.sessionId, signal), expected); check(expected, signal)
         if (!beforeResume || beforeResume.compilationId !== cached.compilationId || beforeResume.stopped || beforeResume.unknown || beforeResume.committed || beforeResume.locallyPaused && !beforeResume.controlKnown) {
           item(cached, beforeResume?.committed ? 'committed' : beforeResume?.stopped ? 'stopped' : 'unknown', 'local-state-changed'); continue
         }

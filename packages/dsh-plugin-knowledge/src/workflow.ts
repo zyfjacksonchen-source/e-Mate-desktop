@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createKnowledgeImports, createKnowledgeTransport, decodeXinReply, findOrCreate, digest, events, fail, HASH, OPERATION, ownerOf, persist, UUID, type Execution, type Scope, type KnowledgeTransport, type BindXin } from './imports.ts'
+import { createKnowledgeImports, createKnowledgeTransport, decodeXinReply, findOrCreate, digest, events, fail, HASH, OPERATION, ownerOf, persist, readStoredSession, UUID, type Execution, type Scope, type KnowledgeTransport, type BindXin } from './imports.ts'
 
 const EVENT = 'knowledge/workflow'
 const READ_TOOL = 'knowledge_frozen_source'
@@ -51,7 +51,7 @@ function claimsResult(value: any) {
 export async function recoverNativeClaims(ctx: any, agent: any, compilationId: string, topicKey: string, owner: string, signal?: AbortSignal) {
   const submission = events(agent).findLast(event => event.kind === 'model-submission' && event.compilationId === compilationId && event.topicKey === topicKey && event.owner === owner)
   if (!submission || !UUID.test(submission.childSessionId)) return undefined
-  const stored = await ctx.sessionPersistence.readFrom(submission.childSessionId, 0)
+  const stored = await readStoredSession(ctx, submission.childSessionId)
   signal?.throwIfAborted()
   if (stored.meta.parentSession !== agent.id || !stored.events.some((event: any) => event.type === EVENT && event.data.kind === 'compilation-child' && event.data.compilationId === compilationId && event.data.topicKey === topicKey && event.data.owner === owner)) fail('invalid-recovery-session')
   const call = stored.events.findLast((event: any) => event.type === 'tool/call' && event.data.name === 'structured_output')
@@ -176,7 +176,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { bindXin?: Bind
         const live = ctx.agents.get(prior)
         if (live) handle = { agent: live, dispose: async () => {} }
         else {
-          const stored = await ctx.sessionPersistence.readFrom(prior, 0)
+          const stored = await readStoredSession(ctx, prior)
           assertExecution(exec, owner)
           const marker = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.owner === owner && event.data.compilationId === initial.id)?.data
           if (!marker || (marker.selection && digest(freezeSelection(marker.selection, initial.request.model)) !== digest(selection))) fail('invalid-recovery-session')
@@ -366,7 +366,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { bindXin?: Bind
     const sessionId = value.checkpoint.session_id
     if (!sessionId) fail('invalid-recovery-session', '缺少冻结模型的原生回执，请从原知识任务恢复。')
     const live = ctx.agents.get(sessionId)
-    const stored = live ? { events: [...live.session.snapshotEvents()] } : await ctx.sessionPersistence.readFrom(sessionId, 0)
+    const stored = live ? { events: [...live.session.snapshotEvents()] } : await readStoredSession(ctx, sessionId)
     exec.signal?.throwIfAborted(); assertExecution(exec, owner)
     const marker = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.compilationId === value.id && event.data.owner === owner)?.data
     if (!marker) fail('invalid-recovery-session')
@@ -380,7 +380,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { bindXin?: Bind
     let agent = id ? ctx.agents.get(id) : events(exec.agent).some(event => event.kind === 'compilation-session' && event.owner === owner && event.compilationId === value.id) ? exec.agent : undefined
     if (!agent) {
       if (id) {
-        const stored = await ctx.sessionPersistence.readFrom(id, 0)
+        const stored = await readStoredSession(ctx, id)
         assertExecution(exec, owner)
         const marker = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.owner === owner && event.data.compilationId === value.id)?.data
         if (!marker || (marker.selection && digest(freezeSelection(marker.selection, value.request.model)) !== digest(selection))) fail('invalid-recovery-session')
@@ -444,7 +444,7 @@ export function createKnowledgeWorkflow(ctx: any, dependencies: { bindXin?: Bind
         if (!binding) {
           const id = value.checkpoint.session_id ?? exec.agent.id
           const live = ctx.agents.get(id)
-          const stored = live ? { events: [...live.session.snapshotEvents()] } : await ctx.sessionPersistence.readFrom(id, 0, exec.signal)
+          const stored = live ? { events: [...live.session.snapshotEvents()] } : await readStoredSession(ctx, id, exec.signal)
           assertExecution(exec, owner)
           binding = stored.events.find((event: any) => event.type === EVENT && event.data.kind === 'compilation-session' && event.data.compilationId === value.id && event.data.owner === owner)?.data
         }

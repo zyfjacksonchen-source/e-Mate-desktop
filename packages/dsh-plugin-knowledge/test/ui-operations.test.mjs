@@ -393,8 +393,8 @@ test('UI recent scans cannot put background import and compilation recovery out 
   const snapshots = Array.from({ length: 50 }, (_, index) => ({ header: { id: String(index).padStart(8, '0') + '-0000-4000-a000-000000000000', createdAt: 50 - index }, revision: 'revision-1' }))
   let lists = 0, reads = 0
   const ctx = { get: () => identity, agents: { list: () => [], get: () => undefined }, jobs: { list: () => [] }, sessionPersistence: {
-    async listSnapshots() { lists++; return structuredClone(snapshots) },
-    async readFrom(id) { reads++; return { meta: { id }, events: [] } },
+    async list() { lists++; return structuredClone(snapshots) },
+    async open(id) { reads++; return { header: { id }, read: async () => ({ events: [] }), close: async () => {} } },
   } }
   const workflow = {}
   const ui = createKnowledgeUiOperations(ctx, { workflow, read: async () => { throw Error('Unexpected network') }, resolveSelection: async () => { throw Error('Unexpected model') } })

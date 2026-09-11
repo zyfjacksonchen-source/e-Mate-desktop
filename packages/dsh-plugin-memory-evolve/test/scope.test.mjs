@@ -99,7 +99,8 @@ test('the pinned Harness registry keeps general sessions isolated through a path
     ctx.storage.mount('domain', facility)
     ctx.provide('storageDomain', facility)
     ctx.provide('sessionPersistence', {
-      list: async () => headers,
+      // 0.1.5 lists snapshots ({ header, revision }), not bare headers.
+      list: async () => headers.map(header => ({ header, revision: 'rev-1' })),
       load: () => { throw new Error('event bodies must not be loaded') },
       inspect: () => { throw new Error('event bodies must not be inspected') },
     })

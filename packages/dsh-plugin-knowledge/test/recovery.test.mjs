@@ -16,6 +16,12 @@ import { createKnowledgeWorkflow } from '../src/workflow.ts'
 import { createKnowledgeRecovery } from '../src/recovery.ts'
 import { digest } from '../src/imports.ts'
 
+/** 0.1.5 reads a stored session through one owned handle instead of the removed readFrom. */
+async function storedEvents(ctx, id) {
+  const handle = await ctx.sessionPersistence.open(id, 'read')
+  try { return { meta: handle.header, events: [...(await handle.read(0)).events] } } finally { await handle.close() }
+}
+
 const owner = digest(['enterprise', 'employee'])
 const selection = { provider: 'mock', model: 'fixture-model' }
 const source = { source_id: randomUUID(), source_version: 'a'.repeat(64), parse_revision: 'b'.repeat(64) }
@@ -93,7 +99,7 @@ test('cold native JSONL coordinator resumes the same compilation through real Ag
   assert.equal(result.recovered, 1)
   await waitJobs(run)
   assert.equal(remote.rows.get(saved.compilationId).state, 'committed')
-  const physical = await run.ctx.sessionPersistence.readFrom(saved.sessionId, 0)
+  const physical = await storedEvents(run.ctx, saved.sessionId)
   assert(physical.events.some(event => event.data.kind === 'committed' && event.data.compilationId === saved.compilationId))
   assert.equal(run.adapter.requests, 0)
   assert.equal((await run.recovery.scan()).recovered, 0)
@@ -170,12 +176,12 @@ test('native completion plus a deferred next scan drains multiple compilations o
 test('read-only discovery is bounded, cancellation-aware and uses physical revisions without synthetic crash repair', async t => {
   const path = await directory(t), remote = backend(), run = await runtime(t, path, remote)
   for (let i = 0; i < 27; i++) await seed(run, remote, { controls: [{ kind: 'user-stop' }] })
-  const before = await run.ctx.sessionPersistence.listSnapshots()
+  const before = await run.ctx.sessionPersistence.list()
   const first = await run.recovery.scan()
   assert.equal(first.has_more, true); assert.equal(first.items.length, 24)
   assert.equal((await run.recovery.scan()).has_more, false)
   assert.equal(run.recovery.recent().length, 27)
-  assert.deepEqual(await run.ctx.sessionPersistence.listSnapshots(), before)
+  assert.deepEqual(await run.ctx.sessionPersistence.list(), before)
   const abort = new AbortController(); abort.abort()
   assert.equal((await run.recovery.scan(abort.signal)).recovered, 0)
   assert.equal(remote.calls.length, 0)
@@ -210,7 +216,7 @@ test('dispose cancels the native resumed Job and releases its owned Agent withou
   const pending = run.recovery.scan(); await started; await pending
   await run.recovery.dispose()
   assert.deepEqual(run.recovery.recent(), []); assert.equal(run.ctx.agents.list().length, 0)
-  const stored = await run.ctx.sessionPersistence.readFrom(saved.sessionId, 0)
+  const stored = await storedEvents(run.ctx, saved.sessionId)
   assert(!stored.events.some(event => event.data.kind === 'user-stop'))
   assert.equal(run.adapter.requests, 0)
 })
@@ -234,8 +240,8 @@ for (const kind of ['import', 'compilation']) {
     const snapshots = Array.from({ length: 50 }, (_, index) => ({ header: { id: randomUUID(), createdAt: index }, revision: 'revision-1' }))
     const readIds = []
     const ctx = { get: () => ({ localAccountPrincipal: () => principal }), agents: { list: () => [], get: () => undefined }, jobs: { list: () => [] }, sessionPersistence: {
-      async listSnapshots() { lists++; return structuredClone(snapshots) },
-      async readFrom(id) { readIds.push(id); return { meta: { id }, events: [] } },
+      async list() { lists++; return structuredClone(snapshots) },
+      async open(id) { readIds.push(id); return { header: { id }, read: async () => ({ events: [] }), close: async () => {} } },
     } }
     const reader = kind === 'import'
       ? createKnowledgeUiOperations(ctx, { workflow: {}, read: async () => { throw Error('Unexpected HTTP') }, resolveSelection: async () => { throw Error('Unexpected model') } })
@@ -268,8 +274,8 @@ for (const kind of ['import', 'compilation']) {
     const snapshots = Array.from({ length: 50 }, (_, index) => ({ header: { id: randomUUID(), createdAt: index }, revision: 'revision-1' }))
     const readIds = []
     const ctx = { get: () => ({ localAccountPrincipal: () => ({ tenantId: 'test', userId: 'test' }) }), agents: { list: () => [], get: () => undefined }, jobs: { list: () => [] }, sessionPersistence: {
-      async listSnapshots() { lists++; if (failList) throw Error('directory temporarily unavailable'); return structuredClone(snapshots) },
-      async readFrom(id) { if (abortRead) abortRead.abort(); readIds.push(id); return { meta: { id }, events: [] } },
+      async list() { lists++; if (failList) throw Error('directory temporarily unavailable'); return structuredClone(snapshots) },
+      async open(id) { if (abortRead) abortRead.abort(); readIds.push(id); return { header: { id }, read: async () => ({ events: [] }), close: async () => {} } },
     } }
     const reader = kind === 'import'
       ? createKnowledgeUiOperations(ctx, { workflow: {}, read: async () => { throw Error('Unexpected HTTP') }, resolveSelection: async () => { throw Error('Unexpected model') } })

@@ -8,7 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { CallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -52,7 +52,7 @@ class CaptureAdapter extends LlmAdapter {
 async function execute(ctx: Context, agent: ReturnType<AgentLoop['create']>, name: string, args: unknown) {
   callOrdinal += 1
   const result = await ctx.tools.execute({
-    callId: CallId(`memory-real-${callOrdinal}`),
+    callId: ToolCallId(`memory-real-${callOrdinal}`),
     name,
     arguments: args,
     agent,
@@ -86,9 +86,22 @@ test('installed Tool Search keeps real project memory durable, isolated, and pre
   ctx.storage.mount('domain', domains)
   ctx.provide('storageDomain', domains)
   ctx.provide('sessionPersistence', {
-    list: async () => headers,
-    load: () => { throw new Error('event bodies must not be loaded') },
-    inspect: () => { throw new Error('event bodies must not be inspected') },
+    // 0.1.5 lists snapshots ({ header, revision }), not bare headers, and
+    // AgentLoop.create takes write ownership through a per-session handle.
+    list: async () => headers.map(header => ({ header, revision: 'rev-1' })),
+    create: async (header: { id: unknown }) => ({
+      id: header.id,
+      header,
+      inheritedEventCount: 0,
+      access: 'write' as const,
+      read: () => { throw new Error('event bodies must not be read') },
+      append: async () => {},
+      flush: async () => {},
+      close: async () => {},
+    }),
+    open: () => { throw new Error('event bodies must not be read') },
+    stat: async () => undefined,
+    flush: async () => {},
   } as never)
   ctx.provide('userQuestions', {
     ask: async (request: { questions: Array<{ id: string; options: Array<{ label: string }> }> }) => ({
@@ -101,10 +114,11 @@ test('installed Tool Search keeps real project memory durable, isolated, and pre
   let memoryFiber = await ctx.plugin(MemoryEvolve, { sessionOnlyWorkspacePath: general })
   await ctx.plugin(ToolSearch, { alwaysVisible: alwaysVisibleTools(), maxResults: 5 })
 
-  const a1 = ctx.agentLoop.create(SessionId('a-1'), { provider: 'mock', model: 'mock' }, { cwd: projectA })
-  const a2 = ctx.agentLoop.create(SessionId('a-2'), { provider: 'mock', model: 'mock' }, { cwd: projectA })
-  const b1 = ctx.agentLoop.create(SessionId('b-1'), { provider: 'mock', model: 'mock' }, { cwd: projectB })
-  const g1 = ctx.agentLoop.create(SessionId('g-1'), { provider: 'mock', model: 'mock' }, { cwd: general })
+  // 0.1.5 AgentLoop.create is async and resolves the published Agent.
+  const a1 = await ctx.agentLoop.create(SessionId('a-1'), { provider: 'mock', model: 'mock' }, { cwd: projectA })
+  const a2 = await ctx.agentLoop.create(SessionId('a-2'), { provider: 'mock', model: 'mock' }, { cwd: projectA })
+  const b1 = await ctx.agentLoop.create(SessionId('b-1'), { provider: 'mock', model: 'mock' }, { cwd: projectB })
+  const g1 = await ctx.agentLoop.create(SessionId('g-1'), { provider: 'mock', model: 'mock' }, { cwd: general })
   for (const agent of [a1, a2, b1, g1]) {
     assert.deepEqual(
       ctx.tools.schemas(agent).map(schema => schema.name).filter(name => name.startsWith('e_mate_memory_')).sort(),

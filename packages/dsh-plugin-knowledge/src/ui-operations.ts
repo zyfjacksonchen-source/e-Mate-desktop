@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { SessionPersistenceSnapshot } from '../../../upstream/deepseek-harness/packages/session/session-persistence'
-import { digest, events, fail, graphOptions, graphReceipt, HASH, ownerOf, persist, UUID, type GraphOptions, type Execution, type Scope } from './imports.ts'
+import { digest, events, fail, graphOptions, graphReceipt, HASH, listStoredSessions, ownerOf, persist, readStoredSession, UUID, type GraphOptions, type Execution, type Scope } from './imports.ts'
 
 type Selection = { provider: string; model: string; reasoningEffort?: string }
 export type ImportPhase = 'prepared' | 'importing' | 'parsing' | 'compiling' | 'complete' | 'partial' | 'paused' | 'stopping' | 'stopped' | 'unknown' | 'failed'
@@ -104,7 +104,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
       let pending = loading.get(key)
       if (!pending) {
         pending = (async () => {
-          const stored = await ctx.sessionPersistence.readFrom(reference.session_id, 0, signal); check(expected, signal)
+          const stored = await readStoredSession(ctx, reference.session_id, signal); check(expected, signal)
           const marker = stored.events.find((event: any) => event.type === 'knowledge/workflow' && event.data.kind === 'ui-import' && event.data.owner === expected && event.data.operationId === reference.operation_id)?.data
           if (!marker?.selection) fail('invalid-recovery-session')
           const handle = await ctx.agents.resume({ resumeSessionId: reference.session_id, agentOptions: marker.selection, signal, setup(agentCtx: any) {
@@ -338,7 +338,7 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
     let candidate: Reference | undefined
     let snapshots = forRecovery ? recoverySnapshots : undefined
     if (!snapshots) {
-      snapshots = await ctx.sessionPersistence.listSnapshots(signal) as SessionPersistenceSnapshot[]; check(expected, signal)
+      snapshots = await listStoredSessions(ctx, signal) as SessionPersistenceSnapshot[]; check(expected, signal)
       snapshots.sort((a, b) => b.header.createdAt - a.header.createdAt)
       if (forRecovery) { recoverySnapshots = snapshots; recoveryCursor = 0 }
     }
@@ -350,11 +350,12 @@ export function createKnowledgeUiOperations(ctx: any, { workflow, read, resolveS
     else cursor = offset
     for (const item of batch) {
       if (item.header.parentSession || !forRecovery && scanned.get(item.header.id) === item.revision) continue
-      const stored = await ctx.sessionPersistence.readFrom(item.header.id, 0, signal).catch(() => undefined); check(expected, signal)
+      const stored = await readStoredSession(ctx, item.header.id, signal).catch(() => undefined); check(expected, signal)
       if (stored) { scanned.set(item.header.id, item.revision); if (scanned.size > 1024) scanned.delete(scanned.keys().next().value!) }
       const marker = stored?.events.find((event: any) => event.type === 'knowledge/workflow' && event.data.kind === 'ui-import' && event.data.owner === expected)?.data
       if (!marker) continue
-      const viewAgent = ctx.agents.get(item.header.id) ?? { id: item.header.id, session: { events: stored.events } }
+      // 0.1.5 reads history through snapshotEvents(), so the detached view agent exposes the same accessor.
+      const viewAgent = ctx.agents.get(item.header.id) ?? { id: item.header.id, session: { snapshotEvents: () => stored.events } }
       try {
         markerOf(viewAgent, expected)
         const view = project(viewAgent, marker)
