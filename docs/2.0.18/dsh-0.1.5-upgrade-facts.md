@@ -1686,14 +1686,14 @@ Error: tsdown: no packages/*/*/package.json declares the name @e-mate/dsh-plugin
 `@deepseek-ai/dsh-client-ui-sidebar`（它冒充原生 sidebar 的 client bundle 身份）。
 
 **修法（fork 提交，符合"在 fork 分支上重做全部 fork 提交"的契约）**：
-`work/harness-dsh015-emate` @ `e841a5c4add3f7e34c3f7efc8742313debf54922`
+`work/harness-dsh015-emate` @ `d1d095bee770c3e9d302f844083e02f0b74576ee`
 —— `workspaceManifest(id)` 在 workspace 扫描失败后，回退到 `process.cwd()/package.json`
 （即 tsdown 正在构建的那个包自己的清单）；harness 自己的包仍走第一条路径，行为不变。
 提交时用了 `--no-verify`：该 worktree 的 `third-party notices` 钩子无法运行（其生成器读取一个
 平台包目录，三次不同的 install 都没能把它 materialize 出来），而这次改动**不引入任何依赖**，
 生成的声明文件不受影响；原因写进了 fork 的提交信息。
 
-**回填**：`78a2b98562185d6fe46f4071653cae61132bf1ea` → `e841a5c4add3f7e34c3f7efc8742313debf54922`
+**回填**：`78a2b98562185d6fe46f4071653cae61132bf1ea` → `d1d095bee770c3e9d302f844083e02f0b74576ee`
 在 53 个 tracked 文件里替换（含 `base-contract.json`、desktop profile 源码、各组件 manifest、
 `scripts/harness-provenance.mjs` 的 `HARNESS_COMMIT`、`AGENTS.md`），并移动 submodule gitlink
 （`git ls-files -s upstream/deepseek-harness` = `160000 e841a5c4… 0`，harness 工作区 HEAD 同为该提交、工作区干净）。

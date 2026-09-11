@@ -81,7 +81,7 @@ async function fixture(t, mode) {
   } })
   ctx.provide('emateIdentity', { localAccountSubject: () => SUBJECT })
   ctx.provide('emateModelPolicy', { markAuditDelivered: async () => {} })
-  const binding = { schema_version: 1, product: 'e-Mate', version: '2.0.18', harness_commit: 'e841a5c4add3f7e34c3f7efc8742313debf54922', dsh_home: root }
+  const binding = { schema_version: 1, product: 'e-Mate', version: '2.0.18', harness_commit: 'd1d095bee770c3e9d302f844083e02f0b74576ee', dsh_home: root }
   for (const [key, path] of [
     ['tools_module', 'packages/core/tools/lib/index.js'],
     ['storage_domain_module', 'packages/storage/storage-domain/lib/index.js'],

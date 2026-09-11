@@ -8,7 +8,7 @@ This is the active repository contract. It supersedes historical release-train n
 - Product version: `2.0.18`
 - GitHub repository: `zyfjacksonchen-source/e-Mate-desktop`
 - DSH package baseline: `@deepseek-ai/dsh@0.1.5-rc.1`
-- Harness: `zyfjacksonchen-source/deepseek-harness@e841a5c4add3f7e34c3f7efc8742313debf54922`
+- Harness: `zyfjacksonchen-source/deepseek-harness@d1d095bee770c3e9d302f844083e02f0b74576ee`
 - Desktop reference: `anywhere-labs/deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517`
 
 ### Source capability and compatibility

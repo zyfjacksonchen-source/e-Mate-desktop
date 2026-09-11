@@ -25,7 +25,7 @@ export async function runNativeToolCohort({ ctx, agent, cases, outputDirectory, 
   assert.equal(ctx.tools.get('image_batch'), undefined, 'retired batch Tool cannot drive this cohort')
   assert.ok(idPattern.test(executionId) && isAbsolute(outputDirectory))
   assert.match(provenance?.emate_commit ?? '', /^[0-9a-f]{40}$/u)
-  assert.equal(provenance?.harness_commit, 'e841a5c4add3f7e34c3f7efc8742313debf54922')
+  assert.equal(provenance?.harness_commit, 'd1d095bee770c3e9d302f844083e02f0b74576ee')
   assert.equal(provenance?.version, '2.0.18')
   assert.ok(Array.isArray(cases) && cases.length > 0 && cases.length <= 1000)
   const ids = new Set()

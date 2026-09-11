@@ -96,7 +96,7 @@ test('the package contains support and installation Skills without any old Offic
   assert.equal(pkg.dsh.client, undefined)
   assert.equal(pkg.dsh.officeSkills, undefined)
   assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-skill'], '0.1.5-rc.1')
-  assert.equal(pkg.eMate.harnessCommit, 'e841a5c4add3f7e34c3f7efc8742313debf54922')
+  assert.equal(pkg.eMate.harnessCommit, 'd1d095bee770c3e9d302f844083e02f0b74576ee')
   assert.ok(pkg.files.includes('skills'))
   for (const removed of ['assets', 'scripts', 'patches', 'vitest.config.ts']) assert.equal((await readdir(root)).includes(removed), false)
 })

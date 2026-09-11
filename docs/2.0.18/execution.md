@@ -5,7 +5,7 @@ User-approved scope: close the original task `01a06a78-3914-7483-a761-0297705a49
 ## Baseline and ownership
 
 - Integration starts at `87b47114ff30882d2895682e74d02eb6307b9dbc`; the independent integration branch is `feat/2.0.18/integration`.
-- Harness stays at 0.1.5 `e841a5c4add3f7e34c3f7efc8742313debf54922`; Desktop reference stays `166c16cfc38c51d32c2316715548c0f8271db517`. Product identity, Node 24.x, pnpm 11.8.0 and Desktop Yarn remain governed by the current target contract.
+- Harness stays at 0.1.5 `d1d095bee770c3e9d302f844083e02f0b74576ee`; Desktop reference stays `166c16cfc38c51d32c2316715548c0f8271db517`. Product identity, Node 24.x, pnpm 11.8.0 and Desktop Yarn remain governed by the current target contract.
 - The main agent owns shared contracts, integration, native packaging, installed tests, deployment, release and recovery. Up to three execution agents use distinct worktrees and write sets. They return reviewed source commits and narrow checks; they cannot claim candidate, installed or production acceptance.
 - The default Agent preset is the native `code` preset (PTC mode); keep its shipped tool-presentation composition and native Session selection semantics.
 - Preserve other worktrees, user data, historical receipts and legacy source databases. Application features use existing native services, events, Tools, Jobs, storage and client slots.

@@ -14,7 +14,7 @@ const categories = protocolConstants.CATEGORIES
 function context() {
   return {
     root: new URL('https://production.example/v1'), token: 'private-session-token-value', upstreamModel: 'gpt-image-2.5-flare',
-    provenance: { emate_commit: 'a'.repeat(40), harness_commit: 'e841a5c4add3f7e34c3f7efc8742313debf54922', desktop_reference: '166c16cfc38c51d32c2316715548c0f8271db517', version: '2.0.18' },
+    provenance: { emate_commit: 'a'.repeat(40), harness_commit: 'd1d095bee770c3e9d302f844083e02f0b74576ee', desktop_reference: '166c16cfc38c51d32c2316715548c0f8271db517', version: '2.0.18' },
     environment: { layer: 'production-provider', environment_name_sha256: hash('production'), gateway_origin_sha256: hash('https://production.example/v1'), deployment_fingerprint_sha256: hash('deployment') },
   }
 }

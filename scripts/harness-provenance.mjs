@@ -22,7 +22,7 @@ import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSourc
 import { adaptHarnessSessionExportSource, SESSION_EXPORT_ADAPTER_PATH, SESSION_EXPORT_PACKAGE } from './harness-session-export-adapter.mjs'
 import { adaptHarnessFsBytesSource, FS_BYTES_ADAPTER_PATH, FS_BYTES_PACKAGE } from './harness-fs-bytes-adapter.mjs'
 
-export const HARNESS_COMMIT = 'e841a5c4add3f7e34c3f7efc8742313debf54922'
+export const HARNESS_COMMIT = 'd1d095bee770c3e9d302f844083e02f0b74576ee'
 export const HARNESS_VERSION = '0.1.5-rc.1'
 
 export function assertNativeAgentLoop(packages) {
