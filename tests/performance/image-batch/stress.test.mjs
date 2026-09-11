@@ -90,8 +90,10 @@ test('160 real native Tool groups preserve 2/4/5/8, queue bounds, receipts, actu
         assert.equal(new Set(receipt.client_request_ids).size, receipt.requested_count)
         assert.equal(receipt.provider_request_ids.length, receipt.returned_count)
         for (const block of receipt.content) {
+          // The store normalizes on save, so identity is the stored artifact the
+          // ref describes, not the provider's original PNG encoding.
           const stored = await f.ctx.attachments.readImage(block.attachment)
-          assert.deepEqual(Buffer.from(stored.data), SMALL_PNG); retained += 1
+          assert.deepEqual(block.attachment, stored.ref); retained += 1
         }
       }
       successes += good
@@ -168,7 +170,7 @@ test('native preflight and replay refuse duplicate work; durable query survives 
     const first = await f.call('generate_image', { prompt: 'one', count: 2 }, { callId: 'one-native-call' })
     const repeated = await f.call('generate_image', { prompt: 'one', count: 2 }, { callId: 'one-native-call' })
     assert.equal(repeated.isError, true); assert.equal(f.calls.length, 2)
-    const restored = f.Session.create(f.agent.id, f.agent.session.events, f.agent.session.header)
+    const restored = f.Session.create(f.agent.id, f.agent.session.snapshotEvents(), f.agent.session.header)
     const { host } = f.ImageGen.createImageHost(f.ctx, f.ImageGen.managedRoot('https://model.example/e-mate/model-api/v1'))
     const task = await host.find(first.value.task_id, { agent: { ...f.agent, session: restored }, callId: 'restore', rootCallId: 'restore' })
     assert.equal((await host.images(task)).length, 2); assert.equal(f.calls.length, 2)

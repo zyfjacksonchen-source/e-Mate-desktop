@@ -50,7 +50,8 @@ export async function runNativeToolCohort({ ctx, agent, cases, outputDirectory, 
     started_at: new Date().toISOString(), run_status: 'COMPLETE', cases: [],
     external_gates: { installed_same_source: 'OPEN', first_visible_actual_ui: 'OPEN', provider_billing_correlation: 'OPEN',
       quality: 'OPEN', hundred_round_fixed_set: 'OPEN', production_latency: 'OPEN' } }
-  const position = agent.session.events.findLast(event => event.type === 'step/start')?.data
+  // 0.1.5 publishes the log through snapshotEvents(); the events array is gone.
+  const position = agent.session.snapshotEvents().findLast(event => event.type === 'step/start')?.data
   assert.ok(Number.isSafeInteger(position?.turn) && Number.isSafeInteger(position?.step), 'caller must supply an entered native step')
   async function execute(entry, count, callId) {
     const began = performance.now(), { turn, step } = position
@@ -67,7 +68,7 @@ export async function runNativeToolCohort({ ctx, agent, cases, outputDirectory, 
       message: m.createToolResultMessage({ callId, content: result.content, isError: result.isError }),
       ...(result.meta === undefined ? {} : { meta: result.meta }),
     }, { surfaceOp: 'append', sourceEventSeqs: [call.seq] })
-    const receipts = agent.session.events.filter(event => event.type === 'emate/image-output'
+    const receipts = agent.session.snapshotEvents().filter(event => event.type === 'emate/image-output'
       && event.data?.schema_version === 3 && event.data.call_id === callId && event.data.revision === 2)
     assert.ok(receipts.length <= 1, 'duplicate native terminal receipt')
     const receipt = receipts[0]?.data
