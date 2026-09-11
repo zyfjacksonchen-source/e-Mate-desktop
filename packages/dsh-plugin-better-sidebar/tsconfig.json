@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "../../upstream/deepseek-harness/node_modules/@types"
+    ],
+    "paths": {
+      "@deepseek-ai/*": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@deepseek-ai/*"
+      ],
+      "react": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react"
+      ],
+      "react/*": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react/*"
+      ],
+      "react-dom": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react-dom"
+      ],
+      "@deepseek-ai/dsh-client-ui-conversation/client": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-connection/client": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@deepseek-ai/dsh-client-connection/lib/types/client/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-slots": [
+        "../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts"
+      ]
+    },
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
+}
