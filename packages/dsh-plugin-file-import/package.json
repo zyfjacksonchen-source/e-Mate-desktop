@@ -41,7 +41,7 @@
   },
   "eMate": {
     "harnessVersion": "0.1.5-rc.1",
-    "harnessCommit": "7882599607eade325e66e7bf28f520a206270727",
+    "harnessCommit": "f9e0f1190e4021e63db579ef36b67484028e8c53",
     "excludedFeatures": [
       "independent-store",
       "independent-router",

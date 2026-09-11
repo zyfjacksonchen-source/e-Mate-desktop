@@ -1,6 +1,6 @@
 # e-Mate
 
-e-Mate 桌面应用的 `2.0.17` 是 [GitHub `e-Mate-desktop`](https://github.com/zyfjacksonchen-source/e-Mate-desktop) 的当前源码目标，基于固定 `@deepseek-ai/dsh@0.1.5-rc.1`、Harness `7882599607eade325e66e7bf28f520a206270727` 与 `deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517`。稳定 Electron `productName`、应用名称和安装位置仍为 `e-Mate`；“Desktop”只描述桌面产品与仓库范围。这些身份只说明源码合同，不表示候选包、安装验收或公共发布已经完成。
+e-Mate 桌面应用的 `2.0.17` 是 [GitHub `e-Mate-desktop`](https://github.com/zyfjacksonchen-source/e-Mate-desktop) 的当前源码目标，基于固定 `@deepseek-ai/dsh@0.1.5-rc.1`、Harness `f9e0f1190e4021e63db579ef36b67484028e8c53` 与 `deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517`。稳定 Electron `productName`、应用名称和安装位置仍为 `e-Mate`；“Desktop”只描述桌面产品与仓库范围。这些身份只说明源码合同，不表示候选包、安装验收或公共发布已经完成。
 
 > 仓库第一准则见 [`AGENTS.md`](AGENTS.md)，当前边界见 [`docs/target-contract.md`](docs/target-contract.md)。官方下载页只指向已通过安装与公开回读的正式字节。
 

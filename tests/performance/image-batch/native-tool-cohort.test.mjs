@@ -7,7 +7,7 @@ import { createNativeImageFixture } from '../image-single/native-fixture.mjs'
 import { SMALL_PNG } from '../image-single/fixtures.mjs'
 import { runNativeToolCohort } from './native-tool-cohort.mjs'
 
-const provenance = { emate_commit: 'a'.repeat(40), harness_commit: '7882599607eade325e66e7bf28f520a206270727', version: '2.0.18' }
+const provenance = { emate_commit: 'a'.repeat(40), harness_commit: 'f9e0f1190e4021e63db579ef36b67484028e8c53', version: '2.0.18' }
 const success = ordinal => new Response(JSON.stringify({ id: 'cohort-local-' + ordinal,
   data: [{ b64_json: SMALL_PNG.toString('base64') }] }), { headers: { 'content-type': 'application/json' } })
 
