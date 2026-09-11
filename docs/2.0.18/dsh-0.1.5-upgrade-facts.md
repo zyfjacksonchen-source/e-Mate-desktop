@@ -2217,3 +2217,39 @@ redundantEscalation = sandbox_permissions !== undefined && standingPolicy !== un
 - 之前记录的三处未提交改动同理，需先确认它们的来源（人工 vs 生成），再决定提交或回退。
 - 对 desktop 的任何验收，都应先确认没有并发写入者。
 
+
+
+## 第 72 轮：桌面 profile 加载失败的收敛路径与最后一个入口
+
+### 72.1 vendored 插件的 `settingsNamespace` 迁移（已完成，待子模块提交）
+
+0.1.5 删除 `settingsNamespace()` 后，**四个 vendored 插件源码**仍在调用它，导致 desktop profile 加载失败：
+`upstream/plugins/{dsh-computer-use,dsh-vision-toolkit}/src/config.ts`、`upstream/plugins/computer-user/src/index.js`、
+`upstream/plugins/dsh-better-sidebar/src/index.ts`。已统一改为"普通字符串命名空间 + 保留 `SettingsNamespace` 类型"。
+
+**它们的 `lib/` 在本机无法重建**：`dsh-computer-use` 自身 typecheck 在 `src/web.ts:177`（req/res 隐式 any）失败；
+`dsh-vision-toolkit` 的 pnpm 依赖状态检查失败。因此对生成产物 `lib/config.js` 施加了"正确构建本应产出"的同一行改动。
+
+**重要**：`upstream/plugins/*` 是**独立子模块**——父仓库不能直接 `git add`（报 `is in submodule`）；
+需在各子模块内各自提交，再由父仓库更新 gitlink。当前四个子模块工作区各带 1–4 处改动，父仓库显示 4 个 gitlink dirty。
+
+### 72.2 最后一个失败入口：`dsh-at-file`（第三方生态插件）
+
+`desktop/e-mate-desktop/package.json:275` 把 `dsh-at-file` 钉成**特定 GitHub commit 的 tarball**：
+`https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz`（版本 0.6.2），
+其 `lib/index.js` 与 `src/settings.ts` 仍 import 已删除的 `settingsNamespace`，于是 `verify:profile` 报
+`failed to import loader entry dsh-at-file`。注意 `yarn patch dsh-at-file@npm:0.6.2` **不可用**（它是 URL locator，不是 npm locator）；
+npm 上另有 **0.6.3**。
+
+两条修法（下一轮择一）：
+- **(a) 打补丁**：`corepack yarn patch "dsh-at-file@<完整 tarball URL>"` → 改 `lib/index.js`（可选 `src/settings.ts`）→ `patch-commit` →
+  登记进 `scripts/harness-provenance.mjs` 的 `DESKTOP_OVERLAYS`（准入表，否则 desktop check 报 "overlay is not admitted"）→ `yarn install`；
+- **(b) 升 pin** 到支持 0.1.5 的版本/commit（npm 0.6.3），但这会改变第三方依赖的固定点，需同批更新 `ECOSYSTEM_PLUGIN_PACKAGES`
+  里 `src/e-mate-profile.ts:66` 的 `version: '0.6.2'` 与相关断言。
+
+### 72.3 本轮其余实测
+
+- `verify:closure` PASS、`verify:loader` PASS（此前被我 async 迁移与 `CallId` 改名弄坏，已修）。
+- `desktop yarn check` 已**越过 Electron 下载**，停在 `verify:cli`：`dsh artifact smoke returned "" instead of "0.1.5-rc.1"`
+  —— 与 profile 加载失败同源（profile 起不来 → CLI 无输出），修好 72.2 后应一并复验。
+
