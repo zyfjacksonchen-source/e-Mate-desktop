@@ -1,6 +1,6 @@
 - insert:
     - id: emate-mcp-manage
       name: '@e-mate/dsh-plugin-mcp-manage'
-      inject: [connection, credentials, settings, subprocess, timer, tools, systemPrompt, userQuestions, webServer]
+      inject: [connection, credentials, settings, subprocess, timer, tools, systemPrompt, userQuestions]
       config:
         servers: []
