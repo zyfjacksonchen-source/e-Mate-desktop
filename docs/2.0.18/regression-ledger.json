@@ -2293,7 +2293,8 @@
    "guards": [],
    "areas": [
     "desktop"
-   ]
+   ],
+   "disposition": "removed with the feature: the office-python source companion left the tree in 24b79e79f6 when Word skills moved to bundled TypeScript tools (b51df1d0db), so no companion bytes remain to preserve"
   },
   {
    "hash": "3aa78749bac2c81dceba3509ae4cbf3d79295f44",

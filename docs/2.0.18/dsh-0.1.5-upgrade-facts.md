@@ -2775,3 +2775,28 @@ identity / capabilities / agent-operations）已通过。
 `electron … lib/desktop-cli.js --version` → `0.1.5-rc.1`；**`corepack yarn run verify:cli` → PASS**。
 桌面检查链（`check:source` 测试面 514 passed / 0 failed + `verify:cli`）**已无红点**。
 
+
+### 81.1 在线更新路径取证结论（执行者全量取证，主代理裁决）
+
+**结论一：不存在第二条更新路径**（已逐类排除）：只有一个版本端点（`update-checker.ts:10`，e-Mate R2）、
+两个安装包端点（`update-download.ts:14-15`，同源）、唯一下载传输（`electron-runtime.ts:208/:594` 的 `net.fetch`，
+唯一写盘者是 `downloadDesktopUpdate`，唯一调用者 `electron-runtime.ts:590`）；无并行 feed、无自定义/健康检查回滚、
+无本地流式协调器（`tests/package.spec.ts:400-419` 已 fail-closed 断言被删产物缺席，并断言"单一汇聚点"）。
+三个入口（托盘 `updates.ts:241-250`、渲染进程 IPC `electron-runtime.ts:916-923`、自然语言 `agent-update.ts:37`）
+**全部收敛到 `runManualCheck`**；`git grep electron-updater|autoUpdater` **零命中**。
+
+**结论二（需裁决的边界分歧）**：e-Mate **没有依赖**固定版上游桌面包，其更新生命周期是**上游重构前那一版的拷贝**
+（上游自己的 ownership note 描述的 "Before" 状态——一个 `ctx.effect` 里两个 timer、两个 AbortController、三个 single-flight
+任务、tray 注册——正是 e-Mate `src/updates.ts` 的现状），且 **feed URL 写在 e-Mate 自己的源码里**。
+上游在固定 SHA 上已有 `dsh-plugin-desktop/src/update-lifecycle.ts`（generation-scoped 生命周期 owner），e-Mate **没有采用它**。
+
+**主代理裁决**：产品 feed URL 属于**产品配置**（e-Mate 自己的 R2 发布源），保留合理；但**生命周期机制属"自己造"**，
+与用户指令"在线更新用 dsh-desktop 的原生方式、不要自己造"冲突。处置方向：**在不动两个受保护文件的前提下**，
+把内联的生命周期（timer/单飞/状态持久化）替换为**固定 SHA 的上游 owner**（vendor `update-lifecycle.ts` + 溯源），
+e-Mate 只保留产品适配（R2 端点、IPC 触发器、托盘文案、无签名 macOS 与 NSIS 行为）。
+
+**受保护文件合规证据（客观事实）**：
+- `desktop/e-mate-desktop/src/update-checker.ts` 与 `update-download.ts` 在 HEAD / index / 工作区**三方同 blob**
+  （`9c91c773…` / `20d1b5d9…`），在上一 HEAD `3c8042caee` 亦相同；最近触碰提交为 `f876f01d`（2026-09-03）。
+- `git status --porcelain` 对这两个路径**为空**。
+
