@@ -1042,7 +1042,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).toMatch(/const sessionId = await ctx\.workspaces\.connectWorkspace\(target\)[\s\S]*?ctx\.sessions\.open\(sessionId\)[\s\S]*?`\/chat\/\$\{encodeURIComponent\(sessionId\)\}`[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)/u)
     expect(source).not.toMatch(/ctx\.sessions\.create|randomUUID|host\/session-added/u)
     expect(source).toMatch(/ctx\.layout\.toggleSidebar\(\)/u)
-    expect(source).toMatch(/ctx\.layout\.closeDetails\(\)/u)
+    expect(source).toMatch(/ctx\.get\('sidebarRight'\)/u)
     expect(source).toMatch(/ctx\.connection\.rpc\.call\('\/emate\.schedules', 'list', \{\}\)/u)
     expect(source).toMatch(/ctx\.theme\.getTheme\(\)\.active\.colorScheme/u)
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)

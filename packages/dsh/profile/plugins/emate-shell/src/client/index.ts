@@ -64,6 +64,8 @@ import { registerPetTaskDetails } from './task-details.tsx'
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'uiConversation', 'conversationEvents',
   'theme', 'sessionLogDownload', 'inputTriggers', 'remote', 'remote.commands', 'settingsScope',
+  // The native right column owns the rightbar track and its tab records.
+  'sidebarRight', 'sidebarRightTabs',
 ]
 
 const desktopUpdateBridge = (): DesktopUpdateTriggerBridge | undefined =>
@@ -223,7 +225,11 @@ export function registerRouteScopedConversationHeader(ctx: any): void {
       const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
       if (hide === (disposeShadow !== undefined)) return
       if (hide) {
-        ctx.layout.closeDetails()
+        // The right column's content is a native right Sidebar page now. Hide it
+        // through that owner's own recorded state, so the frame's track report
+        // (ctx.layout.openRightbar/closeRightbar) stays in sync with its store.
+        const sidebarRight = ctx.get('sidebarRight')
+        if (sidebarRight?.isExpanded()) sidebarRight.toggleExpanded()
         disposeShadow = ctx.slots.register({ name: 'main.conversation', priority: -1 }, StandaloneProductSurface)
       } else {
         const dispose = disposeShadow
@@ -248,26 +254,6 @@ export function registerRouteScopedConversationHeader(ctx: any): void {
           name: 'conversation.session.header',
           priority: -1,
         }, HiddenProductSurface)
-      } else {
-        const dispose = disposeShadow
-        disposeShadow = undefined
-        dispose?.()
-      }
-    }
-    addEventListener('popstate', sync)
-    sync()
-    return () => {
-      removeEventListener('popstate', sync)
-      disposeShadow?.()
-    }
-  })
-  ctx.slots.inject('details', () => {
-    let disposeShadow: (() => void) | undefined
-    const sync = () => {
-      const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
-      if (hide === (disposeShadow !== undefined)) return
-      if (hide) {
-        disposeShadow = ctx.slots.register({ name: 'details', priority: -1 }, HiddenProductSurface)
       } else {
         const dispose = disposeShadow
         disposeShadow = undefined
