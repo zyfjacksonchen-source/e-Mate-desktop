@@ -2138,3 +2138,49 @@ desktop client/tests 面已委派专项迁移（见 §49.3 的精确定位 + 本
 **(c) 另一条 OPEN**：`binds empty machine patch handling to the pinned 0.1.5 app-boot patch` ——
 `desktop/patches/dsh-app-boot@0.1.5-rc.1.patch` 的内容与守卫钉的期望不一致（patch 漂移），需比对 0.1.5 的 boot 源码后重新生成或更正期望。
 
+
+
+## 第 62 轮：desktop 三面收口与两条真实缺口的排序
+
+### 62.1 overlay 契约从 3 条变 4 条（tool-fs 恢复）
+
+我上一轮恢复的 tool-fs overlay **条件写错了**（用"没有挂沙箱文件系统"，而退役补丁的真实语义是"相对现行策略冗余"）：
+```
+redundantEscalation = sandbox_permissions !== undefined && standingPolicy !== undefined
+  && (sandbox_permissions === standingPolicy.mode || standingPolicy.mode === "danger-full-access")
+```
+已按 0.1.0-rc.7 原补丁用 `yarn patch` 重新生成；`DESKTOP_OVERLAYS` **必须**同时登记（`scripts/harness-provenance.mjs:45` 的准入表），
+否则 desktop check 直接报 *"Desktop Harness overlay is not admitted: @deepseek-ai/dsh-tool-fs@npm:^0.1.5-rc.1"*。
+其守卫测试里"0.1.5 已吸收该行为"的旧断言**是错的**（实测三个原生 escalation owner 仍无条件校验、且都没有 `redundantEscalation`），
+已改为"原生确实没有 + 准入补丁确实提供"。provenance 14/14、`package.spec.ts` 25/25。
+
+另外两条 desktop 打包项也已定性：隐藏控制台**非回归**（由 win32-process overlay 承担）；app-boot 空 patch 文档守卫改为钉"改动"而非"重新生成必变的字节/哈希"。
+**关键教训**：改了 `scripts/harness-provenance.mjs` 必须重录 `harness-provenance.mjs build`（它把自己的哈希写进前端构建记录），
+否则 desktop check 报 *"Pinned frontend dist or artifact-link build inputs changed"*；
+且必须用继承的 11.7.0 pnpm：`npm_execpath=~/.cache/node/corepack/v1/pnpm/11.7.0/bin/pnpm.cjs node scripts/harness-provenance.mjs build`。
+
+### 62.2 desktop 三面的现状
+
+- **host 面**：0 错。**client 面**：0 错（我把 9→1 的类型程序缺口补齐后，专项代理把最后的 layout 所有权改完并新增 15 条 frame 规格，客户端规格 35/35）。
+- **tests 面**：47 错 → **仅剩 2 行 schemastery 重复声明噪声**；37 个测试 24 过，其余 13 条**全部出自同一 host 面根因**（见 62.3）。
+- `tsconfig.tests.json` 需排除新的 client frame 规格（它已由 client 面编译），否则会把 client Session 面拉进 tests 程序，多出 8 个 node_modules 错误。
+
+### 62.3 待办 A（正在修）：随包 agent 预设的 owner 变了
+
+`desktop/e-mate-desktop/src/profile.ts:201-206` 仍解析 `@deepseek-ai/dsh/config/agent-presets`；0.1.5 的 owner 是
+`@deepseek-ai/dsh-agent-presets`（`SHIPPED_PRESET_ROOT = new URL('../presets/', import.meta.url)`，
+`packages/preset/agent-presets/src/discovery.ts:60`），随包 id 为 `standard|ptc|minimal|cordis`。
+安装态证据：`node_modules/@deepseek-ai/dsh` 是上游 CLI 包（`apps/cli`，只有 `lib/*.js`，**无 config/`），
+而 `scripts/harness-provenance.mjs` 的 sync 只拷 `lib/`。同时 persona 在 0.1.5 变成 `dsh-persona` 行的
+`prefix`/`suffix` 两个 YAML 字段（不再是单个英文句子）。`scripts/verify-packaged-runtime.ts:92-101` 钉着同一条废路径。
+另注：产品 profile 仍写 `default: code`（`packages/dsh/profile/cordis.patch.yml`），而 0.1.5 没有 `code` 预设 id；
+按根 AGENTS.md 的 2.0.18 契约（native PTC 为默认 Agent preset），应改为随包的 `ptc`。
+
+### 62.4 待办 B（尚未排序，高危）：`ctx.apiProxy` 在 0.1.5 没有 provider
+
+仓库级 + 安装态 grep 显示 **只有消费者、没有 provider**：`packages/dsh/src/profile/agent-operations.ts:45-56`（经
+`ctx.get('apiProxy').sessions.create(...)` 恢复会话）、`model-policy.ts:973-1057`、`artifact-open-boundary.ts:23-49`、
+`share.ts:252`、`dsh-plugin-knowledge/src/model-selection.ts:9`（后四者把 `apiProxy` 作为**硬 inject**，在 0.1.5 下**整体不激活**）。
+直接后果：实装应用里专家模式的 `set` 会退化为"原生会话服务尚未就绪"。0.1.5 的对应 owner 是
+`@deepseek-ai/dsh-api-session-controller` 的 `SessionController`（含 `@Remote('create')`）与各 `api/*-controller`。
+
