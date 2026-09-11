@@ -224,8 +224,14 @@ export function adaptHarnessConversationSource(source) {
   change('\t\t\t\tclassName: clsx(ConversationRoot_module_css_default.composerStack, hero && ConversationRoot_module_css_default.composerHero),\n\t\t\t\t"data-emate-composer-frame-host": "",',
     '\t\t\t\tclassName: clsx(ConversationRoot_module_css_default.composerStack, hero && ConversationRoot_module_css_default.composerHero),\n\t\t\t\t"data-emate-composer-frame-host": "",\n\t\t\t\t"data-emate-composer-fallback": "",', 'canvas/composer-fallback')
 
+  // The seat attribute must name a binding the compiled ConversationRoot scope
+  // actually declares: `pending` never existed there, so the whole render threw
+  // ReferenceError at first paint and the conversation pane stayed blank. The
+  // native selector binding is `pendingInteraction` (SessionPendingInteraction |
+  // undefined — a single interaction, not a list), so "has interactions" is a
+  // presence check, not a length check.
   change('\t\t\t\t"data-composer-seat": "",',
-    '\t\t\t\t"data-composer-seat": "",\n\t\t\t\t"data-emate-has-interactions": pending.length > 0 ? "true" : "false",', 'canvas/interaction-seat')
+    '\t\t\t\t"data-composer-seat": "",\n\t\t\t\t"data-emate-has-interactions": pendingInteraction === void 0 ? "false" : "true",', 'canvas/interaction-seat')
 
   change('\t\t\t\tclassName: ConversationRoot_module_css_default.viewArea,',
     '\t\t\t\tclassName: ConversationRoot_module_css_default.viewArea,\n\t\t\t\t"data-emate-active-view": active?.id ?? "chat",', 'canvas/active-view')

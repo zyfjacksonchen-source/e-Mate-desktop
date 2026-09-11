@@ -673,7 +673,12 @@ test('native composer hiding uses active view projection and keeps pending inter
   // These attrs are emitted by native owners; no DOM listener or duplicate
   // composer implementation supplies view or interaction state.
   assert.match(adapted, /"data-emate-active-view": active\?\.id \?\? "chat"/u)
-  assert.match(adapted, /"data-emate-has-interactions": pending\.length > 0 \? "true" : "false"/u)
+  // The attribute's identifier must be a binding this scope declares: the seam
+  // once emitted `pending.length > 0`, an identifier the compiled ConversationRoot
+  // never declares, which threw ReferenceError on the first conversation render.
+  const interactionAttribute = /"data-emate-has-interactions": ([A-Za-z_$][\w$]*)/u.exec(adapted)
+  assert.ok(interactionAttribute !== null, 'the interaction seat attribute is missing')
+  assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSessionPendingInteraction', 'u'))
   assert.match(adapted, /beforeViewNavigate: \(view\) => emateCanvasBeforeView\(ctx, sessionId, view\)/u)
 })
 
