@@ -552,12 +552,18 @@ function adaptedPluginPatch(source: string, name: string): ReadonlyMap<string, s
   const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as ManagedBundleManifest
   if (manifest.dsh.client?.platform === 'web') return new Map()
   const patchName = manifest.dsh.bundle.patch.replace(/^\.\//u, '')
-  let patch = readFileSync(join(source, patchName), 'utf8')
+  const patch = readFileSync(join(source, patchName), 'utf8')
   if (emptyPatch(patch)) return new Map()
+  // 0.1.5 anchors a name that is absolute or starts with ./ beside the DECLARING
+  // patch file (boot/app-boot/src/index.ts anchorInsertedPluginNames), so rewriting
+  // this row to './node_modules/<name>/<main>' resolved to a doubled path under the
+  // profile and no component ever loaded. The product's bare specifier resolves
+  // through the profile's own node_modules, which is where the component is
+  // installed, so the row is kept as written — with the same fail-loud check that
+  // the entry it names is the one this package declares.
   const marker = `name: '${name}'`
   if (patch.split(marker).length !== 2) throw new Error(`${name} bundle entry is not uniquely localizable`)
-  patch = patch.replace(marker, `name: './node_modules/${name}/${manifest.main}'`)
-  return new Map([[patchName, patch]])
+  return new Map()
 }
 
 function adaptedEcosystemPatch(

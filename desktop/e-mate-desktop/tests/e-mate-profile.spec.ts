@@ -301,7 +301,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(rows.find(row => row.id === 'desktop-agent-update')?.disabled).not.toBe(true)
     expect(rows.map(row => row.id)).not.toContain('desktop-computer-use-setup')
     expect(rows.find(row => row.id === 'emate-cdp')).toEqual(expect.objectContaining({
-      name: './node_modules/@e-mate/dsh-plugin-cdp/lib/index.mjs',
+      name: '@e-mate/dsh-plugin-cdp',
     }))
     expect(rows.map(row => row.id)).not.toContain('bridge-browser')
     expect(rows.find(row => row.id === 'emate-genui')).toEqual(expect.objectContaining({
@@ -350,18 +350,22 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       name: '@e-mate/dsh-plugin-find-skill',
     }))
     expect(rows.find(row => row.id === 'emate-mcp-manage')).toEqual(expect.objectContaining({
-      name: './node_modules/@e-mate/dsh-plugin-mcp-manage/lib/index.mjs',
+      name: '@e-mate/dsh-plugin-mcp-manage',
     }))
     expect(rows.map(row => row.id)).not.toContain('emate-xin-assistant')
     expect(rows.find(row => row.id === 'emate-office-skills')).toEqual(expect.objectContaining({
-      name: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
+      name: '@e-mate/dsh-plugin-office-skills',
     }))
     expect(rows.some(row => row.id === 'univer')).toBe(false)
     const agentOperations = rows.find(row => row.id === 'emate-agent-operations')
     expect(agentOperations).toEqual(expect.objectContaining({
-      name: './plugins/agent-operations.js',
       inject: ['systemPrompt', 'connection', 'sessions'],
     }))
+    // 0.1.5 anchors an inserted './…' name beside the patch file that declares it
+    // (app-boot anchorInsertedPluginNames), so this profile-root row composes as a
+    // file URL naming the profile's own plugin file.
+    expect(new URL(agentOperations!.name!, pathToFileURL(join(profile, 'package.json'))).href)
+      .toBe(pathToFileURL(join(profile, 'plugins', 'agent-operations.js')).href)
     expect(agentOperations?.disabled).not.toBe(true)
     // Boot the composed Desktop row with the pinned native services. A template
     // assertion alone missed the Desktop override that removed this HTTP route.
@@ -380,7 +384,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       services.push(sessionController)
       await sessionController.await()
       provideHostApiProxySeam(ctx)
-      const moduleUrl = pathToFileURL(join(profile, agentOperations!.name!)).href
+      const moduleUrl = new URL(agentOperations!.name!, pathToFileURL(join(profile, 'package.json'))).href
       const plugin = await import(/* @vite-ignore */ moduleUrl)
       const fiber = ctx.plugin(plugin)
       services.push(fiber)
@@ -438,7 +442,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       for (const fiber of services.reverse()) await fiber.dispose()
     }
     expect(rows.find(row => row.id === 'emate-schedules')).toEqual(expect.objectContaining({
-      name: './node_modules/@e-mate/dsh-plugin-schedules/lib/index.js',
+      name: '@e-mate/dsh-plugin-schedules',
       inject: ['connection', 'sessionPersistence'],
     }))
     const schedules = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules', 'lib', 'index.js'), 'utf8')
