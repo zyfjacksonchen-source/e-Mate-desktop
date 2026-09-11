@@ -2432,3 +2432,34 @@ e-mate 只保留"值优先从 keychain 解析"的一层（需确认 0.1.5 是否
 ③ overlay 内容应只做"不渲染该轨道"这一件事，并在补丁注释与 facts 里写明原因（Path C = 用户选择的完整接管）。
 折叠侧的让位是**原生设置**，不需要补丁：`transcriptView: 'normal'`（`ui-chat/src/chat-settings.ts:12-18` 的既有键）。
 
+
+### 76.1 账本里 18 条"无自带测试的修复"清单（objective 明确要求逐条补定向检查）
+
+来源：`docs/2.0.18/regression-ledger.json` 的 `entries` 中 `guards` 为空者（`total 411 / fixes 236 / withGuard 218 / withoutGuard 18`）。
+**已完成 1 条**：#17 专家模式橙点（`077f524469`，2 条新规格 + 283/283 全绿）。
+
+| # | hash | 主题 | 检查落点建议 |
+|---|---|---|---|
+| 1 | `3be5826b3b` | windows 手动更新回执准入 | 回执解析/准入的 host 单测 |
+| 2 | `d0603b731a` | 桌面包 typecheck 程序分区 | ✅ 已有事实：host/client/tests 三面各自 0 错（`tsconfig.*.json`），可写成断言 |
+| 3 | `fb90ab94d8` | skill-hub 发出 Base ABI 对齐 | `packages/dsh-plugin-skill-hub/test/*` 增断言 |
+| 4 | `4fb3e06b61` | 大批量选择时策略控件仍可见 | shell 规格（需真实渲染） |
+| 5 | `7cf82e2cd5` | 受限 Skill Hub 快照导入钉 Node 24 | 快照脚本断言 |
+| 6 | `5793e06dab` | canvas 私有归档依赖进原生桌面启动 | 打包闭包检查（与 #11 同法） |
+| 7 | `c3ec64ae45` | gallery 轮播控件避让图片操作 | shell 规格 |
+| 8 | `f25c27c7be` | knowledge 实时 UI 读取绑定规范 Xin 操作 | knowledge 规格 |
+| 9 | `680b689501` | canvas 批量图片操作 hover/focus 显现 | shell 规格 |
+| 10 | `ab3ba14215` | 打包前重建产品 profile | ✅ 可做：断言 `build` 链里 profile 重建先于打包 |
+| 11 | `2ba3b09416` | 打包前物化**每一个**产品组件 | ✅ **最该做**：对 `component-inventory.json` 逐组件断言物化后行名可解析到磁盘上存在的入口（我们刚修的裸名问题正是这条的反面） |
+| 12 | `820267ca3d` | shell：浅色图上 canvas hover 动作可读 | shell 规格 |
+| 13 | `d1012e633b` | 跨 checkout 保留源码伴生字节 | 构建脚本断言 |
+| 14 | `3aa78749ba` | office：可选 PPT 复核 vs 默认门禁 | office 规格 |
+| 15 | `dbefa84bb9` | profile：为工具边界声明钉住的 web-react 运行时导入 | 组件清单/接缝断言 |
+| 16 | `987725f7e0` | shell：活动轮关闭时停止嵌套 shimmer | shell 规格 |
+| 17 | `077f524469` | 专家模式橙点 | ✅ **已完成** |
+| 18 | `26b2f789ec` | 使用受支持的图片包装 + 原生服务端模型映射 | imagegen/模型映射规格 |
+
+**执行建议顺序**（先做"有现成事实、只差写成断言"的三条，再攻 UI 渲染类）：
+#11 → #10 → #2 → #15 → #6 → 其余 UI 类。每条都必须**新写**一个可失败、可复现的断言（不是叙述性说明），
+并在账本 `entries[hash].guards` 里补上对应文件路径，使 `withoutGuard` 计数下降。
+
