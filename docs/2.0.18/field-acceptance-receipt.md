@@ -199,6 +199,21 @@ CONSOLE:11570] "slot entry crashed in 'main.conversation': ReferenceError: pendi
 canvas / better-sidebar / shell 内部模块），并用 `window.addEventListener('error')` 或 React 组件栈取到确切组件名；
 不修好这条，B–F 组与处理侧性能都无法执行。
 
+## 附录：本机实机操作的复现配方（不含量值）
+
+1. 启动：`open -a e-Mate`（**必须**走 LaunchServices；直接执行 `Contents/MacOS/e-Mate` 会走 web 模式并打开系统浏览器，
+   窗口不出现）。启动后 `127.0.0.1:3080` LISTEN。
+2. 让 Computer Use 能用：先 `osascript -e 'tell application "e-Mate" to activate'`。
+   目标 App 不是 frontmost 时，坐标点击会落到进程但没有焦点、`computer_press_key` 的粘贴也不会生效
+   （实测：`agentCursor.reason = "the bound target application is not frontmost"`）。
+3. 登录（窗口 1280×787，`coordinateSpace: window`）：
+   账号框 `(992, 353)`、密码框 `(992, 430)`、`登录` 按钮 `(992, 533)`、`保持登录` 复选框 `(778, 483)`。
+   凭据来源：用户提供的私有文件（值只经 `pbcopy` 从文件进剪贴板、再 `Cmd+V` 粘入，**从不打印**）：
+   管理端账号/密码取自 `~/Desktop/e-Mate-管理端与审计面板账号.txt` 第 6、7 行。
+   **先勾选"保持登录"**（否则重启即回到登录页，每轮隔离实验都要重新登录）。
+4. 关掉再改 profile 做隔离时，别忘了把 `profiles/e-mate/package.json` 的 `dsh.profile.bundles` 改回去
+   （本轮已还原为 23 项，含 `@e-mate/dsh-plugin-turn-fold`）。
+
 ## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
 
 `dist/e-Mate-2.0.18-win-x64-Setup.exe` 335410291 字节 / sha256 `67797411…`；
