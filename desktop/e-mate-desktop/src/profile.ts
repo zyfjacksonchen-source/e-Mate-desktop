@@ -197,31 +197,54 @@ export function ensureDesktopProfile(home: string = resolveDshHome()): string {
   return dir
 }
 
-/** Resolve the complete agent-preset set shipped by the matching dsh CLI dependency. */
+/** Resolve the complete agent-preset set shipped by its 0.1.5 owner. */
 export function shippedPresetRoot(moduleUrl: string = import.meta.url): string {
   const require = createRequire(moduleUrl)
   return unpackedAsarPath(
-    join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'config', 'agent-presets'),
+    join(dirname(require.resolve('@deepseek-ai/dsh-agent-presets/package.json')), 'presets'),
   )
 }
 
 /** Preserve the shipped Standard and PTC compositions, replacing only the product persona. */
 function managedPresetRoot(profileDir: string): string {
   const targetRoot = join(profileDir, 'agent-presets')
-  const targetPersona = 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.'
   const persona = '你是小芯，用户的 AI 办公助手。你运行在 e-Mate 内，是亦芯开发的全场景办公 AI Agent。自我介绍时使用第一人称：“我是小芯，你的 AI 办公助手。我运行在 e-Mate 内，是亦芯开发的全场景办公 AI Agent。” 当前工作目录是 {{cwd}}。当前会话默认具有完全访问权限；普通 Bash 或 PowerShell 调用不要设置 sandbox_permissions 或 justification，只有工具实际返回沙箱拒绝并明确提示可升级时，才按提示重试一次。'
-  for (const id of ['standard', 'code']) {
+  for (const id of ['standard', 'ptc']) {
     const source = join(shippedPresetRoot(), id)
     const target = join(targetRoot, id)
     const original = readFileSync(join(source, 'agent.cordis.yml'), 'utf8')
-    if (!original.includes(targetPersona)) {
-      throw new Error(`${BIN_NAME}: pinned ${id} preset persona contract changed`)
+    const rewritten = replacePersonaRow(original, persona)
+    if (rewritten === undefined) {
+      throw new Error(`${BIN_NAME}: pinned ${id} preset persona row contract changed`)
     }
     mkdirSync(target, { recursive: true })
-    writeFileSync(join(target, 'agent.cordis.yml'), original.replace(targetPersona, persona))
+    writeFileSync(join(target, 'agent.cordis.yml'), rewritten)
     writeFileSync(join(target, 'preset.yml'), readFileSync(join(source, 'preset.yml')))
   }
   return targetRoot
+}
+
+/**
+ * Replace the pinned preset's persona row with the product persona.
+ *
+ * 0.1.5 carries the persona as the dsh-persona row's own YAML fields, so the
+ * product text becomes that row's prefix and the native cwd suffix is dropped:
+ * the product persona names the working directory itself.
+ * @param source - one shipped preset's agent.cordis.yml text.
+ * @param persona - the product persona, one physical line.
+ * @returns the rewritten preset, or undefined when the row is not where it is pinned.
+ */
+function replacePersonaRow(source: string, persona: string): string | undefined {
+  const lines = source.split('\n')
+  const row = lines.findIndex(line => line === '- id: persona')
+  if (row < 0) return undefined
+  const config = lines.findIndex((line, index) => index > row && line === '  config:')
+  if (config < 0) return undefined
+  let end = config + 1
+  while (end < lines.length && (lines[end]?.startsWith('    ') === true || lines[end]?.trim() === '')) end += 1
+  const replacement = ["    suffix: ''", '    prefix: >-', `      ${persona}`]
+  const patched = [...lines.slice(0, config + 1), ...replacement, ...lines.slice(end)]
+  return patched.join('\n')
 }
 
 /** Read a row's object config without trusting arbitrary YAML values. */
