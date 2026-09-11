@@ -14,9 +14,9 @@ import {
   type FailLoudProcess,
 } from '@deepseek-ai/dsh-app-boot'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import { getOrCreateDesktopInstallationId } from './desktop-installation-id.ts'
+import { pinHarnessHome } from './harness-home.ts'
 import {
   installDesktopDshRuntime,
   installDesktopPnpmRuntime,
@@ -200,7 +200,15 @@ async function start(): Promise<void> {
     platform: process.platform,
   })
   for (const [name, value] of Object.entries(shellEnvironmentResolution.updates)) process.env[name] = value
-  const homeDir = resolveDshHome()
+  // The product owns its Harness home: resolve it here and pin DSH_HOME for everything this
+  // process boots. A DSH_HOME inherited from the launcher names another application's home
+  // (a locally installed DeepSeek Harness, a shell profile, any tool that exports it) and
+  // must never decide where e-Mate reads sessions from or writes settings to.
+  const harnessHome = pinHarnessHome()
+  if (harnessHome.ignored !== undefined) {
+    process.stderr.write(`${BIN_NAME}: ignoring inherited DSH_HOME ${harnessHome.ignored}; this application owns ${harnessHome.home}\n`)
+  }
+  const homeDir = harnessHome.home
   const windowsVolumeConcerns = diagnoseWindowsVolumes(process.platform, [
     { label: 'application install', path: process.execPath },
     { label: 'desktop user data', path: app.getPath('userData') },
