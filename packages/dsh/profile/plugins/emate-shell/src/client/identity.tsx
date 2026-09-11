@@ -262,7 +262,8 @@ export function IdentityGate({ callIdentity }: Props) {
       for (const element of [root, ...document.body.children]) {
         if (!(element instanceof HTMLElement) || element.matches('[data-emate-identity-gate]')
           || element.tagName === 'SCRIPT' || background.has(element)) continue
-        background.set(element, { inert: element.inert, hidden: element.hidden })
+        // A dialog host can hide an element with `hidden="until-found"`; only the boolean state is restored.
+        background.set(element, { inert: element.inert, hidden: element.hidden === true })
         element.inert = true
         element.hidden = true
       }

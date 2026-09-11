@@ -7,7 +7,7 @@ const STATUS_SELECTOR = '[role="status"][aria-live="polite"]'
 
 function targetLabel(node: HTMLElement): Text | undefined {
   return [...node.childNodes].find((child): child is Text =>
-    child.nodeType === Node.TEXT_NODE && child.textContent?.trimStart().startsWith(TARGET_LABEL),
+    child.nodeType === Node.TEXT_NODE && (child.textContent?.trimStart().startsWith(TARGET_LABEL) ?? false),
   )
 }
 

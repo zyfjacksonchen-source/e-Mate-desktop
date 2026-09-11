@@ -1,0 +1,54 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "../../../../../upstream/deepseek-harness/node_modules/@types"
+    ],
+    "paths": {
+      "react": [
+        "../../../../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react"
+      ],
+      "react/*": [
+        "../../../../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react/*"
+      ],
+      "react-dom": [
+        "../../../../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/@types/react-dom"
+      ],
+      "@deepseek-ai/cordis": [
+        "../../../../../upstream/deepseek-harness/vendor/cordis/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-host-webserver": [
+        "../../../../../upstream/deepseek-harness/packages/host/webserver/src/index.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-slots": [
+        "../../../../../upstream/deepseek-harness/packages/client/ui-slots/src/index.ts"
+      ],
+      "@deepseek-ai/dsh-session/types": [
+        "../../../../../upstream/deepseek-harness/packages/core/session/src/types.ts"
+      ],
+      "@deepseek-ai/dsh-session": [
+        "../../../../../upstream/deepseek-harness/packages/core/session/src/index.ts"
+      ],
+      "@deepseek-ai/dsh-session-projection/types": [
+        "../../../../../upstream/deepseek-harness/packages/session/session-projection/src/types.ts"
+      ],
+      "@deepseek-ai/dsh-session-projection": [
+        "../../../../../upstream/deepseek-harness/packages/session/session-projection/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
+}

@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs'
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 
 export const inject = ['webServer']
 
-const assets = new Map([
+const assets = new Map<string, readonly [Buffer, string]>([
   ['/assets/e-mate/logo.png', [readFileSync(new URL('./assets/emate-logo.png', import.meta.url)), 'image/png']],
   ['/assets/e-mate/mark.png', [readFileSync(new URL('./assets/emate-mark.png', import.meta.url)), 'image/png']],
   ['/assets/e-mate/team-hero.png', [readFileSync(new URL('./assets/e-mate-team-hero-transparent.png', import.meta.url)), 'image/png']],
@@ -21,7 +23,7 @@ const manifest = Buffer.from(`${JSON.stringify({
   icons: [{ src: '/assets/e-mate/xiaoxin-avatar.png', sizes: '1332x1280', type: 'image/png', purpose: 'any' }],
 })}\n`)
 
-export function apply(ctx) {
+export function apply(ctx: Context): void {
   for (const [path, [body, contentType]] of assets) {
     ctx.effect(() => ctx.webServer.register({
       kind: 'exact',

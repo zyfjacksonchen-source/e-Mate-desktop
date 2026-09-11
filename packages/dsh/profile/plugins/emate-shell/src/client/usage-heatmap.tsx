@@ -102,13 +102,15 @@ export function validUsageActivity(value: unknown, query: Query): value is Usage
     || typeof activity.calculated_at !== 'string'
     || !Number.isFinite(Date.parse(activity.calculated_at))
     || new Date(activity.calculated_at).toISOString() !== activity.calculated_at) return false
+  const periodTotal = activity.period_total
+  if (periodTotal === undefined) return false
   let total = 0n
   for (let index = 0; index < activity.days.length; index += 1) {
     const day = activity.days[index]
     if (!validDay(day, dateString(start + index * DAY_MS))) return false
     total += BigInt(day.total)
   }
-  return total === BigInt(activity.period_total)
+  return total === BigInt(periodTotal)
 }
 
 function exact(value: bigint): string {
@@ -158,7 +160,7 @@ export function UsageHeatmap({ callIdentity }: Props) {
     let current = true
     setLoading(true)
     setError(null)
-    void callIdentity('identity.usage.activity', query).then(result => {
+    void callIdentity('identity.usage.activity', { ...query }).then(result => {
       if (!current) return
       if (!result.ok) throw new Error(result.error?.message ?? 'Token 使用数据暂时不可用，请稍后重试。')
       if (!validUsageActivity(result.value, query)) throw new Error('Token 使用服务返回了无效数据。')

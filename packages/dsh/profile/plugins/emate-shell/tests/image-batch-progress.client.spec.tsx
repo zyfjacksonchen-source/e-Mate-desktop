@@ -24,6 +24,11 @@ import { ArtifactTerminal, imageCallsDefinition, selectArtifactTerminal } from '
 // over MessageImage): one tile per image, loaded through the owner's loader, with
 // labels resolved from the conversation dictionary. data-attachment-id is test
 // instrumentation the native thumbnail does not carry.
+/** 0.1.5 keeps registered view targets in `views`; these fixtures drive the chat view through it. */
+function conversationSnapshot(chat: unknown): never {
+  return { views: { get: (target: string) => (target === 'chat' ? chat : undefined) }, activeTargets: new Set(['chat']) } as never
+}
+
 const SLOT_LABELS = {
   image: '图片',
   open: '查看原图',
@@ -353,7 +358,7 @@ describe('live image batch progress', () => {
     ] } } } as never)
     const common = {
       sessionId: parentSessionId, seq: 20, openFile: vi.fn(),
-      useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => [], get: () => undefined }, locations: { getTurn: () => [] } } }),
+      useSession: (selector: (value: unknown) => unknown) => selector(conversationSnapshot({ nodes: { values: () => [], get: () => undefined }, locations: { getTurn: () => [] } })),
       useSessions: sessions.useSessions,
       useInput: (selector: (value: unknown) => unknown) => selector({ attachmentIds: [], phase: 'plain' }),
       useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
@@ -405,9 +410,9 @@ describe('live image batch progress', () => {
     const props = {
       sessionId: parentSessionId, seq: 20, turn, openFile: vi.fn(),
       matched: { callIds: [parentCallId], batchCallIds: [parentCallId], paths: [], childSessionIds: [] },
-      useSession: (selector: (value: unknown) => unknown) => selector({ chat: {
+      useSession: (selector: (value: unknown) => unknown) => selector(conversationSnapshot({
         nodes: new Map([['output', node]]), locations: { getTurn: () => ['output'] },
-      } }),
+      })),
       useSessions: sessions.useSessions,
       useInput: (selector: (value: unknown) => unknown) => selector({ attachmentIds: [], phase: 'plain' }),
       useProjection: useProjectionFrom(store), loadImage: vi.fn(async () => 'blob:image'),
@@ -584,7 +589,9 @@ describe('live image batch progress', () => {
     expect(conversation).toContain('function revokePreview(url: string): void {')
     expect(batchCss).toContain('@media (prefers-reduced-motion: reduce)')
     expect(batchCss).toContain('.failures:focus-visible')
-    expect(gallerySource).toContain('snapshot.chat.timeline.turnOrder.at(-1)')
+    // 0.1.5 keeps the chat target in the Conversation snapshot's registered views.
+    expect(gallerySource).toContain("views?.get('chat')")
+    expect(gallerySource).toContain('chat.timeline.turnOrder.at(-1)')
     expect(gallerySource).not.toContain('for (const turn of snapshot')
   })
 

@@ -43,6 +43,11 @@ import { createTransientGalleryNotice, registerImageGallery } from '../src/clien
 import { LegacyArtifacts } from '../src/client/legacy-artifacts.tsx'
 import fileCss from '../../../../../dsh-plugin-file-import/src/client/style.module.css'
 
+/** 0.1.5 keeps registered view targets in `views`; these fixtures drive the chat view through it. */
+function conversationSnapshot(chat: unknown): never {
+  return { views: { get: (target: string) => (target === 'chat' ? chat : undefined) }, activeTargets: new Set(['chat']) } as never
+}
+
 const nativeImageRendering = vi.hoisted(() => ({ enabled: false }))
 vi.mock('@deepseek-ai/dsh-client-ui-attachment', async () => {
   const actual = await vi.importActual<typeof import('@deepseek-ai/dsh-client-ui-attachment')>('@deepseek-ai/dsh-client-ui-attachment')
@@ -201,7 +206,7 @@ function terminalProps(
     turn: turn({}),
     seq: 20,
     openFile: vi.fn(),
-    useSession: (selector: (value: unknown) => unknown) => selector({ chat: chatNodeFixture(nodes) }),
+    useSession: (selector: (value: unknown) => unknown) => selector(conversationSnapshot(chatNodeFixture(nodes))),
     useSessions: (selector: (value: unknown) => unknown) => selector({ byId: { 'session-1': { cwd: '/work' } } }),
     useInput: (selector: (value: unknown) => unknown) => selector({ attachmentIds: [], phase: 'plain' }),
     useProjection: projectionHook(),
@@ -246,12 +251,10 @@ function galleryProps(
 ) {
   return {
     sessionId,
-    useSession: (selector: (value: unknown) => unknown) => selector({
-      chat: {
-        ...chatNodeFixture(nodes),
-        timeline: { turnOrder: [], turns: new Map() },
-      },
-    }),
+    useSession: (selector: (value: unknown) => unknown) => selector(conversationSnapshot({
+      ...chatNodeFixture(nodes),
+      timeline: { turnOrder: [], turns: new Map() },
+    })),
     useSessions: (selector: (value: unknown) => unknown) => selector({
       byId: { [sessionId]: {} }, subagentsByParent: {},
     }),
@@ -684,14 +687,12 @@ describe('completed artifact terminal', () => {
     )).toEqual([])
 
     const props = (batchCalls: readonly unknown[]) => galleryProps(parentId, [], {
-      useSession: (selector: (value: unknown) => unknown) => selector({
-        chat: {
-          nodes: { values: () => [][Symbol.iterator]() },
-          timeline: {
-            turnOrder: [1], turns: new Map([[1, { data: { get: () => ({ batchCalls }) } }]]),
-          },
+      useSession: (selector: (value: unknown) => unknown) => selector(conversationSnapshot({
+        nodes: { values: () => [][Symbol.iterator]() },
+        timeline: {
+          turnOrder: [1], turns: new Map([[1, { data: { get: () => ({ batchCalls }) } }]]),
         },
-      }),
+      })),
       useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
       useProjection: projectionHook([]),
     })
@@ -1446,7 +1447,7 @@ describe('indexed terminal projection', () => {
     const values = vi.fn(() => [...rows.values()])
     const getTurn = vi.fn((turn: number) => turn === 1 ? [...rows.keys()] : [])
     const chat = { nodes: { get, values }, locations: { getTurn } }
-    let snapshot = { chat }
+    let snapshot = conversationSnapshot(chat)
     const listeners = new Set<() => void>()
     const useSession = bindSnapshotSelector({ getSnapshot: () => snapshot, subscribe: fn => { listeners.add(fn); return () => { listeners.delete(fn) } } })
     const childProjection = vi.fn(() => { throw new Error('unrelated child must not be read') })
@@ -1455,16 +1456,16 @@ describe('indexed terminal projection', () => {
     render(<ArtifactTerminal {...props as any} />)
     expect(screen.getByRole('button', {name: 'result.png，点击查看原图'})).toBeTruthy()
     get.mockClear()
-    for(let i = 0; i < 20; i++) act(() => { snapshot = {chat}; listeners.forEach(fn => fn()) })
+    for(let i = 0; i < 20; i++) act(() => { snapshot = conversationSnapshot(chat); listeners.forEach(fn => fn()) })
     expect(values).not.toHaveBeenCalled()
     expect(childProjection).not.toHaveBeenCalled()
     expect(get.mock.calls.every(([key]) => key === 'receipt')).toBe(true)
     act(() => {
       rows.set('receipt', hidden({...original, revision: 3, attachment: {...attachment, name: 'updated.png'}}))
-      snapshot = {chat}; listeners.forEach(fn => fn())
+      snapshot = conversationSnapshot(chat); listeners.forEach(fn => fn())
     })
     expect(screen.getByRole('button', {name: 'updated.png，点击查看原图'})).toBeTruthy()
-    act(() => { rows.clear(); snapshot = {chat}; listeners.forEach(fn => fn()) })
+    act(() => { rows.clear(); snapshot = conversationSnapshot(chat); listeners.forEach(fn => fn()) })
     expect(screen.queryByRole('button', {name: /查看原图/})).toBeNull()
   })
 })
@@ -1543,7 +1544,8 @@ describe('native typed tool image outputs', () => {
     const blocks = [{ kind: 'text', text: '保留说明' }, { kind: 'image', attachment: original.attachment }]
     const assistant = { location: rows[0].location, data: { blocks } }
     const nodes = new Map(rows.map((row, index) => [String(index), row]))
-    const filtered = filter({ chat: { nodes, locations: { getTurn: () => [...nodes.keys()] } } }, assistant)
+    // The adapter seam receives the chat view snapshot itself, not the Conversation wrapper.
+    const filtered = filter({ nodes, locations: { getTurn: () => [...nodes.keys()] } }, assistant)
     const terminal = terminalImageItems(rows, ['generated'], 1)
     expect(filtered).toEqual([blocks[0]])
     expect(terminal).toEqual([strict])
@@ -1699,9 +1701,9 @@ describe('dsh-imagegen native receipt integration', () => {
 it('native result presentation restores query images without re-reading JSON text or duplicating Gallery images', () => {
   const original = parseImageOutputGroup(v3Receipt())!
   const query = { key: 'query', kind: 'tool-call', location: { kind: 'turn', turn: turn({}, 2, 'open') }, data: {
+    // 0.1.5 publishes typed result content on the node itself; the model's JSON text stays text.
     root: { kind: 'tool-result', callId: 'query-call', seq: 12, time: 12, isError: false, subCalls: [],
-      content: [{ type: 'text', text: 'model JSON remains text' }],
-      resultView: { card: 'generic', content: [{ type: 'image', attachment }] } },
+      content: [{ type: 'text', text: 'model JSON remains text' }, { type: 'image', attachment }] },
   } }
   const nodes = [{ ...hidden(original.items[0]!), data: original }, query]
   expect(terminalImageItems(nodes as never, ['query-call'], 2)).toMatchObject([{ callId: 'query-call', attachment }])

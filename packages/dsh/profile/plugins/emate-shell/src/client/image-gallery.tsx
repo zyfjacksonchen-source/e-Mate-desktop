@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject, RefObject } from 'react'
-import type { ChatConversationViewNode, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { ChatConversationViewNode, ChatSnapshot, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {
   ConversationLocation,
   ConversationNodeContext,
@@ -11,6 +11,7 @@ import type {
   UseConversation,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionListState, UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import {
@@ -290,6 +291,8 @@ export const subagentSettledDefinition: ConversationNodeDefinition<SubagentSettl
     const sessionId = settledSessionId(event)
     return sessionId === null ? null : { id: `${sessionId}:${event.seq}`, role: 'start' }
   },
+  // This Definition claims only start Matches; a post-start Match keeps the State it created.
+  update: context => context.state,
   start: (context, match, reader) => {
     const sessionId = settledSessionId(match.event)
     if (sessionId === null) throw new Error('subagent settlement marker requires a native sender Session')
@@ -466,7 +469,9 @@ function nativeToolImageItems(
   const images: Array<ImageGalleryItem & { attachment: ImageAttachmentRef }> = []
   const visit = (block: ToolCallBlock): void => {
     if ('kind' in block && !block.isError && block.seq <= throughSeq) {
-      const content = [...block.content, ...(block.resultView?.card === 'generic' ? block.resultView.content ?? [] : [])]
+      // 0.1.5 publishes the typed result content on the node; the lazily derived
+      // generic card view it used to merge in is no longer part of the contract.
+      const content = [...block.content]
       for (const part of content) {
         if (part.type !== 'image') continue
         images.push({ callId: block.callId, revision: 0, status: 'completed', operation: 'unknown',
@@ -638,7 +643,7 @@ export function childGalleryImageItems(
     readonly seq: number
     readonly ordinal: number
   }> = []
-  const entries = sessions.subagentsByParent?.[parentSessionId]?.entries ?? []
+  const entries = sessionOf(sessions.subagentsByParent ?? {}, parentSessionId)?.entries ?? []
   for (const [index, entry] of entries.entries()) {
     if (entry.kind !== 'child' || selectedChildren && !selectedChildren.has(entry.id)) continue
     const summary = sessions.byId[entry.id]
@@ -713,10 +718,24 @@ export function schemaAwareChildGalleryImageItems(
   })
 }
 
+/** Wire session ids arrive as plain strings; the native session list is keyed by branded SessionId. */
+function sessionOf<T>(byId: Readonly<Record<SessionId, T>>, sessionId: string): T | undefined {
+  return byId[sessionId as SessionId]
+}
+
+/** The registered native chat view of one Conversation snapshot (0.1.5 keeps targets in `views`).
+ * A selector can run before a Session binding exists, so the snapshot itself may be absent.
+ */
+function chatViewOf(snapshot: ConversationSnapshot | undefined): ChatSnapshot | undefined {
+  return snapshot?.views?.get('chat')
+}
+
 function snapshotHasImageBatchCall(snapshot: ConversationSnapshot): boolean {
-  const current = snapshot.chat.timeline.turnOrder.at(-1)
+  const chat = chatViewOf(snapshot)
+  if (chat === undefined) return false
+  const current = chat.timeline.turnOrder.at(-1)
   if (current === undefined) return false
-  const data = snapshot.chat.timeline.turns.get(current)?.data.get('e-mate-image-calls')
+  const data = chat.timeline.turns.get(current)?.data.get('e-mate-image-calls')
   return (data?.batchCalls?.length ?? 0) > 0
 }
 
@@ -833,13 +852,13 @@ export function ImageGalleryView({
 }: ImageGalleryViewProps) {
   const snapshot = useSession(value => value)
   const sessions = useSessions(value => value)
-  const title = sessions.byId[sessionId]?.title
+  const title = sessionOf(sessions.byId, sessionId)?.title
   const input = useInput(value => value)
   const limits = useProjection('imageLimits')
   const batchView = useImageBatchProjection(useProjection, sessionId)
   const items = namedGalleryImageItems([
     ...schemaAwareChildGalleryImageItems(sessions, sessionId, batchView, snapshotHasImageBatchCall(snapshot)),
-    ...galleryImageItems(snapshot.chat.nodes.values()),
+    ...galleryImageItems(chatViewOf(snapshot)?.nodes.values() ?? []),
   ], title ?? '')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<keyof typeof galleryStatus>('all')
@@ -973,7 +992,7 @@ export function ImageGalleryView({
 
 function Menu({ state, menuRef, buttonRefs, close, activate }: {
   readonly state: MenuState
-  readonly menuRef: RefObject<HTMLDivElement | null>
+  readonly menuRef: RefObject<HTMLDivElement>
   readonly buttonRefs: MutableRefObject<Array<HTMLButtonElement | null>>
   readonly close: () => void
   readonly activate: (action: string) => void
@@ -1186,16 +1205,20 @@ function ArtifactTerminalBody({
   const [menu, setMenu] = useState<MenuState | null>(null)
   const input = useInput(value => value)
   const limits = useProjection('imageLimits')
-  const summary = useSessions(value => value.byId[sessionId],
+  const summary = useSessions(value => sessionOf(value.byId, sessionId),
     (left, right) => left?.title === right?.title && left?.cwd === right?.cwd)
   const title = summary?.title
   const root = summary?.cwd
   const ambiguousBatch = (matched.batchCallIds?.length ?? 0) > 0 && batches.length === 0
   // rc.7 readers are live objects: compare the actual indexed nodes, not store identity.
-  const nodes = useSession(value => value.chat.locations.getTurn(turn.turn).flatMap(key => {
-    const node = value.chat.nodes.get(key)
-    return node === undefined ? [] : [node]
-  }), (left, right) => left.length === right.length && left.every((node, index) => node === right[index]))
+  const nodes = useSession(value => {
+    const chat = chatViewOf(value)
+    if (chat === undefined) return []
+    return chat.locations.getTurn(turn.turn).flatMap(key => {
+      const node = chat.nodes.get(key)
+      return node === undefined ? [] : [node]
+    })
+  }, (left, right) => left.length === right.length && left.every((node, index) => node === right[index]))
   // The selector reads published Turn data only in 0.1.5; the node-derived facts
   // replace the `owner.nodes` it used to receive from the rc.7 chain dispatch.
   const nodeFacts = useMemo(
@@ -1213,7 +1236,7 @@ function ArtifactTerminalBody({
   const includeChildren = !ambiguousBatch && (childSessionIds.length > 0 || matched.foregroundWindow !== undefined)
   const sessions = useSessions(value => includeChildren || batches.length > 0 ? value : undefined)
   const settled = useSession(value => includeChildren && matched.foregroundWindow !== undefined
-    ? settledChildSessions(value.chat.nodes.values()) : NO_BATCH_CHILD_IDS,
+    ? settledChildSessions(chatViewOf(value)?.nodes.values() ?? []) : NO_BATCH_CHILD_IDS,
   (left, right) => left.size === right.size && [...left].every(id => right.has(id)))
   const items = useMemo(
     () => {
@@ -1281,12 +1304,16 @@ function ArtifactTerminalBody({
     if (target.kind === 'image') {
       const attachment = target.item.attachment
       if (attachment === undefined) return Promise.reject(new Error('图片附件不可用'))
+      if (action !== 'save-as' && action !== 'reveal' && action !== 'copy-image') {
+        return Promise.reject(new Error('此操作不适用于图片资源'))
+      }
       const ownerSessionId = target.item.source?.sessionId ?? sessionId
       return loadImage(attachment, ownerSessionId).then(src => runResource({ action, resource: {
         kind: 'image', sessionId: ownerSessionId, name: galleryAttachmentName(attachment), src,
       } }))
     }
     if (root === undefined) return Promise.reject(new Error('当前工作区不可用'))
+    if (action === 'copy-image') return Promise.reject(new Error('此操作仅适用于图片资源'))
     const path = normalizedAbsolute(root, target.path)
     if (path === undefined) return Promise.reject(new Error('文件路径不可用'))
     return runResource({ action, resource: { kind: 'file', sessionId, root, path } })
