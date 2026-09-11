@@ -25,6 +25,8 @@ import {
   SEAMS,
   TARGET,
   TARGET_BUNDLE_SHA256,
+  VERIFIED_BUNDLE_SHA256,
+  WINDOWS_BUNDLE_SHA256,
   assertSeams,
   evaluateBundleHash,
   evaluateHostSymbols,
@@ -188,13 +190,26 @@ test('MISS cascade: an unresolved seam-1 anchor leaves every host symbol unresol
   assert.equal(hosts.failures.length, 6, `every unbound symbol must be reported: ${JSON.stringify(hosts.failures)}`)
 })
 
+test('SET: a platform whose seams were verified is accepted, and a foreign digest is refused', () => {
+  const windows = evaluateBundleHash(WINDOWS_BUNDLE_SHA256)
+  assert.equal(windows.result.ok, true, 'the Windows digest must be an accepted target')
+  assert.deepEqual(windows.failures, [])
+
+  const foreign = evaluateBundleHash('0'.repeat(64))
+  assert.equal(foreign.result.ok, false)
+  assert.equal(foreign.result.found, 0)
+  assert.equal(foreign.result.expect, 1)
+  assert.match(foreign.result.detail, /accepted /u, 'the refusal must name every digest the set accepts')
+  assert.equal(foreign.failures.length, 1)
+})
+
 test('PIN: the exported pin is the digest of the pinned bundle, and the runner verifies it', () => {
   const source = loadPinned()
   assert.match(TARGET_BUNDLE_SHA256, /^[0-9a-f]{64}$/u, 'the pin must be a lowercase sha256 digest')
   assert.equal(digestOf(source.target.file), TARGET_BUNDLE_SHA256, 'the pin must name the very bundle this checker reads')
 
   const report = assertSeams()
-  assert.equal(report.pinnedSha256, TARGET_BUNDLE_SHA256)
+  assert.deepEqual(report.pinnedSha256, [...VERIFIED_BUNDLE_SHA256], 'the gate reports every digest it accepts')
   assert.equal(report.fileSha256, TARGET_BUNDLE_SHA256)
   assert.equal(report.fileBytes, statSync(source.target.file).size)
   assert.equal(report.hash.id, BUNDLE_HASH_CHECK_ID)
@@ -222,7 +237,7 @@ test('RED: a wrong pin refuses the bundle before any selector is evaluated, nami
   assert.match(error.message, /^turn-fold seams failed against @deepseek-ai\/dsh-client-ui-chat@0\.1\.5-rc\.1:/u)
   assert.ok(error.message.includes(WRONG_SHA256), `the failure must name the pin: ${error.message}`)
   assert.ok(error.message.includes(actual), `the failure must name the resolved digest: ${error.message}`)
-  assert.match(error.message, /verify-bundle-hash: resolved sha256 [0-9a-f]{64} is not the verified target \(pinned [0-9a-f]{64}\)/u)
+  assert.match(error.message, /verify-bundle-hash: resolved sha256 [0-9a-f]{64} is not the verified target \(accepted [0-9a-f]{64}(?:, [0-9a-f]{64})*\)/u)
   assert.match(error.message, /no patch is authorized for this bundle/u)
 
   const report = error.report

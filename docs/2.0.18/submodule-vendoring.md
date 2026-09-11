@@ -1,8 +1,9 @@
 # Four dangling plugin submodules: vendored or removed
 
 Worktree `/Users/mac/e-mate/worktrees/emate-2.0.18-dsh015-upgrade`, branch
-`feat/2.0.18/dsh-0.1.5-upgrade`, base commit `040538c132`. **Uncommitted** — the
-whole change is staged in the index and described here.
+`feat/2.0.18/dsh-0.1.5-upgrade`, base commit `040538c132`. The change was staged in
+the index and the main agent committed it as `30763a2804`; the only later edit is the
+gate result recorded in this file.
 
 ## The defect
 
@@ -99,12 +100,28 @@ rm -rf upstream/plugins/computer-user
 
 ## Gates
 
-| Command | Exit code |
-|---|---|
-| `pnpm run test:fast` | **0** — `68 pass / 0 fail` + `38 pass / 0 fail`, 0 `not ok` markers |
-| `node scripts/component-run.mjs check --component @e-mate/dsh-plugin-computer-use` | see the run recorded below |
-| `node scripts/component-run.mjs check --component @e-mate/dsh-plugin-vision-toolkit` | see the run recorded below |
-| `node scripts/component-run.mjs check` | see the run recorded below |
+All four were run from the worktree root on the finished tree:
+
+| Command | Exit code | Result |
+|---|---|---|
+| `pnpm run test:fast` | **0** | `68 pass / 0 fail` and `38 pass / 0 fail`; 0 `not ok` markers |
+| `node scripts/component-run.mjs check --component @e-mate/dsh-plugin-computer-use` | **0** | build + `27 pass / 0 fail`. Its build script copies `lib/`, `assets/` and `scripts/build-native.mjs` straight out of the vendored tree, so this is the direct proof that the consumer still finds exactly what it copies |
+| `node scripts/component-run.mjs check --component @e-mate/dsh-plugin-vision-toolkit` | **0** | build + `8 pass / 0 fail / 13 skipped`. Every `replaceExactlyOnce` against the vendored `lib/` still matches — the vendored bytes are the ones its contract pins |
+| `node scripts/component-run.mjs check` (all components) | **0** | every suite `fail 0`; the only `✖`-looking lines in the log are the intentional negative controls `✔ MISS:` and `✔ DOUBLE:` |
+
+### One transient red, and the concurrent commit
+
+The first full `check` ended **exit 1** inside `@e-mate/dsh-plugin-turn-fold`
+(`ReferenceError: TARGET_BUNDLE_SHA256 is not defined`) while a concurrent writer was
+mid-edit on the bundle-hash pin in the same worktree. That symbol lives entirely inside
+`packages/dsh-plugin-turn-fold/**`, which this slice never touches, and its component
+`check` is **exit 0 / fail 0** both before (14 tests) and after (15 tests) the writer
+settled, as is the full gate. It was a timing artefact, not this change.
+
+While those runs were in flight the main agent committed this slice as
+`30763a2804 2.0.18: vendor the plugin trees whose pinned commits vanished from their
+upstreams` (533 A / 4 D / 1 M — 538 files, 89 853 insertions), including this document.
+The working tree is clean; the gate results above are the only later edit.
 
 ## Notes left for the main agent
 

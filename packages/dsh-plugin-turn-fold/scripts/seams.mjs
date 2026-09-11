@@ -49,6 +49,10 @@ export const TARGET = Object.freeze({
  * is the identity, and a second numeric pin would only be one more thing to disagree with it.
  */
 export const TARGET_BUNDLE_SHA256 = 'cf53ae8f5978901504286189a64506febf09cd237d097db3abf3f39b3953ba97'
+/** The digest the seams were verified against on Windows, where the same source builds a different bundle. */
+export const WINDOWS_BUNDLE_SHA256 = '9a54fa521480db27bf10857622c87ba05ad508e278ad349114294bfb02f8db7b'
+/** Every digest the seams were verified against, one entry per platform. A bundle matching none is refused. */
+export const VERIFIED_BUNDLE_SHA256 = Object.freeze([TARGET_BUNDLE_SHA256, WINDOWS_BUNDLE_SHA256])
 
 /**
  * The three selectors are copied verbatim from the vendored
@@ -242,11 +246,12 @@ export const BUNDLE_HASH_CHECK_ID = 'verify-bundle-hash'
  * @param {string} pinnedSha256 the digest that bundle must have; defaults to the pin
  * @returns {{ result: {id: string, ok: boolean, found: number, expect: number, detail: string}, failures: string[] }}
  */
-export function evaluateBundleHash(actualSha256, pinnedSha256 = TARGET_BUNDLE_SHA256) {
-  const ok = actualSha256 === pinnedSha256
+export function evaluateBundleHash(actualSha256, pinnedSha256 = VERIFIED_BUNDLE_SHA256) {
+  const accepted = Array.isArray(pinnedSha256) ? pinnedSha256 : [pinnedSha256]
+  const ok = accepted.includes(actualSha256)
   const detail = ok
     ? `resolved sha256 ${actualSha256} is the verified target`
-    : `resolved sha256 ${actualSha256} is not the verified target (pinned ${pinnedSha256})`
+    : `resolved sha256 ${actualSha256} is not the verified target (accepted ${accepted.join(', ')})`
   const result = { id: BUNDLE_HASH_CHECK_ID, ok, found: ok ? 1 : 0, expect: 1, detail }
   return { result, failures: ok ? [] : [`${BUNDLE_HASH_CHECK_ID}: ${detail}`] }
 }
@@ -339,7 +344,7 @@ export function evaluateHostSymbols(ts, sourceText, fileName, results) {
  *   resolve as declared.
  */
 export function assertSeams(options = {}) {
-  const pinnedSha256 = options.pinnedSha256 ?? TARGET_BUNDLE_SHA256
+  const pinnedSha256 = options.pinnedSha256 ?? VERIFIED_BUNDLE_SHA256
   const harnessRoot = findHarnessRoot()
   const ts = loadCompiler(harnessRoot)
   const target = locateTarget(harnessRoot, TARGET)
