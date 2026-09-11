@@ -2086,3 +2086,23 @@ desktop client/tests 面已委派专项迁移（见 §49.3 的精确定位 + 本
 - client 面：`tsc -p tsconfig.client.json` 已从 9 错收敛到 **1 错**（`ctx.layout` 与原生 `ILayout` 冲突，
   且 `layout-service.ts:12` 用 `ctx.reflect.provide('layout', …)` **抢注了原生服务名** —— 按"回到固定版 owner"的原则，
   应删除桌面自带的 layout 服务，改用原生布局 store + 右列 owner 上报）。
+
+### 51.4 一处真实回归：Windows 受限 shell 的隐藏控制台补丁被退役，但守卫仍在要求它
+
+**证据链**：
+- 守卫：`desktop/e-mate-desktop/tests/package.spec.ts:564` "starts restricted Windows shells with a hidden console show state" 要求
+  `resolutions` 里有 `@deepseek-ai/dsh-sandbox-windows-acl@npm:0.1.5-rc.1` → `./patches/dsh-sandbox-windows-acl@0.1.5-rc.1.patch`，
+  且该 patch 里 `dwFlags: 257` 与 `wShowWindow: 0` 各出现 **2 次**（`spawnSandboxed` 与 `spawnSandboxedInherited` 两条路径）。
+- 现状：`desktop/patches/` 只剩 app-builder-lib / dsh-app-boot / dsh-client-ui-workspace / dsh-win32-process 四个 patch；
+  `resolutions` 里没有 sandbox-windows-acl 条目；该补丁文件在 `e9b50a598d`（"retire absorbed overlays and re-derive harness gate seams onto 0.1.5"）
+  里被**当作"已被上游吸收"删除**，删除前内容是 12 行、2 个 hunk，目标文件是 **0.1.0-rc.7 的哈希分块** `lib/types-CNjZgO4h.js`：
+  `-\t\tdwFlags: 256` → `+\t\tdwFlags: 257` + `+\t\twShowWindow: 0`。
+- **"已被上游吸收"不成立**：0.1.5 的闭包副本 `node_modules/@deepseek-ai/dsh-sandbox-windows-acl/lib/*.js` 里
+  `grep -c "wShowWindow: 0\|dwFlags: 257"` 全为 0，且整个 `lib/` 里**根本找不到** `dwFlags`/`wShowWindow`/`createProcess`；
+  0.1.5 的 `spawnSandboxed`/`spawnSandboxedInherited` 已改为委托 `spawnPipedProcess`/`spawnInheritedJobProcess`
+  （`lib/types-DuU3lSVe.js:523/536`），控制台标志的构造点**从 JS 里消失**（很可能落到原生 addon）。
+
+**结论**：这是"同一种 bug 换个形式复现"的候选——不是补丁没打，而是**修复的落点变了**。下一步必须先在 0.1.5 里定位
+受限子进程的 `STARTUPINFO`/`dwFlags` 构造点（原生 addon `@deepseek-ai/node-addon-system` 或 subprocess provider），
+再决定：在该 owner 上恢复隐藏窗口，或在证明上游已隐藏后把守卫改成断言原生行为。**不能**只改守卫让它变绿。
+
