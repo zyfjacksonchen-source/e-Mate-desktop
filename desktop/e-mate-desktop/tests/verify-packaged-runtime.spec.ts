@@ -343,8 +343,8 @@ describe('packaged desktop runtime verification', () => {
     'lib/update-download.js',
     'node_modules/@earendil-works/pi-ai/dist/providers/data/.manifest.json',
     'node_modules/@deepseek-ai/dsh/lib/bin.js',
-    'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/agent.cordis.yml',
-    'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/skills/cordis-plugin-development/SKILL.md',
+    'node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/agent.cordis.yml',
+    'node_modules/@deepseek-ai/dsh-agent-presets/presets/cordis/skills/cordis-plugin-development/SKILL.md',
     'node_modules/pnpm/bin/pnpm.mjs',
     'node_modules/node-pty/prebuilds/win32-x64/conpty.node',
   ])('fails loud when physical runtime entry %s is absent from app.asar.unpacked', (missing) => {
