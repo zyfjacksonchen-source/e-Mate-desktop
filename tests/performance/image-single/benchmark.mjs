@@ -68,9 +68,11 @@ export function sourceSmoke() {
   const runtime = readFileSync(join(ROOT, 'packages/dsh-plugin-imagegen/src/upstream/generation-runtime.ts'), 'utf8')
   assert.match(runtime, /GenerationTaskQueue/u)
   const cas = readFileSync(join(ROOT, 'upstream/deepseek-harness/packages/attachment/attachment-local/src/store.ts'), 'utf8')
-  for (const required of ['detectImage', 'createHash', 'handle.sync()', 'syncDirectory(bucket)', 'chmod(target, 0o700)']) {
+  for (const required of ['detectImage', 'createHash', 'handle.sync()', 'chmod(target, 0o700)']) {
     assert.ok(cas.includes(required), 'pinned CAS source missing ' + required)
   }
+  // The durability step is the directory fsync; 0.1.5 names its argument per level.
+  assert.match(cas, /syncDirectory\(/u, 'pinned CAS source must fsync the directory after writing a blob')
   const worker = readFileSync(WORKER, 'utf8')
   assert.match(worker, /setTimeout as delay/u)
   assert.match(worker, /FAKE_DELAY_MS/u)

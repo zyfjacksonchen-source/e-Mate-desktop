@@ -418,7 +418,6 @@ test('three native steps preserve the real user image, omit generated model imag
     assert.equal(edited.value.status, 'completed')
     assertContext()
     assert.equal(f.calls[1].url.endsWith('/images/edits'), true)
-    assert.deepEqual(Buffer.from(await f.calls[1].init.body.get('image').arrayBuffer()), SMALL_PNG)
     assert.deepEqual(snakeRef(uploaded).attachment_id, generated.value.images[0].attachment_id)
     for (const result of [generated, queried, edited]) {
       assert.equal(result.isError, false)
@@ -426,8 +425,14 @@ test('three native steps preserve the real user image, omit generated model imag
     }
     const view = f.ctx.tools.get('generate_image').presentResult({ prompt: 'offline new image' }, generated)
     assert.equal(view.content[0].type, 'image')
-    assert.deepEqual(Buffer.from((await f.ctx.attachments.readImage(view.content[0].attachment)).data), SMALL_PNG)
-    const restored = f.Session.create(f.agent.id, f.agent.session.events, f.agent.session.header)
+    // The store normalizes on save (an alpha PNG becomes WebP), so the provider
+    // receives the stored bytes and the presented ref must describe exactly them.
+    const presented = await f.ctx.attachments.readImage(view.content[0].attachment)
+    assert.equal(presented.ref.mediaType, 'image/webp')
+    assert.equal(presented.ref.bytes, presented.data.byteLength)
+    assert.deepEqual(view.content[0].attachment, presented.ref)
+    assert.deepEqual(Buffer.from(await f.calls[1].init.body.get('image').arrayBuffer()), Buffer.from(presented.data))
+    const restored = f.Session.create(f.agent.id, f.agent.session.snapshotEvents(), f.agent.session.header)
     assert.deepEqual(restored.deriveMessages(), f.agent.session.deriveMessages())
   } finally { await f.dispose() }
 })

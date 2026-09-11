@@ -17,11 +17,14 @@ export const NATIVE_MODEL = 'gpt-image-2.5-flare'
 export const NATIVE_REQUEST_BODY = JSON.stringify({ prompt: NORMALIZED_PROMPT, model: NATIVE_MODEL })
 export const NATIVE_EXECUTION = 'dsh-imagegen-1.5.11-native-tools-jobs-session-v3'
 export const CLAIM = 'pinned-owner-lower-bound-not-native-imagegen-parity'
+// The pinned 0.1.5 attachment limits (attachment-local/src/index.ts DEFAULT_MAX_*),
+// so a silent limit change in the native owner fails this smoke loudly.
 export const ATTACHMENT_LIMITS = Object.freeze({
-  maxImageBytes: 5 * 1024 * 1024,
+  maxImageBytes: 20 * 1024 * 1024,
   maxImagesPerMessage: 20,
-  maxMessageImageBytes: 100 * 1024 * 1024,
-  maxImagePixels: 40_000_000,
+  maxMessageImageBytes: 200 * 1024 * 1024,
+  maxImagePixels: 64_000_000,
+  maxImageDimension: 8192,
   mediaTypes: Object.freeze(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
 })
 
