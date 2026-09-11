@@ -284,7 +284,7 @@ const conversationEventRegistry = {
   }
 }
 const fakeCtx = {
-  conversationEvents: conversationEventRegistry,
+  uiConversation: { events: conversationEventRegistry },
   inject(services, callback) {
     if (services.join(',') !== 'settingsScope')
       throw new Error(`unexpected ctx.inject(${JSON.stringify(services)})`)
@@ -336,7 +336,7 @@ const dockEntry = slotEntries.find(
   (entry) => entry.options.name === 'conversation.input.dock' && entry.options.id === 'univer-dock'
 )
 const tailEntry = slotEntries.find(
-  (entry) => entry.options.name === 'conversation.chat.turnTail' && entry.options.priority === -10
+  (entry) => entry.options.name === 'conversation.chat.turnTail' && entry.options.priority === 10
 )
 const settingsEntry = slotEntries.find(
   (entry) => entry.options.name === 'settings.plugin.item' && entry.options.key === 'univer-office'
@@ -353,7 +353,7 @@ if (localeDicts === null || localeDicts.ns !== 'univer')
   throw new Error('locale dictionaries not registered')
 if (conversationDefinition === null || conversationDefinition.kind !== 'univerTurn')
   throw new Error(`${conversationApi} Conversation definition not registered`)
-if (pluginExports.inject.join(',') !== 'slots,locale,conversation,conversationEvents')
+if (pluginExports.inject.join(',') !== 'slots,locale,conversation,uiConversation')
   throw new Error('Client must depend on the fixed rc.7 native Conversation registry')
 if (
   dockEntry.options.locale !== 'univer' ||
@@ -373,15 +373,15 @@ if (dockInjected.livePreview === undefined || settingsInjected.settings !== sett
   throw new Error('Settings preference injection missing')
 // ---- replay through the pinned native assembler and Chat snapshot builder ----
 const { buildSync } = repoRequire('esbuild')
-const nativeRuntime = repoRequire.resolve(
-  '@deepseek-ai/dsh-client-runtime/src/client/sessions/conversation-assembler.ts'
+const nativeAssembler = repoRequire.resolve(
+  '@deepseek-ai/dsh-client-ui-conversation/src/client/conversation/assembler.ts'
 )
 const nativeChat = repoRequire.resolve(
-  '@deepseek-ai/dsh-client-ui-conversation/src/client/conversation-nodes/chat-snapshot-builder.ts'
+  '@deepseek-ai/dsh-client-ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts'
 )
 const nativeBundle = buildSync({
   stdin: {
-    contents: `export { ConversationNodeAssembler } from ${JSON.stringify(nativeRuntime)}; export { chatViewDefinition } from ${JSON.stringify(nativeChat)};`,
+    contents: `export { ConversationNodeAssembler } from ${JSON.stringify(nativeAssembler)}; export { chatViewDefinition } from ${JSON.stringify(nativeChat)};`,
     resolveDir: dirname(here)
   },
   bundle: true,
@@ -392,11 +392,15 @@ const nativeBundle = buildSync({
 const { ConversationNodeAssembler, chatViewDefinition } = await import(
   `data:text/javascript;base64,${Buffer.from(nativeBundle).toString('base64')}`
 )
-const makeAssembler = () =>
-  new ConversationNodeAssembler(
+const makeAssembler = () => {
+  const assembler = new ConversationNodeAssembler(
     { entries: () => [conversationDefinition], fallbackEntry: () => undefined },
     { entries: () => [chatViewDefinition] }
   )
+  // 0.1.5 materializes a view target's snapshot only once the target is active.
+  assembler.activateTarget('chat')
+  return assembler
+}
 const projectionEvents = []
 const appendEvent = (type, data, extra = {}) => {
   const event = {
@@ -406,7 +410,8 @@ const appendEvent = (type, data, extra = {}) => {
     data,
     ...extra
   }
-  projectionEvents.push({ event, view: undefined })
+  // 0.1.5 history entries carry their transport discriminator.
+  projectionEvents.push({ type: 'event', event, view: undefined })
   return event
 }
 const argsFor = (file = DEMO_FILE, action) => ({
@@ -442,7 +447,7 @@ const dispatch = (
   isError = false,
   parentCallId = rootCallId
 ) =>
-  appendEvent(content === undefined ? 'tool/code-dispatch-start' : 'tool/code-dispatch', {
+  appendEvent(content === undefined ? 'tool/ptc-dispatch-start' : 'tool/ptc-dispatch', {
     rootCallId,
     parentCallId,
     subCallId,
@@ -531,36 +536,41 @@ for (const entry of projectionEvents) {
 const replayAssembler = makeAssembler()
 replayAssembler.replaceWindow([...projectionEvents].reverse(), false)
 replayAssembler.flush()
-const selectedTurn = (chat, turn) =>
-  tailEntry.options.select({
-    turn: chat.timeline.turns.get(turn),
-    nodes: chat.nodes.values(),
-    seq: 999,
-    openFile() {}
-  })
+// The 0.1.5 chain owner carries no Chat nodes, so the card reads the assembled
+// projection itself: one hidden node per root call, merged per Turn in log order.
+const turnProjection = (chat, turn) => {
+  const files = new Map()
+  for (const node of chat.nodes.values()) {
+    if (node.kind !== 'univerTurn' || node.data.turn !== turn) continue
+    for (const file of node.data.files) {
+      const operations = [...(files.get(file.file) ?? []), ...file.operations]
+      files.set(
+        file.file,
+        operations.sort((left, right) => left.seq - right.seq)
+      )
+    }
+  }
+  return [...files].map(([file, operations]) => ({ file, operations }))
+}
 const liveChat = liveAssembler.snapshot('chat')
 const replayChat = replayAssembler.snapshot('chat')
-const liveTurn = selectedTurn(liveChat, 7)
-assert.deepEqual(selectedTurn(replayChat, 7), liveTurn, 'live and cold replay projections differ')
+const liveTurn = turnProjection(liveChat, 7)
+assert.deepEqual(turnProjection(replayChat, 7), liveTurn, 'live and cold replay projections differ')
 assert.equal(liveChat.order.length, 0, 'hidden projection must not add a duplicate chat row')
 assert.deepEqual(
-  liveTurn.files.map((file) => file.file),
+  liveTurn.map((file) => file.file),
   [DEMO_FILE, SECOND_FILE, '/missing/failed.univer']
 )
-const demoOperations = liveTurn.files[0].operations
+const demoOperations = liveTurn[0].operations
 assert.deepEqual(
   demoOperations.map((op) => op.callId),
   ['code-a-create', 'code-b-write', 'code-a-ready', 'read-after-ready', 'cancel-write']
 )
 assert.equal(demoOperations.find((op) => op.callId === 'code-a-ready').action, 'ready')
 assert.equal(demoOperations.at(-1).phase, 'failed', 'cancelled Code child must not succeed')
-assert.equal(
-  liveTurn.files[2].operations[0].phase,
-  'failed',
-  'free-form prefix is not structured output'
-)
+assert.equal(liveTurn[2].operations[0].phase, 'failed', 'free-form prefix is not structured output')
 assert.deepEqual(
-  selectedTurn(liveChat, 8).files.map((file) => file.file),
+  turnProjection(liveChat, 8).map((file) => file.file),
   [SECOND_FILE],
   'turn projection leaked'
 )
@@ -579,7 +589,7 @@ liveAssembler.replaceWindow(
 )
 liveAssembler.flush()
 assert.deepEqual(
-  selectedTurn(liveAssembler.snapshot('chat'), 8).files.map((file) => file.file),
+  turnProjection(liveAssembler.snapshot('chat'), 8).map((file) => file.file),
   [SECOND_FILE]
 )
 assert.equal(
@@ -673,7 +683,11 @@ const nativeChatOf = (chat) => {
 }
 const runtimeProps = (session) => {
   const value = { ...session, chat: nativeChatOf(session.chat) }
-  return { session: value, useSession: (selector) => selector(value) }
+  return {
+    session: value,
+    useSession: (selector) => selector(value),
+    useChat: (selector) => selector(value.chat)
+  }
 }
 const rootEl = document.createElement('div')
 document.body.appendChild(rootEl)
@@ -702,14 +716,7 @@ function render(session, remount = true, cwd = SESSION_CWD) {
   reviewRoot.render(
     React.createElement(tailEntry.Component, {
       key: 's' + scenario,
-      matched: {
-        turn: session.reviewTurn ?? 3,
-        files:
-          tailEntry.options.select({
-            turn: { turn: session.reviewTurn ?? 3 },
-            nodes: nativeChatOf(session.chat).nodes.values()
-          })?.files ?? []
-      },
+      turn: { turn: session.reviewTurn ?? 3 },
       t,
       getViewerLocale: tailInjected.getViewerLocale,
       sessionId: 'test-session-id',
@@ -737,7 +744,7 @@ document.body.appendChild(tailRootEl)
 const tailRoot = createRoot(tailRootEl)
 worktrees = [wt('draft')]
 const tailProps = {
-  matched: { turn: 3, files: [turnFile(DEMO_FILE, WORKTREE)] },
+  turn: { turn: 3 },
   sessionId: 'test-session-id',
   t,
   getViewerLocale: tailInjected.getViewerLocale,
@@ -779,10 +786,12 @@ await waitFor(
 tailRoot.render(
   React.createElement(tailEntry.Component, {
     ...tailProps,
-    matched: {
-      turn: 3,
-      files: [turnFile('work_班级成绩表/班级管理.univer'), turnFile(REL_DEMO_FILE, WORKTREE)]
-    }
+    ...runtimeProps(
+      sessionWithFiles(
+        [turnFile('work_班级成绩表/班级管理.univer'), turnFile(REL_DEMO_FILE, WORKTREE)],
+        true
+      )
+    )
   })
 )
 await waitFor(
@@ -796,10 +805,12 @@ await waitFor(
 tailRoot.render(
   React.createElement(tailEntry.Component, {
     ...tailProps,
-    matched: {
-      turn: 3,
-      files: [turnFile('学生成绩表.univer'), turnFile(WINDOWS_FILE.replaceAll('\\', '/'), WORKTREE)]
-    },
+    ...runtimeProps(
+      sessionWithFiles(
+        [turnFile('学生成绩表.univer'), turnFile(WINDOWS_FILE.replaceAll('\\', '/'), WORKTREE)],
+        true
+      )
+    ),
     useSessions: (selector) => selector({ byId: { 'test-session-id': { cwd: WINDOWS_CWD } } })
   })
 )
@@ -814,7 +825,7 @@ await waitFor(
 tailRoot.render(
   React.createElement(tailEntry.Component, {
     ...tailProps,
-    matched: { turn: 3, files: [turnFile(DEMO_FILE, WORKTREE), turnFile(SECOND_FILE)] }
+    ...runtimeProps(sessionWithFiles([turnFile(DEMO_FILE, WORKTREE), turnFile(SECOND_FILE)], true))
   })
 )
 await waitFor(
@@ -869,7 +880,6 @@ const historicalSession = {
 tailRoot.render(
   React.createElement(tailEntry.Component, {
     ...tailProps,
-    matched: { turn: 3, files: [turnFile(DEMO_FILE, WORKTREE)] },
     ...runtimeProps(historicalSession)
   })
 )
@@ -1532,7 +1542,7 @@ document.body.appendChild(lifecycleRootEl)
 const lifecycleRoot = createRoot(lifecycleRootEl)
 worktrees = []
 const scopeProps = (sessionId = 'test-session-id', cwd = SESSION_CWD) => ({
-  matched: { turn: 3, files: [turnFile(DEMO_FILE)] },
+  turn: { turn: 3 },
   t,
   getViewerLocale: tailInjected.getViewerLocale,
   sessionId,

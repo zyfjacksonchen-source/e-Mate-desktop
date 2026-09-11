@@ -1,10 +1,12 @@
 import type {
   ChatConversationViewNode,
   ChatSnapshot,
+  TurnTailOwnerProps
+} from '@deepseek-ai/dsh-client-ui-chat/client'
+import type {
   ConversationNodeContext,
   ConversationNodeDefinition
-} from '@deepseek-ai/dsh-client-runtime/client'
-import type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
@@ -54,6 +56,9 @@ export interface UniverTurnMatch extends UniverTurnData {
   readonly turn: number
 }
 
+/** One Client history event a Definition may match; narrower than the durable Session map. */
+type ConversationEvent = Parameters<ConversationNodeDefinition['match']>[0]
+
 export interface UniverTurnOutcome {
   readonly primaryWorktreeId: string | null
   readonly lifecycle: UniverTurnLifecycle
@@ -65,7 +70,7 @@ interface UniverTurnState extends UniverTurnData {
   readonly turn: number
 }
 
-declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
+declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap {
     /** One root call's hidden, replayable Univer operations. */
     univerTurn: UniverTurnMatch
@@ -76,11 +81,11 @@ declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
 export const univerTurnDefinition = {
   kind: 'univerTurn',
   target: 'chat',
-  match(event: SessionEvent) {
+  match(event: ConversationEvent) {
     if (event.type === 'tool/call') return { id: String(event.data.callId), role: 'start' }
     if (event.type === 'tool/result' && isAppendSurfaceEvent(event))
       return { id: String(event.data.message.content[0].toolCallId), role: 'update' }
-    if (event.type === 'tool/code-dispatch-start' || event.type === 'tool/code-dispatch')
+    if (event.type === 'tool/ptc-dispatch-start' || event.type === 'tool/ptc-dispatch')
       return { id: String(event.data.rootCallId), role: 'update' }
     return null
   },
@@ -110,10 +115,24 @@ export const univerTurnDefinition = {
   }
 } satisfies ConversationNodeDefinition<UniverTurnState>
 
-/** Select a Turn-tail surface only when that Turn contains file-scoped Univer operations. */
-export function selectUniverTurn(owner: TurnTailOwnerProps): UniverTurnMatch | null {
-  const files = filesOfNodes(owner.nodes ?? [], owner.turn.turn)
-  return files.length === 0 ? null : { turn: owner.turn.turn, files }
+/** One Turn whose tail the Univer card owns. */
+export interface UniverTurnClaim {
+  readonly turn: number
+}
+
+/**
+ * Elect the Univer card for the closing Turn.
+ *
+ * The 0.1.5 chain owner currency is `{ turn, seq, openFile }`: the assembled Chat
+ * nodes the 0.1.4 owner carried are gone, and Location data accepts exactly one
+ * publisher per Definition kind and Turn, so this Definition — one Context per
+ * root call, so that nested Code subcalls fold into their root — cannot publish
+ * the Turn aggregate. The election is therefore unconditional and the component
+ * decides from the assembled Chat snapshot, rendering nothing when the Turn
+ * holds no Univer operation.
+ */
+export function selectUniverTurn(owner: TurnTailOwnerProps): UniverTurnClaim {
+  return { turn: owner.turn.turn }
 }
 
 /** Resolve relative files and combine call/result paths that identify the same workspace file. */
@@ -210,7 +229,7 @@ export function opensFloatingWindow(operation: UniverTurnOperation): boolean {
 
 function addCall(
   state: UniverTurnState,
-  event: SessionEvent<'tool/call' | 'tool/code-dispatch-start' | 'tool/code-dispatch'>
+  event: SessionEvent<'tool/call' | 'tool/ptc-dispatch-start' | 'tool/ptc-dispatch'>
 ): UniverTurnState {
   const data = event.data
   const name = operationName(data.name)
@@ -302,9 +321,9 @@ function structuredResult(
   return null
 }
 
-function updateOperation(state: UniverTurnState, event: SessionEvent): UniverTurnState {
-  if (event.type === 'tool/code-dispatch-start') return addCall(state, event)
-  if (event.type === 'tool/code-dispatch') {
+function updateOperation(state: UniverTurnState, event: ConversationEvent): UniverTurnState {
+  if (event.type === 'tool/ptc-dispatch-start') return addCall(state, event)
+  if (event.type === 'tool/ptc-dispatch') {
     const pending = addCall(state, event)
     return applyResult(
       pending,

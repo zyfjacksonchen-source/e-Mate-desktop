@@ -1,7 +1,8 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { UNIVER_SETTINGS_NAMESPACE, type UniverSettings } from '../shared/settings.ts'
@@ -15,7 +16,7 @@ import { settingsStyles } from './styles/settings.ts'
 import { worktreeStyles } from './styles/worktree.ts'
 import { viewerLocaleOf, type ViewerLocale } from './viewer-locale.ts'
 
-export const inject = ['slots', 'locale', 'conversation', 'conversationEvents']
+export const inject = ['slots', 'locale', 'conversation', 'uiConversation']
 
 /** Register the DSH browser projections for Univer files and worktrees. */
 export function apply(ctx: ClientContext): void {
@@ -23,7 +24,7 @@ export function apply(ctx: ClientContext): void {
   const livePreview = new LivePreviewPreference()
   injectStyles('dsh-univer-office/styles', worktreeStyles)
   injectStyles('dsh-univer-office/settings-styles', settingsStyles)
-  ctx.conversationEvents.register(univerTurnDefinition)
+  ctx.uiConversation.events.register(univerTurnDefinition)
   ctx.effect(() => ctx.locale.register(UNIVER_LOCALE_NAMESPACE, { zh, en }), 'univer: dictionaries')
   ctx.effect(
     () =>
@@ -31,7 +32,11 @@ export function apply(ctx: ClientContext): void {
         ctx.slots.register(
           {
             name: 'conversation.chat.turnTail',
-            priority: -10,
+            // The 0.1.5 owner currency carries no assembled Chat nodes, so the
+            // election cannot decline before the card mounts. Keeping this entry
+            // last leaves every Turn to the entries that can still decline, and
+            // the card itself renders nothing for a Turn without Univer files.
+            priority: 10,
             locale: UNIVER_LOCALE_NAMESPACE,
             select: selectUniverTurn,
             inject: () => ({ getViewerLocale })

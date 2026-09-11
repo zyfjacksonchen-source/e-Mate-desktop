@@ -1,8 +1,8 @@
 import * as React from 'react'
-import type { ChatSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ChatSnapshot } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
+  filesOfNodes,
   outcomeOfTurnFile,
   resolveTurnFiles,
   type UniverTurnFile,
@@ -12,15 +12,13 @@ import { useUniverStates } from '../hooks/use-univer-state.ts'
 import type { ViewerLocaleInjected } from '../viewer-locale.ts'
 import { ReviewPanel } from './review-panel.tsx'
 
-interface PreviewCardShared extends PropsLocale<'univer'>, ViewerLocaleInjected {
-  readonly matched: UniverTurnMatch
-}
+interface PreviewCardShared extends PropsLocale<'univer'>, ViewerLocaleInjected {}
 
 export type PreviewCardProps = PropsRuntime<'conversation.chat.turnTail'> & PreviewCardShared
 
-/** Read rc.7's combined Session and remount the view at the authorization boundary. */
-export function PreviewCard(props: PreviewCardProps): React.ReactElement {
-  const chat = props.useSession((snapshot) => snapshot.chat)
+/** Read the assembled Chat target and remount the card at the authorization boundary. */
+export function PreviewCard(props: PreviewCardProps): React.ReactElement | null {
+  const chat = props.useChat((snapshot) => snapshot)
   const cwd = props.useSessions((state) => state.byId[props.sessionId]?.cwd)
   return (
     <PreviewCardContent
@@ -34,15 +32,15 @@ export function PreviewCard(props: PreviewCardProps): React.ReactElement {
 
 /** Render one unified Univer card for every file touched during the owning Turn. */
 function PreviewCardContent(
-  props: PreviewCardShared & {
-    readonly sessionId: SessionId
+  props: PreviewCardProps & {
     readonly chat: ChatSnapshot
     readonly cwd: string | undefined
   }
-): React.ReactElement {
+): React.ReactElement | null {
+  const turn = props.turn.turn
   const files = React.useMemo(
-    () => resolveTurnFiles(props.matched.files, props.cwd),
-    [props.matched.files, props.cwd]
+    () => resolveTurnFiles(filesOfNodes(props.chat.nodes.values(), turn), props.cwd),
+    [props.chat, turn, props.cwd]
   )
   const { states, missingFiles } = useUniverStates(
     files.map((entry) => entry.file),
@@ -52,6 +50,7 @@ function PreviewCardContent(
     () => latestWorktreeTurns(props.chat, props.cwd),
     [props.chat, props.cwd]
   )
+  if (files.length === 0) return null
   return (
     <>
       {files.map((target) => {
@@ -61,8 +60,7 @@ function PreviewCardContent(
         const outcome = outcomeOfTurnFile(target)
         const worktreeId = outcome.primaryWorktreeId ?? pendingWorktree(target)
         const historical =
-          worktreeId !== null &&
-          latestTurns.get(JSON.stringify([target.file, worktreeId])) !== props.matched.turn
+          worktreeId !== null && latestTurns.get(JSON.stringify([target.file, worktreeId])) !== turn
         return (
           <ReviewPanel
             key={target.file}

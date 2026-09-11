@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings'
+import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import {
   DEFAULT_UNIVER_SETTINGS,
@@ -17,7 +17,7 @@ const SettingsSchema: z<UniverSettings> = z.object({
 export function apply(ctx: Context): void {
   ctx.inject(['settings'], (settingsCtx: Context) => {
     const settings: SettingsProvider = settingsCtx.settings
-    settings.register(settingsNamespace(UNIVER_SETTINGS_NAMESPACE), SettingsSchema, {
+    settings.register(UNIVER_SETTINGS_NAMESPACE, SettingsSchema, {
       base: DEFAULT_UNIVER_SETTINGS,
       applies: 'live'
     })

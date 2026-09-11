@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
-import type { ChatSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ChatSnapshot } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
@@ -25,14 +25,14 @@ interface OpenWindow {
   readonly preferredUnitId: string | null
 }
 
-/** rc.7 supplies the input owner's current combined Session snapshot. */
+/** The input owner supplies the Session snapshot and the framework Chat hook. */
 export function UniverDock(props: UniverDockProps): React.ReactElement {
   const cwd = props.useSessions((state) => state.byId[props.sessionId]?.cwd)
   return (
     <UniverSessionDock
       key={JSON.stringify([props.sessionId, cwd])}
       {...props}
-      chat={props.session?.chat}
+      chat={props.useChat((snapshot) => snapshot)}
       cwd={cwd}
       running={props.session?.running === true}
     />
