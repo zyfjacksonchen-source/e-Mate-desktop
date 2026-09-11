@@ -2800,3 +2800,26 @@ e-Mate 只保留产品适配（R2 端点、IPC 触发器、托盘文案、无签
   （`9c91c773…` / `20d1b5d9…`），在上一 HEAD `3c8042caee` 亦相同；最近触碰提交为 `f876f01d`（2026-09-03）。
 - `git status --porcelain` 对这两个路径**为空**。
 
+
+### 82 用户最终准则（治理级，优先于本文件其余内容）
+
+1. **企业管理面不影响本地 e-Mate 运行**；企业面只负责：**鉴权、模型下发、gateway、审计**。
+2. **所有功能 / 自制插件 / 原生插件，一律以原生插件方式接入**。
+3. **不要两套事实源互斥**（同一能力只允许一个权威来源）。
+4. **不要插件碰核心；严禁篡改核心代码**。
+
+**据此对在建工作的重估（本轮实测扫描）**：
+
+- **Path C（turn-fold 接管）与本准则第 4 条正面冲突**。全仓扫描：**只有** `packages/dsh-plugin-turn-fold/`
+  在运行时改写核心产物（`scripts/seams.mjs`、`scripts/shipped.mjs` 对已编译 `dsh-client-ui-chat` bundle 做
+  tsquery 注入与改写；其 `inline-source.cjs` 即为注入体）。这不是"以原生插件方式接入"，而是**改核心**。
+  **决定：暂停 Path C 的挂载；切片 1 保持未挂载的 vendored 形态不再推进**，等用户裁决是撤回还是改走原生接入路径。
+  同时它与第 3 条冲突：折叠/导航若同时存在 tidychat 与 turn-fold，即为两套互斥事实源。
+- **企业管理面与本地耦合面**：本地产品侧引用企业概念的仅限身份/审计/模型策略一族
+  （`packages/dsh/src/profile/{identity/enterprise-provider,identity/index,identity/agreements,audit,model-policy,agent-operations}.ts`、
+  `desktop/e-mate-desktop/src/e-mate-profile.ts`）；在 `model-policy.ts` 与桌面源码中**未发现硬编码的企业端点**，
+  与"企业面只管鉴权/模型下发/gateway/审计"一致。**待补的定向检查**：企业面不可达时**本地仍可启动与出模**
+  （离线降级守卫），这是准则第 1 条的可失败证明。
+- **企业部署产物**（`enterprise/deploy/sub2api-*.patch`、`gpt-fast-mode.md` 等）位于服务端部署面，
+  不随本地应用发布（`package.json` `build.files` 不含 `enterprise/`），符合第 1 条；本轮已为其补配对一致性守卫。
+
