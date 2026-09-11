@@ -2184,3 +2184,22 @@ redundantEscalation = sandbox_permissions !== undefined && standingPolicy !== un
 直接后果：实装应用里专家模式的 `set` 会退化为"原生会话服务尚未就绪"。0.1.5 的对应 owner 是
 `@deepseek-ai/dsh-api-session-controller` 的 `SessionController`（含 `@Remote('create')`）与各 `api/*-controller`。
 
+
+### 48.10 desktop 平台检查（`corepack yarn check`）的阻塞点（本轮实测）
+
+`check` 链是 `prepare:python → check:source(build:sdk → typecheck → vitest → verify:closure → verify:cli → verify:loader → verify:licenses) → verify:profile`。
+本轮它停在 **typecheck**，且两个配置状态各不相同：
+
+- `tsconfig.json`、`tsconfig.client.json`、`tsconfig.tests.client.json`：单独跑 `tsc -p … --noEmit` **干净**。
+- `tsconfig.tests.json`：有两个真实问题
+  1. **TS6200 重复声明**：`node_modules/@deepseek-ai/schemastery/lib/types/index.d.ts` 与
+     `node_modules/dsh-file-viewer/node_modules/@deepseek-ai/schemastery/lib/types/index.d.ts` 同时进程序，
+     标识符冲突（`From/TypeS…`）。这是 desktop 工作区里 schemastery 的**两份安装**，属依赖去重/安装态问题，
+     不是源码改动能修的；需要在 `desktop` 里 `yarn install` 去重，或让该 config 明确排除嵌套副本。
+  2. `yarn check` 那次还报过 `TS6053: File '…/tests/zz-probe-rows.spec.ts' not found ... Matched by include pattern 'tests/**/*.ts'`；
+     该文件既不在版本库也不在工作区（无 tsbuildinfo、无 `files` 列表），单独重跑该 config 不再复现——判定为
+     **一次运行期的陈旧增量状态**，需要在干净环境下重跑确认。
+
+- 另注：`desktop/e-mate-desktop/` 里有 3 个**未提交的改动**（`scripts/verify-packaged-runtime.ts`、
+  `tests/e-mate-profile.spec.ts`、`tests/verify-packaged-runtime.spec.ts`），来自本会话更早的轮次，需要复核后提交或回退。
+
