@@ -13,6 +13,7 @@ import Storage from '../../../upstream/deepseek-harness/packages/storage/storage
 import { DomainFacility } from '../../../upstream/deepseek-harness/packages/storage/storage-domain/lib/index.js'
 import { JsonStorageBackend } from '../../../upstream/deepseek-harness/packages/storage/storage-json/lib/index.js'
 import WorkspaceRegistry from '../../../upstream/deepseek-harness/packages/workspace/workspace/lib/index.js'
+import { sessionFormatCatalog } from '../../../upstream/deepseek-harness/packages/session/session-format-catalog/lib/index.js'
 import { defaultLegacySources, migrateLegacySessions } from '../lib/legacy-migration.js'
 import { registerLegacyArtifactDownload, runOptionalLegacyMigration } from '../profile/plugins/legacy-migration.js'
 import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'
@@ -64,6 +65,31 @@ async function readCurrentSession(sessionPersistence, id) {
   } finally {
     await handle.close()
   }
+}
+
+// Harness surface vocabulary: the v2->v3 migration refuses any of these that precedes the
+// stream's first step/start (packages/session/session-format-v2-to-v3/src/migration.ts:56),
+// and every native v0 record in the user store opens its step before its first surface event.
+const SURFACE_EVENT_TYPES = new Set(['system/message', 'user/message', 'assistant/message', 'tool/result'])
+
+function firstSurfaceBeforeStep(events) {
+  let opened = false
+  for (let index = 0; index < events.length; index += 1) {
+    if (events[index].type === 'step/start') opened = true
+    else if (SURFACE_EVENT_TYPES.has(events[index].type) && !opened) return index
+  }
+  return -1
+}
+
+// Replay imported rows through the shipped released-v0 -> v3 catalog: the same migration chain
+// the Session reader runs for a stored v0 artifact.
+function restoreReleasedV0Rows(header, events) {
+  const restore = sessionFormatCatalog.createRestore(
+    { type: 'session', version: 0, id: header.id, createdAt: header.createdAt, cwd: header.cwd, delegationDepth: header.delegationDepth },
+    { recovery: 'strict', validation: 'current' },
+  )
+  for (const event of events) restore.decodeRow(event)
+  return restore.finish()
 }
 
 function cowDatabase(path, projectPath, artifactPath) {
@@ -288,7 +314,7 @@ test('imports CowAgent sessions through the real Harness SessionPersistence and 
       delegationDepth: 0,
     })
     assert.deepEqual(loaded.events.map(event => event.type), [
-      'turn/start', 'user/message', 'step/start', 'assistant/message', 'step/end', 'turn/end',
+      'turn/start', 'step/start', 'user/message', 'assistant/message', 'step/end', 'turn/end',
       'emate/legacy-artifacts', 'session/title',
     ])
     assert.equal(loaded.events.find(event => event.type === 'assistant/message').data.message.content[0].text, '你好，我是 e-Mate')
@@ -511,6 +537,81 @@ test('validates every existing target identity before importing another source s
     database.close()
     await assert.rejects(migrateLegacySessions(options), /conflicts with its stable legacy identity/)
     assert.equal((await ctx.sessionPersistence.list()).length, 1)
+  } finally {
+    await harness.dispose()
+  }
+})
+
+test('opens a step before the first surface event of every imported session', async () => {
+  const root = scratch()
+  const dshHome = join(root, 'dsh')
+  const project = join(root, 'project')
+  const cowRoot = join(root, 'cow')
+  const runtimeRoot = join(root, 'runtime')
+  mkdirSync(project)
+  mkdirSync(cowRoot)
+  mkdirSync(runtimeRoot)
+  const cowSource = join(cowRoot, 'conversations.db')
+  const runtimeSource = join(runtimeRoot, 'runtime.sqlite3')
+  const artifact = join(cowRoot, 'outputs', 'report.docx')
+  mkdirSync(join(cowRoot, 'outputs'))
+  writeFileSync(artifact, 'legacy office bytes')
+  cowDatabase(cowSource, project, artifact)
+  runtimeDatabase(runtimeSource, project)
+  const harness = await harnessPersistence(join(dshHome, 'sessions'))
+  const { ctx } = harness
+  try {
+    const result = await migrateLegacySessions({
+      sessionPersistence: ctx.sessionPersistence,
+      dshHome,
+      sources: [
+        { family: 'cowagent', root: cowRoot, database: cowSource },
+        { family: 'ecorex-runtime', root: runtimeRoot, database: runtimeSource },
+      ],
+    })
+    assert.equal(result.imported_sessions, 2)
+    for (const snapshot of await ctx.sessionPersistence.list()) {
+      const { events } = await readCurrentSession(ctx.sessionPersistence, snapshot.header.id)
+      const offending = firstSurfaceBeforeStep(events)
+      assert.equal(
+        offending,
+        -1,
+        `${snapshot.header.id}: ${events[offending]?.type} at ${offending} precedes the first step/start (${events.map(event => event.type).join(' ')})`,
+      )
+    }
+  } finally {
+    await harness.dispose()
+  }
+})
+
+test('replays an imported session as released v0 without a surface before its step', async () => {
+  const root = scratch()
+  const sourceRoot = join(root, 'cow')
+  const dshHome = join(root, 'dsh')
+  const project = join(root, 'project')
+  mkdirSync(sourceRoot, { recursive: true })
+  mkdirSync(project)
+  const source = join(sourceRoot, 'conversations.db')
+  // No attachments: the emitted stream stays inside the released vocabulary a v0 reader admits,
+  // so the shipped migration chain must restore it end to end.
+  cowDatabase(source, project)
+  const harness = await harnessPersistence(join(dshHome, 'sessions'))
+  const { ctx } = harness
+  try {
+    await migrateLegacySessions({
+      sessionPersistence: ctx.sessionPersistence,
+      dshHome,
+      sources: [{ family: 'cowagent', root: sourceRoot, database: source }],
+    })
+    const [snapshot] = await ctx.sessionPersistence.list()
+    const { meta, events } = await readCurrentSession(ctx.sessionPersistence, snapshot.header.id)
+    const offending = firstSurfaceBeforeStep(events)
+    assert.equal(offending, -1, `${events[offending]?.type} at ${offending} precedes the first step/start`)
+    const restored = restoreReleasedV0Rows(meta, events)
+    assert.deepEqual(
+      restored.events.map(event => event.type).filter(type => type === 'user/message' || type === 'assistant/message'),
+      ['user/message', 'assistant/message'],
+    )
   } finally {
     await harness.dispose()
   }

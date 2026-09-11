@@ -599,11 +599,8 @@ function planRuntime(snapshot: SourceSnapshot, generalWorkspace: string): Planne
         const started = epochMilliseconds(turn.created_at)
         builder.push('turn/start', { turn: turnNumber }, started)
         const input = typeof turn.input_text === 'string' ? turn.input_text : ''
-        if (input !== '') {
-          builder.push('user/message', message('user', stableId('msg', id, turnId, 'user'), input, { kind: 'user' }), started, true)
-        }
         const items = database.prepare('SELECT * FROM items WHERE turn_id = ? ORDER BY created_at, item_id').all(turnId) as JsonRecord[]
-        let step = 0
+        const assistants: { item: JsonRecord; content: unknown }[] = []
         for (const item of items) {
           const content = parseJson(item.content_json)
           const role = isRecord(content) && typeof content.role === 'string' ? content.role.toLowerCase() : ''
@@ -620,18 +617,38 @@ function planRuntime(snapshot: SourceSnapshot, generalWorkspace: string): Planne
             })
             continue
           }
-          step += 1
-          const itemTime = epochMilliseconds(item.created_at)
-          builder.push('step/start', { turn: turnNumber, step }, itemTime)
+          assistants.push({ item, content })
+        }
+        // Released logs open a step before their first surface event: the v2->v3 migration refuses
+        // a user or assistant surface that precedes the stream's first step/start.
+        let step = 0
+        let openStep = false
+        if (input !== '' || assistants.length > 0) {
+          step = 1
+          openStep = true
+          builder.push('step/start', { turn: turnNumber, step }, started)
+          if (input !== '') {
+            builder.push('user/message', message('user', stableId('msg', id, turnId, 'user'), input, { kind: 'user' }), started, true)
+          }
+        }
+        for (const assistant of assistants) {
+          const itemTime = epochMilliseconds(assistant.item.created_at)
+          if (!openStep) {
+            step += 1
+            openStep = true
+            builder.push('step/start', { turn: turnNumber, step }, itemTime)
+          }
           builder.push('assistant/message', {
             turn: turnNumber,
             step,
-            message: message('assistant', stableId('msg', id, String(item.item_id)), displayText(content), {
+            message: message('assistant', stableId('msg', id, String(assistant.item.item_id)), displayText(assistant.content), {
               kind: 'model', provider: 'legacy-ecorex', model: String(turn.agent_model_id || 'ecorex-chat'),
             }),
           }, itemTime, true)
           builder.push('step/end', { turn: turnNumber, step }, itemTime)
+          openStep = false
         }
+        if (openStep) builder.push('step/end', { turn: turnNumber, step }, epochMilliseconds(turn.updated_at))
         const completed = String(turn.status).toLowerCase() === 'completed'
         builder.push('turn/end', { turn: turnNumber, reason: completed ? { kind: 'completed' } : { kind: 'interrupted' } }, epochMilliseconds(turn.updated_at))
       }
@@ -724,7 +741,11 @@ function planCowAgent(snapshot: SourceSnapshot, generalWorkspace: string): Plann
         const group = groups[index]
         const started = epochMilliseconds(group[0]?.created_at)
         builder.push('turn/start', { turn }, started)
-        let step = 0
+        // Released logs open a step before their first surface event: the v2->v3 migration refuses
+        // a user or assistant surface that precedes the stream's first step/start.
+        let step = group.length > 0 ? 1 : 0
+        let openStep = group.length > 0
+        if (openStep) builder.push('step/start', { turn, step }, started)
         for (const row of group) {
           const referenced = messageAttachments(row, snapshot.source.root)
           attachments.push(...referenced.plans)
@@ -736,8 +757,11 @@ function planCowAgent(snapshot: SourceSnapshot, generalWorkspace: string): Plann
           if (role === 'user') {
             builder.push('user/message', message('user', stableId('msg', id, sequence, 'user'), text, { kind: 'user' }), time, true)
           } else if (role === 'assistant') {
-            step += 1
-            builder.push('step/start', { turn, step }, time)
+            if (!openStep) {
+              step += 1
+              openStep = true
+              builder.push('step/start', { turn, step }, time)
+            }
             builder.push('assistant/message', {
               turn,
               step,
@@ -746,10 +770,12 @@ function planCowAgent(snapshot: SourceSnapshot, generalWorkspace: string): Plann
               }),
             }, time, true)
             builder.push('step/end', { turn, step }, time)
+            openStep = false
           } else {
             omitted.push({ seq: row.seq, role: row.role, content: parseJson(row.content), extras: parseJson(row.extras) })
           }
         }
+        if (openStep) builder.push('step/end', { turn, step }, epochMilliseconds(group.at(-1)?.created_at))
         builder.push('turn/end', { turn, reason: { kind: 'completed' } }, epochMilliseconds(group.at(-1)?.created_at))
       }
       addAttachmentEvent(builder, attachmentDescriptors, epochMilliseconds(session.last_active))

@@ -18,6 +18,18 @@ import { loadTargetCredentials } from './target-runtime.js'
 export const name = 'emate-credentials-os'
 export const LOGGED_OUT_CREDENTIAL = 'E_MATE_CREDENTIAL_LOGGED_OUT_V1'
 
+/**
+ * The product's rotating model credential: the enterprise gateway session token
+ * the identity provider issues, projects and renews on its own schedule (see
+ * `identity/enterprise-provider.ts`). It is the only reference whose stored
+ * value can still be stored while it is already unusable, so it is the only one
+ * resolved for use through the product's renewal owner.
+ */
+export const MODEL_SESSION_CREDENTIAL_REF = 'E_MATE_MODEL_SESSION_TOKEN'
+
+/** The product service that owns the enterprise lease behind that reference. */
+const IDENTITY_SERVICE = 'emateIdentity'
+
 const KEYCHAIN_SERVICE = 'net.ecoremedia.e-mate.credentials.v1'
 const KEYCHAIN_CHUNK_BYTES = 96
 const KEYCHAIN_MAX_BYTES = 64 * 1024
@@ -27,7 +39,7 @@ const MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
 const CREDENTIAL_REF = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const MANAGED_IDENTITY_CREDENTIAL_REFS = new Set([
   'E_MATE_ENTERPRISE_SESSION',
-  'E_MATE_MODEL_SESSION_TOKEN',
+  MODEL_SESSION_CREDENTIAL_REF,
   'E_MATE_MODEL_KEY_GPT',
   'E_MATE_MODEL_KEY_DEEPSEEK',
   'E_MATE_MODEL_KEY_DOUBAO',
@@ -543,12 +555,36 @@ const RECORD_PROVIDER_DIRECTORY = 'dsh-credentials-local'
  * @param Base - the bound `CredentialProvider` class this provider extends.
  * @param store - OS-backed value store.
  * @param records - native record provider over the same harness home.
+ * @param renewProductCredential - makes the product's rotating credential
+ *   current before a request authenticates with it. The renewal itself stays
+ *   with its owner; this provider only asks for it at the moment of use. A
+ *   profile with no such owner passes nothing and keeps stored-value behaviour.
  * @returns the provider class to mount.
  */
-export function createOsCredentialProvider(Base: any, store: CredentialStore, records: any) {
+export function createOsCredentialProvider(
+  Base: any,
+  store: CredentialStore,
+  records: any,
+  renewProductCredential?: () => Promise<void>,
+) {
   return class OsCredentialProvider extends Base {
     override resolve(ref: string) {
       return store.resolve(ref)
+    }
+
+    /**
+     * The seam's "value a request must authenticate with now". Only the
+     * product's rotating model credential can be stored and already unusable, so
+     * only that reference is made current first; every other reference is the
+     * stored value the seam default already returns, and asking the renewal
+     * owner would be a round trip for nothing.
+     * @param ref - the reference about to authenticate one request.
+     * @returns the value for use, or `undefined` while unconfigured.
+     */
+    override async resolveCurrent(ref: string) {
+      if (ref !== MODEL_SESSION_CREDENTIAL_REF) return super.resolveCurrent(ref)
+      await renewProductCredential?.()
+      return super.resolveCurrent(ref)
     }
 
     override describe(ref: string) {
@@ -672,5 +708,47 @@ export async function apply(ctx: any, config: ProviderConfig = {}) {
   const backend = config.backend ?? createOsCredentialBackend(process.platform, target.binding.dsh_home)
   const store = new CredentialStore(target.launchEnvironmentOf(ctx), backend)
   const records = await mountRecordProvider(ctx, target.binding.credentials_module, target.binding.dsh_home)
-  await ctx.plugin(createOsCredentialProvider(target.CredentialProvider, store, records))
+  await mountProductCredentialProvider(ctx, target.CredentialProvider, store, records)
+}
+
+/**
+ * Mount the product provider with the renewal wiring the runtime uses.
+ *
+ * Exported so the profile test can compose the same provider `apply` does —
+ * in the same order, with the same renewal owner — without the managed-binding
+ * loader that only a packaged runtime satisfies.
+ * @param ctx - the plugin context that owns the provider and resolves the owner.
+ * @param Base - the bound `CredentialProvider` class this provider extends.
+ * @param store - OS-backed value store.
+ * @param records - native record provider over the same harness home.
+ * @returns after the provider service is mounted.
+ */
+export async function mountProductCredentialProvider(
+  ctx: any,
+  Base: any,
+  store: CredentialStore,
+  records: any,
+) {
+  await ctx.plugin(createOsCredentialProvider(Base, store, records, renewProductModelCredential(ctx)))
+}
+
+/**
+ * The product's rotation owner, looked up per call.
+ *
+ * The identity plugin is inserted after this one and requires the service this
+ * plugin provides, so its service cannot be read at mount time; looking it up
+ * when a request needs it keeps load order free. The renewal is delegated whole
+ * — due margin, single-flight, credential persistence and terminal clearing all
+ * stay inside the identity provider — so this adds no timer, no cache and no
+ * second token store, and a profile without that owner keeps exactly the stored
+ * value it resolved before.
+ * @param ctx - the plugin context that resolves the product identity service.
+ * @returns the renewal to run before a product model request authenticates.
+ */
+function renewProductModelCredential(ctx: any): () => Promise<void> {
+  return async () => {
+    const identity = ctx.get(IDENTITY_SERVICE)
+    if (typeof identity?.renewModelCredential !== 'function') return
+    await identity.renewModelCredential()
+  }
 }

@@ -61,7 +61,7 @@
   },
   "eMate": {
     "harnessVersion": "0.1.5-rc.1",
-    "harnessCommit": "ff9a977890dafc4fe9b05634470db9a33bc9a3ef",
+    "harnessCommit": "7882599607eade325e66e7bf28f520a206270727",
     "baseImports": [
       "@deepseek-ai/dsh-settings",
       "@deepseek-ai/schemastery"

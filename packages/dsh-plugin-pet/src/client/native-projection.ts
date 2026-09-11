@@ -4,7 +4,7 @@
  * sessions/service.ts, packages/client/ui-session/src/client/index.ts,
  * packages/client/ui-conversation/src/client/contract/conversation.ts and
  * packages/client/ui-chat/src/client/contract/snapshot.ts at Harness
- * ff9a977890dafc4fe9b05634470db9a33bc9a3ef. No domain is folded here.
+ * 7882599607eade325e66e7bf28f520a206270727. No domain is folded here.
  */
 import { EMPTY_PROJECTION, type PetTaskProjection, type PetWorkFactsReader } from '../projection.ts'
 export interface Observable<T> { getSnapshot(): T; subscribe(listener: () => void): () => void }

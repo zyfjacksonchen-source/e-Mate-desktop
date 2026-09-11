@@ -301,6 +301,22 @@ export function apply(ctx, config = {}) {
         ? config.identityProvider.localAccountSubject()
         : undefined
     },
+    /**
+     * Make the rotating model credential current before a request authenticates
+     * with it. The `credentials` provider calls this while resolving
+     * `E_MATE_MODEL_SESSION_TOKEN` for use, so a gateway token that expired
+     * while nothing was watching is renewed at the moment of use. The whole
+     * decision stays with the lease owner: `keepAlive` renews only at its own
+     * margin, shares one in-flight refresh and persists the result through the
+     * same credential service, so this surface opens no second renewal owner.
+     * @returns after the lease is current, or after nothing needed renewing.
+     */
+    async renewModelCredential() {
+      if (typeof config.identityProvider?.keepAlive !== 'function') {
+        throw new Error('e-Mate enterprise credential renewal is unavailable')
+      }
+      return config.identityProvider.keepAlive()
+    },
     async request(url, init) {
       if (typeof config.authenticatedRequest !== 'function') {
         throw new Error('e-Mate enterprise identity transport is unavailable; sign in after the verified provider policy is installed')

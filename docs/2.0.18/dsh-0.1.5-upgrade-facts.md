@@ -3011,3 +3011,63 @@ e-Mate 侧**没有任何**对 `transcriptView` 的覆盖（全仓 grep 只命中
 - **实机可见性未验**：原生 `turn-process` disclosure、右侧 `TurnNavigator`、usage/time pill 是否真的在打包后的 e-Mate 里可见，本轮只做到**源码级 + Profile 挂载级**取证（`ui-chat` 在 web-app bundle 里、`transcriptView` 无覆盖）。实机核对按 calibration 走 computer use，不在本轮写集。
 - **条数 455 与 2 条已复核读**是当前树的快照；`packages/dsh/profile/plugins/*` 之外的 profile 插件目录若新增，需同步扩大 `SCANNED_SUBDIRECTORIES`（当前覆盖 `src/scripts/test/tests`）。
 - `pnpm-workspace.yaml` 是否把新 `test/*.mjs` 纳入任何 vitest include：已确认 tidychat 的 `vitest.config.ts` 只 include `test/*.spec.tsx`，故无重复执行。
+
+### 85 第 105 轮：把 turn-fold 豁免收进唯一一处，并让它承重（`scripts/no-core-rewrite-guard.mjs`）
+
+背景：用户裁定 Codex 式逐轮折叠由 `dsh-turn-fold` 提供，作为 native-first 的**逐字豁免**，AGENTS.md 已记录
+（三处 shape-guarded 补丁**只在内存**施加于已编译的 `ui-chat` bundle、每个选择器必须仍恰好命中一次否则拒绝、
+bundle hash 必须校验、其他插件不得解析源码或改写 Harness 产物）。§84 建立的守卫当时会把**被豁免的 provider 判成违规**：
+本轮开跑前的实测是 16 个用例 **1 红**，`findViolations` 报出 **9 条**，全部落在两个 provider 根内
+（`packages/dsh-plugin-harmony/scripts/seams.mjs:128,381`、`packages/dsh-plugin-harmony/scripts/tsquery-subset.mjs:202`、
+`packages/dsh-plugin-turn-fold/scripts/seams.mjs:12,107,229,271`、`packages/dsh-plugin-turn-fold/scripts/tsquery-subset.mjs:202`、
+`packages/dsh-plugin-turn-fold/test/seams.test.mjs:52`）。
+
+#### 85.1 豁免只写一处
+
+- 新增 `EXEMPT_PROVIDER_ROOTS`（4 个根：`packages/dsh-plugin-turn-fold`、`packages/dsh-plugin-harmony`、
+  `upstream/plugins/dsh-turn-fold`、`upstream/plugins/dsh-harmony`）与唯一判定函数 `isExemptProviderPath`，
+  注释**逐字引用** AGENTS.md 的裁定。判定按**精确根**匹配，`dsh-plugin-turn-fold-extra` / `dsh-plugin-turn-foldish`
+  不继承任何东西（有用例钉住）。
+- `findViolations` 与 `observedTestBundleReads` 都只从这一个定义读豁免，没有第二处；
+  于是「provider 的 test 也读得到钉住的 bundle」不会变成往 `REVIEWED_TEST_BUNDLE_READS` 里再加一条（那会是第二处豁免）。
+- 豁免覆盖规则 1 与规则 2 的**全部四条族**，并附一条事实理由：provider 的出货运行时确实寻址原生转录钩子
+  `data-chat-anchor-key`（`packages/dsh-plugin-turn-fold/lib/inline-source.cjs:198,204`），这正是被豁免的折叠能力本身；
+  `lib/` 不在扫描子目录（`src/scripts/test/tests`）内，故今天真实树本来也不触发，显式豁免是为了让守卫与裁定自洽，
+  而不是让被豁免的能力换个名字复活。
+- **写盘不在豁免内**：`harness-artifact-write` 在豁免根内照常触发（裁定原文要求 patches must stay in memory /
+  never written to disk）。扫描器**没有**把豁免根从扫描集里剔除（实测仍扫到
+  `packages/dsh-plugin-turn-fold/scripts/seams.mjs`、`packages/dsh-plugin-harmony/scripts/seams.mjs`），
+  所以这条写盘规则在真实树上仍然是活的。
+
+#### 85.2 位置迁移：`git mv` 不成立，改用 `mv`（实测）
+
+```
+$ git mv docs/2.0.18/no-core-rewrite-guard.mjs scripts/no-core-rewrite-guard.mjs
+fatal: not under version control, source=docs/2.0.18/no-core-rewrite-guard.mjs, destination=scripts/no-core-rewrite-guard.mjs
+gitmv_exit=128
+```
+
+两个守卫文件在 HEAD 里**从未被跟踪**（`git ls-files` 输出为空、`git status` 显示 `??`），故 `git mv` 必然失败；
+改用 `mv`（exit 0）。`docs/2.0.18/` 下已无 `*guard*` 文件，`git status` 显示两条 `?? scripts/no-core-rewrite-guard*.mjs`。
+伴随的必然改动：测试里 `ROOT` 由 `new URL('../../', import.meta.url)` 改为 `new URL('../', import.meta.url)`
+（`scripts/` 只比仓库根深一层，否则会解析到工作树之外），`SELF_EXEMPT_PATHS` 同步指向 `scripts/` 两条。
+
+#### 85.3 双向可失败（变异实测，变异后按 sha256 原样还原）
+
+| 变异 | 结果 |
+|---|---|
+| `isExemptProviderPath` → `return false`（取消豁免） | **3 红**：真实树扫描 + 「豁免只列这些根」+「豁免根内不报、根外照报」 |
+| `isExemptProviderPath` → `return true`（豁免一切） | **10 红**：fail-closed 各用例连带红，证明豁免之外的规则确实承重 |
+| 写盘规则换成 `if (false)`（取消「绝不落盘」） | **2 红**：本轮新增的「豁免不覆盖写盘」+ 原有的「测试里写 Harness 闭包也拒绝」 |
+
+三次变异后文件按备份还原，还原前后 sha256 相等（`31327db9bbc1a8ce70368aa1d05e640e63a75466fc1e4876ab612968430d0b58`）。
+
+#### 85.4 门禁（本轮实测，全部 EXIT 0）
+
+| 命令 | 结果 |
+|---|---|
+| `node --test scripts/no-core-rewrite-guard.test.mjs` | **EXIT 0** — `ℹ tests 19 / pass 19 / fail 0` |
+| `pnpm run test:fast` | **EXIT 0** — `ℹ tests 68 / pass 68 / fail 0` + `ℹ tests 38 / pass 38 / fail 0`（守卫已在该 list 内实跑） |
+| `node scripts/component-run.mjs check` | **EXIT 0**（turn-fold 三条 seam 各 1/1 + ChatView 作用域 6 个宿主符号，bundle sha256 `cf53ae8f5978901504286189a64506febf09cd237d097db3abf3f39b3953ba97`） |
+
+`test:fast` 只动一行：node --test 文件列表里加入 `scripts/no-core-rewrite-guard.test.mjs`。
