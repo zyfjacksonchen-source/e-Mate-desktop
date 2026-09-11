@@ -279,6 +279,12 @@ assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSes
 
 **结论**：客户端（2.0.18）发出的请求是**当前源码所接受的形状**，而线上服务用 `INVALID_REQUEST` 拒绝了它
 ——即 **线上企业服务是一个不认识 `capabilities` 参数（因而早于 2.0.18 契约）的旧构建**。
+
+**可精确定位的时间点**：`capabilities=responses-multimodal` 这个参数**客户端与网关两侧都是同一次提交引入的** ——
+`bdb9e67f14`（2026-09-09，"restore rc7 native flow with tidychat and verified image plugins"），
+`git log -S "responses-multimodal"` 在 `enterprise/apps/model-gateway/src/server.ts` 与
+`packages/dsh/src/profile/identity/enterprise-provider.ts` 上指向同一提交。**因此需要的动作是把企业服务部署到
+包含 `bdb9e67f14` 及之后的构建**（用户侧部署），客户端无需改动。
 这不是客户端缺陷、不是配额/限额，也不是本地环境问题。
 
 **为什么不在本轮"修"**：客户端契约由 2.0.18 与线上服务的版本门共同定义，改客户端去迁就旧服务等于**削弱版本门**
