@@ -520,23 +520,21 @@ describe('published package surface', () => {
       '@deepseek-ai/dsh-app-boot@npm:0.1.5-rc.1': patchResolution,
       '@deepseek-ai/dsh-app-boot@npm:^0.1.5-rc.1': patchResolution,
     })
-    expect(patch).toBe([
-      'diff --git a/lib/index.js b/lib/index.js',
-      'index 8bca7aa8e26ef9c9f1495061d2e91ff89ebf434a..32c9f77f20af88f0606f75afd9fdf88126c91d90 100644',
-      '--- a/lib/index.js',
-      '+++ b/lib/index.js',
-      '@@ -840 +840,2 @@ function parsePatchList(binName, file, content, label) {',
-      '-\tif (!Array.isArray(parsed)) throw new Error(\`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries\`);',
-      '+\tif (parsed === void 0 || parsed === null) return [];',
-      '+\tif (!Array.isArray(parsed)) throw new Error(\`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries\`);',
-      '',
-    ].join('\n'))
+    // Regenerating the overlay against the pinned build changes its blob hashes and
+    // yarn's recorded hash, so pin the change it makes and the runtime that carries it.
+    expect(patch.match(/^\+\tif \(parsed === void 0 \|\| parsed === null\) return \[\];$/gmu)).toHaveLength(1)
+    expect(patch.match(/^[-+][^+-]/gmu)).toHaveLength(1)
     expect(lockfile).toContain(
       '"@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.5-rc.1#./patches/dsh-app-boot@0.1.5-rc.1.patch::locator=%40e-mate%2Fdesktop-workspace%40workspace%3A.":',
     )
     expect(lockfile).toContain(
-      'resolution: "@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.5-rc.1#./patches/dsh-app-boot@0.1.5-rc.1.patch::version=0.1.5-rc.1&hash=d4ccf8&locator=%40e-mate%2Fdesktop-workspace%40workspace%3A."',
+      'resolution: "@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.5-rc.1#./patches/dsh-app-boot@0.1.5-rc.1.patch::version=0.1.5-rc.1&hash=',
     )
+    const bootManifest = createRequire(new URL('package.json', packageRoot)).resolve('@deepseek-ai/dsh-app-boot/package.json')
+    const installedBoot = readFileSync(join(dirname(bootManifest), 'lib/index.js'), 'utf8')
+    const earlyReturn = installedBoot.indexOf('if (parsed === void 0 || parsed === null) return [];')
+    expect(earlyReturn).toBeGreaterThan(-1)
+    expect(installedBoot.indexOf('if (!Array.isArray(parsed)) throw new Error')).toBeGreaterThan(earlyReturn)
   })
 
   it('keeps the pinned app-builder patch free of local NSIS changes', () => {
