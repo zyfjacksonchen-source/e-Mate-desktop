@@ -243,10 +243,11 @@ function harnessFromPackage() {
     [source?.artifact_links_adapter_sha256, join(root, 'e-mate-artifact-links-adapter.mjs')],
     [source?.artifact_links_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-primitives', 'lib', 'index.js')],
     [source?.artifact_deliverables_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-deliverables', 'lib', 'client.js')],
-    [source?.slot_error_adapter_sha256, join(root, 'e-mate-slot-error-adapter.mjs')],
-    [source?.slot_error_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-runtime', 'lib', 'client.js')],
     [source?.conversation_adapter_sha256, join(root, 'e-mate-conversation-adapter.mjs')],
     [source?.conversation_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-conversation', 'lib', 'client.js')],
+    // rc.1 removes @deepseek-ai/dsh-client-runtime and moves the slot-error
+    // adaptation onto ui-conversation; the chat adapter's own owner is pinned too.
+    [source?.conversation_chat_client_sha256, join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-chat', 'lib', 'client.js')],
   ]) {
     if (typeof expected !== 'string' || !/^[a-f0-9]{64}$/u.test(expected) || !existsSync(path)
       || createHash('sha256').update(readFileSync(path)).digest('hex') !== expected) {
