@@ -1,4 +1,5 @@
 import { createPetWorkFactsReader } from '../src/client/pet-image-facts.ts'
+import { NativePetProjection } from '../../../../../dsh-plugin-pet/src/client/native-projection.ts'
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -621,15 +622,33 @@ describe('live image batch progress', () => {
 })
 
 
-function petStore(value: any) { return {getSnapshot:()=>value,set:(next: any)=>{value=next}} }
+function petStore(value: any) {
+  const listeners = new Set<() => void>()
+  return { getSnapshot: () => value, listeners,
+    subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
+    set(next: any) { value = next; for (const listener of [...listeners]) listener() } }
+}
+/** The 0.1.5 chat target: ui-conversation's TurnLocation map, ui-chat's node store and running root calls. */
+function petChat({
+  turn = 1, status = 'open', reason, data = (() => undefined) as (key: string) => unknown,
+  keys = [] as readonly string[], nodes = { get: (_key: string) => undefined as any }, runningCalls = [] as any[],
+} = {}) {
+  const location = { turn, status, start: { time: 100 }, data: { get: data },
+    ...(reason === undefined ? {} : { end: { data: { reason: { kind: reason } } } }) }
+  return { timeline: { turnOrder: [turn], turns: new Map([[turn, location]]) },
+    locations: { getTurn: () => keys }, nodes: { get: (key: string) => nodes.get(key) }, legacy: { runningCalls } }
+}
 function petContext() {
   const faces: Record<string, ReturnType<typeof petStore>>={goal:petStore(undefined),todos:petStore(undefined),eMateImageReceipts:petStore(undefined),eMateImageBatches:petStore(undefined)}
-  const turn: any={status:'open',start:{time:100},data:{get:()=>undefined}}
-  const conversation=petStore({sessionId:'a',openState:'open',composerPhase:'active',running:false,lastAgentError:null,runningCalls:[],pending:[],queue:[],chat:{timeline:{turnOrder:[1],turns:new Map([[1,turn]])},locations:{getTurn:()=>[]},nodes:new Map()}})
-  const session={...conversation,projections:{faceOf:(key: string)=>faces[key]}}
-  const list=petStore({current:'a',phase:'ready',byId:{a:{running:false}},jobsBySession:{}})
-  const read=createPetWorkFactsReader({sessions:{list,binding:()=>({session})}} as never)
-  return {a:{turn,conversation,goal:faces.goal,images:faces.eMateImageReceipts,batches:faces.eMateImageBatches},list,read}
+  const session=petStore({sessionId:'a',openState:'open',running:false,lastAgentError:null,queue:[],promptAttempted:false,awaitingFirstTurn:false})
+  const chat=petStore(undefined);const pending=petStore(new Map<string, unknown>())
+  const list=petStore({current:'a',phase:'ready',byId:{a:{}},jobsBySession:{}})
+  const sessions={list,binding:()=>({session:{getSnapshot:session.getSnapshot,subscribe:session.subscribe,sessionId:'a',projections:{faceOf:(key: string)=>faces[key]}}})}
+  const uiConversation={binding:()=>({target:()=>chat})}
+  const read=createPetWorkFactsReader({sessions,uiConversation} as never)
+  const context={session,chat,pending,list,goal:faces.goal,images:faces.eMateImageReceipts,batches:faces.eMateImageBatches,sessions,uiConversation,read}
+  // Every pet case addresses this context twice: as its own handle, and as a.
+  return {...context,a:context}
 }
 
 const petImageRef={attachmentId:'sha256:'+'a'.repeat(64),mediaType:'image/png',width:2,height:2,bytes:42}
@@ -639,10 +658,13 @@ function petImageRow({owner='a',call='image',operation='generate',status='runnin
     content:status==='completed'||status==='needs-review'?[{type:'image',attachment:petImageRef}]:[],
     output:petImageRef,verifier:{structural:'attachment-cas-v1'},verification:{structural:status==='running'?'not-run':'passed',semantic:'not-applicable'}}}
 }
-function petImageTurn(a,{running=true,batch=false}={}) {
-  a.turn.data={get:key=>key==='e-mate-image-calls'?{calls:batch?[]:[{callId:'image',seq:1}],batchCalls:batch?[{callId:'batch',seq:1}]:[]}:undefined}
-  a.turn.status=running?'open':'closed';a.turn.end=running?undefined:{data:{reason:{kind:'completed'}}}
-  a.conversation.set({...a.conversation.getSnapshot(),running,runningCalls:running?[{callId:batch?'batch':'image',turn:1,callView:null}]:[]})
+// The fixture keeps the running call's own name inert (image_batch admits no
+// operation) so every image assertion reads the admitted receipt instead.
+function petImageTurn(a: ReturnType<typeof petContext>, {running=true,batch=false,reason='completed',provenance=true, name='image_batch'}={}) {
+  const data=(key: string)=>provenance&&key==='e-mate-image-calls'?{calls:batch?[]:[{callId:'image',seq:1}],batchCalls:batch?[{callId:'batch',seq:1}]:[]}:undefined
+  a.chat.set(petChat({status:running?'open':'closed',...(running?{}:{reason}),data,
+    runningCalls:running?[{callId:batch?'batch':'image',name,turn:1}]:[]}))
+  a.session.set({...a.session.getSnapshot(),running})
 }
 function petBatchRows(state='running',imageIds=[[],[]]) {
   const tasks=[1,2].map(ordinal=>({task_id:'sha256:'+String(ordinal).repeat(64),ordinal,revision:1,state,
@@ -671,7 +693,7 @@ it('only this completed turn exact successful attachment can show image delivery
   }
   const invalid=petImageRow({status:'completed'});invalid.receipt.output={...petImageRef,attachmentId:'sha256:'+'e'.repeat(64)}
   a.images.set([invalid]);expect(read('a').delivered).toBe(false)
-  a.images.set([petImageRow({status:'completed'})]);a.turn.end={data:{reason:{kind:'aborted'}}};a.conversation.set({...a.conversation.getSnapshot()});expect(read('a').delivered).toBe(false);
+  a.images.set([petImageRow({status:'completed'})]);petImageTurn(a,{running:false,reason:'aborted'});expect(read('a').delivered).toBe(false);
 })
 it('batch activity uses admitted source identities, current parent call and exact terminal child pointers',()=>{
   const {a,list,read}=petContext();petImageTurn(a,{batch:true})
@@ -686,46 +708,33 @@ it('batch activity uses admitted source identities, current parent call and exac
     children['child-1'].projectionValues.eMateImageReceipts=[{...petImageRow({owner:'child-1',call:'call-1',status:'completed'}),...wrong}]
     list.set({...list.getSnapshot(),byId:{...list.getSnapshot().byId,...children}});expect(read('a').delivered).toBe(false)
   }
-  a.turn.data={get:()=>undefined};a.conversation.set({...a.conversation.getSnapshot()});expect(read('a').delivered).toBe(false);
+  petImageTurn(a,{running:false,batch:true,provenance:false});expect(read('a').delivered).toBe(false);
 })
 
-it('work activity uses exact native identities without search or browser prefix guessing',()=>{
+it('work activity uses exact native running call identities without argument inspection',()=>{
   const {a,read,list}=petContext()
-  const call=(name: string,turn=1,callView: any=null)=>a.conversation.set({...a.conversation.getSnapshot(),running:true,
-    runningCalls:[{callId:'work',name,turn,callView,get argsRaw(){throw new Error('arguments inspected')}}]})
+  const call=(name: string,turn=1)=>a.chat.set(petChat({runningCalls:[{callId:'work',name,turn,get argsRaw(){throw new Error('arguments inspected')}}]}))
   for(const [name,scene] of [['web_search','web-search'],['grep','file-search'],['glob','file-search'],
     ['browser_tabs','browser'],['browser_select_tab','browser'],['browser_snapshot','browser'],['browser_click','browser'],
     ['browser_type','browser'],['browser_press','browser'],['browser_navigate','browser'],['browser_back','browser'],
     ['browser_forward','browser'],['browser_reload','browser'],['browser_scroll','browser'],['browser_get_text','browser'],['browser_wait','browser']]) {
     call(name!);expect(read('a').operation).toBe(scene)
   }
-  for(const name of ['tool_search','session_search','web_fetch','browser_control_access','browser_unverified','computer_type_text','bash','lsp','skill','run_code']) {
-    call(name,1,{card:'generic',kind:'search',get title(){throw new Error('title inspected')}});expect(read('a').operation).toBeUndefined()
+  // 0.1.5 has no call-presentation owner outside ui-tool's rendered cards, so a
+  // running write/edit carries no admitted file evidence and stays generic.
+  for(const name of ['tool_search','session_search','web_fetch','browser_control_access','browser_unverified','computer_type_text','bash','lsp','skill','run_code','write','edit','office_write']) {
+    call(name);expect(read('a').operation).toBeUndefined()
   }
   call('web_search',2);expect(read('a').operation).toBeUndefined()
   call('web_search');list.set({...list.getSnapshot(),current:'b'});expect(read('a').operation).toBeUndefined()
 })
 
-it('code activity requires actual native write/edit diff locations with explicit code extensions',()=>{
-  const {a,read}=petContext()
-  const call=(name: string,card: string,paths: string[])=>a.conversation.set({...a.conversation.getSnapshot(),running:true,
-    runningCalls:[{callId:'work',name,turn:1,callView:{card,locations:paths.map(path=>({path})),get diffs(){throw new Error('body inspected')}}}]})
-  for(const [name,path] of [['write','src/main.ts'],['edit','C:\\src\\MAIN.PY'],['write','app.vue']]) {
-    call(name!,'diff',[path!]);expect(read('a').operation).toBe('code-write')
-  }
-  for(const [name,card,paths] of [['write','diff',['README.md']],['edit','diff',['settings.json']],['edit','diff',['app.ts','notes.txt']],
-    ['write','generic',['app.ts']],['office_write','diff',['app.ts']],['write','diff',['ts']],['write','diff',[]]] as const) {
-    call(name,card,[...paths]);expect(read('a').operation).toBeUndefined()
-  }
-})
-
 it('Office completion uses current-turn canonical result metadata, never the requested delivery path',()=>{
   const {a,read}=petContext()
-  a.turn.status='closed';a.turn.end={data:{reason:{kind:'completed'}}}
   let root: any
-  a.turn.data={get:(key: string)=>key==='deliverables'?{produced:[{seq:9,path:'.e-mate/office/requested.docx'}]}:undefined}
-  a.conversation.set({...a.conversation.getSnapshot(),chat:{...a.conversation.getSnapshot().chat,
-    locations:{getTurn:(turn: number)=>turn===1?['current']:[]},nodes:{get:(key: string)=>key==='current'?{kind:'tool-call',data:{root}}:undefined}}})
+  const officeTurn=(reason: string, keys: readonly string[], data: (key: string) => unknown) =>
+    a.chat.set(petChat({status:'closed',reason,data,keys,nodes:{get:(key: string)=>key==='current'?{kind:'tool-call',data:{root}}:undefined}}))
+  officeTurn('completed',['current'],key=>key==='deliverables'?{produced:[{seq:9,path:'.e-mate/office/requested.docx'}]}:undefined)
   const result=(operation: string,format: string)=>({kind:'tool-result',seq:9,callId:'office',call:{name:'office_'+operation},isError:false,
     meta:{operation,format,job_id:'emate-office-1',relative_path:'.e-mate/office/final-2.'+format,bytes:100}})
   for(const [operation,format,scene] of [['write','docx','document-write'],['read','docx','document-read'],
@@ -739,20 +748,20 @@ it('Office completion uses current-turn canonical result metadata, never the req
     {meta:{...valid.meta,document:{private:'body'}}},{meta:{...valid.meta,relative_path:'.e-mate/office/wrong.pdf'}}]) {
     root={...valid,...changes};expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
   }
-  root=valid;a.turn.end={data:{reason:{kind:'aborted'}}};expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
-  a.turn.end={data:{reason:{kind:'completed'}}};a.turn.data={get:()=>undefined}
+  root=valid;officeTurn('aborted',['current'],()=>undefined);expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
+  officeTurn('completed',['current'],()=>undefined)
   root={...valid,call:{name:'run_code'}};expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
   root={...valid,call:{name:'foreign_tool'}};expect(read('a').completedOperation).toBeUndefined()
-  root=valid;a.conversation.set({...a.conversation.getSnapshot(),chat:{...a.conversation.getSnapshot().chat,locations:{getTurn:()=>[]}}})
+  root=valid;officeTurn('completed',[],()=>undefined)
   expect(read('a').completedOperation).toBeUndefined();expect(read('a').delivered).toBe(false)
 })
 
 it('ordinary native deliverables require their successful current-turn result identity',()=>{
-  const {a,read}=petContext();a.turn.status='closed';a.turn.end={data:{reason:{kind:'completed'}}}
-  a.turn.data={get:(key: string)=>key==='deliverables'?{produced:[{seq:9,path:'report.md'}]}:undefined}
+  const {a,read}=petContext()
   let root: any={kind:'tool-result',seq:9,callId:'write',call:{name:'write'},isError:false}
-  a.conversation.set({...a.conversation.getSnapshot(),chat:{...a.conversation.getSnapshot().chat,
-    locations:{getTurn:()=>['write']},nodes:{get:()=>({kind:'tool-call',data:{root}})}}})
+  a.chat.set(petChat({status:'closed',reason:'completed',keys:['write'],
+    data:key=>key==='deliverables'?{produced:[{seq:9,path:'report.md'}]}:undefined,
+    nodes:{get:()=>({kind:'tool-call',data:{root}})}}))
   expect(read('a').delivered).toBe(true)
   root={...root,seq:8};expect(read('a').delivered).toBe(false)
   root={...root,seq:9,isError:true};expect(read('a').delivered).toBe(false)
@@ -839,7 +848,7 @@ it('Univer pet reads actual native direct and Code results, preserving semantic 
   ]
   for (const code of [false, true]) for (const incremental of [false, true]) for (const [name, operation, result, scene, delivered] of cases) {
     const chat = univerPetChat([{ name, content: univerPetEnvelope(operation, result) }], { code, incremental })
-    a.conversation.set({ ...a.conversation.getSnapshot(), chat })
+    a.chat.set(chat)
     expect(read('a')).toMatchObject({ completedOperation: scene, delivered, failed: false, needsAttention: false })
   }
 })
@@ -849,7 +858,7 @@ it('Univer pet retains partial output but never celebrates failures, cancellatio
   const good = { name: 'univer_print_pdf', content: univerPetEnvelope('print-pdf', { output: '/one/report.pdf', pageCount: 1, unitType: 'doc' }) }
   const set = (calls: Parameters<typeof univerPetChat>[0], options: Parameters<typeof univerPetChat>[1] = {}) => {
     const chat = univerPetChat(calls, { code: true, ...options })
-    a.conversation.set({ ...a.conversation.getSnapshot(), chat }); return chat
+    a.chat.set(chat); return chat
   }
   for (const incremental of [false, true]) {
     set([good, { ...good, error: true }], { incremental })
@@ -873,8 +882,34 @@ it('Univer pet retains partial output but never celebrates failures, cancellatio
   set([{ ...good, name: 'run_code' }]); expect(read('a').completedOperation).toBeUndefined(); expect(read('a').delivered).toBe(false)
   const chat = set([good, { ...good, content: univerPetEnvelope('print-pdf', { output: '/two/report.pdf', pageCount: 1, unitType: 'sheet' }) }])
   expect(read('a')).toMatchObject({ delivered: true, completedOperation: 'spreadsheet' })
-  a.conversation.set({ ...a.conversation.getSnapshot(), chat: { ...chat, timeline: { ...chat.timeline, turnOrder: [2], turns: new Map([[2, { status: 'closed', end: { data: { reason: { kind: 'completed' } } }, data: new Map() }]]) } } })
+  a.chat.set({ ...chat, timeline: { turnOrder: [2], turns: new Map([[2, { turn: 2, status: 'closed', start: { time: 100 }, end: { data: { reason: { kind: 'completed' } } }, steps: [], data: { get: () => undefined } }]]) } })
   expect(read('a').delivered).toBe(false)
   set([good]); list.set({ ...list.getSnapshot(), current: 'b' }); expect(read('a').delivered).toBe(false)
-  list.set({ ...list.getSnapshot(), current: 'a' }); a.conversation.set({ ...a.conversation.getSnapshot(), sessionId: 'b' }); expect(read('a').delivered).toBe(false)
+  list.set({ ...list.getSnapshot(), current: 'a' }); a.session.set({ ...a.session.getSnapshot(), sessionId: 'b' }); expect(read('a').delivered).toBe(false)
+})
+
+it('the pet sprite reads the live 0.1.5 Session, chat and pending-interaction owners', () => {
+  const a = petContext()
+  const visible = petStore(true)
+  const projection = new NativePetProjection({
+    sessions: a.sessions, uiSession: { pendingInteractions: a.pending }, uiConversation: a.uiConversation,
+  } as never, visible as never, a.read)
+  // A real assembled chat snapshot: one univer call with no result yet.
+  a.chat.set(univerPetChat([{ name: 'univer_execute' }], { closed: false }))
+  a.session.set({ ...a.session.getSnapshot(), running: true })
+  expect(projection.getSnapshot().tool).toEqual({ status: 'running', operation: 'document-write' })
+  expect(projection.getSnapshot().firstResponsePending).toBe(false)
+  // Waiting for the user comes only from ui-session's pending-interaction map.
+  a.pending.set(new Map([['a', { key: 'approve', kind: 'approval', sessionId: 'a' }]]))
+  expect(projection.getSnapshot().tool).toEqual({ status: 'waiting' })
+  a.pending.set(new Map())
+  // A closed turn with a real univer result completes and delivers.
+  a.chat.set(univerPetChat([{ name: 'univer_export',
+    content: univerPetEnvelope('export', { filePath: '/workspace/book.univer', kind: 'sheet', outputPath: '/one/report.xlsx' }) }]))
+  a.session.set({ ...a.session.getSnapshot(), running: false })
+  expect(projection.getSnapshot().tool).toEqual({ status: 'completed', operation: 'spreadsheet' })
+  expect(projection.getSnapshot().deliverable).toEqual({ status: 'completed' })
+  projection.dispose()
+  expect(a.chat.listeners.size).toBe(0)
+  expect(a.pending.listeners.size).toBe(0)
 })

@@ -2,13 +2,13 @@
 import { parseImageOutputReceipt, parseImageOutputGroup } from './image-gallery-contract.ts'
 import { createImageBatchProjectionSelector, type ImageBatchClientTask } from './image-batch-client.ts'
 import type { PetWorkFacts, PetWorkFactsReader } from '../../../../../../dsh-plugin-pet/src/projection.ts'
-import type { NativeSession, NativeSessions } from '../../../../../../dsh-plugin-pet/src/client/native-projection.ts'
-type NativeConversation = ReturnType<NativeSession['getSnapshot']>
+import type {
+  NativeChat, NativeConversationService, NativeSession, NativeSessions, NativeToolRoot,
+} from '../../../../../../dsh-plugin-pet/src/client/native-projection.ts'
 type NativeList = ReturnType<NativeSessions['list']['getSnapshot']>
-type NativeTurn = NativeConversation['chat']['timeline']['turns'] extends ReadonlyMap<number, infer T> ? T : never
-type RunningCall = NativeConversation['runningCalls'][number]
-type ToolNode = NonNullable<ReturnType<NativeConversation['chat']['nodes']['get']>>
-type ToolRoot = NonNullable<NonNullable<ToolNode['data']>['root']>
+type NativeTurn = NativeChat['timeline']['turns'] extends ReadonlyMap<number, infer T> ? T : never
+type RunningCall = NativeChat['legacy']['runningCalls'][number]
+type ToolRoot = NativeToolRoot
 function object(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value) }
 function rows(value: unknown): readonly { seq: number; receipt: Record<string, unknown> }[] {
   return Array.isArray(value) ? value.filter(row => object(row) && Number.isSafeInteger(row.seq) && object(row.receipt)) : []
@@ -25,23 +25,23 @@ function completedImage(receipt: Record<string, unknown>): boolean {
 function imageOperation(value: unknown): PetWorkFacts['operation'] {
   return value === 'generate' ? 'image-generate' : value === 'edit' || value === 'fusion' ? 'image-edit' : undefined
 }
+// Media types the attachment store may hold after its own normalization: a
+// screenshot's PNG can be re-encoded to WebP (kept alpha) or JPEG (opaque), so
+// the stored attachment's type is the store's, not the producer's.
+const STORED_IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 const BROWSER_OPERATIONS = new Set([
   'browser_tabs', 'browser_select_tab', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_press',
   'browser_navigate', 'browser_back', 'browser_forward', 'browser_reload', 'browser_scroll', 'browser_get_text', 'browser_wait',
 ])
-// File-type evidence only: unknown, prose, data and configuration files stay generic.
-const CODE_EXTENSIONS = new Set(['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'py', 'rb', 'go', 'rs',
-  'c', 'h', 'cpp', 'cc', 'cxx', 'hpp', 'cs', 'java', 'kt', 'kts', 'swift', 'm', 'mm', 'php', 'lua', 'r', 'sql',
-  'sh', 'bash', 'ps1', 'html', 'css', 'scss', 'vue', 'svelte'])
+// An operation comes only from an admitted native tool name or a native result
+// envelope. No call presentation model exists outside ui-tool's rendered cards,
+// so a running write/edit cannot prove a code file and stays generic.
 function runningOperation(call: RunningCall): PetWorkFacts['operation'] {
   const univer = univerRunningOperation(call.name)
   if (univer) return univer
   if (call.name === 'web_search') return 'web-search'
   if (call.name === 'grep' || call.name === 'glob') return 'file-search'
   if (BROWSER_OPERATIONS.has(call.name)) return 'browser'
-  const files = call.callView?.locations
-  if ((call.name === 'write' || call.name === 'edit') && call.callView?.card === 'diff' && files?.length
-    && files.every(file => typeof file.path === 'string' && CODE_EXTENSIONS.has(file.path.match(/\.([A-Za-z][A-Za-z0-9]*)$/)?.[1]?.toLowerCase() ?? ''))) return 'code-write'
   return undefined
 }
 const UNIVER_OPERATIONS: Readonly<Record<string, string>> = {
@@ -94,7 +94,7 @@ function univerResult(root: ToolRoot): { operation: NonNullable<PetWorkFacts['co
   } else if (operation === 'screenshot') {
     if (!Array.isArray(result.images)) return undefined
     written = result.images.some(item => object(item) && outputPath(item.path) && item.mediaType === 'image/png'
-      && object(item.image) && item.image.mediaType === 'image/png' && typeof item.image.attachmentId === 'string'
+      && object(item.image) && STORED_IMAGE_MEDIA_TYPES.has(String(item.image.mediaType)) && typeof item.image.attachmentId === 'string'
       && /^sha256:[a-f0-9]{64}$/u.test(item.image.attachmentId))
     kind = result.unitType
   } else if (operation === 'resources') {
@@ -120,10 +120,10 @@ function officeResult(root: ToolRoot): { operation: NonNullable<PetWorkFacts['co
     : meta.format === 'pdf' && !written ? 'pdf-read' : written ? 'document-write' : 'document-read'
   return { operation, written }
 }
-function settledWork(conversation: NativeConversation, turn: NativeTurn | undefined, turnNumber: number | undefined): PetWorkFacts {
+function settledWork(chat: NativeChat, turn: NativeTurn | undefined, turnNumber: number | undefined): PetWorkFacts {
   if (turnNumber === undefined) return { delivered: false }
-  const roots = conversation.chat.locations.getTurn(turnNumber).flatMap(key => {
-    const node = conversation.chat.nodes.get(key)
+  const roots = chat.locations.getTurn(turnNumber).flatMap(key => {
+    const node = chat.nodes.get(key)
     return node?.kind === 'tool-call' && node.data?.root ? [node.data.root] : []
   })
   const blocks = (root: ToolRoot): ToolRoot[] => [root, ...(root.subCalls ?? []).flatMap(blocks)]
@@ -160,10 +160,10 @@ function exactChildImage(task: ImageBatchClientTask, list: NativeList): boolean 
     && row.receipt.call_id === pointer.callId && row.receipt.revision === pointer.revision && completedImage(row.receipt))
 }
 /** Reuse current-turn call provenance and admitted batch/receipt faces, never Tool text. */
-function imageActivity(session: NativeSession, conversation: NativeConversation, list: NativeList, turn: NativeTurn | undefined, turnNumber: number | undefined,
+function imageActivity(session: NativeSession, chat: NativeChat, list: NativeList, turn: NativeTurn | undefined, turnNumber: number | undefined,
   selectBatches: ReturnType<typeof createImageBatchProjectionSelector>): PetWorkFacts {
-  const current = conversation.sessionId
-  const running = conversation.runningCalls.filter(call => call.turn === turnNumber)
+  const current = session.sessionId
+  const running = chat.legacy.runningCalls.filter(call => call.turn === turnNumber)
   const receipts = rows(session.projections.faceOf('eMateImageReceipts').getSnapshot())
   let operation: PetWorkFacts['operation']
   for (const call of running) {
@@ -205,21 +205,28 @@ function imageActivity(session: NativeSession, conversation: NativeConversation,
 }
 
 /** No subscriptions, RPC or copied Session state; the caller observes native owners. */
-export function createPetWorkFactsReader(ctx: { sessions: NativeSessions }): PetWorkFactsReader {
+export function createPetWorkFactsReader(ctx: {
+  sessions: NativeSessions
+  /** ui-conversation's per-Session binding, the owner of the chat target. */
+  uiConversation: NativeConversationService
+}): PetWorkFactsReader {
   let selected: string | undefined
   let selectBatches = createImageBatchProjectionSelector('')
   return sessionId => {
     const list = ctx.sessions.list.getSnapshot()
     const session = list.current === sessionId ? ctx.sessions.binding(sessionId)?.session : undefined
-    const conversation = session?.getSnapshot()
-    if (session === undefined || conversation?.sessionId !== sessionId || conversation.openState !== 'open') return { delivered: false }
+    const snapshot = session?.getSnapshot()
+    if (session === undefined || snapshot?.sessionId !== sessionId || snapshot.openState !== 'open') return { delivered: false }
+    // Running calls and Turn boundaries live only in ui-chat's Conversation chat target.
+    const chat = ctx.uiConversation.binding(sessionId).target('chat').getSnapshot()
+    if (chat === undefined) return { delivered: false }
     if (selected !== sessionId) { selected = sessionId; selectBatches = createImageBatchProjectionSelector(sessionId) }
-    const order = conversation.chat.timeline.turnOrder
+    const order = chat.timeline.turnOrder
     const turnNumber = order[order.length - 1]
-    const turn = turnNumber === undefined ? undefined : conversation.chat.timeline.turns.get(turnNumber)
-    const images = imageActivity(session, conversation, list, turn, turnNumber, selectBatches)
-    const running = conversation.runningCalls.filter(call => call.turn === turnNumber)
-    const completed = settledWork(conversation, turn, turnNumber)
+    const turn = turnNumber === undefined ? undefined : chat.timeline.turns.get(turnNumber)
+    const images = imageActivity(session, chat, list, turn, turnNumber, selectBatches)
+    const running = chat.legacy.runningCalls.filter(call => call.turn === turnNumber)
+    const completed = settledWork(chat, turn, turnNumber)
     const operation = images.operation ?? completed.operation ?? running.map(runningOperation).findLast(value => value !== undefined)
     const failed = images.failed || completed.failed
     const needsAttention = images.needsAttention || completed.needsAttention

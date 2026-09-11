@@ -19,8 +19,9 @@ test('projects real native Schedule events without owning execution or storage',
   mkdirSync(deepseek, { recursive: true })
   symlinkSync(join(repository, 'upstream', 'deepseek-harness', 'packages', 'schedule', 'schedule'), join(deepseek, 'dsh-schedule'), 'dir')
   const { apply, SCHEDULES_CHANNEL } = await import(pathToFileURL(join(component, 'lib', 'index.js')).href)
+  // 0.1.5 moved the RPC envelope schema from host/apiproxy's api/rpc.schema to client/connection.
   const { serverResponseSchema } = await import(pathToFileURL(join(
-    repository, 'upstream', 'deepseek-harness', 'packages', 'host', 'apiproxy', 'lib', 'types', 'api', 'rpc.schema.js',
+    repository, 'upstream', 'deepseek-harness', 'packages', 'client', 'connection', 'src', 'rpc-schema.ts',
   )).href)
   let route
   let inspectCount = 0

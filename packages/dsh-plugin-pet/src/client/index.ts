@@ -9,7 +9,8 @@ import { decodeSettings, PET_SETTINGS_NAMESPACE } from '../settings.ts'
 import type { ClientContext, PetDetails } from './runtime-types.ts'
 export type { PetDetails } from './runtime-types.ts'
 declare module '@deepseek-ai/cordis' { interface Context { ematePetDetails: PetDetails } }
-export const inject = ['slots', 'sessions', 'settingsScope']
+// The projection reads the native Session, pending-interaction and Conversation owners.
+export const inject = ['slots', 'sessions', 'settingsScope', 'uiSession', 'uiConversation']
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap { 'shell.overlay.pet': { kind: 'single'; scope: 'session-maybe'; owner: { children?: never } } }
 }
@@ -21,7 +22,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'appearance-motion', order: 30, label: '智能伙伴', inject: () => ({ settings, resources }) }, PetsSection))
   ctx.inject(['ematePetDetails'], detailsCtx => registerOverlay(detailsCtx, detailsCtx.ematePetDetails))
   function registerOverlay(scope: ClientContext, details: PetDetails): void {
-    const projection = new NativePetProjection(scope.sessions, documentVisibility(), details.readWorkFacts)
+    const projection = new NativePetProjection(scope, documentVisibility(), details.readWorkFacts)
     scope.effect(() => {
       const updateEnabled = () => projection.setEnabled(decodeSettings(settings.getSnapshot().value).enabled)
       updateEnabled()
