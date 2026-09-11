@@ -64,18 +64,38 @@ test('new multi-image Code receipts coexist with historical receipts through rep
   assert.equal(JSON.stringify(log), before)
 })
 
-function context(headers, cachedSnapshots = new Map(), coldSnapshot = async () => {}) {
+// rc.1 lists { header, revision } snapshots and serves the durable log through an
+// open read handle carrying the exact inherited cut the cold-read ladder needs.
+function context(headers, cachedSnapshots = new Map(), coldSnapshot = async () => {}, logs = new Map()) {
   const warnings = []
+  const closed = []
   return {
     ctx: {
-      sessionPersistence: { list: async () => headers },
+      sessionPersistence: {
+        list: async () => headers.map(value => ({ header: value, revision: 1 })),
+        open: async (id, access) => {
+          assert.equal(access, 'read')
+          return {
+            inheritedEventCount: 0,
+            read: async offset => {
+              assert.equal(offset, 0)
+              return { events: logs.get(id) ?? [] }
+            },
+            close: async () => { closed.push(id) },
+          }
+        },
+      },
       sessionProjectionCache: {
-        cachedSnapshot: value => cachedSnapshots.get(value.id),
+        cachedSnapshot: (meta, inheritedEventCount) => {
+          assert.equal(inheritedEventCount, 0)
+          return cachedSnapshots.get(meta.id)
+        },
         coldSnapshot,
       },
       logger: { warn: warning => warnings.push(warning) },
     },
     warnings,
+    closed,
   }
 }
 
@@ -87,23 +107,28 @@ test('hydrates completed, review-required, and failed receipts on the first pass
   ])
   const cachedSnapshots = new Map()
   const calls = []
-  const { ctx } = context([...statuses.keys()].map(header), cachedSnapshots, async id => {
-    calls.push(id)
-    const event = {
-      type: 'emate/image-output',
-      seq: 1,
-      time: 100,
-      data: { schema_version: 2, revision: 2, call_id: id, status: statuses.get(id) },
-    }
-    const state = projection.apply(projection.init(), event)
-    const snapshot = { asOfSeq: event.seq, values: { [projection.key]: projection.view(state) } }
-    cachedSnapshots.set(id, snapshot)
+  const logs = new Map([...statuses.keys()].map(id => [id, [{
+    type: 'emate/image-output',
+    seq: 1,
+    time: 100,
+    data: { schema_version: 2, revision: 2, call_id: id, status: statuses.get(id) },
+  }]]))
+  const { ctx, closed } = context([...statuses.keys()].map(header), cachedSnapshots, async (meta, inheritedEventCount, events) => {
+    calls.push(meta.id)
+    assert.equal(inheritedEventCount, 0)
+    // The cold read folds the caller-supplied log, so the handle must have
+    // delivered this child's own events.
+    assert.deepEqual(events, logs.get(meta.id))
+    const state = events.reduce((folded, event) => projection.apply(folded, event), projection.init())
+    const snapshot = { asOfSeq: events.at(-1).seq, values: { [projection.key]: projection.view(state) } }
+    cachedSnapshots.set(meta.id, snapshot)
     return snapshot
-  })
+  }, logs)
 
   await hydrateImageReceiptProjections(ctx)
 
   assert.deepEqual(calls.sort(), [...statuses.keys()].sort())
+  assert.deepEqual(closed.sort(), [...statuses.keys()].sort())
   assert.deepEqual([...statuses.keys()].map(id => [
     id,
     cachedSnapshots.get(id).values.eMateImageReceipts[0].receipt.status,
@@ -115,19 +140,23 @@ test('an own projection key skips repeated cold reads even when its value is und
     ['own-undefined', { asOfSeq: 0, values: { eMateImageReceipts: undefined } }],
   ])
   const calls = []
-  const { ctx } = context([
+  const { ctx, closed } = context([
     header('own-undefined'),
     header('missing-key'),
     { id: 'ordinary-session', origin: 'user' },
-  ], cachedSnapshots, async id => {
-    calls.push(id)
-    cachedSnapshots.set(id, { asOfSeq: 0, values: { eMateImageReceipts: [] } })
+  ], cachedSnapshots, async meta => {
+    calls.push(meta.id)
+    cachedSnapshots.set(meta.id, { asOfSeq: 0, values: { eMateImageReceipts: [] } })
   })
 
   await hydrateImageReceiptProjections(ctx)
   await hydrateImageReceiptProjections(ctx)
 
   assert.deepEqual(calls, ['missing-key'])
+  // Only the listed subagent children are hydrated; the ordinary session is never opened.
+  assert.equal(closed.includes('ordinary-session'), false)
+  // A skipped cold read still closes the handle it opened.
+  assert.equal(closed.includes('own-undefined'), true)
 })
 
 test('bounds at least nine cold reads to four concurrent operations', async () => {
@@ -153,10 +182,10 @@ test('warns for one failed child and continues hydrating the rest', async () => 
   const calls = []
   const hydrated = []
   const headers = Array.from({ length: 6 }, (_, index) => header(`child-${index}`))
-  const { ctx, warnings } = context(headers, new Map(), async id => {
-    calls.push(id)
-    if (id === 'child-2') throw new Error('broken child log')
-    hydrated.push(id)
+  const { ctx, warnings, closed } = context(headers, new Map(), async meta => {
+    calls.push(meta.id)
+    if (meta.id === 'child-2') throw new Error('broken child log')
+    hydrated.push(meta.id)
   })
 
   await hydrateImageReceiptProjections(ctx)
@@ -165,6 +194,8 @@ test('warns for one failed child and continues hydrating the rest', async () => 
   assert.deepEqual(hydrated.sort(), headers.map(value => value.id).filter(id => id !== 'child-2').sort())
   assert.equal(warnings.length, 1)
   assert.match(warnings[0], /child-2.*broken child log/u)
+  // Every handle is closed, including the child whose cold read failed.
+  assert.deepEqual(closed.sort(), headers.map(value => value.id).sort())
 })
 
 test('rejects when the top-level persistence listing fails', async () => {

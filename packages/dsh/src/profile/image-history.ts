@@ -48,17 +48,28 @@ export function imageReceiptsProjectionDefinition(z) {
   }
 }
 
-/** Backfill a newly introduced projection through rc.7's native cold-read ladder. */
+/** Backfill a newly introduced projection through the native cold-read ladder. */
 export async function hydrateImageReceiptProjections(ctx) {
-  const queue = (await ctx.sessionPersistence.list()).filter(header => header.origin === 'subagent')
+  // rc.1 lists { header, revision } snapshots, and the cold-read ladder identifies a
+  // checkpoint by the header plus its exact inherited cut, so the durable log is read
+  // through a read handle that never takes writer ownership.
+  const queue = (await ctx.sessionPersistence.list())
+    .map(snapshot => snapshot.header)
+    .filter(header => header.origin === 'subagent')
   await Promise.all(Array.from(
     { length: Math.min(COLD_READ_CONCURRENCY, queue.length) },
     async () => {
       for (let header = queue.shift(); header !== undefined; header = queue.shift()) {
         try {
-          const cached = ctx.sessionProjectionCache.cachedSnapshot(header)
-          if (Object.hasOwn(cached?.values ?? {}, IMAGE_RECEIPTS_PROJECTION)) continue
-          await ctx.sessionProjectionCache.coldSnapshot(header.id)
+          const handle = await ctx.sessionPersistence.open(header.id, 'read')
+          try {
+            const { events } = await handle.read(0)
+            const cached = ctx.sessionProjectionCache.cachedSnapshot(header, handle.inheritedEventCount)
+            if (Object.hasOwn(cached?.values ?? {}, IMAGE_RECEIPTS_PROJECTION)) continue
+            await ctx.sessionProjectionCache.coldSnapshot(header, handle.inheritedEventCount, events)
+          } finally {
+            await handle.close()
+          }
         } catch (error) {
           ctx.logger.warn(`e-Mate image projection hydration for "${header.id}" failed: ${String(error)}`)
         }
