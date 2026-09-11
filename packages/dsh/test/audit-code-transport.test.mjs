@@ -12,7 +12,8 @@ import SystemPrompt from '../../../upstream/deepseek-harness/packages/core/syste
 import ToolRuntime, { defineTool } from '../../../upstream/deepseek-harness/packages/core/tools/lib/index.js'
 import { SessionStore, SessionId } from '../../../upstream/deepseek-harness/packages/core/session/lib/index.js'
 import { createScope } from '../../../upstream/deepseek-harness/packages/core/scope/lib/index.js'
-import { CallId, createAssistantMessage } from '../../../upstream/deepseek-harness/packages/llm/llm/lib/index.js'
+// 0.1.5 renamed the tool-call id brand CallId -> ToolCallId.
+import { ToolCallId, createAssistantMessage } from '../../../upstream/deepseek-harness/packages/llm/llm/lib/index.js'
 import WorkerThreadCodeRuntime from '../../../upstream/deepseek-harness/packages/code-runtime/code-runtime-worker-thread/lib/index.js'
 import * as Audit from '../profile/plugins/audit.js'
 
@@ -46,7 +47,8 @@ async function fixture(t, mode) {
   await ctx.plugin(Timer)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(SessionStore)
-  await ctx.plugin(ToolRuntime, { mode })
+  // 0.1.5 renamed the ToolRuntime presentation mode 'code' -> 'ptc' (this fixture keeps its own 'code' transport name).
+  await ctx.plugin(ToolRuntime, { mode: mode === 'code' ? 'ptc' : mode })
   await ctx.plugin(WorkerThreadCodeRuntime, { computeMs: 5_000, maxWallMs: 10_000 })
 
   // Real Loader entries own provenance. Only module import resolution and the
@@ -79,7 +81,7 @@ async function fixture(t, mode) {
   } })
   ctx.provide('emateIdentity', { localAccountSubject: () => SUBJECT })
   ctx.provide('emateModelPolicy', { markAuditDelivered: async () => {} })
-  const binding = { schema_version: 1, product: 'e-Mate', version: '2.0.18', harness_commit: '78a2b98562185d6fe46f4071653cae61132bf1ea', dsh_home: root }
+  const binding = { schema_version: 1, product: 'e-Mate', version: '2.0.18', harness_commit: 'e841a5c4add3f7e34c3f7efc8742313debf54922', dsh_home: root }
   for (const [key, path] of [
     ['tools_module', 'packages/core/tools/lib/index.js'],
     ['storage_domain_module', 'packages/storage/storage-domain/lib/index.js'],
@@ -115,7 +117,7 @@ async function fixture(t, mode) {
       code: code ?? names.map(name => `await tools.${name}({ private_text: ${JSON.stringify(PRIVATE)} });`).join('\n'),
     } }] : names.map(name => ({ name, arguments: { private_text: PRIVATE } }))
     for (const [index, call] of calls.entries()) {
-      const callId = CallId(`${id}-call-${index}`)
+      const callId = ToolCallId(`${id}-call-${index}`)
       session.append('tool/call', { turn: 1, step: 1, callId, name: call.name, arguments: JSON.stringify(call.arguments) })
       const result = await ctx.tools.execute({ ...call, callId, rootCallId: callId, agent, signal: new AbortController().signal })
       assert.equal(result.isError, false, JSON.stringify(result))
@@ -188,7 +190,8 @@ for (const mode of ['native', 'both', 'code']) {
           assert.equal(root.nested, false)
           assert.equal(root.provenance, undefined)
           assert.equal(inner.rootCallId, root.callId)
-          assert.equal(result.agent.session.events.filter(event => event.type === 'tool/code-dispatch').length, 1)
+          // Session format v3 renamed the retired 'tool/code-dispatch' to 'tool/ptc-dispatch' (the dispatch settle record).
+          assert.equal(result.agent.session.snapshotEvents().filter(event => event.type === 'tool/ptc-dispatch').length, 1)
         }
       }
       const unknown = await f.run(['unknown_fixture'], transport)

@@ -13,7 +13,7 @@ function contract(): Record<string, unknown> {
       harness_version: '0.1.5-rc.1',
     },
     harness_version: '0.1.5-rc.1',
-    harness_commit: '78a2b98562185d6fe46f4071653cae61132bf1ea',
+    harness_commit: 'e841a5c4add3f7e34c3f7efc8742313debf54922',
     runtime_imports: {
       '@deepseek-ai/dsh-settings': '0.1.5-rc.1',
       '@e-mate/desktop/vision-toolkit': '2.0.18',
@@ -27,7 +27,7 @@ describe('Desktop Base contract', () => {
     expect(parseProfileBaseContract(contract())).toMatchObject({
       schema_version: 1,
       harness_version: '0.1.5-rc.1',
-      harness_commit: '78a2b98562185d6fe46f4071653cae61132bf1ea',
+      harness_commit: 'e841a5c4add3f7e34c3f7efc8742313debf54922',
       runtime_imports: expect.objectContaining({ '@e-mate/desktop/vision-toolkit': '2.0.18' }),
     })
   })

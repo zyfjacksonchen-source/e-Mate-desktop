@@ -5,7 +5,7 @@ import { RELEASE_VERSION, ticketFor, versionFor } from '../image-batch/release-i
 export { RELEASE_VERSION }
 export const TICKET = ticketFor(RELEASE_VERSION, '108')
 const evidenceContract = ticket => versionFor(ticket, '108') === RELEASE_VERSION ? 'tests/performance/image-single/protocol.mjs' : 'docs/2.0.17/contracts/single-image-latency.md'
-export const HARNESS_COMMIT = '78a2b98562185d6fe46f4071653cae61132bf1ea'
+export const HARNESS_COMMIT = 'e841a5c4add3f7e34c3f7efc8742313debf54922'
 export const DESKTOP_REFERENCE = '166c16cfc38c51d32c2316715548c0f8271db517'
 export const MODEL = 'gpt-image-2-pro'
 export const FAKE_DELAY_MS = 25
