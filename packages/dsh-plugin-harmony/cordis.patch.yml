@@ -1,0 +1,10 @@
+# e-Mate mount rows for the vendored Harmony runtime.
+#
+# Only the runtime row is mounted. Upstream also inserts
+# "dsh-harmony/settings" (lib/settings.js), which still imports the
+# settingsNamespace() helper that DSH 0.1.5 deleted; that row is deferred to the
+# Path C builtin-verification slice (docs/2.0.18/dsh-0.1.5-upgrade-facts.md §76)
+# and must not be mounted before it loads.
+- insert:
+    - id: emate-harmony
+      name: '@e-mate/dsh-plugin-harmony'

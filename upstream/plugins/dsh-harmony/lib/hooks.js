@@ -1,0 +1,189 @@
+import fs from 'node:fs';
+import { createRequire, registerHooks, syncBuiltinESMExports } from 'node:module';
+import { dirname, isAbsolute, join, relative } from 'node:path';
+import { fileURLToPath, pathToFileURL, URL } from 'node:url';
+const nativeReadFileSync = fs.readFileSync.bind(fs);
+const nativeReadFile = fs.promises.readFile.bind(fs.promises);
+let moduleHooksInstalled = false;
+function filenameOf(path) {
+    if (typeof path === 'string')
+        return path;
+    if (Buffer.isBuffer(path))
+        return path.toString();
+    return path instanceof URL && path.protocol === 'file:' ? fileURLToPath(path) : undefined;
+}
+function moduleSourceText(source) {
+    if (typeof source === 'string')
+        return source;
+    if (source instanceof ArrayBuffer)
+        return Buffer.from(source).toString('utf8');
+    return Buffer.from(source.buffer, source.byteOffset, source.byteLength).toString('utf8');
+}
+function isUtf8Read(options) {
+    const encoding = typeof options === 'string'
+        ? options
+        : typeof options === 'object' && options !== null
+            ? options.encoding
+            : undefined;
+    return encoding === 'utf8' || encoding === 'utf-8';
+}
+export function installNodeFileTransforms(runtime) {
+    fs.readFileSync = ((path, ...args) => {
+        const value = nativeReadFileSync(path, ...args);
+        const filename = filenameOf(path);
+        if (filename === undefined || (!Buffer.isBuffer(value) && typeof value !== 'string'))
+            return value;
+        if (typeof value === 'string' && !isUtf8Read(args[0]))
+            return value;
+        const target = runtime.targetFilename(filename);
+        if (target === undefined || runtime.isModuleSourceLoading(target))
+            return value;
+        const output = runtime.transform(target, value.toString());
+        return Buffer.isBuffer(value) ? Buffer.from(output) : output;
+    });
+    fs.promises.readFile = (async (path, ...args) => {
+        const value = await nativeReadFile(path, ...args);
+        const filename = filenameOf(path);
+        if (filename === undefined || (!Buffer.isBuffer(value) && typeof value !== 'string'))
+            return value;
+        if (typeof value === 'string' && !isUtf8Read(args[0]))
+            return value;
+        const target = runtime.targetFilename(filename);
+        if (target === undefined || runtime.isModuleSourceLoading(target))
+            return value;
+        const output = runtime.transform(target, value.toString());
+        return Buffer.isBuffer(value) ? Buffer.from(output) : output;
+    });
+    syncBuiltinESMExports();
+}
+export function installNodeModuleHooks(runtime) {
+    if (moduleHooksInstalled)
+        return;
+    let resolvingProfileDependency = false;
+    const runtimeDirectory = dirname(fileURLToPath(runtime.aliases.manifest));
+    const isRuntimeModule = (url) => {
+        if (!url.startsWith('file:'))
+            return false;
+        const path = relative(runtimeDirectory, fileURLToPath(url));
+        return path === '' || !path.startsWith('..') && !isAbsolute(path);
+    };
+    registerHooks({
+        resolve(specifier, context, nextResolve) {
+            const parentUrl = context.parentURL;
+            const marker = '?dsh-harmony=';
+            const index = specifier.lastIndexOf(marker);
+            const cleanSpecifier = index === -1 ? specifier : specifier.slice(0, index);
+            if (cleanSpecifier === 'dsh-harmony')
+                return { url: runtime.aliases.index, shortCircuit: true };
+            if (cleanSpecifier === 'dsh-harmony:plugin')
+                return { url: runtime.aliases.plugin, shortCircuit: true };
+            if (cleanSpecifier === 'dsh-harmony/settings')
+                return { url: runtime.aliases.settings, shortCircuit: true };
+            if (cleanSpecifier === 'dsh-harmony/package.json')
+                return { url: runtime.aliases.manifest, shortCircuit: true };
+            let nextGeneration = index === -1 ? undefined : specifier.slice(index + marker.length);
+            const inherited = context.parentURL?.startsWith('file:')
+                ? new URL(context.parentURL).searchParams.get('dsh-harmony') ?? undefined
+                : undefined;
+            const requestedGeneration = Number(nextGeneration ?? inherited ?? runtime.currentGeneration());
+            let result;
+            const profileDirectory = resolvingProfileDependency
+                ? undefined
+                : runtime.resolveProfileDependency(cleanSpecifier, context.parentURL, requestedGeneration);
+            if (profileDirectory !== undefined) {
+                const manifestUrl = pathToFileURL(join(profileDirectory, 'package.json'));
+                const directResult = () => {
+                    const firstSlash = cleanSpecifier.indexOf('/');
+                    const separator = cleanSpecifier.startsWith('@') ? cleanSpecifier.indexOf('/', firstSlash + 1) : firstSlash;
+                    const subpath = separator === -1 ? '' : cleanSpecifier.slice(separator + 1);
+                    const target = subpath === '' ? profileDirectory : join(profileDirectory, subpath);
+                    return { url: pathToFileURL(createRequire(manifestUrl).resolve(target)).href, shortCircuit: true };
+                };
+                try {
+                    if (context.conditions.includes('require') && !context.conditions.includes('import')) {
+                        resolvingProfileDependency = true;
+                        try {
+                            result = { url: pathToFileURL(createRequire(manifestUrl).resolve(cleanSpecifier)).href, shortCircuit: true };
+                        }
+                        finally {
+                            resolvingProfileDependency = false;
+                        }
+                    }
+                    else {
+                        result = nextResolve(cleanSpecifier, { ...context, parentURL: manifestUrl.href });
+                    }
+                }
+                catch (error) {
+                    const code = error.code;
+                    if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND')
+                        throw error;
+                    result = directResult();
+                }
+                const resolvedDirectory = result.url.startsWith('file:')
+                    ? runtime.packageDirectory(fileURLToPath(result.url))
+                    : undefined;
+                if (resolvedDirectory !== profileDirectory) {
+                    result = directResult();
+                }
+            }
+            else {
+                try {
+                    result = nextResolve(cleanSpecifier, context);
+                }
+                catch (error) {
+                    if (error.code !== 'ERR_MODULE_NOT_FOUND')
+                        throw error;
+                    const filename = runtime.resolveTypeScriptDependency(cleanSpecifier, context.parentURL, requestedGeneration);
+                    if (filename === undefined)
+                        throw error;
+                    result = { url: pathToFileURL(filename).href, shortCircuit: true };
+                    nextGeneration ??= inherited;
+                }
+            }
+            runtime.recordDependency(parentUrl, result.url, requestedGeneration);
+            if (nextGeneration === undefined && parentUrl?.startsWith('file:') && result.url.startsWith('file:')) {
+                if (inherited !== undefined) {
+                    const parentDirectory = runtime.packageDirectory(fileURLToPath(parentUrl));
+                    const childDirectory = runtime.packageDirectory(fileURLToPath(result.url));
+                    const transformedDependency = runtime.targetFilename(fileURLToPath(result.url), requestedGeneration) !== undefined;
+                    if (parentDirectory === childDirectory || transformedDependency)
+                        nextGeneration = inherited;
+                }
+            }
+            if (nextGeneration === undefined)
+                return result;
+            if (isRuntimeModule(result.url))
+                return result;
+            const url = new URL(result.url);
+            url.searchParams.set('dsh-harmony', nextGeneration);
+            return { ...result, url: url.href, shortCircuit: true };
+        },
+        load(url, context, nextLoad) {
+            const path = url.startsWith('file:') ? fileURLToPath(url) : undefined;
+            const requested = Number(new URL(url).searchParams.get('dsh-harmony') ?? runtime.currentGeneration());
+            const loader = path === undefined ? undefined : runtime.activeTypeScriptLoader(path, requested);
+            if (path !== undefined && loader !== undefined) {
+                const filename = runtime.canonicalFilename(path);
+                const source = nativeReadFileSync(filename, 'utf8');
+                const transformed = runtime.transform(filename, source, requested);
+                return { ...runtime.transpileTypeScript(filename, transformed, loader), shortCircuit: true };
+            }
+            const filename = path === undefined ? undefined : runtime.targetFilename(path, requested);
+            if (filename !== undefined)
+                runtime.beginModuleSourceLoad(filename);
+            let result;
+            try {
+                result = nextLoad(url, context);
+            }
+            finally {
+                if (filename !== undefined)
+                    runtime.endModuleSourceLoad(filename);
+            }
+            if (filename !== undefined && (result.format === 'module' || result.format === 'commonjs') && result.source != null) {
+                return { ...result, source: runtime.transform(filename, moduleSourceText(result.source), requested) };
+            }
+            return result;
+        },
+    });
+    moduleHooksInstalled = true;
+}
