@@ -2726,3 +2726,27 @@ identity / capabilities / agent-operations）已通过。
 `@deepseek-ai/dsh/lib/bin.js`（经 `packagedDependencyPath` 解析），所以空输出来自 harness CLI 的版本路径，
 需直接跑该 bin 判定。
 
+
+### 82.1 verify:cli 已通过（本轮实测），以及与原版 dsh-desktop 的对照线索
+
+**已通过**：桌面 `build` EXIT=0（上一轮的 wheel 取物失败是**瞬时网络问题**，重跑即过），
+`ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --expose-internals lib/desktop-cli.js --version` → `0.1.5-rc.1`，
+`corepack yarn run verify:cli` → **PASS**。桌面检查链（`check:source` + `verify:cli`）现无红点。
+
+**按用户指示对照原版 dsh-desktop（固定点 `anywhere-labs/deepseek-harness-desktop@166c16cf…`）**：
+该仓库可取证（GitHub API 走 301 到 repository id `1333321333`，raw 直取可用；1417 条目、714 个 TS 文件）。
+其中与我们 `desktop/e-mate-desktop` 对应的应用包是 **`dsh-plugin-desktop/`**（192 个 `src/` 文件）。
+
+**关键发现（待决策，不要照抄）**：原版的入口 `dsh-plugin-desktop/src/bin.ts`（154 行）**不是**"打包 harness CLI 的 bootstrap"，
+而是一个 **Electron 启动器**：
+- 自己解析 `--export-diagnostics | -h/--help | -V/--version`，其余情况 `launch`（spawn Electron 可执行文件）；
+- `--version` 读的是**它自己的 `package.json` 版本**（`packageVersion()`），**完全不转发给 harness `dsh` CLI**。
+
+而 e-mate 的 `desktop/e-mate-desktop/src/desktop-cli.ts` 是另一套设计：**import 打包的 harness `dsh` bin 并转发 argv**，
+`verify:cli` 断言产物输出 **harness 版本 `0.1.5-rc.1`**。两者目的不同（npm 启动器 vs 打包 CLI bootstrap），
+所以**不能直接互换**；需要先确认原版是否另有"打包 harness CLI"入口（例如 `asar-module-resolver-state.ts` / 打包运行时路径那条线），
+再决定是"对齐其形态"还是"直接复用其实现"。
+
+**顺带记录的契约问题**：`verify:cli` 的期望值应锚定 **harness 版本**还是 **桌面版本**，需要以原版行为为准做一次对照后定论；
+本轮不改断言（保持现状 PASS）。
+
