@@ -3575,7 +3575,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-tool-fs@npm:^0.1.5-rc.1":
+"@deepseek-ai/dsh-tool-fs@npm:0.1.5-rc.1":
   version: 0.1.5-rc.1
   resolution: "@deepseek-ai/dsh-tool-fs@npm:0.1.5-rc.1"
   dependencies:
@@ -3593,6 +3593,27 @@ __metadata:
     "@deepseek-ai/dsh-tools": ^0.1.5-rc.1
     "@deepseek-ai/dsh-user-approval": ^0.1.5-rc.1
   checksum: 10c0/d766b6fd7674a27bbd67efb853e78a4a778eb4813da142ec0b29e055addcb0fd4c62a0400a966401d833674b6e434f307edc52da9b2ca7eb5d4bcf09bd3f7ba6
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch":
+  version: 0.1.5-rc.1
+  resolution: "@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch::version=0.1.5-rc.1&hash=2ebad6"
+  dependencies:
+    "@deepseek-ai/schemastery": "npm:^3.18.2"
+    diff: "npm:^9.0.0"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.2
+    "@deepseek-ai/dsh-attachment": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-fs": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-llm": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-sandbox": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-sandbox-policy": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-session": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-system-prompt": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-tools": ^0.1.5-rc.1
+    "@deepseek-ai/dsh-user-approval": ^0.1.5-rc.1
+  checksum: 10c0/463a5e4ee655fe51a427a3e4a2bb31de9e052c8f8f3713c33cc0e595493d4e6f738bda466785b67247ac8a6f94db51c9980916c71ad375c923e041b0ab478bfb
   languageName: node
   linkType: hard
 
