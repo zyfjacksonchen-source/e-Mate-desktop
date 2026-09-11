@@ -189,7 +189,6 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-tool-search', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules', 'lib', 'index.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-file-import', 'lib', 'client.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'lib', 'index.js'))).toBe(true)
     const findSkillPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'cordis.patch.yml'), 'utf8')
     expect(findSkillPatch).toContain("cliCommand: 'pnpm dlx skills@1.5.22'")
@@ -317,9 +316,6 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       .toEqual(expect.arrayContaining(['generate_image', 'edit_image', 'get_image_generation_task', 'cancel_image_generation_task']))
     expect(rows.find(row => row.id === 'emate-file-import')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-file-import',
-    }))
-    expect(rows.find(row => row.id === 'emate-computer-use')).toEqual(expect.objectContaining({
-      name: '@e-mate/dsh-plugin-computer-use',
     }))
     expect(rows.find(row => row.id === 'emate-find-skill')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-find-skill',
@@ -605,7 +601,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
   it('skips only declaration conditions while repairing missing or corrupted runtime entries', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
     roots.push(home)
-    const source = join(packagedSource, 'bundles', 'computer-use')
+    const source = join(packagedSource, 'bundles', 'better-sidebar')
     const manifestPath = join(source, 'package.json')
     const originalManifest = readFileSync(manifestPath, 'utf8')
     const manifest = JSON.parse(originalManifest)
@@ -627,7 +623,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       writeFileSync(manifestPath, JSON.stringify(manifest))
       for (const entry of entries) writeFileSync(join(source, entry), runtime)
       const profile = installEmateDesktopProfile(home)
-      const target = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
+      const target = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-better-sidebar')
       const receiptPath = join(profile, '.e-mate-install.json')
       const previousTime = new Date('2000-01-01T00:00:00Z')
       expect(existsSync(join(source, 'lib', 'types', 'client', 'index.d.ts'))).toBe(false)
@@ -821,6 +817,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       dsh: { profile: { bundles: string[] } }
     }
     manifest.dependencies['@xmanrui/dsh-im'] = 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'
+    manifest.dependencies['@e-mate/dsh-plugin-computer-use'] = '2.0.17'
     manifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
     manifest.dependencies['@e-mate/dsh-plugin-idesign'] = '2.0.12'
     manifest.dependencies['@e-mate/dsh-plugin-search-mcp'] = '2.0.11'
@@ -833,22 +830,26 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     const retiredNavigation = join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar')
     mkdirSync(retiredNavigation, { recursive: true })
     writeFileSync(join(retiredNavigation, 'cordis.patch.yml'), "- insert:\n    - id: dsh-navigation-bar\n      name: '@kelearns/dsh-navigation-bar'\n")
+    const retiredComputerUse = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
     const retiredXin = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
     const retiredIDesign = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-idesign')
     const retiredSearchMcp = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp')
     const retiredSidebar = join(profile, 'node_modules', 'dsh-better-sidebar')
     const retiredTurnFold = join(profile, 'node_modules', 'dsh-turn-fold')
+    mkdirSync(retiredComputerUse, { recursive: true })
     mkdirSync(retiredXin, { recursive: true })
     mkdirSync(retiredIDesign, { recursive: true })
     mkdirSync(retiredSearchMcp, { recursive: true })
     mkdirSync(retiredSidebar, { recursive: true })
     mkdirSync(retiredTurnFold, { recursive: true })
+    writeFileSync(join(retiredComputerUse, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredXin, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredIDesign, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredSearchMcp, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredSidebar, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredTurnFold, 'stale.txt'), 'retired', { flag: 'w' })
     manifest.dsh.profile.bundles.push(
+      '@e-mate/dsh-plugin-computer-use',
       '@xmanrui/dsh-im',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-idesign',
@@ -867,6 +868,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062',
     )
     expect(repaired.dsh.profile.bundles.at(-1)).toBe('@xmanrui/dsh-im')
+    expect(repaired.dependencies['@e-mate/dsh-plugin-computer-use']).toBeUndefined()
     expect(repaired.dependencies['@e-mate/dsh-plugin-im']).toBeUndefined()
     expect(repaired.dependencies['@e-mate/dsh-plugin-idesign']).toBeUndefined()
     expect(repaired.dependencies['@e-mate/dsh-plugin-search-mcp']).toBeUndefined()
@@ -874,6 +876,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(repaired.dependencies['@yuxianglin/dsh-bridge-browser']).toBeUndefined()
     expect(repaired.dependencies['dsh-better-sidebar']).toBeUndefined()
     expect(repaired.dependencies['dsh-turn-fold']).toBeUndefined()
+    expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-computer-use')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-idesign')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')

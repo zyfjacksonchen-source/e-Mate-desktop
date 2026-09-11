@@ -54,6 +54,7 @@ const PLUGIN_PACKAGES = componentInventory.components
 const MANAGED_PROFILE_PACKAGES = new Set(PLUGIN_PACKAGES)
 const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-browser',
+  '@e-mate/dsh-plugin-computer-use',
   '@e-mate/dsh-plugin-browser-panel',
   '@e-mate/dsh-plugin-idesign',
   '@e-mate/dsh-plugin-im',

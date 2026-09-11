@@ -250,11 +250,14 @@ describe('session share plugin', () => {
     const header = readFileSync('src/client/header-controls.tsx', 'utf8')
     const component = readFileSync('src/client/session-share.tsx', 'utf8')
     const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
-    const registration = source.slice(0, source.indexOf('export function registerComputerUseTrigger'))
+    // The slice boundary used to be the Computer Use trigger's source text, which
+    // never lived in this file: indexOf returned -1 and the prefix was the whole
+    // source anyway. The trigger was removed with the capability, so the assertions
+    // below read the source directly.
     expect(source).toContain("ctx.slots.inject('conversation.session.header.utilities'")
     expect(source).toContain("id: 'session-log-download'")
-    expect(registration).toContain('priority: -1')
-    expect(registration).toContain("ctx.connection.rpc.call('/emate.share', endpoint, payload)")
+    expect(source).toContain('priority: -1')
+    expect(source).toContain("ctx.connection.rpc.call('/emate.share', endpoint, payload)")
     expect(source).toContain('ctx.sessionLogDownload.download(sessionId)')
     expect(header).toContain('<SessionShareAction')
     expect(header).toContain("useSessions(state => state.current)")

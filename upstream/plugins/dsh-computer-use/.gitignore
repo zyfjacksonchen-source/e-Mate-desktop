@@ -1,6 +1,0 @@
-node_modules/
-.npmrc
-.client-build/
-native/macos/fixture/
-*.tgz
-.DS_Store

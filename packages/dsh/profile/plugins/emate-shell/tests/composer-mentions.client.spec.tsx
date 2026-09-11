@@ -6,7 +6,7 @@ import { createScope } from '@deepseek-ai/dsh-api-session-controller/client'
 import { InputTriggerController } from '../../../../../../upstream/deepseek-harness/packages/client/ui-input-trigger/src/client/controller.ts'
 import { SessionInputShell } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from '../src/client/composer-mentions.ts'
+import { openMentionMenu, registerMentionSources } from '../src/client/composer-mentions.ts'
 
 afterEach(() => { delete document.body.dataset.dshDesktopPlatform; vi.restoreAllMocks() })
 
@@ -69,12 +69,11 @@ describe('native e-Mate @ references', () => {
       logger: { warn: vi.fn() },
     }
 
-    registerComputerUseTrigger(ctx)
     registerMentionSources(ctx)
     const roster = [{ name: '文件', order: -30 }, ...sources]
       .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
       .map(source => source.name)
-    expect(roster).toEqual(['文件', '目标', '计划', '电脑操控', 'Skill'])
+    expect(roster).toEqual(['文件', '目标', '计划', 'Skill'])
 
     const signal = new AbortController().signal
     const request = { query: '', position: 'inline' as const, signal }
@@ -169,71 +168,6 @@ describe('native e-Mate @ references', () => {
     ])
   })
 
-  it('uses native Computer Use metadata for ready, setup, failed, and Windows candidates', async () => {
-    let item: any = {
-      id: 'computer-use', state: 'ready', detail: '原生 Computer Use 已就绪。', actions: [],
-    }
-    const call = vi.fn(async (_channel: string, endpoint: string) => endpoint === 'list'
-      ? { ok: true, value: { schema_version: 1, items: [item] } }
-      : { ok: true, value: { schema_version: 1 } })
-    const sources: InputTriggerSource[] = []
-    registerComputerUseTrigger({
-      effect(run: () => () => void) { return run() },
-      inputTriggers: { registerSource(source: InputTriggerSource) { sources.push(source); return () => {} } },
-      connection: { rpc: { call } },
-      logger: { warn: vi.fn() },
-    })
-    const source = sources[0]!
-    const signal = new AbortController().signal
-    const setupSignal = new AbortController().signal
-    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(setupSignal)
-    const session = { sessionId: 'session-1' as never }
-    const request = { query: '', position: 'inline' as const, signal }
-    const pick = (candidate: any) => source.onPick({
-      candidate, session, position: 'inline', via: 'menu', span: { start: 0, end: 1, draftRev: 1 },
-    })
-
-    document.body.dataset.dshDesktopPlatform = 'darwin'
-    const ready = (await source.candidates(session, request))[0]!
-    expect(ready).toMatchObject({ name: '电脑操控', description: '原生 Computer Use 已就绪。', hint: '可插入' })
-    expect(pick(ready)).toMatchObject({ insert: { ref: 'computer-use', label: '@电脑操控' } })
-
-    item = {
-      id: 'computer-use', state: 'setup-required', detail: '需要开启辅助功能。',
-      actions: [{ id: 'open-accessibility-settings', label: '打开辅助功能设置' }],
-    }
-    const setup = (await source.candidates(session, request))[0]!
-    expect(setup).toMatchObject({ description: '需要开启辅助功能。', hint: '打开系统设置' })
-    expect(pick(setup)).toBe('handled')
-    expect(timeout).toHaveBeenCalledWith(10_000)
-    await vi.waitFor(() => expect(call).toHaveBeenCalledWith('/emate.capabilities', 'action', {
-      capability_id: 'computer-use', action_id: 'open-accessibility-settings', data: {},
-    }, setupSignal))
-
-    item = { id: 'computer-use', state: 'failed', detail: 'provider failed', actions: [] }
-    const failed = (await source.candidates(session, request))[0]!
-    expect(failed).toMatchObject({ description: 'provider failed', hint: '不可用' })
-    const actionCalls = call.mock.calls.filter(([, endpoint]) => endpoint === 'action').length
-    expect(pick(failed)).toBe('handled')
-    expect(call.mock.calls.filter(([, endpoint]) => endpoint === 'action')).toHaveLength(actionCalls)
-
-    call.mockClear()
-    document.body.dataset.dshDesktopPlatform = 'win32'
-    item = { id: 'computer-use', state: 'ready', detail: 'Windows 已就绪。', actions: [] }
-    const windows = (await source.candidates(session, request))[0]!
-    expect(windows).toMatchObject({ description: 'Windows 已就绪。', hint: '可插入' })
-    expect(pick(windows)).toMatchObject({ insert: { source: '电脑操控', ref: 'computer-use' } })
-    expect(call).toHaveBeenCalledOnce()
-    call.mockClear()
-    document.body.dataset.dshDesktopPlatform = 'linux'
-    const unsupported = (await source.candidates(session, request))[0]!
-    expect(unsupported).toMatchObject({ hint: '不可用' })
-    expect(pick(unsupported)).toBe('handled')
-    expect(call).not.toHaveBeenCalled()
-    delete document.body.dataset.dshDesktopPlatform
-    timeout.mockRestore()
-  })
-
   it('keeps enabled Skills as references while Goal and Plan stay action-only', async () => {
     let skills = [{ name: 'office-review', description: '复核办公文档', modelInvocable: true }]
     const sources: InputTriggerSource[] = []
@@ -280,78 +214,4 @@ describe('native e-Mate @ references', () => {
     expect(setDraft).toHaveBeenCalledWith('请处理 @')
     expect(track).toHaveBeenCalledWith('请处理 @', 5, { tier: 'plain' }, 8)
   })
-})
-
-it.each(['darwin', 'win32'])('native %s pick inserts and submits a selected CU reference, including application grants still pending', async platform => {
-  for (const state of ['ready', 'setup-required', 'blocked', 'failed', ...(platform === 'darwin' ? ['os-setup'] : [])]) {
-    document.body.dataset.dshDesktopPlatform = platform
-    const sources: InputTriggerSource[] = []
-    const ctx = new Context(), scope = createScope(ctx, `cu-${platform}-${state}` as never)
-    const controller = new InputTriggerController({ actx: scope.ctx, sessionId: `cu-${platform}-${state}` as never,
-      roster: { sources: trigger => sources.filter(source => source.trigger === trigger), all: () => sources } })
-    // The shell's sink is a settlement promise; a bare vi.fn() starves it.
-    const sent = vi.fn(async () => ({ kind: 'success' as const })),
-      input = new SessionInputShell({ actx: scope.ctx, inputTriggers: () => controller, defaultSink: sent })
-    const off = scope.ctx.on('slash/input-insert-reference', req => input.insertReference(req.reference, req.span) ? true : undefined)
-    const call = vi.fn(async (_channel: string, endpoint: string, _data: unknown, _signal: AbortSignal) => endpoint === 'list'
-      ? { ok: true, value: { items: [{ id: 'computer-use', state: state === 'os-setup' ? 'setup-required' : state,
-        actions: state === 'os-setup' ? [{ id: 'open-accessibility-settings', label: '打开辅助功能设置' }] : [], detail: '原生状态说明' }] } }
-      : { ok: true })
-    registerComputerUseTrigger({ effect: (run: () => unknown) => run(), inputTriggers: { registerSource: (source: InputTriggerSource) => {
-      sources.push(source); controller.sourceAdded(source); return () => {}
-    } }, connection: { rpc: { call } } })
-    try {
-      input.setDraft('请保留正文 @ 后续文字')
-      input.addAttachments(['attachment-image', 'attachment-file'] as never)
-      const initial = input.state.getSnapshot(), caret = initial.draft.indexOf('@') + 1
-      controller.track(initial.draft, caret, { tier: 'plain' }, initial.draftRev)
-      await vi.waitFor(() => expect(controller.menu.getSnapshot().groups[0]?.status).toBe('ready'))
-      const candidate = controller.menu.getSnapshot().groups[0]!.items[0]!
-      if (state === 'blocked' || state === 'failed' || state === 'os-setup') {
-        expect(candidate).toMatchObject({ description: '原生状态说明', hint: state === 'os-setup' ? '打开系统设置' : '不可用' })
-        controller.pick('电脑操控', 0)
-        if (state === 'os-setup') await vi.waitFor(() => expect(call).toHaveBeenCalledWith('/emate.capabilities', 'action', {
-          capability_id: 'computer-use', action_id: 'open-accessibility-settings', data: {},
-        }, expect.any(AbortSignal)))
-        else expect(call).toHaveBeenCalledOnce()
-        expect(input.state.getSnapshot().draft).toBe(initial.draft)
-        expect(input.state.getSnapshot().attachmentIds).toEqual(initial.attachmentIds)
-        expect(input.state.getSnapshot().occurrences).toEqual([])
-        expect(sent).not.toHaveBeenCalled()
-        continue
-      }
-      expect(candidate.hint).toBe('可插入') // actual native menu retains the owner metadata
-      if (state === 'setup-required') expect(candidate.description).toContain('实际操作仍需原生应用授权')
-      controller.pick('电脑操控', 0)
-      const selected = input.state.getSnapshot()
-      // 0.1.5 keeps the draft as the clipboard projection: a chip expands to
-      // its canonical text and the display label lives in the chip decorator.
-      expect(selected.draft).toBe('请保留正文 @电脑操控 后续文字')
-      expect(selected.attachmentIds).toEqual(['attachment-image', 'attachment-file'])
-      expect(selected.occurrences).toMatchObject([{ source: '电脑操控', ref: 'computer-use', label: '@电脑操控' }])
-      // rc.1 renders the chip from the occurrence itself; the 0.1.0
-      // decoration derivation is gone and an unresolved owner flips `invalid`.
-      expect(selected.occurrences[0]?.invalid).toBeUndefined()
-      input.actions.submit()
-      await vi.waitFor(() => expect(sent).toHaveBeenCalledOnce())
-      // rc.1 splices the owning source's serialized model form into the prompt
-      // text; the retired mentions channel no longer rides the sink.
-      expect(sent).toHaveBeenCalledWith('请保留正文 @[电脑操控](computer-use) 后续文字',
-        ['attachment-image', 'attachment-file'], 'queue', expect.any(AbortSignal))
-      expect(call.mock.calls).toHaveLength(1) // insertion is intent; no grant/settings action was requested
-
-      // Verify the delivered source/ref against the actual Host explicit gate,
-      // without invoking any native tool or granting an application lease.
-      const builder = readFileSync('../../../../dsh-plugin-computer-use/scripts/build.mjs', 'utf8')
-      const start = builder.indexOf('`const COMPUTER_USE_MENTION') + 1
-      const end = builder.indexOf('const DIRECT_AUTOMATION', start)
-      const gate = new Function('session', builder.slice(start, end).replaceAll('export function ', 'function ') + '\nreturn hasExplicitComputerUseRequest(session)')
-      const userMessage = (text: string) => ({ type: 'user/message',
-        data: { source: { kind: 'user' }, content: [{ type: 'text', text }] } })
-      const event = userMessage(sent.mock.calls[0]![0] as string)
-      expect(gate({ snapshotEvents: () => [event] })).toBe(true)
-      expect(gate({ snapshotEvents: () => [userMessage('@电脑操控 读取当前应用')] })).toBe(false)
-      expect(gate({ snapshotEvents: () => [event, userMessage('下一轮普通请求')] })).toBe(false)
-    } finally { off(); input.dispose(); controller.dispose(); await scope.fiber.dispose() }
-  }
 })

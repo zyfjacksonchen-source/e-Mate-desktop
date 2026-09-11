@@ -33,7 +33,7 @@ import './theme-tokens.module.css'
 import './chat-chrome.module.css'
 import { ComposerConnectors, ComposerExpertMode, ComposerMentions } from './composer-connectors.tsx'
 import { appendConnectionDraft, loadConnectionStates, callXinConnection } from './connection-status.ts'
-import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
+import { openMentionMenu, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection, SchedulesOverlayProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
 import { IDENTITY_CHANGED_EVENT, IdentityGate } from './identity.tsx'
@@ -444,7 +444,6 @@ export async function prepareSchedulePromptFromRoute(
 export function apply(ctx: any): void {
   registerPetTaskDetails(ctx, createTransientGalleryNotice(ctx))
   // Native ChatView owns process rows and ToolCallTree injection.
-  registerComputerUseTrigger(ctx)
   registerMentionSources(ctx)
   registerManagedPresetSurfaces(ctx)
   registerRouteScopedConversationHeader(ctx)

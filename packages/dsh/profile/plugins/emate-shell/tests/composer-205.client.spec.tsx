@@ -4,7 +4,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { COMPOSER_PLACEHOLDER, ComposerConnectors, ComposerExpertMode, ComposerMentions } from '../src/client/composer-connectors.tsx'
-import { registerComputerUseTrigger } from '../src/client/composer-mentions.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { PlanChip, type PlanChipProps } from '../../../../../../upstream/deepseek-harness/packages/client/ui-plan/src/client/PlanModeControl.tsx'
 import { FileImportControl } from '../../../../../dsh-plugin-file-import/src/client/index.tsx'
@@ -286,35 +285,6 @@ describe('e-Mate 2.0.17 composer projection', () => {
     expect([glyphStyle.fontSize, glyphStyle.lineHeight]).toEqual(['16px', '16px'])
   })
 
-  it('keeps a picked @电脑操控 reference visible in the native composer', async () => {
-    document.body.dataset.dshDesktopPlatform = 'darwin'
-    let registered: InputTriggerSource | undefined
-    registerComputerUseTrigger({
-      effect(run: () => () => void) { return run() },
-      inputTriggers: {
-        registerSource(source: InputTriggerSource) {
-          registered = source
-          return () => {}
-        },
-      },
-    })
-    expect(registered?.onPick({
-      candidate: { name: '电脑操控', hint: '可插入' },
-      session: { sessionId: 'session-1' as never },
-      position: 'inline',
-      via: 'menu',
-      span: { start: 0, end: 5, draftRev: 1 },
-    })).toEqual({
-      insert: { source: '电脑操控', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' },
-    })
-    const signal = new AbortController().signal
-    // rc.1 splices the serializer's output into the prompt text, so the model
-    // form carries the explicit selection while the draft keeps @电脑操控.
-    await expect(registered?.codec?.serialize('computer-use', signal))
-      .resolves.toBe('@[电脑操控](computer-use)')
-    expect(readFileSync('src/client/home.module.css', 'utf8')).toContain("font-family: 'DshChipCell', -apple-system")
-  })
-
   it('keeps one frame and a flush workspace footer when slots add wrappers around the native card', () => {
     const composer = (depth: number) => {
       let body = <div data-testid="native-root"><div data-composer-card data-testid="card">
@@ -351,8 +321,6 @@ describe('e-Mate 2.0.17 composer projection', () => {
     expect(source).toMatch(/id: 'e-mate-mentions',[\s\S]*?order: 11/u)
     expect(source).toContain("appendConnectionDraft(ctx, sessionId, prompt)")
     const mentions = readFileSync('src/client/composer-mentions.ts', 'utf8')
-    expect(mentions).toContain("name: '电脑操控'")
-    expect(mentions).toContain("label: '@电脑操控'")
     expect(source).not.toContain('<computer-use explicit="true">')
     expect(mentions).not.toMatch(/faceOf\('(?:goal|todos)'\)|kind: 'goal'|kind: 'plan'|<goal|<plan-item/u)
     expect(mentions).toContain("execute(session.sessionId, '/plan')")

@@ -32,20 +32,12 @@ describe.runIf(process.platform === 'win32')('Windows managed Profile materializ
   it('uses physical directories and repairs a missing declared main without scanning unrelated nested files', () => {
     const receiptPath = join(profile, '.e-mate-install.json')
     const packageRoot = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules')
-    const computerUseRoot = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
-    const computerUsePatch = readFileSync(join(computerUseRoot, 'cordis.patch.yml'), 'utf8')
-    expect((computerUsePatch.match(/id: emate-computer-use/gu) ?? []).length).toBe(1)
-    expect(computerUsePatch).toContain("disabled: !!js Array.of('darwin', 'win32').includes(process.platform) === false")
-    expect(computerUsePatch).toContain("process.platform === 'win32' ? 'hidden' : 'visible'")
-    const publicTypes = readFileSync(join(computerUseRoot, 'lib', 'types', 'types.d.ts'), 'utf8')
-    expect(publicTypes).not.toMatch(/executablePath|processStartTime|windowId/u)
-    expect(existsSync(join(computerUseRoot, 'native', 'windows', 'dsh-computer-use-helper.ps1'))).toBe(true)
-    expect(existsSync(join(computerUseRoot, 'native', 'windows', 'manifest.json'))).toBe(true)
+    const unrelatedRoot = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-better-sidebar')
     const library = join(packageRoot, 'lib')
     const main = join(library, 'index.js')
     const nestedExtra = join(library, '.warm-path-does-not-scan-this-file')
     const topLevelExtra = join(packageRoot, '.unexpected-top-level-entry')
-    const unrelatedNestedExtra = join(computerUseRoot, 'lib', '.unrelated-package-warm-marker')
+    const unrelatedNestedExtra = join(unrelatedRoot, 'lib', '.unrelated-package-warm-marker')
     const receipt = readFileSync(receiptPath, 'utf8')
 
     // The shipped process enforces Windows redirection trust, so managed payloads cannot rely on junctions.

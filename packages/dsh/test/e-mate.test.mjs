@@ -105,22 +105,6 @@ test('resolved Harness modules use source builds and file URLs for Windows ESM i
   join(root, 'packages', 'storage', 'storage-domain', 'lib', 'index.js'))
 })
 
-test('Computer Use composes one cross-platform Profile row without a candidate plugin layer', () => {
-  const root = new URL('../../dsh-plugin-computer-use/', import.meta.url)
-  const patchSource = readFileSync(new URL('cordis.patch.yml', root), 'utf8')
-  const patch = parseYaml(patchSource)
-  assert.match(patchSource, /process\.platform === 'win32' \? 'hidden' : 'visible'/u)
-  const build = readFileSync(new URL('scripts/build.mjs', root), 'utf8')
-  assert.doesNotMatch(build, /executablePath\?: string|processStartTime\?: string|windowId\?: number/u)
-  const rows = patch.flatMap(entry => entry.insert ?? []).filter(entry => entry.id === 'emate-computer-use')
-  assert.equal(rows.length, 1)
-  assert.equal(rows[0].name, '@e-mate/dsh-plugin-computer-use')
-  const source = readFileSync(new URL('src/windows.ts', root), 'utf8')
-  for (const excluded of ['upstream/plugins/computer-user/src/index.js', 'computer_set_mode', 'node:child_process']) {
-    assert.equal(source.includes(excluded), false)
-  }
-})
-
 test('identity mutations restore the native route only after validated login or agreement acceptance', () => {
   const source = readFileSync(new URL('../profile/plugins/emate-shell/src/client/identity.tsx', import.meta.url), 'utf8')
   const login = source.slice(source.indexOf('  const login = async'), source.indexOf('  const issueChallenge'))
@@ -234,7 +218,6 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-skill-hub',
       '@e-mate/dsh-plugin-better-sidebar',
       '@e-mate/dsh-plugin-cdp',
-      '@e-mate/dsh-plugin-computer-use',
       '@e-mate/dsh-plugin-file-import',
       '@e-mate/dsh-plugin-find-skill',
       '@e-mate/dsh-plugin-genui',
@@ -254,14 +237,18 @@ test('managed profile installation is idempotent', () => {
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
     assert.equal(readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8'), patch)
+    profileManifest.dependencies['@e-mate/dsh-plugin-computer-use'] = '2.0.17'
     profileManifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
     profileManifest.dependencies['@e-mate/dsh-plugin-idesign'] = '2.0.12'
     profileManifest.dependencies['@e-mate/dsh-plugin-search-mcp'] = '2.0.11'
     profileManifest.dependencies['@e-mate/dsh-plugin-xin-assistant'] = '2.0.10'
     profileManifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
+    const retiredComputerUse = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
     const retiredXin = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
     const retiredIDesign = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-idesign')
     const retiredSearchMcp = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp')
+    mkdirSync(retiredComputerUse, { recursive: true })
+    writeFileSync(join(retiredComputerUse, 'stale.txt'), 'retired')
     mkdirSync(retiredXin, { recursive: true })
     writeFileSync(join(retiredXin, 'stale.txt'), 'retired')
     mkdirSync(retiredIDesign, { recursive: true })
@@ -269,6 +256,7 @@ test('managed profile installation is idempotent', () => {
     mkdirSync(retiredSearchMcp, { recursive: true })
     writeFileSync(join(retiredSearchMcp, 'stale.txt'), 'retired')
     profileManifest.dsh.profile.bundles.push(
+      '@e-mate/dsh-plugin-computer-use',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-idesign',
       '@e-mate/dsh-plugin-search-mcp',
@@ -278,16 +266,19 @@ test('managed profile installation is idempotent', () => {
     writeFileSync(join(first.profile, 'package.json'), `${JSON.stringify(profileManifest, null, 2)}\n`)
     installProfile(dshHome)
     const repairedManifest = JSON.parse(readFileSync(join(first.profile, 'package.json'), 'utf8'))
+    assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-computer-use'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-im'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-idesign'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-search-mcp'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-xin-assistant'], undefined)
     assert.equal(repairedManifest.dependencies['@yuxianglin/dsh-bridge-browser'], undefined)
+    assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-computer-use'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-im'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-idesign'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-search-mcp'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-xin-assistant'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@yuxianglin/dsh-bridge-browser'), false)
+    assert.equal(existsSync(retiredComputerUse), false)
     assert.equal(existsSync(retiredXin), false)
     assert.equal(existsSync(retiredIDesign), false)
     assert.equal(existsSync(retiredSearchMcp), false)
@@ -991,12 +982,10 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
     const visible = new Set([
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-cdp',
-      '@e-mate/dsh-plugin-computer-use',
     ])
     const packages = [
       '@e-mate/dsh-plugin-better-sidebar',
       '@e-mate/dsh-plugin-cdp',
-      '@e-mate/dsh-plugin-computer-use',
       '@e-mate/dsh-plugin-file-import',
       '@e-mate/dsh-plugin-find-skill',
       '@e-mate/dsh-plugin-genui',

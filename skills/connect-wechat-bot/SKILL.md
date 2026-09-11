@@ -22,6 +22,6 @@ The connector installation and credential are device-global. A new e-Mate sessio
    ```
 
    Resume after the native application restart.
-3. Ask the user to open `设置 → IM 机器人 → 微信` and generate the iLink QR code. Use native Computer Use only after the user explicitly requests `@电脑操控`. Pause only for the user to scan and confirm in WeChat. If WeChat displays a pairing number, ask only for that one-time number through the authorization UI; never place it in chat or persist it.
+3. Ask the user to open `设置 → IM 机器人 → 微信` and generate the iLink QR code. Pause only for the user to scan and confirm in WeChat. If WeChat displays a pairing number, ask only for that one-time number through the authorization UI; never place it in chat or persist it.
 4. Keep polling the same provisioning attempt until the connector stores the credential in DSH Credentials and reports iLink long polling online. Regenerate expired QR codes and fail closed on an unknown state.
 5. The first normal message from the connected WeChat account must enter the existing DSH Workspace/Session and receive the Agent reply before reporting the connection as end to end.

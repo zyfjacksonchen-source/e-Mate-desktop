@@ -44,12 +44,6 @@
       "cli": true
     },
     {
-      "id": "@e-mate/dsh-plugin-computer-use",
-      "root": "packages/dsh-plugin-computer-use",
-      "desktop": "bundled-profile",
-      "cli": true
-    },
-    {
       "id": "@e-mate/dsh-plugin-file-import",
       "root": "packages/dsh-plugin-file-import",
       "desktop": "bundled-profile",

@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "helperVersion": "1.0.0",
-  "source": {
-    "path": "dsh-computer-use-helper.ps1",
-    "sha256": "f63a6a12d2e6f4afb9383f18ac01b529f76da380b1dd64382b117ea04d21a84f"
-  }
-}

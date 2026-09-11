@@ -319,7 +319,7 @@ test('lets an owning Agent change the same persisted control grant through UserQ
   assert.equal(harness.get().allowControl, true)
 })
 
-test('makes CDP the first browser path and reserves Computer Use for an explicit mention', async () => {
+test('makes CDP the only browser path and no longer names the retired Computer Use capability', async () => {
   const prompts = []
   const harness = settingsHarness()
   apply({
@@ -334,7 +334,9 @@ test('makes CDP the first browser path and reserves Computer Use for an explicit
   assert.equal(harness.get().allowControl, true)
   assert.match(prompts[0].text, /only when the latest user request explicitly asks to read or operate a visible Chrome webpage/u)
   assert.match(prompts[0].text, /Never use them for attachments, image generation, native apps, or non-page work/u)
-  assert.match(prompts[0].text, /only when the user explicitly inserts @电脑操控/u)
+  // The capability was removed in 2.0.18; the browser guidance must not keep
+  // promising a Computer Use path the Profile no longer ships.
+  assert.doesNotMatch(prompts[0].text, /Computer Use|电脑操控/u)
 })
 
 

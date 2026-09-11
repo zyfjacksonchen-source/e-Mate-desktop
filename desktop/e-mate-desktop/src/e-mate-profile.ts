@@ -76,6 +76,7 @@ const MANAGED_PROFILE_PACKAGES = new Set<string>(PROFILE_PLUGIN_PACKAGES)
 const RETIRED_PROFILE_PACKAGES = new Set([
   '@kelearns/dsh-navigation-bar',
   '@e-mate/dsh-plugin-browser',
+  '@e-mate/dsh-plugin-computer-use',
   '@e-mate/dsh-plugin-browser-panel',
   '@e-mate/dsh-plugin-idesign',
   '@e-mate/dsh-plugin-im',

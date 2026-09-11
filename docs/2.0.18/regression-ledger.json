@@ -513,7 +513,8 @@
     "profile-core",
     "shell",
     "scripts"
-   ]
+   ],
+   "disposition": "Removed with the capability. The user ruled that Computer Use is dropped on both Windows and macOS, including its plugin, front-end presentation and supporting configuration, so packages/dsh-plugin-computer-use and the vendored upstream/plugins/dsh-computer-use were deleted (186 tracked files) and the guard files listed here went with them: packages/dsh-plugin-computer-use/test/contract.test.mjs. The removal is itself guarded rather than merely recorded: both profile installers now carry @e-mate/dsh-plugin-computer-use in RETIRED_PROFILE_PACKAGES, and the profile repair tests in packages/dsh/test/e-mate.test.mjs and desktop/e-mate-desktop/tests/e-mate-profile.spec.ts seed a stale install and assert the next install deletes the directory, drops the dependency and removes it from dsh.profile.bundles, so the plugin cannot come back unnoticed. Negative assertions that predate the removal stay live in e-mate-profile.spec.ts, profile.spec.ts, package.spec.ts and composer-205.client.spec.tsx. Durable record: docs/2.0.18/computer-use-removal.md."
   },
   {
    "hash": "90c3a1fae3124536bb62f5ee215c74fe510e5e63",
@@ -1266,7 +1267,8 @@
     "plugin:computer-use",
     "plugin:file-import",
     "plugin:tool-search"
-   ]
+   ],
+   "disposition": "Removed with the capability. The user ruled that Computer Use is dropped on both Windows and macOS, including its plugin, front-end presentation and supporting configuration, so packages/dsh-plugin-computer-use and the vendored upstream/plugins/dsh-computer-use were deleted (186 tracked files) and the guard files listed here went with them: packages/dsh-plugin-computer-use/test/contract.test.mjs and test/windows-source.test.mjs. The removal is itself guarded rather than merely recorded: both profile installers now carry @e-mate/dsh-plugin-computer-use in RETIRED_PROFILE_PACKAGES, and the profile repair tests in packages/dsh/test/e-mate.test.mjs and desktop/e-mate-desktop/tests/e-mate-profile.spec.ts seed a stale install and assert the next install deletes the directory, drops the dependency and removes it from dsh.profile.bundles, so the plugin cannot come back unnoticed. Negative assertions that predate the removal stay live in e-mate-profile.spec.ts, profile.spec.ts, package.spec.ts and composer-205.client.spec.tsx. Durable record: docs/2.0.18/computer-use-removal.md."
   },
   {
    "hash": "9a78fe6a50f7d24c1b88960aa636c22bb6b22ff4",
@@ -2559,7 +2561,8 @@
    ],
    "areas": [
     "plugin:computer-use"
-   ]
+   ],
+   "disposition": "Removed with the capability. The user ruled that Computer Use is dropped on both Windows and macOS, including its plugin, front-end presentation and supporting configuration, so packages/dsh-plugin-computer-use and the vendored upstream/plugins/dsh-computer-use were deleted (186 tracked files) and the guard files listed here went with them: packages/dsh-plugin-computer-use/test/windows-source.test.mjs. The removal is itself guarded rather than merely recorded: both profile installers now carry @e-mate/dsh-plugin-computer-use in RETIRED_PROFILE_PACKAGES, and the profile repair tests in packages/dsh/test/e-mate.test.mjs and desktop/e-mate-desktop/tests/e-mate-profile.spec.ts seed a stale install and assert the next install deletes the directory, drops the dependency and removes it from dsh.profile.bundles, so the plugin cannot come back unnoticed. Negative assertions that predate the removal stay live in e-mate-profile.spec.ts, profile.spec.ts, package.spec.ts and composer-205.client.spec.tsx. Durable record: docs/2.0.18/computer-use-removal.md."
   },
   {
    "hash": "7ecbb19edca68d4977b3f63076504624a96e7c6c",
