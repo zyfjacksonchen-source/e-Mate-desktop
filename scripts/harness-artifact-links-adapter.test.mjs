@@ -5,7 +5,7 @@ import { readFile, mkdtemp, realpath, writeFile, rm, symlink } from 'node:fs/pro
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { adaptHarnessConversationSource } from './harness-conversation-adapter.mjs'
+import { adaptHarnessChatSource, adaptHarnessConversationSource } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSource, artifactLinksVitePlugin, ARTIFACT_LINKS_RENDERER_PATH } from './harness-artifact-links-adapter.mjs'
 import { apply as applyOpenBoundary } from '../packages/dsh/src/profile/artifact-open-boundary.ts'
 
@@ -18,19 +18,39 @@ const requireHarness = createRequire(join(harness, 'package.json'))
 
 // Import the actual emitted renderer. Only package resolution and the CSS-only
 // side effect are adjusted for this Node DOM test; no renderer is substituted.
-const moduleText = adapted.replace(/^import [^\n]+ from "([^"]+)";/gmu, (line, name) => line.replace('"' + name + '"', JSON.stringify(pathToFileURL(requireNative.resolve(name)).href)))
+// rc.1 emits CSS-module imports beside the library, and a data:-URL module cannot
+// resolve them; stub each one with a class-name proxy so rendered markup keeps
+// its class attributes.
+const cssStub = 'data:text/javascript,' + encodeURIComponent('export default new Proxy({}, { get: (_t, key) => String(key) })')
+const moduleText = adapted.replace(/^(import [^\n]+ from )"([^"]+\.css)";$/gmu, (_line, head) => head + '"' + cssStub + '";')
+  .replace(/^import [^\n]+ from "([^"]+)";/gmu, (line, name) => name.startsWith('data:')
+    ? line
+    : line.replace('"' + name + '"', JSON.stringify(pathToFileURL(requireNative.resolve(name)).href)))
   .replace(/^import "katex\/dist\/katex.min.css";$/mu, '')
 const primitiveModule = await import('data:text/javascript;base64,' + Buffer.from(moduleText).toString('base64'))
 const { MarkdownText } = primitiveModule
 const { jsx } = requireNative('react/jsx-runtime')
 const { renderToStaticMarkup } = requireNative('react-dom/server')
 const vocabularyText = await readFile(join(harness, 'packages/client/ui-deliverables/src/client/turn-deliverables.ts'), 'utf8')
-const vocabulary = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(vocabularyText.slice(vocabularyText.indexOf('export function basename(')))).toString('base64'))
+// rc.1 moved the vocabulary's basename() into presented.ts; inline the same
+// three-line helper so the evaluated slice keeps its one external dependency.
+const basenameSource = `function basename(path) {
+  const at = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\\\"))
+  return at === -1 ? path : path.slice(at + 1)
+}
+`
+const vocabularySlice = vocabularyText.slice(vocabularyText.indexOf('export function producedForClosing('))
+  // A data:-URL module cannot resolve the slice's trailing relative re-export;
+  // basenameSource above supplies that one helper.
+  .replace(/^export \{[^}]*\} from '[^']*'$/gmu, '')
+const vocabulary = await import('data:text/javascript;base64,' + Buffer.from(
+  basenameSource + stripTypeScriptTypes(vocabularySlice),
+).toString('base64'))
 const conversation = adaptHarnessConversationSource(await readFile(join(harness, 'packages/client/ui-conversation/lib/client.js'), 'utf8'))
 const mentionsCode = conversation.slice(conversation.indexOf('function emateArtifactFileMentions('), conversation.indexOf('function emateCanvasNavigationRequest('))
 const fileLinkOwner = new Function(mentionsCode + '\nreturn emateArtifactFileMentions')()
-const { resolveWorkspacePath } = await import(pathToFileURL(join(harness, 'upstream/deepseek-harness/packages/util/workspace-path/src/index.ts')).href)
-const { openNativePath } = await import(pathToFileURL(join(harness, 'upstream/deepseek-harness/packages/util/native-command/src/path-opener.ts')).href)
+const { resolveWorkspacePath } = await import(pathToFileURL(join(harness, 'packages/util/workspace-path/src/index.ts')).href)
+const { openNativePath } = await import(pathToFileURL(join(harness, 'packages/util/native-command/src/path-opener.ts')).href)
 
 test('all renderer seams fail closed on drift, duplication and already adapted output', () => {
   assert.throws(() => adaptHarnessArtifactLinksSource('future'), /expected one rc.7 seam/)
@@ -123,25 +143,55 @@ test('explicit links preserve Windows drives and relative paths without promotin
 
 // Load the emitted native module factories, exposing only their real owners for
 // this test. Slot dispatch below supplies the same native hook context as ChatView.
+// The emitted prologue reads its loader from a global window, and a factory's
+// other window reads resolve lazily against whatever page the current test has
+// installed, so a factory loaded before a DOM test still sees that test's DOM.
 function emittedFactory(source, require, extraExports = '') {
   let output
-  new Function('window', source.replace('return module.exports;', extraExports + '\nreturn module.exports;'))({ __ModuleLoader__: { load(module) { output = module.factory(require) } } })
+  const loader = { __ModuleLoader__: { load(module) { output = module.factory(require) } } }
+  const host = new Proxy(loader, {
+    get: (target, key) => key in target ? target[key] : (globalThis.window ?? globalThis)[key],
+  })
+  new Function('window', source.replace('return module.exports;', extraExports + '\nreturn module.exports;'))(host)
   return output
 }
+// 0.1.5 kept the assembler in ui-conversation and moved the Chat renderer, its
+// Node Definitions and the Chat target builder to ui-chat, so each owner is
+// loaded from its own emitted bundle.
 const requireConversation = createRequire(join(harness, 'packages/client/ui-conversation/package.json'))
-const clientRuntime = emittedFactory(await readFile(join(harness, 'packages/client/runtime/lib/client.js'), 'utf8'), requireConversation)
-const conversationOwners = emittedFactory(conversation, name => {
-  if (name === '@deepseek-ai/dsh-client-runtime/client') return clientRuntime
-  if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitiveModule
-  if (name === '@deepseek-ai/dsh-client-ui-attachment') return {}
-  return requireConversation(name)
-}, 'exports.testOwners = { registerConversationNodes, AssistantNodeView, ChatNodeSeat, CHAT_NODE_INJECT };').testOwners
+const requireChat = createRequire(join(harness, 'packages/client/ui-chat/package.json'))
+// Every emitted factory and the adapted renderer must render through the one
+// React instance the assertions use, so React resolves through the library.
+function harnessRequire(packageRequire) {
+  return name => name === '@deepseek-ai/dsh-client-ui-primitives' ? primitiveModule
+    : name === 'react' || name === 'react-dom' || name === 'react/jsx-runtime' ? requireNative(name)
+    : packageRequire(name)
+}
+const conversationRuntime = emittedFactory(conversation, harnessRequire(requireConversation))
+const conversationOwners = emittedFactory(
+  adaptHarnessChatSource(await readFile(join(harness, 'packages/client/ui-chat/lib/client.js'), 'utf8')),
+  harnessRequire(requireChat),
+  'exports.testOwners = { registerConversationNodes, AssistantNodeView, ChatNodeSeat, CHAT_NODE_INJECT };',
+).testOwners
 function nativeChat(events, incremental = false) {
   const definitions = [], views = []; let fallback
-  conversationOwners.registerConversationNodes({ conversationEvents: { register: value => definitions.push(value), registerFallback: value => { fallback = value } }, conversationViews: { register: value => views.push(value) } })
-  const assembler = new clientRuntime.ConversationNodeAssembler({ entries: () => definitions, fallbackEntry: () => fallback }, { entries: () => views })
-  if (incremental) for (const event of events) { assembler.append({ event, view: undefined }); assembler.flush() }
-  else assembler.replaceWindow(events.map(event => ({ event, view: undefined })), false)
+  // The registry entry point is ctx.uiConversation.{events,views}.register;
+  // only the system-prompt and request-prompt Definitions read the two
+  // inspect helpers, and no fixture event here reaches them.
+  conversationOwners.registerConversationNodes({
+    uiConversation: {
+      events: { register: value => definitions.push(value), registerFallback: value => { fallback = value } },
+      views: { register: value => views.push(value) },
+      inspectSystemPrompt: previous => previous,
+      inspectRequestPrompt: previous => previous,
+    },
+  })
+  const assembler = new conversationRuntime.ConversationNodeAssembler({ entries: () => definitions, fallbackEntry: () => fallback }, { entries: () => views })
+  // 0.1.5 feeds one activated target with tagged SessionEventLikeEntry values:
+  // rc.7 accepted a bare { event } and appended without activating 'chat'.
+  assembler.activateTarget('chat')
+  if (incremental) for (const event of events) { assembler.append({ type: 'event', event }); assembler.flush() }
+  else assembler.replaceWindow(events.map(event => ({ type: 'event', event })), false)
   assembler.flush()
   return assembler.snapshot('chat')
 }
@@ -150,7 +200,9 @@ function terminalEvents() {
   return [
     { seq: 1, type: 'turn/start', data: { turn: 1 } },
     { seq: 2, type: 'step/start', data: { turn: 1, step: 1 } },
-    { seq: 3, type: 'assistant/message', surfaceOp: 'append', data: { turn: 1, step: 1, message: { id: 'final-message', role: 'assistant', content: [{ type: 'text', text: terminalText }] } } },
+    // 0.1.5's turn-tail Definition derives Turn token usage from the durable
+    // assistant/message payload, which always carries `source` and `stream`.
+    { seq: 3, type: 'assistant/message', surfaceOp: 'append', data: { turn: 1, step: 1, message: { id: 'final-message', role: 'assistant', content: [{ type: 'text', text: terminalText }], source: { kind: 'model', provider: 'synthetic', model: 'synthetic' } }, stream: [] } },
     { seq: 4, type: 'step/end', data: { turn: 1, step: 1 } },
     { seq: 5, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
   ].map(event => ({ ...event, time: 1700000000000 + event.seq }))
@@ -159,18 +211,43 @@ function nodeProps(chat, openFile) {
   const node = chat.nodes.values().find(node => node.kind === 'assistant-step' && node.data.finalNode?.seq === 3)
   assert(node)
   const useSession = selector => selector({ chat })
-  return { nodeKey: node.key, selectedCallId: null, cwd: '/workspace', openFile, inspectCall() {}, forkAt() {}, useSession,
+  const useChat = selector => selector(chat)
+  return {
+    nodeKey: node.key,
+    // 0.1.5's ChatNodeSeat subscribes per Node key through the seat's keyed
+    // hook faces; rc.7 handed it one selectedCallId and a whole-snapshot
+    // useSession to pick the row itself.
+    useChatNode: key => chat.nodes.get(key),
+    useChatNodeProcess: () => undefined,
+    historyIncomplete: false, compactTranscript: false, useStore: () => undefined,
+    actions: { setTurnProcessOpen() {} },
+    cwd: '/workspace', openFile, inspectCall() {}, forkAt() {}, loadImage: async () => undefined,
+    renderMessageImages: () => null,
     fileMentions: owner => fileLinkOwner({ get: () => undefined }, owner), t: key => key,
     renderSlot(_name, owner, { hookContext }) {
-      return jsx(conversationOwners.AssistantNodeView, { ...owner, useSession, t: key => key, useTurnData: conversationOwners.CHAT_NODE_INJECT.hooks.turnData({ useSession }, hookContext) })
+      // useChat is a session standard hook and the Turn-data hook rides the
+      // slot's provided hook face, exactly as the keyed seat supplies them.
+      return jsx(conversationOwners.AssistantNodeView, { ...owner, useChat, useSession, t: key => key,
+        useTurnData: conversationOwners.CHAT_NODE_INJECT.hooks.turnData({ useSession }, hookContext) })
     },
   }
 }
-test('actual native final projection and Assistant renderer retain explicit file links after cold and incremental completion', () => {
+test('actual native final projection and Assistant renderer retain explicit file links after cold and incremental completion', async t => {
+  // 0.1.5's Turn-data hook reads its Turn store through useSyncExternalStore and
+  // publishes no server snapshot, so the shipped renderer is exercised in a DOM
+  // instead of through renderToStaticMarkup.
+  const { JSDOM } = requireHarness('jsdom')
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
+  const names = ['window', 'document', 'navigator', 'HTMLElement', 'Node', 'IS_REACT_ACT_ENVIRONMENT']
+  const previous = new Map(names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]))
+  for (const name of names) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value: name === 'IS_REACT_ACT_ENVIRONMENT' ? true : dom.window[name] })
+  const { render, cleanup } = requireHarness('@testing-library/react')
+  t.after(() => { cleanup(); dom.window.close(); for (const [name, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name] } })
   for (const incremental of [false, true]) {
     const chat = nativeChat(terminalEvents(), incremental)
-    const html = renderToStaticMarkup(jsx(conversationOwners.ChatNodeSeat, nodeProps(chat, () => {})))
-    assert.equal((html.match(/<button/g) ?? []).length, 2, incremental ? 'incremental completion' : 'cold completion')
+    const view = render(jsx(conversationOwners.ChatNodeSeat, nodeProps(chat, () => {})))
+    assert.equal((view.container.innerHTML.match(/<button/g) ?? []).length, 2, incremental ? 'incremental completion' : 'cold completion')
+    cleanup()
   }
 })
 
@@ -228,24 +305,44 @@ test('Vite consumes the native source adapter and the emitted browser library op
   }
 })
 
+// 0.1.5 emits the deliverables owner as three bundle regions whose two helper
+// regions carry no outer reference, so slicing all three keeps the Definition
+// and its readers self-contained; rc.7 sliced one producedPaths() helper and
+// injected the runtime namespace's isAppendSurfaceEvent.
+function deliverablesBundleCode(bundle) {
+  const region = name => {
+    const start = bundle.indexOf('//#region ' + name)
+    const end = bundle.indexOf('//#endregion', start)
+    assert(start !== -1 && end !== -1, 'missing emitted region ' + name)
+    return bundle.slice(start, end)
+  }
+  return [
+    region('lib/types/presented.js'),
+    region('../../core/session/lib/types/surface.js'),
+    region('lib/types/client/turn-deliverables.js'),
+  ].join('\n')
+}
 test('native deliverables adopts only successful Office receipts explicitly named by latest closing prose', async () => {
   const { adaptHarnessArtifactDeliverablesSource } = await import('./harness-artifact-links-adapter.mjs')
   const library = await readFile(join(harness, 'packages/client/ui-deliverables/lib/client.js'), 'utf8')
   const adapted = adaptHarnessArtifactDeliverablesSource(library)
   // Execute the emitted native accumulator from its module factory. The actual
   // boot serves this client.js; it does not import the source through Vite.
-  const code = adapted.slice(adapted.indexOf('function producedPaths('), adapted.indexOf('function basename('))
-  const definition = new Function('_deepseek_ai_dsh_client_runtime_client', code + '\nreturn deliverablesDefinition')({ isAppendSurfaceEvent: (event) => event.surfaceOp !== 'replace' })
+  const code = deliverablesBundleCode(adapted)
+  const definition = new Function(code + '\nreturn deliverablesDefinition')()
   assert.throws(() => adaptHarnessArtifactDeliverablesSource(adapted), /expected one/)
   let seq = 1
   const start = { type: 'turn/start', seq: seq++, data: { turn: 3 } }
   let state = definition.start({}, { event: start })
+  // 0.1.5's own isAppendSurfaceEvent gates every surface Match on the durable
+  // marker, so the fixture carries the `append` a real Session event carries;
+  // rc.7's injected stub read a missing marker as append.
   function step(event, view) { event.seq = seq++; event.data.turn = 3; const match = definition.match(event); if (match) state = definition.update({ state }, { event, view }) }
   function receipt(id, name, path, operation = 'read', extra = {}) {
     step({ type: 'tool/call', data: { callId: id, name } }, { for: 'call', view: { card: 'generic', kind: 'edit', locations: [{ path: 'wrong-requested-name.pptx' }] } })
-    step({ type: 'tool/result', data: { message: { source: { callId: id }, content: [{ type: 'tool-result', isError: false }] }, meta: { operation, format: 'pptx', job_id: 'emate-office-7', bytes: 1703973, relative_path: path, ...extra } } })
+    step({ type: 'tool/result', surfaceOp: 'append', data: { message: { source: { callId: id }, content: [{ type: 'tool-result', isError: false }] }, meta: { operation, format: 'pptx', job_id: 'emate-office-7', bytes: 1703973, relative_path: path, ...extra } } })
   }
-  function closing(text) { step({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }) }
+  function closing(text) { step({ type: 'assistant/message', surfaceOp: 'append', data: { message: { content: [{ type: 'text', text }] } } }) }
   const paths = () => definition.buildLocationData({ state }, 'turn').value.produced.map(row => row.path)
   receipt('intermediate', 'editor', 'ignored')
   const real = 'emate_red_intro_20260908/exports/e-Mate介绍_红色活力风_5页.pptx'
@@ -270,7 +367,7 @@ test('native deliverables adopts only successful Office receipts explicitly name
   receipt('fake-tool', 'bash', 'unverified.pptx'); closing('`unverified.pptx`')
   assert.ok(!paths().includes('unverified.pptx'))
   step({ type: 'tool/call', data: { callId: 'failed', name: 'office_read' } })
-  step({ type: 'tool/result', data: { message: { source: { callId: 'failed' }, content: [{ type: 'tool-result', isError: true }] }, meta: { operation: 'read', format: 'pptx', job_id: 'emate-office-8', bytes: 20, relative_path: 'failed.pptx' } } })
+  step({ type: 'tool/result', surfaceOp: 'append', data: { message: { source: { callId: 'failed' }, content: [{ type: 'tool-result', isError: true }] }, meta: { operation: 'read', format: 'pptx', job_id: 'emate-office-8', bytes: 20, relative_path: 'failed.pptx' } } })
   closing('`failed.pptx`'); assert.ok(!paths().includes('failed.pptx'))
   receipt('png', 'office_write', '.e-mate/office/page.png', 'write', { format: 'png' })
   assert.ok(paths().includes('.e-mate/office/page.png'))
@@ -281,8 +378,8 @@ test('native deliverables adopts only successful Office receipts explicitly name
 test('Univer outputs use native root and Code trees in replay and live closing, with exact paths and session ownership', async () => {
   const { adaptHarnessArtifactDeliverablesSource } = await import('./harness-artifact-links-adapter.mjs')
   const adapted = adaptHarnessArtifactDeliverablesSource(await readFile(join(harness, 'packages/client/ui-deliverables/lib/client.js'), 'utf8'))
-  const code = adapted.slice(adapted.indexOf('function producedPaths('), adapted.indexOf('function basename('))
-  const select = new Function('_deepseek_ai_dsh_client_runtime_client', code + '\nreturn selectProducedFiles')({ isAppendSurfaceEvent: () => true })
+  const code = deliverablesBundleCode(adapted)
+  const select = new Function(code + '\nreturn selectProducedFiles')()
   const events = []; let seq = 0
   const add = (type, data) => events.push({ type, data, seq: ++seq, time: 100 + seq, surfaceOp: 'append' })
   const content = (operation, file, result) => [{ type: 'text', text: JSON.stringify({ ok: true, operation, ...(file ? { file } : {}), result }) }]
@@ -300,8 +397,8 @@ test('Univer outputs use native root and Code trees in replay and live closing, 
   for (const [id, output] of [['root-a', '/one/report.pdf'], ['root-b', 'C:\\two\\report.pdf']]) {
     add('tool/call', { turn: 1, step: 1, callId: id, name: 'run_code', arguments: '{}' })
     const identity = { rootCallId: id, parentCallId: id, subCallId: 'same-child', name: 'univer_print_pdf', arguments: { output: '/guessed.pdf' } }
-    add('tool/code-dispatch-start', identity)
-    add('tool/code-dispatch', { ...identity, isError: false, content: content('print-pdf', file, { output, pageCount: 1, unitType: 'slide' }) })
+    add('tool/ptc-dispatch-start', identity)
+    add('tool/ptc-dispatch', { ...identity, isError: false, content: content('print-pdf', file, { output, pageCount: 1, unitType: 'slide' }) })
     add('tool/result', { turn: 1, step: 1, message: { source: { callId: id }, content: [{ type: 'tool-result', isError: id === 'root-b', content: [{ type: 'text', text: 'partial: /guessed.pdf' }] }] } })
   }
   const fake = content('print-pdf', file, { output: '/fake.pdf', pageCount: 1 })
@@ -310,7 +407,7 @@ test('Univer outputs use native root and Code trees in replay and live closing, 
   call('escape', 'univer_print_pdf', content('print-pdf', file, { output: '/workspace/../escape.pdf', pageCount: 1 }))
   call('remote', 'univer_print_pdf', content('print-pdf', file, { output: 'https://example.com/report.pdf', pageCount: 1 }))
   call('prose', 'univer_print_pdf', [{ type: 'text', text: 'Result: ' + fake[0].text }])
-  add('assistant/message', { turn: 1, step: 1, message: { id: 'done', role: 'assistant', content: [{ type: 'text', text: '完成' }] } })
+  add('assistant/message', { turn: 1, step: 1, message: { id: 'done', role: 'assistant', content: [{ type: 'text', text: '完成' }], source: { kind: 'model', provider: 'synthetic', model: 'synthetic' } }, stream: [] })
   const closing = seq
   call('late', 'univer_print_pdf', content('print-pdf', file, { output: '/late.pdf', pageCount: 1 }))
   add('step/end', { turn: 1, step: 1 }); add('turn/end', { turn: 1, reason: { kind: 'completed' } })
