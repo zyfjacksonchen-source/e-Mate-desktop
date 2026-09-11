@@ -2357,3 +2357,37 @@ peer 为 `ui-chat >=0.1.2-alpha.5 <0.1.3-0` 与 `ui-conversation/settings: >=0.1
    `packages/dsh/test/e-mate.test.mjs:247`、`desktop/.../e-mate-profile.spec.ts:224,316,916`、`verify-profile-boot.mjs:272`（tidychat 移入 retired 拒绝表）。
 4. 同批改写根 `AGENTS.md` 第 65 行（"Use dsh-tidychat … do not install a second owner"）为 turn-fold + 原生 owner 的表述，并在 `regression-ledger.{md,json}` 落一行。
 
+
+## 第 75 轮：**用户裁决 = Path C（turn-fold 完整接管）**，覆盖第 74 轮的 Path A
+
+### 75.1 我必须先报的事实（已向用户呈报并获其明确选择）
+
+`dsh-turn-fold` **不是新方案，而是 e-mate 自己删除过的修复**：提交 `5093c4defb`
+（"fix: restore native chat flow and global connector state"，子提交 "fix: fold process details without hiding messages"）
+做了三件事：把 `dsh-turn-fold` 加入 `RETIRED_PROFILE_PACKAGES`；删除 `desktop/e-mate-desktop/tests/turn-fold-ui.spec.ts`；
+自研 `emate-shell/src/client/activity-fold.tsx`（215 行）+ 其守卫规格（138 行）取而代之。
+三处**活跃守卫**至今阻止它回来：`desktop/e-mate-desktop/tests/e-mate-profile.spec.ts:267`（profile 内不得存在 `dsh-turn-fold`）、
+`:459`（行不存在）、`:854-900`（从带 `dsh-turn-fold@0.2.2` 的旧 profile 升级时，修复路径必须移除它）。
+
+### 75.2 裁决（用户显式选择，记录为对验收条款的豁免）
+
+用户在 A / B / C 三选中**明确选择 C：完整按 turn-fold 接管折叠与导航**。因此：
+- 本目标"2.0.11 之后修过的 bug 不得以相同或不同形式复现"这条验收，对 `5093c4defb` 的"原生聊天流 + 不隐藏消息"结论**由用户显式豁免**；
+- 上述三处守卫**改写为新契约**（断言 turn-fold 在场、tidychat 不在场、升级路径按新状态处理），**不得删除断言**；
+- `AGENTS.md:65`（"Use dsh-tidychat … do not install a second owner"）同批改写为 turn-fold + 原生 owner 的表述。
+
+### 75.3 Path C 的执行切片（按顺序）
+
+1. **vendor + 骨架**：`upstream/plugins/dsh-harmony`（npm tarball）与 `upstream/plugins/dsh-turn-fold`（仓库克隆）→
+   `packages/dsh-plugin-harmony`、`packages/dsh-plugin-turn-fold`（`@e-mate/…@2.0.18`、`eMate.harnessVersion=0.1.5-rc.1`、
+   各自 `cordis.patch.yml` insert 行、`scripts/build.mjs` 按 genui 同法拷产物并对接缝做 fail-closed 断言）。
+2. **harmony 对 0.1.5 的逐 builtin 复验**：其 4 个 builtin 目前只有 `resolveMeta`/`graphRow`（`dsh-client-modules@0.1.5-rc.1`）被确认存在；
+   settings/atomic-write 两个 builtin 针对 0.1.1 世代且会**再嵌一份 `dsh-settings`**，必须逐个复验或明确移除（移除要在 README/facts 记录）。
+3. **运行时词汇三处迁移**：`timeline.playbackClock` 已删 → 实时时钟改用 `TurnLocation.start?.time` 或 `turn-tail.data.time`+`ttftMs`；
+   指标 `assistant-step.data.usage.*` → `turn-tail.data.tokenUsage.*`；`TurnLocation.status` 变为 `open|closed|unknown` → 标签重映射。
+4. **原生 owner 让位**：折叠走原生设置 `transcriptView:'normal'`；原生轨道（`TurnNavigator.tsx`，无开关）由 shell CSS 覆盖或新增一条 ui-chat overlay 抑制——
+   二选一必须在 facts 记录理由，并纳入 `DESKTOP_OVERLAYS` 准入（若走 overlay）。
+5. **退役 tidychat**：删包与 `profile/bundles/tidychat`，inventory 行移除，`@e-mate/dsh-plugin-tidychat` 加入 `RETIRED_PROFILE_PACKAGES`，重跑 bundle sync。
+6. **守卫改指 + 文档**：`packages/dsh/test/e-mate.test.mjs:247`、`desktop/.../e-mate-profile.spec.ts:224/267/316/459/854-916`、
+   `desktop/.../scripts/verify-profile-boot.mjs:272`（tidychat 移入 retired 拒绝表，turn-fold 移出）、`regression-ledger.{md,json}`、`AGENTS.md:65`。
+
