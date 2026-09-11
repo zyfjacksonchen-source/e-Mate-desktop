@@ -2678,3 +2678,25 @@ identity / capabilities / agent-operations）已通过。
 **流程教训（写入交接）**：改组件行 inject 后必须刷新 `build/e-mate-profile/bundles/**`（生成物），
 否则一切"改了没反应"的观察都是在看旧副本。
 
+
+### 79.3 canvas 收口：两个对照实验 + 挂起疑点的判定
+
+**对照实验（本轮）**：把 canvas 行的 `webServer` 去掉再跑 → 仍是同一个错；恢复后再跑 → 仍是同一个错。
+说明 canvas 的失败**与该行 inject 无关**。结合：`packages/dsh-plugin-canvas/lib/index.js` 里
+`ctx.webServer` **出现 0 次**（只有第 1504 行 `ctx.get("webServer")` 与第 1505 行具名 throw），
+因此报错文案（cordis 的 `cannot get property "webServer" without inject`）**只能来自第 1503 行**
+`ctx.connection.rpc.handle(...)` 内部 —— 即 `rpc-host.ts:179` 的 `owner.webServer.register(route)`。
+
+**"7 个是真加载还是挂起"的判定**（本轮只能给出推理，测不了）：
+`Entry._await()` 对**挂起**的 fiber 返回**永不 resolve** 的 promise，而 `boot()` 内部是
+`Promise.allSettled([...entries].map(e => e._await()))`（loader `lib/index.js:192`）。
+若那 7 个真的挂起，boot 会**永远等不到结算**（表现为卡住/超时），但它**正常返回了失败清单且只含 canvas**。
+→ 结论（推理，非直接测量）：那 7 个入口**已结算并激活**，不是静默挂起。
+下一轮若要实测，须在 **boot 之前**插桩（boot 抛错后 `ctx` 不可用，本轮 probe 因此没输出），
+例如用 `ctx.loader.entries()` 的 fiber 状态在 boot 成功的路径上断言，或改由功能面断言（通道/服务存在）。
+
+**剩余唯一变量**：`webServer` 在那个时刻是否真的已注册 —— 若未注册，为何只有 canvas 在 `rpc.handle` 抛错，
+而那 7 个同样在 apply 期调用 `rpc.handle` 却通过？两者唯一差异是 canvas 的 `rpc.handle` 调用在**行内联的 effect 第一个语句**、
+且它的行同时声明了 8 个服务。下一步应逐字比较 canvas 与那 7 个的**行结构**（layer 顺序 / 是否 insert 块内 / 是否有 client 半边），
+而不是继续在 canvas 代码里找。
+
