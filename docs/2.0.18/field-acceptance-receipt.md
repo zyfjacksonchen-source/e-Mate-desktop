@@ -1,5 +1,11 @@
 # 2.0.18 实机验收回执（本机 macOS）
 
+> **现状汇总（第 8 轮，源码 `24a0a4fcfe`）**
+> - **已 PASS（实机）**：AC-01 升级自愈、AC-02 候选渲染、AC-03 升级路径、AC-04 主内容区空白（根因已修，C2c 复测通过）、A 登录与企业、E 侧栏/能力中心、F 设置与更新（含 turn-fold 的 settings card 可见）、H 移除项核对（候选级）、AC-06 Windows 就地升级安装（逐字节）。
+> - **`BLOCKED`（唯一外部依赖）**：B/C/D 组、G 组折叠可见性、三维度性能的**处理侧** —— 线上企业服务落后 `bdb9e67f14` 一次提交，对 `/v1/runtime-models?client_version=2.0.18&capabilities=responses-multimodal` 回 `INVALID_REQUEST`。**需要的动作：把企业服务部署到含 `bdb9e67f14` 及之后的构建**（客户端不改）。详见 AC-05。
+> - **`OPEN`**：Windows C5 的 GUI/登录态验收（需已登录的交互式会话；非交互 SSH 启动实测 0 进程）；临时任务/画布/宠物等尚未逐面覆盖的 E 组界面。
+> - 对照基线（DSH 原版）生图延迟已实测：n=3，中位数 19330 ms。
+
 方法与判定口径见 `docs/2.0.18/field-acceptance-plan.md`。本文件只记录**实际执行**的用例与结果。
 判据只允许 `PASS / FAIL / BLOCKED / NEEDS_EVIDENCE / OPEN / OUT_OF_SCOPE`。
 
@@ -158,7 +164,7 @@ profile 依 `.e-mate-install.json`（schema 2 / 2.0.18 / harness `43c411a5`）�
 
 | 组 | 状态（C2b） |
 |---|---|
-| A 登录与企业 | **`PASS`**（登录与企业鉴权面；设置→个人资料实测显示「e-Mate 企业管理员 / 企业账户状态已认证 / 每周 Token 额度 不限」与 Token 使用情况面板（每日·每周·累计 + 日历热力图））：企业主机可达（`https://mvdcm.ecoremedia.net` → HTTP **302**，0.63 s；先前 `http=000` 测的是 txt 里的**面板**主机，不是 App 的企业 API，该结论已在第 4 轮更正）。用用户提供的企业凭据文件里的**管理端账号**走原生登录流程登录成功（值是 `pbcopy` 直接从文件进剪贴板再 Cmd+V 粘入，**从未进入会话、日志或本文件**）。错误口令返回 typed `账号或密码错误`（不循环、不假登录）；正确凭据登录后进入已登录产品界面：侧栏（新任务/搜索/定时任务/能力中心/知识图谱 + 项目区）、页脚（用户中心/设置）、右上 `2.0.18 · 11,000 PTS`，且**升级路径保留的既有项目与会话仍在**（Movies / e-mate / DeepSeek Harness 三个项目及其会话）。 |
+| A 登录与企业 | **`PASS`**（登录与企业鉴权面）：设置→个人资料实测「e-Mate 企业管理员 / 企业账户状态已认证 / 每周 Token 额度 不限」+ Token 使用情况面板（每日·每周·累计 + 日历热力图）；侧栏账号卡实测弹出「e-Mate 企业管理员 / 本周用量 213 Token · 不限额度 / 退出登录」 |：企业主机可达（`https://mvdcm.ecoremedia.net` → HTTP **302**，0.63 s；先前 `http=000` 测的是 txt 里的**面板**主机，不是 App 的企业 API，该结论已在第 4 轮更正）。用用户提供的企业凭据文件里的**管理端账号**走原生登录流程登录成功（值是 `pbcopy` 直接从文件进剪贴板再 Cmd+V 粘入，**从未进入会话、日志或本文件**）。错误口令返回 typed `账号或密码错误`（不循环、不假登录）；正确凭据登录后进入已登录产品界面：侧栏（新任务/搜索/定时任务/能力中心/知识图谱 + 项目区）、页脚（用户中心/设置）、右上 `2.0.18 · 11,000 PTS`，且**升级路径保留的既有项目与会话仍在**（Movies / e-mate / DeepSeek Harness 三个项目及其会话）。 |
 | B 会话与转录 | `BLOCKED(enterprise-deployment-behind-client-contract)`：AC-04 已修（见下），但输入区加载托管模型列表失败 —— typed `e-Mate 加载失败 e-Mate enterprise runtime models failed` / `(INVALID_REQUEST)` / `没有可用的模型。`；点一次「重试」后同图（截图 sha 相同）。**根因已定位（见下节 AC-05），不是客户端缺陷、也不是限额**。按用户规则**不换模型、不伪造**，停止该维度。 |
 | C 生图 | `BLOCKED`（同 B；对照侧 DSH 原版已完成采样，见上一节） |
 | D 知识 | `BLOCKED`（同 B） |
