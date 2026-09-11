@@ -64,7 +64,7 @@
   },
   "eMate": {
     "harnessVersion": "0.1.5-rc.1",
-    "harnessCommit": "bf7179bf3f62585d84b9b41b8cc1a0fffa1d7866",
+    "harnessCommit": "43c411a51c555e61e9b5f500442cb3404a2d70cd",
     "windowsPrimitiveSource": {
       "repository": "https://github.com/jing-hy/computer-user",
       "commit": "2fbf383b49fe08e466d4d1caba659fb42b61de6b"

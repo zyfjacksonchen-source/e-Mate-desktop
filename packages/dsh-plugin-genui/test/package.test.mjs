@@ -10,7 +10,7 @@ test('preserves the pinned GenUI Tool, Skill, and client surfaces on the rc.7 co
   const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
   assert.equal(manifest.name, '@e-mate/dsh-plugin-genui')
   assert.equal(manifest.eMate.harnessVersion, '0.1.5-rc.1')
-  assert.equal(manifest.eMate.harnessCommit, 'bf7179bf3f62585d84b9b41b8cc1a0fffa1d7866')
+  assert.equal(manifest.eMate.harnessCommit, '43c411a51c555e61e9b5f500442cb3404a2d70cd')
   assert.equal(manifest.peerDependencies, undefined)
 
   const host = await readFile(resolve(root, 'lib/index.js'), 'utf8')

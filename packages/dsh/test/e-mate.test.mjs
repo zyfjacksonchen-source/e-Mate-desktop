@@ -208,7 +208,7 @@ test('runtime resolves only the exact Harness source', () => {
   for (const field of ['conversation_adapter_sha256', 'conversation_client_sha256']) assert.ok(packaged.includes(field))
   assert.match(packaged, /throw new Error\('e-Mate packaged conversation adapter provenance is missing or mismatched'\)/u)
   const runtime = resolveHarness()
-  assert.equal(HARNESS_COMMIT, 'bf7179bf3f62585d84b9b41b8cc1a0fffa1d7866')
+  assert.equal(HARNESS_COMMIT, '43c411a51c555e61e9b5f500442cb3404a2d70cd')
   assert.equal(runtime.version, HARNESS_VERSION)
   assert.equal(runtime.commit, HARNESS_COMMIT)
   assert.ok(['development-source', 'packaged-runtime'].includes(runtime.source))

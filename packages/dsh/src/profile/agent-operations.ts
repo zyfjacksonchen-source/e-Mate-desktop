@@ -1,6 +1,6 @@
 export const name = 'emate-agent-operations'
 export const inject = [
-  'webServer','systemPrompt', 'connection', 'sessions']
+  'webServer','systemPrompt', 'connection', 'sessions', 'sessionController']
 
 class ExpertModeRpcError extends Error {
   constructor(error) { super(error.message); this.rpcError = error }
@@ -43,15 +43,26 @@ export async function expertModeRequest(ctx, endpoint, payload) {
     if (session === undefined && endpoint === 'get') return { active: expertModeIn(inspected.events) }
   }
   if (endpoint === 'set') {
-    const api = ctx.get?.('apiProxy')
-    if (api === undefined) throw new Error('原生会话服务尚未就绪，请稍后重试。')
+    // The pinned 0.1.5 owner of Session resume is SessionController.create
+    // (packages/api/session-controller/src/index.ts:243). It throws a
+    // structurally marked RemoteError (typert/protocol/src/remote-error.ts:12-14),
+    // which is the same failure the retired ApiProxy returned in result.error.
+    const controller = ctx.get?.('sessionController')
+    if (controller === undefined) throw new Error('原生会话服务尚未就绪，请稍后重试。')
     // Every write, including warm and concurrently attached Sessions, uses the
     // native owner check. Existing ordinary Agents return without a resume.
-    const response = await api.sessions.create({
-      rpcId: `expert-mode:${payload.session_id}`,
-      payload: { sessionId: payload.session_id, cwd: (session?.header ?? inspected.meta).cwd },
-    })
-    if (!response.result.ok) throw new ExpertModeRpcError(response.result.error)
+    try {
+      await controller.create({
+        sessionId: payload.session_id,
+        cwd: (session?.header ?? inspected.meta).cwd,
+      })
+    } catch (error) {
+      throw new ExpertModeRpcError(error?.isDSHRemoteError === true ? error : {
+        code: 'internal',
+        message: error instanceof Error ? error.message : String(error),
+        details: {},
+      })
+    }
     session = ctx.sessions.get(payload.session_id)
     if (session === undefined) throw new Error('原生会话恢复后仍不可用。')
     if (expertModeActive(session) !== payload.active) session.append('emate/expert-mode', { active: payload.active }, { ignorable: true })

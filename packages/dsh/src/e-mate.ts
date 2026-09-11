@@ -31,7 +31,7 @@ export const VERSION = '2.0.18'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.5-rc.1'
-export const HARNESS_COMMIT = 'bf7179bf3f62585d84b9b41b8cc1a0fffa1d7866'
+export const HARNESS_COMMIT = '43c411a51c555e61e9b5f500442cb3404a2d70cd'
 const packageRoot = resolve(import.meta.dirname, '..')
 const componentInventory = JSON.parse(
   readFileSync(join(packageRoot, 'profile', 'component-inventory.json'), 'utf8'),
@@ -369,7 +369,6 @@ function profileCheck(paths) {
   const plugins = [
     join(paths.profile, 'plugins', 'health.js'),
     join(paths.profile, 'plugins', 'agent-operations.js'),
-    join(paths.profile, 'plugins', 'artifact-open-boundary.js'),
     join(paths.profile, 'plugins', 'capabilities.js'),
     join(paths.profile, 'plugins', 'qr-generation.js'),
     join(paths.profile, 'plugins', 'credentials-os.js'),
@@ -403,7 +402,6 @@ function profileCheck(paths) {
       && byId.get('credentials')?.disabled === true
       && byId.get('emate-settings-document-boundary')?.name === './plugins/settings-document-boundary.js'
       && byId.get('emate-credentials-os')?.name === './plugins/credentials-os.js'
-      && byId.get('emate-artifact-open-boundary')?.name === './plugins/artifact-open-boundary.js'
       && byId.get('emate-qr-generation')?.name === './plugins/qr-generation.js'
       && byId.get('emate-model-policy')?.name === './plugins/model-policy.js'
       && byId.get('emate-audit')?.name === './plugins/audit.js'

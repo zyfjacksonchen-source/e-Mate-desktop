@@ -3,8 +3,30 @@ import { createHash } from 'node:crypto'
 import { decodedContentLength } from './http-response.ts'
 
 export const name = 'emate-share'
-export const inject = ['apiProxy', 'connection', 'credentials']
+export const inject = ['connection', 'credentials']
 export const SHARE_CHANNEL = '/emate.share'
+
+// The pinned owner of the Session ZIP projection is @deepseek-ai/dsh-session-log-export,
+// which the web-app bundle mounts as the session-log-download row
+// (upstream/deepseek-harness/packages/bundle/web-app/cordis.patch.yml:59-60). It publishes
+// the archive on one authenticated route; this adapter dispatches that route through the
+// shared channel handler instead of cloning the export projection or the download route.
+const SESSION_EXPORT_PATH = '/api/session.export'
+
+/**
+ * Read the native Session ZIP for one Session.
+ * @param ctx - Host context carrying the connection channel handler.
+ * @param sessionId - Session whose log and attachments are exported.
+ * @param signal - caller lifetime; abort cancels the native export.
+ * @returns the native ZIP response, including its content type and failure status.
+ */
+function sessionLogArchive(ctx: any, sessionId: string, signal: AbortSignal): Promise<Response> {
+  const url = new URL(`http://localhost${SESSION_EXPORT_PATH}`)
+  url.searchParams.set('sessionId', sessionId)
+  url.searchParams.set('includeDescendants', 'true')
+  return ctx.connection.createSharedFetchHandler('/api')
+    .fetch(new Request(url, { method: 'GET', signal }))
+}
 
 const SHARE_ID = /^[A-Za-z0-9_-]{32}$/u
 const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
@@ -249,10 +271,7 @@ export function apply(ctx: any, config: ShareConfig = {}): void {
             const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
             let archive
             try {
-              archive = await ctx.apiProxy.downloads.sessionLog({
-                sessionId: payload.session_id as string,
-                includeDescendants: true,
-              }, signal)
+              archive = await sessionLogArchive(ctx, payload.session_id as string, signal)
             } catch (error) {
               if (error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)) throw error
               throw new ShareRequestError('archive-unavailable', 'preparing')

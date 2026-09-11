@@ -5,7 +5,7 @@ import { RELEASE_VERSION, ticketFor, versionFor } from './release-identity.mjs'
 export { RELEASE_VERSION }
 export const TICKET = ticketFor(RELEASE_VERSION, '502')
 export const CLAIM = 'image-batch-release-performance-v1'
-export const HARNESS_COMMIT = 'bf7179bf3f62585d84b9b41b8cc1a0fffa1d7866'
+export const HARNESS_COMMIT = '43c411a51c555e61e9b5f500442cb3404a2d70cd'
 export const DESKTOP_REFERENCE = '166c16cfc38c51d32c2316715548c0f8271db517'
 export const BOOTSTRAP_RESAMPLES = 10_000
 // Retain the statistical protocol seed across releases so old percentile evidence is reproducible.

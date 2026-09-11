@@ -5,7 +5,7 @@ import { loadTargetStorageDomain, loadTargetCompaction } from './target-runtime.
 import { installRequestHistoryCompaction, requestSizeFailure } from './request-size.js'
 
 export const name = 'emate-model-policy'
-export const inject = ['apiProxy', 'connection', 'credentials', 'settings', 'storageDomain', 'llm', 'emateIdentity']
+export const inject = ['sessionController', 'connection', 'credentials', 'settings', 'storageDomain', 'llm', 'emateIdentity']
 export const MODEL_POLICY_CHANNEL = '/emate.modelPolicy'
 
 const CHAT_MODELS = new Map([
@@ -438,13 +438,6 @@ function unavailableCatalog(value, message) {
     ...value,
     groups: [],
     failures: [...value.failures, { id: 'e-mate-policy', name: 'e-Mate', message }],
-  }
-}
-
-function modelUnavailable(request, provider, model, message = `Model "${model}" is not allowed by the current e-Mate policy.`) {
-  return {
-    rpcId: request.rpcId,
-    result: { ok: false, error: { code: 'model-unavailable', message, details: { provider, model } } },
   }
 }
 
@@ -969,92 +962,89 @@ export function managedReasoningEffort(model, effort) {
     ? CHAT_MODELS.get('gpt-6-astra').reasoning_effort : effort
 }
 
-function installApiPolicy(ctx, service) {
-  const originalSessionModels = ctx.apiProxy.sessions.models
-  const originalSelectModel = ctx.apiProxy.sessions.selectModel
-  const originalLlmModels = ctx.apiProxy.llm.models
+/**
+ * Build one native Remote failure carrying the owner's own code and details.
+ * The Gateway, the carrier, and every consumer discriminate a RemoteError
+ * structurally, never by instanceof
+ * (upstream/deepseek-harness/packages/typert/protocol/src/remote-error.ts:12-14,40-48),
+ * so the native failure keeps its identity without importing the protocol package.
+ * `session/model-unavailable` is the code the native owner itself raises
+ * (packages/api/session-controller/src/commands.ts:160-167).
+ */
+function policyRefusal(provider, model, message) {
+  return Object.assign(new Error(message), {
+    name: 'RemoteError',
+    isDSHRemoteError: true,
+    code: 'session/model-unavailable',
+    details: { provider, model },
+  })
+}
 
-  const sessionModels = async (request) => {
-    const response = await originalSessionModels(request)
-    if (!response.result.ok) return response
+/**
+ * Project the enterprise model policy onto the pinned owner of the browser model
+ * surfaces: SessionController.modelCatalog and SessionController.selectModel
+ * (upstream/deepseek-harness/packages/api/session-controller/src/index.ts:253-265).
+ * The Gateway resolves each Remote method from the live Service on every call
+ * (packages/api/gateway/src/index.ts:614-615), so this own-property projection is
+ * what `session/modelCatalog` and `session/selectModel` resolve to. rc.1 removed the
+ * ApiProxy that carried those two entries plus `llm.models`; the host catalog is now
+ * the single owner of the model list, so one projection covers all three.
+ */
+function installNativePolicy(ctx, service) {
+  const controller = ctx.get?.('sessionController') ?? ctx.sessionController
+  if (controller === undefined) throw new Error('e-Mate model policy requires the native Session Controller')
+  const originalCatalog = controller.modelCatalog
+  const originalSelectModel = controller.selectModel
+  const ownCatalog = Object.hasOwn(controller, 'modelCatalog')
+  const ownSelectModel = Object.hasOwn(controller, 'selectModel')
+
+  const modelCatalog = async () => {
+    const catalog = await originalCatalog.call(controller)
     try {
       const policy = await service.refresh()
-      const currentAllowed = allowed(policy, response.result.value.current.model)
+      const groups = filterGroups(catalog.groups, policy)
+      const listed = new Set(groups.map(group => group.id))
       return {
-        ...response,
-        result: {
-          ok: true,
-          value: {
-            ...response.result.value,
-            current: { ...response.result.value.current,
-              reasoningEffort: managedReasoningEffort(response.result.value.current.model, response.result.value.current.reasoningEffort) },
-            routable: response.result.value.routable && currentAllowed,
-            groups: filterGroups(response.result.value.groups, policy),
-          },
-        },
+        ...catalog,
+        default: { ...catalog.default,
+          reasoningEffort: managedReasoningEffort(catalog.default.model, catalog.default.reasoningEffort) },
+        // A provider keeps its route only while the policy leaves it a model.
+        routableProviders: catalog.routableProviders.filter(provider => listed.has(provider)),
+        groups,
       }
     } catch (error) {
       return {
-        ...response,
-        result: {
-          ok: true,
-          value: {
-            ...unavailableCatalog(response.result.value, error instanceof Error ? error.message : String(error)),
-            routable: false,
-          },
-        },
+        ...unavailableCatalog(catalog, error instanceof Error ? error.message : String(error)),
+        routableProviders: [],
       }
     }
   }
 
   const selectModel = async (request) => {
     try {
-      await service.assertModel(request.payload.model)
+      await service.assertModel(request.model)
     } catch (error) {
-      return modelUnavailable(
-        request,
-        request.payload.provider,
-        request.payload.model,
-        error instanceof Error ? error.message : String(error),
-      )
+      throw policyRefusal(request.provider, request.model,
+        error instanceof Error ? error.message : String(error))
     }
-    return originalSelectModel({
+    return originalSelectModel.call(controller, {
       ...request,
-      payload: {
-        ...request.payload,
-        reasoningEffort: managedReasoningEffort(request.payload.model, request.payload.reasoningEffort)
-          ?? CHAT_MODELS.get(policyModelId(request.payload.model))?.reasoning_effort,
-      },
+      reasoningEffort: managedReasoningEffort(request.model, request.reasoningEffort)
+        ?? CHAT_MODELS.get(policyModelId(request.model))?.reasoning_effort,
     })
   }
 
-  const llmModels = async (request) => {
-    const response = await originalLlmModels(request)
-    if (!response.result.ok) return response
-    try {
-      const policy = await service.refresh()
-      return {
-        ...response,
-        result: { ok: true, value: { ...response.result.value, groups: filterGroups(response.result.value.groups, policy) } },
-      }
-    } catch (error) {
-      return {
-        ...response,
-        result: {
-          ok: true,
-          value: unavailableCatalog(response.result.value, error instanceof Error ? error.message : String(error)),
-        },
-      }
-    }
-  }
-
-  ctx.apiProxy.sessions.models = sessionModels
-  ctx.apiProxy.sessions.selectModel = selectModel
-  ctx.apiProxy.llm.models = llmModels
+  controller.modelCatalog = modelCatalog
+  controller.selectModel = selectModel
   return () => {
-    if (ctx.apiProxy.sessions.models === sessionModels) ctx.apiProxy.sessions.models = originalSessionModels
-    if (ctx.apiProxy.sessions.selectModel === selectModel) ctx.apiProxy.sessions.selectModel = originalSelectModel
-    if (ctx.apiProxy.llm.models === llmModels) ctx.apiProxy.llm.models = originalLlmModels
+    if (controller.modelCatalog === modelCatalog) {
+      if (ownCatalog) controller.modelCatalog = originalCatalog
+      else delete controller.modelCatalog
+    }
+    if (controller.selectModel === selectModel) {
+      if (ownSelectModel) controller.selectModel = originalSelectModel
+      else delete controller.selectModel
+    }
   }
 }
 
@@ -1171,7 +1161,7 @@ export async function apply(ctx, config = {}) {
   )
   const service = createService(ctx, policyTable, domain.table('runtime_projection'), quota)
   ctx.provide('emateModelPolicy', service)
-  ctx.effect(() => installApiPolicy(ctx, service), 'emate.modelPolicy: target ApiProxy policy projection')
+  ctx.effect(() => installNativePolicy(ctx, service), 'emate.modelPolicy: native model surface projection')
   const pairing = await loadTargetCompaction(config.bindingPath)
   ctx.effect(() => installRequestHistoryCompaction(ctx, pairing), 'emate.modelPolicy: native compaction realm byte pressure')
   ctx.on('agent/request', async (payload, next) => {
