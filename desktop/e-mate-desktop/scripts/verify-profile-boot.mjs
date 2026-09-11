@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { runInThisContext } from 'node:vm'
 import { boot } from '@deepseek-ai/dsh-app-boot'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import {
   createLaunchEnvironmentSnapshot,
@@ -52,7 +52,7 @@ try {
       throw new Error(`assembled Profile contains retired browser bridge code: ${relative}`)
     }
   }
-  const prepared = prepareDesktopProfile('1', home, selectedTarget.platform)
+  const prepared = await prepareDesktopProfile('1', home, selectedTarget.platform)
   const packageRoot = new URL('../', import.meta.url)
   const pnpmBinPath = fileURLToPath(new URL('node_modules/pnpm/bin/pnpm.mjs', packageRoot))
   const electronVersion = JSON.parse(
@@ -186,7 +186,7 @@ try {
     throw new Error('assembled Profile did not select the native PTC preset by default')
   }
   const ptc = await ctx.tools.execute({
-    callId: CallId('profile-smoke-ptc-sdk'),
+    callId: ToolCallId('profile-smoke-ptc-sdk'),
     name: 'run_code',
     arguments: { code: 'return await tools.job_list({})', description: 'Verify native PTC tool dispatch' },
     agent: defaultAgent,
@@ -212,7 +212,7 @@ try {
 
   const processTool = process.platform === 'win32' ? 'pwsh' : 'bash'
   const background = await ctx.tools.execute({
-    callId: CallId('profile-smoke-background-job'),
+    callId: ToolCallId('profile-smoke-background-job'),
     name: processTool,
     arguments: {
       command: process.platform === 'win32' ? 'Start-Sleep -Seconds 30' : 'sleep 30',
@@ -226,7 +226,7 @@ try {
     throw new Error(`assembled Profile could not start a native background Job: ${JSON.stringify(background)}`)
   }
   const cancelled = await ctx.tools.execute({
-    callId: CallId('profile-smoke-job-kill'),
+    callId: ToolCallId('profile-smoke-job-kill'),
     name: 'job_kill',
     arguments: { job_id: background.value.jobId, reason: 'profile cancellation smoke complete' },
     agent: disclosureAgent,
@@ -241,7 +241,7 @@ try {
   }
 
   const disclosure = await ctx.tools.execute({
-    callId: CallId('profile-smoke-tool-search'),
+    callId: ToolCallId('profile-smoke-tool-search'),
     name: 'tool_search',
     arguments: { query: 'skill_find', limit: 1 },
     agent: disclosureAgent,

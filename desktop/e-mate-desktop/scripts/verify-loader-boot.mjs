@@ -49,7 +49,7 @@ try {
     stateDir: join(home, 'runtime-commands'),
     environment: process.env,
   })
-  const prepared = prepareDesktopProfile(undefined, home)
+  const prepared = await prepareDesktopProfile(undefined, home)
   const thirdPartyDir = join(prepared.profile.dir, 'node_modules', THIRD_PARTY_NAME)
   mkdirSync(thirdPartyDir, { recursive: true })
   writeFileSync(join(thirdPartyDir, 'package.json'), JSON.stringify({
