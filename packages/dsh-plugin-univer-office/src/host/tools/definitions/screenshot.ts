@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import type { Context } from '@deepseek-ai/cordis'
-import { AttachmentError, AttachmentId, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { AttachmentError, AttachmentId, type ImageAttachmentRef, type ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue, ScreenshotTarget } from '../../service/types.ts'
@@ -18,7 +18,8 @@ type ScreenshotToolImage = {
   metadata: JsonValue
   image: {
     attachmentId: string
-    mediaType: 'image/png'
+    /** Media type the attachment store verified for the stored bytes; the store may normalize a screenshot PNG to WebP or JPEG. */
+    mediaType: ImageMediaType
     bytes: number
     width: number
     height: number
@@ -206,7 +207,7 @@ export function screenshotTool(ctx: Context, timeoutMs: number) {
           metadata: item.metadata,
           image: {
             attachmentId: ref.attachmentId,
-            mediaType: item.mediaType,
+            mediaType: ref.mediaType,
             bytes: ref.bytes,
             width: ref.width,
             height: ref.height,

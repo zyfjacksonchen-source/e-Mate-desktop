@@ -5,13 +5,16 @@ class ExpertModeRpcError extends Error {
   constructor(error) { super(error.message); this.rpcError = error }
 }
 
-export function expertModeActive(session) {
-  const events = session.snapshotEvents()
+function expertModeIn(events) {
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index]
     if (event.type === 'emate/expert-mode') return event.data?.active === true
   }
   return false
+}
+
+export function expertModeActive(session) {
+  return expertModeIn(session.snapshotEvents())
 }
 
 export async function expertModeRequest(ctx, endpoint, payload) {
@@ -27,10 +30,16 @@ export async function expertModeRequest(ctx, endpoint, payload) {
       code: 'session-not-found', message: '会话尚未就绪，请稍后重试。', details: { sessionId: payload.session_id },
     })
     // History browsing is intentionally read-only in the native Host: it does
-    // not attach an Agent. Inspect the durable log without creating a writer.
-    inspected = await persistence.inspect(payload.session_id)
+    // not attach an Agent. rc.1 reads the durable log through a read handle
+    // instead of the removed `inspect`, so this never takes writer ownership.
+    const handle = await persistence.open(payload.session_id, 'read')
+    try {
+      inspected = { meta: handle.header, events: [...(await handle.read()).events] }
+    } finally {
+      await handle.close()
+    }
     session = ctx.sessions.get(payload.session_id)
-    if (session === undefined && endpoint === 'get') return { active: expertModeActive(inspected) }
+    if (session === undefined && endpoint === 'get') return { active: expertModeIn(inspected.events) }
   }
   if (endpoint === 'set') {
     const api = ctx.get?.('apiProxy')

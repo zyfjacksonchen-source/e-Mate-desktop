@@ -10,7 +10,7 @@ import test from 'node:test'
 import { unzipSync } from 'fflate'
 import { parse as parseYaml } from 'yaml'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
-import AgentRegistry, { Inbox } from '../../../upstream/deepseek-harness/packages/core/agent/lib/index.js'
+import AgentRegistry from '../../../upstream/deepseek-harness/packages/core/agent/lib/index.js'
 import { Session, SessionId, SESSION_FORMAT_VERSION } from '../../../upstream/deepseek-harness/packages/core/session/lib/index.js'
 import { LocalAttachmentStore } from '../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'
 import LocalJobRegistry from '../../../upstream/deepseek-harness/packages/jobs/jobs-local/lib/index.js'
@@ -463,7 +463,11 @@ test('managed profile installation is idempotent', () => {
     })
     assert.equal(dumped.status, 0, dumped.stderr)
     assert.match(dumped.stdout, /- id: credentials\n  name: '@deepseek-ai\/dsh-credentials-local'\n  disabled: true/)
-    assert.match(dumped.stdout, /- id: emate-credentials-os\n  name: \.\/plugins\/credentials-os\.js/)
+    // rc.1's dump anchors an inserted relative plugin name beside its patch file
+    // (upstream/deepseek-harness/packages/boot/app-boot/src/index.ts, anchorInsertedPluginNames),
+    // so this row prints the profile-local file URL instead of the raw specifier.
+    const credentialsOsRow = dumped.stdout.slice(dumped.stdout.indexOf('- id: emate-credentials-os'))
+    assert.match(credentialsOsRow.slice(0, credentialsOsRow.indexOf('\n- id: ')), /file:\/\/\S+\/profiles\/e-mate\/plugins\/credentials-os\.js/)
     assert.match(dumped.stdout, /- id: ui-trajectory\n  name: '@deepseek-ai\/dsh-client-ui-trajectory'\n  disabled: true/)
     assert.match(dumped.stdout, /- id: web\n  name: '@deepseek-ai\/dsh-web'\n  config:\n    searchProvider: deepseek-official/)
     assert.match(dumped.stdout, /- id: web-search-deepseek\n  name: '@deepseek-ai\/dsh-web-search-deepseek'\n  config:\n    apiKeyEnv: E_MATE_SEARCH_KEY_DEEPSEEK\n    baseURL: https:\/\/api\.deepseek\.com\/anthropic\/v1\n    model: deepseek-v4-flash\n  disabled: false/)
@@ -475,8 +479,12 @@ test('managed profile installation is idempotent', () => {
     assert.match(binding.zod_module_sha256, /^[0-9a-f]{64}$/)
     const shell = join(first.profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')
     const shellManifest = JSON.parse(readFileSync(join(shell, 'package.json'), 'utf8'))
+    // rc.1 removed @deepseek-ai/dsh-client-runtime (no packages/client/runtime);
+    // the shell now injects the native session controller and chat surface it
+    // composes with (packages/api/session-controller, packages/client/ui-chat).
     assert.deepEqual(shellManifest.dsh.client.inject, [
-      '@deepseek-ai/dsh-client-runtime',
+      '@deepseek-ai/dsh-api-session-controller',
+      '@deepseek-ai/dsh-client-ui-chat',
       '@deepseek-ai/dsh-client-connection',
       '@deepseek-ai/dsh-client-ui-layout',
       '@deepseek-ai/dsh-client-ui-conversation',
@@ -1137,8 +1145,16 @@ test('Agent QR generation uses the target Tool, Job, Attachment, and image rende
 })
 
 test('expert mode persists in its native session and leaves other conversations unchanged', async () => {
-  const first = { header: { cwd: '/test' }, events: [], append(type, data) { this.events.push({ type, data }) } }
-  const second = { events: [] }
+  // rc.1 publishes a kernel Session's log through snapshotEvents(), so the fixture
+  // records appends and publishes them through the same accessor.
+  const kernelSession = (header, events) => ({
+    header,
+    events,
+    append(type, data, options) { this.events.push({ type, data, ...options }) },
+    snapshotEvents() { return this.events },
+  })
+  const first = kernelSession({ cwd: '/test' }, [])
+  const second = kernelSession({ cwd: '/other' }, [])
   let flushes = 0
   const ctx = { get: name => name === 'apiProxy' ? { sessions: { create: async request => ({ rpcId: request.rpcId, result: { ok: true, value: { sessionId: request.payload.sessionId } } }) } } : undefined, sessions: { get: id => id === 'one' ? first : id === 'two' ? second : undefined,
     flush: async value => { assert.equal(value, first); flushes++; return true } } }
@@ -1150,7 +1166,10 @@ test('expert mode persists in its native session and leaves other conversations 
   assert.equal(expertModeActive(first), false)
   assert.deepEqual(await expertModeRequest(ctx, 'set', { session_id: 'one', active: true }), { active: true })
   assert.match(expertPolicy({ agent: { session: first } }), /enterprise-knowledge Skill/u)
-  assert.equal(expertModeActive({ events: structuredClone(first.events) }), true)
+  assert.equal(expertModeActive(kernelSession({ cwd: '/test' }, structuredClone(first.events))), true)
+  // A plugin event type survives a cold session read only with the ignorable
+  // envelope, so the append must carry it.
+  assert.deepEqual(first.events, [{ type: 'emate/expert-mode', data: { active: true }, ignorable: true }])
   assert.equal(expertModeActive(second), false)
   assert.deepEqual(await expertModeRequest(ctx, 'set', { session_id: 'one', active: false }), { active: false })
   assert.match(expertPolicy({ agent: { session: first } }), /用户已关闭/u)
@@ -1174,7 +1193,13 @@ test('Agent operation guidance owns the e-Mate persona without a second image po
   assert.equal(profilePatch.find(row => row?.id === 'agent-loop').config.maxParallelToolCalls, 4)
   assert.match(nativeBase, /toolName: subagent[\s\S]*backgroundMode: continuable/u)
   assert.match(nativeTool, /isConcurrencySafe: \(\) => true/u)
-  assert.match(nativeTool, /if \(runSpec\.runInBackground\)[\s\S]*const run: SubagentRun = await ctx\.subagents\.start/u)
+  // rc.1 starts a configured continuable background child through
+  // ctx.subagents.startContinuable() and returns its id without collecting a run,
+  // so the awaited foreground start stays in the foreground tail.
+  assert.match(nativeTool, /if \(runSpec\.runInBackground\)[\s\S]*if \(continuable\) \{[\s\S]*await runtimeCtx\.subagents\.startContinuable\(\{/u)
+  assert.match(nativeTool, /return \{ kind: 'continuable' as const, subagentId: started\.childId \}/u)
+  assert.ok(nativeTool.indexOf('const run: SubagentRun = await runtimeCtx.subagents.start(')
+    > nativeTool.indexOf('if (runSpec.runInBackground)'))
   assert.match(nativeScheduler, /inFlight\.size < maxParallelToolCalls/u)
   assert.match(nativeSpawn, /inheritsParentContext = false/u)
   assert.equal(section.name, 'emate:agent-operations')
@@ -2527,7 +2552,8 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek' })),
       { provider: 'e-mate-enterprise-deepseek', model: 'deepseek' },
     )
-    const { deepFreeze } = await import('../../../upstream/deepseek-harness/packages/llm/llm/lib/index.js')
+    // rc.1 moved deepFreeze to the duplicate-install-safe value primitives package.
+    const { deepFreeze } = await import('../../../upstream/deepseek-harness/packages/util/values/lib/index.js')
     const frozenDeepSeek = deepFreeze({ provider: 'e-mate-deepseek', model: 'deepseek', reasoningEffort: 'max', sessionId: 'deepseek-frozen-stream' })
     let reachedDeepSeek = false
     for await (const _chunk of streamPolicy(frozenDeepSeek, () => (async function* () {

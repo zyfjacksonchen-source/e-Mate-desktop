@@ -870,15 +870,21 @@ function createAuditService(
 }
 
 async function backfill(ctx, service) {
-  const headers = await ctx.sessionPersistence.list()
-  await Promise.allSettled(headers.map(async (header) => {
-    const { events } = await ctx.sessionPersistence.readFrom(header.id, 0)
-    for (const event of events) {
-      service.captureEvent(header.id, event, false)
-      service.captureTaskEvent(header.id, event, false)
+  const snapshots = await ctx.sessionPersistence.list()
+  await Promise.allSettled(snapshots.map(async (snapshot) => {
+    // 0.1.5 reads a durable log through an open read handle, not readFrom().
+    const handle = await ctx.sessionPersistence.open(snapshot.header.id, 'read')
+    try {
+      const { events } = await handle.read(0)
+      for (const event of events) {
+        service.captureEvent(snapshot.header.id, event, false)
+        service.captureTaskEvent(snapshot.header.id, event, false)
+      }
+    } finally {
+      await handle.close()
     }
-    service.closeSession(header.id)
-    await service.drain(header.id)
+    service.closeSession(snapshot.header.id)
+    await service.drain(snapshot.header.id)
   }))
 }
 

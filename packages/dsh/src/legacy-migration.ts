@@ -21,7 +21,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const SESSION_FORMAT_VERSION = 0
+const SESSION_FORMAT_VERSION = 3
 const RECEIPT_SCHEMA = 1
 const RECEIPT_NAME = 'legacy-sessions-v1.json'
 const COPY_BUFFER_BYTES = 1024 * 1024
@@ -48,11 +48,27 @@ export interface LegacySource {
   root: string
 }
 
+interface SessionHandleLike {
+  header: JsonRecord
+  read(): Promise<{ events: readonly JsonRecord[] }>
+  append(events: readonly JsonRecord[]): Promise<void>
+  close(): Promise<void>
+}
+
 interface SessionPersistenceLike {
-  create(meta: JsonRecord): Promise<void>
-  append(id: string, events: JsonRecord[]): Promise<void>
-  inspect(id: string): Promise<{ meta: JsonRecord; events: JsonRecord[] }>
-  list(): Promise<JsonRecord[]>
+  create(header: JsonRecord): Promise<SessionHandleLike>
+  open(id: string, access: 'read' | 'write'): Promise<SessionHandleLike>
+  list(): Promise<readonly { header: JsonRecord }[]>
+}
+
+async function readStoredSession(sessionPersistence: SessionPersistenceLike, id: string) {
+  const handle = await sessionPersistence.open(id, 'read')
+  try {
+    const { events } = await handle.read()
+    return { meta: handle.header, events: [...events] }
+  } finally {
+    await handle.close()
+  }
 }
 
 export interface LegacyMigrationOptions {
@@ -634,7 +650,7 @@ function planRuntime(snapshot: SourceSnapshot, generalWorkspace: string): Planne
         sourceFamily: snapshot.source.family,
         sourceDatabase: snapshot.source.database,
         legacyId: identity.legacyId,
-        header: { version: SESSION_FORMAT_VERSION, id, createdAt, delegationDepth: 0, cwd },
+        header: { version: SESSION_FORMAT_VERSION, id, createdAt, isSeeded: false, delegationDepth: 0, cwd },
         events: builder.events,
         evidence: {
           schema_version: 1,
@@ -760,6 +776,7 @@ function planCowAgent(snapshot: SourceSnapshot, generalWorkspace: string): Plann
           version: SESSION_FORMAT_VERSION,
           id,
           createdAt: epochMilliseconds(session.created_at),
+          isSeeded: false,
           delegationDepth: 0,
           cwd: projectPath ?? generalWorkspace,
         },
@@ -884,12 +901,12 @@ export async function migrateLegacySessions(options: LegacyMigrationOptions): Pr
       ? planRuntime(snapshot, generalWorkspace)
       : planCowAgent(snapshot, generalWorkspace)))
     const listed = await options.sessionPersistence.list()
-    const existing = new Map(listed.map(header => [String(header.id), header]))
+    const existing = new Set(listed.map(snapshot => String(snapshot.header.id)))
     const absent: PlannedSession[] = []
     let reused = 0
     for (const plan of plans) {
       if (existing.has(plan.id)) {
-        const loaded = await options.sessionPersistence.inspect(plan.id)
+        const loaded = await readStoredSession(options.sessionPersistence, plan.id)
         const actualHeader = sha256(canonicalJson(loaded.meta))
         const expectedHeader = sha256(canonicalJson(plan.header))
         const actualEvents = sha256(canonicalJson(loaded.events))
@@ -907,8 +924,12 @@ export async function migrateLegacySessions(options: LegacyMigrationOptions): Pr
     }
     publishAttachmentObjects(plans, dshHome)
     for (const plan of absent) {
-      await options.sessionPersistence.create(plan.header)
-      await options.sessionPersistence.append(plan.id, plan.events)
+      const handle = await options.sessionPersistence.create(plan.header)
+      try {
+        await handle.append(plan.events)
+      } finally {
+        await handle.close()
+      }
     }
     const evidenceRoot = join(dshHome, 'e-mate', 'migrations', 'legacy-evidence-v1')
     for (const plan of plans) atomicWrite(join(evidenceRoot, `${plan.id}.json`), plan.evidence)

@@ -96,8 +96,14 @@ test('native Tool returns JSON references, native CAS stores actual bytes, and p
   assert.equal(new Set(receipt.client_request_ids).size, 2)
   for (const block of receipt.content) {
     const stored = await f.ctx.attachments.readImage(block.attachment)
-    assert.deepEqual(Buffer.from(stored.data), PNG)
-    assert.equal(block.attachment.attachmentId, `sha256:${createHash('sha256').update(PNG).digest('hex')}`)
+    // The store normalizes on save: a provider PNG with alpha is re-encoded to
+    // WebP, so the durable identity is the stored bytes and the ref must
+    // describe exactly them.
+    assert.equal(stored.ref.mediaType, 'image/webp')
+    assert.equal(stored.ref.bytes, stored.data.byteLength)
+    assert.equal(stored.ref.width, 1)
+    assert.equal(stored.ref.height, 1)
+    assert.deepEqual(block.attachment, stored.ref)
   }
   const view = f.ctx.tools.get('generate_image').presentResult({ prompt: 'fixture', count: 2 }, result)
   assert.equal(view.content.length, 2)
@@ -127,7 +133,9 @@ test('PTC nested tool keeps JSON-only model output and durable images when nativ
   assert.equal(receipt.turn, 1)
   assert.equal(receipt.tool_name, 'generate_image')
   assert.equal(receipt.content[0].type, 'image')
-  assert.deepEqual(Buffer.from((await f.ctx.attachments.readImage(receipt.content[0].attachment)).data), PNG)
+  const stored = await f.ctx.attachments.readImage(receipt.content[0].attachment)
+  assert.equal(stored.ref.mediaType, 'image/webp')
+  assert.equal(stored.ref.bytes, stored.data.byteLength)
 })
 
 test('explicit uploaded and generated image references remain editable; foreign and tampered refs are refused', async () => {
@@ -137,7 +145,9 @@ test('explicit uploaded and generated image references remain editable; foreign 
   const edit = await f.call('edit_image', { prompt: 'edit the uploaded image', source_image: snake(uploaded) }, { parent: Symbol('PTC'), rootCallId: 'edit-code', callId: 'edit-code:code:1' })
   assert.equal(edit.isError, false, JSON.stringify(edit))
   assert.equal(f.calls[0].url.endsWith('/images/edits'), true)
-  assert.deepEqual(Buffer.from(await f.calls[0].init.body.get('image').arrayBuffer()), PNG)
+  // The multipart body carries the stored (normalized) bytes for that ref.
+  const uploadedStored = await f.ctx.attachments.readImage(uploaded)
+  assert.deepEqual(Buffer.from(await f.calls[0].init.body.get('image').arrayBuffer()), Buffer.from(uploadedStored.data))
   assert.deepEqual(receipts(f.agent).at(-1).sources, [uploaded])
   const second = await f.call('edit_image', { prompt: 'edit the actual output', source_image: edit.value.images[0] })
   assert.equal(second.isError, false, JSON.stringify(second))
@@ -311,7 +321,10 @@ test('ordered multi-source edit uses one upstream multipart operation and refuse
   assert.equal(f.calls[0].url.endsWith('/images/edits'), true)
   const images = f.calls[0].init.body.getAll('image[]')
   assert.equal(images.length, 2)
-  for (const file of images) assert.deepEqual(Buffer.from(await file.arrayBuffer()), PNG)
+  const requested = await Promise.all([first, second].map(async ref => Buffer.from((await f.ctx.attachments.readImage(ref)).data)))
+  for (const [index, file] of images.entries()) {
+    assert.deepEqual(Buffer.from(await file.arrayBuffer()), requested[index])
+  }
   assert.deepEqual(receipts(f.agent).at(-1).sources, [first, second])
   for (const args of [
     { source_images: [snake(first), snake(foreign)] },
@@ -441,7 +454,9 @@ test('cancelling after one provider success preserves that actual image in CAS, 
   assert.equal(receipt.status, 'cancelled')
   assert.equal(receipt.content.length, 1)
   assert.deepEqual(receipt.provider_request_ids, ['success-before-cancel'])
-  assert.deepEqual(Buffer.from((await f.ctx.attachments.readImage(receipt.content[0].attachment)).data), PNG)
+  const retained = await f.ctx.attachments.readImage(receipt.content[0].attachment)
+  assert.equal(retained.ref.mediaType, 'image/webp')
+  assert.equal(retained.ref.bytes, retained.data.byteLength)
   const edit = await f.call('edit_image', { prompt: 'edit the retained success', source_image: cancelled.value.images[0] })
   assert.equal(edit.isError, false, JSON.stringify(edit))
   assert.equal(f.calls.length, 3)
@@ -502,8 +517,15 @@ test('actual Model Gateway validates default count-two generation, independent u
       const invocation = invocationFacts.find(fact => fact.taskId === request.task_id)
       assert.equal(invocation.traceId, request.trace_id)
       assert.ok(receipt.provider_request_ids.includes(request.provider_request_id))
+      // image_sha256 digests the bytes the provider returned, which is how an
+      // out-of-order reply is correlated with its request. Storage then
+      // normalizes those bytes, so the digest is no longer the CAS ref id.
       assert.equal(request.image_sha256, createHash('sha256').update(PNG).digest('hex'))
-      assert.ok(receipt.content.some(block => block.attachment.attachmentId === `sha256:${request.image_sha256}`))
+    }
+    for (const block of receipt.content) {
+      const stored = await f.ctx.attachments.readImage(block.attachment)
+      assert.equal(stored.ref.bytes, block.attachment.bytes)
+      assert.equal(stored.ref.mediaType, 'image/webp')
     }
     for (const request of upstreamRequests) assert.deepEqual(await request.clone().json(), {
       model: ImageGen.IMAGE_MODEL, prompt: 'actual gateway defaults', n: 1, response_format: 'b64_json',
@@ -515,7 +537,12 @@ test('actual Model Gateway validates default count-two generation, independent u
     const editForm = await upstreamRequests[2].clone().formData()
     assert.deepEqual([...new Set(editForm.keys())].sort(), ['image[]', 'model', 'n', 'prompt', 'response_format'])
     assert.equal(editForm.getAll('image[]').length, 2)
-    for (const file of editForm.getAll('image[]')) assert.deepEqual(Buffer.from(await file.arrayBuffer()), PNG)
+    // The edit body carries the stored bytes behind each generated ref, in order.
+    const editSources = await Promise.all(receipt.content.map(async block =>
+      Buffer.from((await f.ctx.attachments.readImage(block.attachment)).data)))
+    for (const [index, file] of editForm.getAll('image[]').entries()) {
+      assert.deepEqual(Buffer.from(await file.arrayBuffer()), editSources[index])
+    }
     const sized = await f.call('generate_image', { prompt: 'actual supported size', size: '1024x1536' })
     assert.equal(sized.isError, false, JSON.stringify(sized))
     assert.equal(sized.value.returned_count, 1)

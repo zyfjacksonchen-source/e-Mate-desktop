@@ -46,6 +46,26 @@ async function harnessPersistence(root) {
   }
 }
 
+const CURRENT_HEADER = { version: 3, isSeeded: false, delegationDepth: 0 }
+
+// A current session must be flushed before its handle closes, or the backend
+// forgets a session that never materialized and list() silently loses it.
+async function createCurrentSession(sessionPersistence, header) {
+  const handle = await sessionPersistence.create({ ...CURRENT_HEADER, ...header })
+  await handle.flush()
+  await handle.close()
+}
+
+async function readCurrentSession(sessionPersistence, id) {
+  const handle = await sessionPersistence.open(id, 'read')
+  try {
+    const { events } = await handle.read()
+    return { meta: handle.header, events }
+  } finally {
+    await handle.close()
+  }
+}
+
 function cowDatabase(path, projectPath, artifactPath) {
   const database = new DatabaseSync(path)
   database.exec(`
@@ -171,12 +191,10 @@ test('an optional legacy source disappearing after discovery is a bounded no-op'
   const source = join(sourceRoot, 'conversations.db')
   const harness = await harnessPersistence(join(dshHome, 'sessions'))
   try {
-    await harness.ctx.sessionPersistence.create({
-      version: 0,
+    await createCurrentSession(harness.ctx.sessionPersistence, {
       id: 'current-session',
       createdAt: 1_700_000_000_000,
       cwd: join(root, 'current'),
-      delegationDepth: 0,
     })
     const before = await harness.ctx.sessionPersistence.list()
     const result = await runOptionalLegacyMigration({
@@ -206,12 +224,10 @@ test('a corrupt optional legacy source fails closed without leaking its path or 
   const harness = await harnessPersistence(join(dshHome, 'sessions'))
   const warnings = []
   try {
-    await harness.ctx.sessionPersistence.create({
-      version: 0,
+    await createCurrentSession(harness.ctx.sessionPersistence, {
       id: 'current-session',
       createdAt: 1_700_000_000_000,
       cwd: join(root, 'current'),
-      delegationDepth: 0,
     })
     const before = await harness.ctx.sessionPersistence.list()
     await assert.rejects(runOptionalLegacyMigration({
@@ -259,14 +275,16 @@ test('imports CowAgent sessions through the real Harness SessionPersistence and 
     const first = await migrateLegacySessions(options)
     assert.equal(first.imported_sessions, 1)
     assert.equal(first.reused_sessions, 0)
-    const [header] = await ctx.sessionPersistence.list()
+    const [snapshot] = await ctx.sessionPersistence.list()
+    const header = snapshot.header
     assert.equal(header.cwd, project)
-    const loaded = await ctx.sessionPersistence.inspect(header.id)
+    const loaded = await readCurrentSession(ctx.sessionPersistence, header.id)
     assert.deepEqual(loaded.meta, {
-      version: 0,
+      version: 3,
       id: header.id,
       createdAt: 1_700_000_000_000,
       cwd: project,
+      isSeeded: false,
       delegationDepth: 0,
     })
     assert.deepEqual(loaded.events.map(event => event.type), [
@@ -315,9 +333,10 @@ test('imports only non-deleted ECoreX Runtime threads and preserves tool history
       sources: [{ family: 'ecorex-runtime', root: sourceRoot, database: source }],
     })
     assert.equal(result.imported_sessions, 1)
-    const [header] = await ctx.sessionPersistence.list()
+    const [snapshot] = await ctx.sessionPersistence.list()
+    const header = snapshot.header
     assert.equal(header.cwd, project)
-    const loaded = await ctx.sessionPersistence.inspect(header.id)
+    const loaded = await readCurrentSession(ctx.sessionPersistence, header.id)
     assert.equal(loaded.events.some(event => event.type === 'tool/call'), false)
     assert.equal(
       loaded.events.find(event => event.type === 'emate/legacy-artifacts').data.items[0].artifact_id,
@@ -380,7 +399,7 @@ test('real WorkspaceRegistry groups unprojected legacy sessions under managed ge
     registryFiber = await ctx.plugin(WorkspaceRegistry)
     await applyGeneralWorkspace(ctx, { dshHome })
 
-    const headers = await ctx.sessionPersistence.list()
+    const headers = (await ctx.sessionPersistence.list()).map(snapshot => snapshot.header)
     const generalSession = headers.find(header => header.cwd === general)
     const projectSession = headers.find(header => header.cwd === project)
     assert.ok(generalSession)
@@ -475,13 +494,17 @@ test('validates every existing target identity before importing another source s
   }
   try {
     await migrateLegacySessions(options)
-    const [header] = await ctx.sessionPersistence.list()
-    const existing = await ctx.sessionPersistence.inspect(header.id)
-    const nextSeq = existing.events.length
-    await ctx.sessionPersistence.append(header.id, [
-      { type: 'turn/start', seq: nextSeq, time: 1_700_000_004_000, data: { turn: 2 } },
-      { type: 'turn/end', seq: nextSeq + 1, time: 1_700_000_004_000, data: { turn: 2, reason: { kind: 'completed' } } },
-    ])
+    const [snapshot] = await ctx.sessionPersistence.list()
+    const write = await ctx.sessionPersistence.open(snapshot.header.id, 'write')
+    try {
+      const nextSeq = (await write.read()).events.length
+      await write.append([
+        { type: 'turn/start', seq: nextSeq, time: 1_700_000_004_000, data: { turn: 2 } },
+        { type: 'turn/end', seq: nextSeq + 1, time: 1_700_000_004_000, data: { turn: 2, reason: { kind: 'completed' } } },
+      ])
+    } finally {
+      await write.close()
+    }
     const database = new DatabaseSync(source)
     database.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?)')
       .run('new-session', '新增会话', project, 1_700_000_010, 1_700_000_010)
