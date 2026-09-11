@@ -1590,3 +1590,34 @@ sink 签名是 `(text, attachmentIds, mode, signal)`。
   逐包 `node_modules` 链接（当前 `packages/host/apiproxy` 缺 `zod` 解析），
   否则 `pnpm run build` 在 tsdown 阶段失败、`lib/index.js` 停留在未叠加 e-mate overlay 的上游副本。
 
+
+### 7. 下一项：`desktop/e-mate-desktop/tests/e-mate-profile.spec.ts` 的 apiProxy 停用（已定性，未改）
+实测：
+```
+corepack yarn workspace @e-mate/desktop exec vitest run tests/e-mate-profile.spec.ts
+→ Error: Cannot find package '@deepseek-ai/dsh-host-apiproxy'
+  imported from tests/e-mate-profile.spec.ts:26
+```
+- 该 spec 有 4 处依赖已删除的 apiproxy（L26 导入 `createApiProxy`、L27 导入 `serverResponseSchema`、
+  L264 与 L823 组合代理、L281 与 L836 解析响应体）。
+- 0.1.5 没有 drop-in 替代：Host 侧是 `TypertGatewayService`（ctx key `typertGateway`，
+  `packages/api/gateway/src/index.ts:169`，`static inject = ['typert']`），
+  业务方法用 `@Remote`/`@RemoteScope` 标注，请求走 **Connection 的 `/api` FetchHandler**
+  与 `ctx.connection.rpc.call('/api', endpoint, ...)`；不再有 `api.sessions.create({rpcId, payload})`
+  这种「一个大代理对象」的形态。
+- **好消息**：`ClientConnectionRpc.handle(channel, handler)` 仍在
+  （`packages/client/connection/src/rpc.ts:145`），所以 e-mate 的
+  `ctx.connection.rpc.handle('/emate.expert-mode', ...)`（`dsh/src/profile/agent-operations.ts:76`）
+  不需要改写；要改的只是 spec 自己的组装方式：会话用真实的 `ctx.sessions`/`SessionStore` 创建，
+  响应体不再用 `serverResponseSchema` 解析。
+- 该 spec 的 `beforeAll` 需要 `desktop/e-mate-desktop/build/e-mate-profile/`，
+  必须先跑 `yarn run build:sdk`（会执行 `harness-provenance.mjs sync-desktop` +
+  `sync-emate-profile.mjs` 把插件 bundle 同步进 build 目录）。
+  **不要在并行写 plugin 源码时跑它**，否则会把半成品烧进 profile。
+
+### 8. 已验证但尚未纳入门禁的项
+- `pnpm test` = `test:fast` + `component-run check`（对每个 component 先 build 再 test）
+  + `@e-mate/dsh test`。`component-run check` 会写各组件 `lib/`，同样应在所有写手停下来之后跑。
+- `packages/dsh-plugin-computer-use` 的 `lib/` 当前**不存在**（构建需 harness workspace 的逐包 node_modules）；
+  本轮临时生成的半成品 `lib/` 已删除，避免留下未叠加 e-mate overlay 的错误产物。
+
