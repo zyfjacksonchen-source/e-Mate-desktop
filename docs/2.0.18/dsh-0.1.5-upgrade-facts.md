@@ -1509,3 +1509,84 @@ shell 套件从 97 → **128 通过 / 13 失败**（21 个 spec 文件中 13 个
 
 **另需注意**：`emate-shell` 没有 `tsconfig.json`，`tsdown` 只转译不做类型检查，
 所以该包的组件门禁**从不做类型检查**——测试转绿并不等于类型成立。
+
+---
+
+## 第 43 轮：0.1.5 改名/移主清单（实测，非推断）
+
+本轮把 emate-shell 套件从 232/246 推到 **277/277（20 文件全绿）**，过程中逐个确认了
+0.1.5 相对 0.1.0 的**改名与移主**。以下每条都在源码里核对过，不是从报错猜的。
+
+### 1. 会话事件读取：`session.events` → `session.snapshotEvents()`
+0.1.5 的 kernel `Session` **删除**了 `events` 属性（built lib 只有 `snapshotEvents`）。
+- 读法：`snapshotEvents()`（缓存冻结快照，下次 append 前同引用）；
+  按 seq 直接取用 `eventAt(seq)`。
+- `header`、`derivedMessages`、`deriveEventMessage` 都还在，只有 `events` 没了。
+- 受影响**产品源码**（已全部改完，本次 19 处 + 前一轮 4 处）：
+  `dsh-plugin-imagegen/src/host.ts`、`dsh-plugin-vision-toolkit/src/attachment-source.ts`、
+  `dsh-plugin-canvas/src/{index,native-artifacts}.ts`、`dsh-plugin-knowledge/src/{workflow,ui-operations,imports,agent-tools,recovery}.ts`、
+  `dsh-plugin-mcp-manage/src/index.ts`、`dsh/src/profile/{agent-operations,request-size}.ts`、
+  `dsh-plugin-computer-use/scripts/build.mjs`（生成的 `lib/emate-explicit.js`）。
+- Canvas 保留自己的 `NativeSession` 投影类型，只在 **live kernel 边界**转换一次
+  （`inspectSession` 返回 `{ header, events: live.snapshotEvents() }`），内部读取照旧。
+- 未改测试替身：多个 `test/*.test.mjs` 里手写的 session 假件仍写 `session.events`，
+  需要在假件上加 `snapshotEvents()` 访问器（已派工）。
+
+### 2. PTC dispatch 事件改名（session format v3）
+`tool/code-dispatch-start` / `tool/code-dispatch` → **`tool/ptc-dispatch-start` / `tool/ptc-dispatch`**。
+v3 明确**拒绝**旧名（`session-format-v2-to-v3/tests/v3-event-admission.spec.ts` 把旧名列为 obsolete）。
+产物 `ui-chat/src/client/conversation-nodes/tool.ts` 只认新名。
+受影响：`dsh-plugin-univer-office/src/client/conversation/univer-turn-definition.ts`（match/type/update 共 5 处）、
+`scripts/harness-artifact-links-adapter.test.mjs`、`packages/dsh/test/audit-code-transport.test.mjs`、
+`dsh-plugin-computer-use/test/contract.test.mjs`、`dsh-plugin-vision-toolkit/test/contract.test.mjs`。
+
+### 3. 图片/草稿链路的移主（真实功能缺陷，非测试问题）
+emate-shell 的图像→草稿路径整体还停在 0.1.0 的 conversation service 名上；在 0.1.5 上会**运行时抛错**：
+| 0.1.0 | 0.1.5 owner |
+| --- | --- |
+| `ctx.conversation.resolveImage(sessionId, attachment)` | `ctx.uiConversation.imageUrl(sessionId, attachment)`（会话级 URL 缓存的唯一持有者；插件需 `inject` 里加 `'uiConversation'`） |
+| `ctx.conversation.createDraftImages(files)` | `ctx.conversation.createDrafts(sessionId, files)` |
+| `ctx.conversation.draftImages(ids)` | `ctx.conversation.resolveDraftAttachments(ids)` |
+| `ctx.conversation.releaseDraftImages(images)` | `ctx.conversation.releaseDraftAttachments(drafts)` |
+| `shell.addImages(ids)` | `shell.addAttachments(ids)` |
+| native input state `imageIds` | `attachmentIds`（`InputState`，contract/input.ts:333） |
+| 草稿里的引用 chip 写成 `\ufffc` | `InputState.draft` 现在**就是剪贴板投影**，chip 展开成规范文本 |
+| `SessionProvider` 子节点是渲染函数 | **普通 ReactNode**（`SessionAreaProps.children: ReactNode`） |
+| `toolImagesDefinition` 节点数据 `{ item }` | 整个回执组 `{ callId, rootCallId, revision, items }` |
+
+### 4. 引用（@mention）到 Host 的证据通道
+0.1.5 **没有** `source.mentions` 通道（`user/message` 的 v0 `references` 字段已被格式迁移退休）。
+`SerializedReference` 的产物由 `InputTriggerController.serializeReference` 拼接进 **prompt 文本**：
+`facade.ts:725 settleSink(attempt, this.deps.defaultSink(out.trim(), attachmentIds, mode, attempt.signal))`，
+sink 签名是 `(text, attachmentIds, mode, signal)`。
+- 电脑操控的授权门禁因此改为：codec.serialize 产出规范 token `@[电脑操控](computer-use)`，
+  Host 侧 `hasExplicitComputerUseRequest` 在**最后一条直接用户消息的文本块**里匹配该精确 token；
+  裸打 `@电脑操控` 仍然是 false（安全属性保持）。
+- `deriveDecorations` 已不存在（chip 由 occurrence 自身渲染；`Occurrence.invalid` 表示 owner 解析失败）。
+
+### 5. 补丁/适配脚本里的 0.1.0 残留
+- `scripts/harness-artifact-links-adapter.mjs` 注入的代码写死了 0.1.0 的 CSS 绑定名
+  `MarkdownText_module_css_default`；0.1.5 构建里它是 `css$23`（26 个 CSS 模块挨着重命名）。
+  已改为从产物里**读取** MarkdownText CSS 的本地绑定名（`markdownCssBinding`，不唯一即 fail-closed），
+  两个注入片段用同一占位符替换（它们引号形式不同，不能就地插值）。
+  读取动作放在**所有 seam 之后**，这样漂移仍然先在它自己的 seam 上失败。
+- `packages/dsh/src/e-mate.ts` 的 `harnessFromPackage()` 仍在校验已退休的回执字段
+  `slot_error_adapter_sha256` / `slot_error_client_sha256`，并去 hash 已被删除的
+  `@deepseek-ai/dsh-client-runtime`——因此**打包运行时永远无法通过校验**。
+  已改为校验当前构建真正写出的字段，并补上 `conversation_chat_client_sha256`。
+  `scripts/harness-conversation-adapter.test.mjs` 的拒绝用例同步换名单。
+
+### 6. 其他实测结论
+- `scripts/harness-artifact-links-adapter.test.mjs` 两处陈旧路径由此前的迁移引入：
+  `join(harness, 'upstream/deepseek-harness/...')` 多了一层（`harness` 本身已是 harness 根）；
+  以及 `await readFile(packages/client/runtime/lib/client.js)` 读已删除包，
+  导致**模块级 await 拒绝、该行之后的测试全部静默不注册**。
+- `ui-primitives/lib/index.js` 现在带 26 条相对 CSS-module import，data:-URL 模块无法解析，
+  测试需要在改写裸 specifier 之前先把 `.css` specifier 换成 class-name proxy 桩。
+- `THIRD_PARTY_NOTICES.md` 是**派生产物**（`desktop/e-mate-desktop/scripts/verify-licenses.mjs`
+  需要 `build/e-mate-profile/bundles/registry.json`），必须在 desktop profile 构建后重新生成，
+  不能手改行。
+- `packages/dsh-plugin-computer-use` 的运行时 bundle 需要 harness workspace 的
+  逐包 `node_modules` 链接（当前 `packages/host/apiproxy` 缺 `zod` 解析），
+  否则 `pnpm run build` 在 tsdown 阶段失败、`lib/index.js` 停留在未叠加 e-mate overlay 的上游副本。
+

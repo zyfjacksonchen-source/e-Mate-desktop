@@ -29,17 +29,29 @@ function emateArtifactMention(url, context) {
   } catch { return undefined }
 }
 
+/** Local name the emitted library gave the MarkdownText CSS module; rc.1 renames it per build. */
+function markdownCssBinding(source) {
+  const matches = [...source.matchAll(/^import ([A-Za-z_$][\w$]*) from "([^"]*markdown\/MarkdownText\.module\.css)";$/gmu)]
+  if (matches.length !== 1) {
+    throw new Error(`Harness artifact-link adapter renderer/css: expected one MarkdownText CSS import, found ${matches.length}`)
+  }
+  return matches[0][1]
+}
+
 export function adaptHarnessArtifactLinksSource(source) {
   const change = (before, after, owner) => { source = replaceOnce(source, before, after, owner) }
   change('function renderAnchor(url, children, key, glyph = true) {\n\treturn renderSafeLink(normalizeUri(url), children, key, glyph);\n}',
-    `${emateArtifactMention.toString()}\nfunction renderAnchor(url, children, key, glyph = true, context) {\n\tconst mention = emateArtifactMention(url, context);\n\tif (mention) return jsx("button", { type: "button", className: MarkdownText_module_css_default.fileMention, style: { margin: 0, padding: 0, border: 0, background: "none", font: "inherit", color: "var(--dsw-alias-state-business-primary, LinkText)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: "3px" }, title: mention.title, "aria-label": mention.label, onClick: mention.open, children }, key);\n\treturn renderSafeLink(normalizeUri(url), children, key, glyph);\n}`, 'renderer/anchor')
+    `${emateArtifactMention.toString()}\nfunction renderAnchor(url, children, key, glyph = true, context) {\n\tconst mention = emateArtifactMention(url, context);\n\tif (mention) return jsx("button", { type: "button", className: __EMATE_MD_CSS__.fileMention, style: { margin: 0, padding: 0, border: 0, background: "none", font: "inherit", color: "var(--dsw-alias-state-business-primary, LinkText)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: "3px" }, title: mention.title, "aria-label": mention.label, onClick: mention.open, children }, key);\n\treturn renderSafeLink(normalizeUri(url), children, key, glyph);\n}`, 'renderer/anchor')
   change('case "link": return renderAnchor(node.url, renderChildren(node.children, {\n\t\t\t...context,\n\t\t\tinLink: true\n\t\t}), key, !anchorWrapsOnlyImages(node.children));',
     'case "link": return renderAnchor(node.url, renderChildren(node.children, {\n\t\t\t...context,\n\t\t\tinLink: true\n\t\t}), key, !anchorWrapsOnlyImages(node.children), context);', 'renderer/link')
   change('return renderAnchor(definition.url, rendered, key, !anchorWrapsOnlyImages(node.children));',
     'return renderAnchor(definition.url, rendered, key, !anchorWrapsOnlyImages(node.children), context);', 'renderer/reference')
   change('function renderImage(url, alt, key, context) {\n\tconst imageSrc',
-    'function renderImage(url, alt, key, context) {\n\tconst mention = emateArtifactMention(url, context);\n\tif (mention) return jsx("button", { type: "button", className: MarkdownText_module_css_default.fileMention, style: { margin: 0, padding: 0, border: 0, background: "none", font: "inherit", color: "var(--dsw-alias-state-business-primary, LinkText)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: "3px" }, title: mention.title, "aria-label": mention.label, onClick: mention.open, children: alt || mention.label }, key);\n\tconst imageSrc', 'renderer/image')
-  return source
+    'function renderImage(url, alt, key, context) {\n\tconst mention = emateArtifactMention(url, context);\n\tif (mention) return jsx("button", { type: "button", className: __EMATE_MD_CSS__.fileMention, style: { margin: 0, padding: 0, border: 0, background: "none", font: "inherit", color: "var(--dsw-alias-state-business-primary, LinkText)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: "3px" }, title: mention.title, "aria-label": mention.label, onClick: mention.open, children: alt || mention.label }, key);\n\tconst imageSrc', 'renderer/image')
+  // The two injected snippets are quoted differently, so the owner's local CSS
+  // name lands through one placeholder substitution. Reading it after the seams
+  // keeps a drifted source failing on its own seam, not on this lookup.
+  return source.replaceAll('__EMATE_MD_CSS__', markdownCssBinding(source))
 }
 
 // Vite aliases the platform library to this native SOURCE module. Adapting its
