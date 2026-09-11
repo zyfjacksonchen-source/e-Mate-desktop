@@ -26,3 +26,16 @@ test('the image wrapper keeps the image model and only moves the outer model', (
   assert.match(patch, /result\.Model/u)
   assert.match(patch, /result\.UpstreamModel/u)
 })
+
+test('the skill-hub migration stage pins a digest and probes the restricted reader', () => {
+  const dockerfile = readFileSync(join(deployRoot, 'Dockerfile.services'), 'utf8')
+  assert.match(
+    dockerfile,
+    /ARG MIGRATION_NODE_IMAGE=node@sha256:[0-9a-f]{64}/u,
+    'the migration Node image is no longer pinned by digest',
+  )
+  assert.match(dockerfile, /FROM \$\{MIGRATION_NODE_IMAGE\} AS skill-hub-migrate/u)
+  // The restricted SQLite reader is the reason this stage needs its own image: without the
+  // probe an older image would migrate the database without it.
+  assert.match(dockerfile, /setAuthorizer/u)
+})
