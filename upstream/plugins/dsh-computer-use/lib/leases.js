@@ -132,7 +132,7 @@ export class ComputerLeaseManager {
     }
     async ensureInteractive(agent, app, scope, toolName, callId, signal) {
         await this.prepareStorage();
-        const turn = currentTurn(agent.session.events);
+        const turn = currentTurn(agent.session.snapshotEvents());
         if (turn === undefined) {
             throw new ComputerUseError('COMPUTER_PERMISSION_REQUIRED', `${scope} access for ${app.name} must be requested inside an open Agent turn`);
         }

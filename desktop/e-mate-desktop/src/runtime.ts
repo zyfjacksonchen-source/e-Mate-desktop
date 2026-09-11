@@ -133,6 +133,16 @@ export interface DesktopTerminalSpec {
 export interface DesktopShellSpec extends DesktopWindowConfig {
   /** Unmodified Web root served by the active DSH profile. */
   url: string
+  /**
+   * Process-token URL that authenticates the renderer's own Electron session
+   * before {@link url} is loaded, from the native Connection owner's
+   * `authenticatedUrl`. The adapter exchanges it inside the BrowserWindow
+   * session, so the Web root and every `/api` request carry the resulting
+   * browser-session cookie; loading {@link url} without the exchange answers
+   * HTTP 401. Absent in hand-built plugin contexts that provide no Connection
+   * service.
+   */
+  authenticationUrl?: string
   /** Native application and tray label. */
   productName: string
   /** Visible native caption on platforms that retain a title. */

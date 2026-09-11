@@ -101,46 +101,6 @@ function mountSessionController(ctx: Context) {
 }
 
 /**
- * Answer the retired host API proxy key through the 0.1.5 owner. The composed
- * `emate-agent-operations` row still resumes a Session by calling
- * `ctx.get('apiProxy').sessions.create(...)`
- * (`packages/dsh/src/profile/agent-operations.ts:45`); that plugin's own
- * migration onto `ctx.sessionController` is owned outside this spec, so the
- * scenarios bind the key it reads to the same controller the migrated call uses.
- * @param ctx - Host context with the Session Controller mounted.
- */
-function provideHostApiProxySeam(ctx: Context): void {
-  ctx.provide('apiProxy', {
-    sessions: {
-      create: async (request: {
-        readonly rpcId: string
-        readonly payload: { readonly sessionId: SessionId; readonly cwd: string }
-      }) => {
-        try {
-          return {
-            rpcId: request.rpcId,
-            result: { ok: true as const, value: await ctx.sessionController.create(request.payload) },
-          }
-        } catch (error) {
-          const remote = error as { code?: string; message?: string; details?: Record<string, unknown> }
-          return {
-            rpcId: request.rpcId,
-            result: {
-              ok: false as const,
-              error: {
-                code: remote.code ?? 'internal',
-                message: remote.message ?? String(error),
-                details: remote.details ?? {},
-              },
-            },
-          }
-        }
-      },
-    },
-  })
-}
-
-/**
  * Authorize the loopback requests these scenarios drive. They exercise the Host
  * Connection trust fence (the untrusted-origin refusal), not the browser cookie
  * handshake that owns its own upstream coverage.
@@ -374,7 +334,9 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(rows.some(row => row.id === 'univer')).toBe(false)
     const agentOperations = rows.find(row => row.id === 'emate-agent-operations')
     expect(agentOperations).toEqual(expect.objectContaining({
-      inject: ['systemPrompt', 'connection', 'sessions'],
+      // The pinned baseline owns Session resume through sessionController, so the row
+      // declares it in addition to the services it already read.
+      inject: ['systemPrompt', 'connection', 'sessions', 'sessionController'],
     }))
     // 0.1.5 anchors an inserted './…' name beside the patch file that declares it
     // (app-boot anchorInsertedPluginNames), so this profile-root row composes as a
@@ -398,7 +360,6 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       const sessionController = mountSessionController(ctx)
       services.push(sessionController)
       await sessionController.await()
-      provideHostApiProxySeam(ctx)
       const moduleUrl = new URL(agentOperations!.name!, pathToFileURL(join(profile, 'package.json'))).href
       const plugin = await import(/* @vite-ignore */ moduleUrl)
       const fiber = ctx.plugin(plugin)
@@ -971,7 +932,6 @@ describe('expert mode native cold-session RPC', () => {
         apply: (owner: Context) => { new HostConnectionService(owner, [], loopbackBrowserAuth()) } })
       installSessionApiCapabilities(ctx)
       await mountSessionController(ctx).await()
-      provideHostApiProxySeam(ctx)
       const source = new URL('../../../packages/dsh/src/profile/agent-operations.ts', import.meta.url).href
       await ctx.plugin(await import(/* @vite-ignore */ source))
       // 0.1.5 hands every Context its own traced service proxy, so a spy on one

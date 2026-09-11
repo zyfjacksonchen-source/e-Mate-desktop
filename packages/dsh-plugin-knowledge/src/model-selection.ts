@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { fail, type Execution } from './imports.ts'
 
 /** Read the same native selection as the composer, including an unsent pick. */
@@ -6,9 +5,14 @@ export async function resolveKnowledgeSelection(ctx: any, exec?: Execution, sign
   signal?.throwIfAborted()
   let selection: any = frozenSelection
   if (!selection && exec?.agent) {
-    const response = await ctx.apiProxy.sessions.models({ rpcId: randomUUID(), payload: { sessionId: exec.agent.id } })
-    if (!response?.result?.ok || response.result.value?.routable !== true) fail('model-unavailable')
-    selection = response.result.value.current
+    // rc.1 removed the ApiProxy RPC this used to call. The pinned owner of a
+    // Session's current selection — a composer pick not yet sent, else the logged
+    // request header, else the deployment default — is
+    // SessionController.selectionFor(agent).current
+    // (upstream/deepseek-harness/packages/api/session-controller/src/agent.ts:276-305).
+    const controller = ctx.get?.('sessionController')
+    if (controller === undefined) fail('model-selection-unavailable')
+    selection = controller.selectionFor(exec.agent).current
   } else if (!selection) selection = ctx.agentDefaultModel.currentSelection()
   signal?.throwIfAborted()
   if (!selection || typeof selection.provider !== 'string' || !selection.provider || typeof selection.model !== 'string' || !selection.model) fail('model-selection-unavailable')

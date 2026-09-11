@@ -73,6 +73,12 @@ exposure = replaceExactlyOnce(exposure,
             || (block.text.trim().startsWith('<skill_content name="' + VISION_TOOLS_SKILL_NAME + '">')
                 && block.text.trim().endsWith('</skill_content>'))));`,
   'native skill identity survives instruction updates')
+// 0.1.5 replaced the Session event list with the snapshot accessor; the pinned
+// bundle still iterates the removed property and throws on Agent activation.
+exposure = replaceExactlyOnce(exposure,
+  'for (const event of session.events) {',
+  'for (const event of session.snapshotEvents()) {',
+  'native session snapshot accessor')
 await writeFile(exposurePath, exposure)
 
 const upstreamIndex = resolve(staged, 'index.js')

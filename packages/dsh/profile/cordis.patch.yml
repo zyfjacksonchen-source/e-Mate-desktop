@@ -90,9 +90,6 @@
     - id: emate-general-workspace
       name: ./plugins/general-workspace.js
       inject: [workspaceRegistry]
-    - id: emate-artifact-open-boundary
-      name: ./plugins/artifact-open-boundary.js
-      inject: [apiProxy, workspaceRegistry]
     - id: emate-identity
       name: ./plugins/identity/index.js
       inject: [connection, credentials, timer]
@@ -105,12 +102,12 @@
           organization: emate-v2
     - id: emate-share
       name: ./plugins/share.js
-      inject: [apiProxy, connection, credentials]
+      inject: [connection, credentials]
       config:
         rootUrl: https://mvdcm.ecoremedia.net/e-mate/share
     - id: emate-model-policy
       name: ./plugins/model-policy.js
-      inject: [apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity]
+      inject: [sessionController, connection, credentials, settings, storageDomain, llm, emateIdentity]
     - id: emate-audit
       name: ./plugins/audit.js
       inject: [connection, sessionPersistence, storageDomain, timer, tools, emateModelPolicy, emateIdentity]
@@ -137,4 +134,4 @@
 
     - id: emate-agent-operations
       name: ./plugins/agent-operations.js
-      inject: [systemPrompt, connection, sessions]
+      inject: [systemPrompt, connection, sessions, sessionController]

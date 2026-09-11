@@ -20,9 +20,10 @@ so a later sync can prove what changed.
 | Vendored by | e-Mate 2.0.18 (`docs/2.0.18/submodule-vendoring.md`) |
 
 The vendored tree contains **tracked upstream content only**: no `.git`, no
-`.gitignore`-hidden build output and no `node_modules`. The file set, the file
-modes (`100644` / `100755`) and every byte match the pinned commit exactly; the
-sha256 inventory at the end of this file is the proof.
+`.gitignore`-hidden build output and no `node_modules`. The file set and the file
+modes (`100644` / `100755`) match the pinned commit exactly, and every byte does
+except the two files listed under [Local modifications](#local-modifications-vs-upstream)
+below; the sha256 inventory at the end of this file is the proof.
 
 ## Why it is vendored rather than depended on
 
@@ -46,8 +47,34 @@ files is what makes a fresh clone buildable with no manual file transfer.
 
 ## Local modifications vs upstream
 
-None. The tree is the pinned revision verbatim, taken from the submodule working
-tree that was already materialised at that commit and copied unchanged.
+One 0.1.5-compatibility change, in two files. Every other file is the pinned
+revision verbatim, taken from the submodule working tree that was already
+materialised at that commit and copied unchanged.
+
+| File:line | Change |
+|---|---|
+| `src/leases.ts:188` | `currentTurn(agent.session.events)` → `currentTurn(agent.session.snapshotEvents())` |
+| `lib/leases.js:135` | the same seam, kept textually consistent with the source |
+
+Reason: 0.1.5-rc.1 replaced the Session event list with the snapshot accessors. A
+real `Session` has **no `events` member** — only `snapshotEvents(fromSeq, toSeqExclusive)`
+(the full log, the faithful replacement for the accessor the pinned revision was
+written against) and `ownEvents()` (child-owned events only) — so
+`currentTurn(agent.session.events)` threw `TypeError: Cannot read properties of
+undefined (reading 'length')` on the first interactive read or control lease
+request, instead of raising the intended `COMPUTER_PERMISSION_REQUIRED`.
+
+This seam lives here rather than in `packages/dsh-plugin-computer-use/scripts/build.mjs`
+because `test/contract.test.mjs:82` asserts the shipped `lib/leases.js` is
+byte-identical to this file: the guard is what proves e-Mate ships the pinned
+owner's lease manager, so a build-time rewrite of the shipped copy would fail it.
+This tree is already an e-Mate 0.1.5-compat branch (see Provenance), which is
+where the pinned revision's earlier 0.1.5 fix also lives. The e-Mate adapter no
+longer rewrites this file; `lib/leases.js.map` embeds no source text and is
+unchanged. The vendored tree's own `pnpm run build` was not used to produce the
+artifact — it also rebuilds `native/macos/bin` and `native/macos/manifest.json`,
+which this repository pins by hash — so `lib/leases.js` is kept hand-consistent
+with `src/leases.ts`.
 
 ## File inventory (sha256 of the vendored content)
 
@@ -96,7 +123,7 @@ cda76d620781a18ac7b7930f1607a4ce8bb12738d5d3a93d94ee480892631b35  lib/exposure.j
 59be80c51a275a856093251df04c7ddb16267e502aaf83cc4db2e27d9b8b29de  lib/exposure.js.map
 cbd94104fe5337e6219be266f2931f7b4d44ed2fd8883b409a6c59008f0b39d4  lib/index.js
 a95bf53f43bfd88d740ef2b05fbbf0a2974188d5b1cbafd1f94f8e0d3fe7c0ba  lib/index.js.map
-1a7be16acc9f3cbbc5860dcb8047496ac1c26b18479b58d38b58dd61cdbbe7c4  lib/leases.js
+53bc9892b7c8121d7a7aab9d71808c33dcbd2b255a39c70df130e5c7e8942ae8  lib/leases.js
 f30a08862fcb750e13f87caadf8e1eb69377103cb5f03fef1084baf1a09110e4  lib/leases.js.map
 2e7a57012f70b874a943d9e06dde40c913b5f05fed2512aadb6e2024ab86610a  lib/providers/macos.js
 70abcf7101ea1ee77660db8232d6456e13d24e90d9f739b43be4f21b0b29063c  lib/providers/macos.js.map
@@ -179,7 +206,7 @@ c07309b100a489621093669326f8dad008947cd886125d6afec80cd65bd559a1  src/backend.ts
 9b29caf118329fc018f143d3db3492c60e5bf56f0ddef8dd7d76db956dfd8511  src/errors.ts
 c27ad92ac3d006aa3decb28507840690d4691550e7a8f462db03a105143a0b50  src/exposure.ts
 e265b14dee19f58f5e2e6169ed426f71834ecd1cf1b36ccaa9566055703097a4  src/index.ts
-6303fea45f81eb8fdb71952eda3a4c9215cc7da127981ec3aa8b01691faa9583  src/leases.ts
+cb7d50bdb4aca04b824fbb8a99244788ab709d1a12ba3d3cbe8d6dfa2f889e3f  src/leases.ts
 3e1ca9de776f26faaf02d9066e0760ff42bbb4473c9d2026608229d69f0cb2c3  src/providers/macos.ts
 b4d6c8a13551a3f1415194ac5cbfe8d439196f8c3ebcb597788e82ec384d96bc  src/providers/native-helper.ts
 4e01b62f41b6aaea4f7100696a5c055668ba7f7b294a0471aa72174427089190  src/service.ts

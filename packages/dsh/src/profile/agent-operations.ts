@@ -57,7 +57,14 @@ export async function expertModeRequest(ctx, endpoint, payload) {
         cwd: (session?.header ?? inspected.meta).cwd,
       })
     } catch (error) {
-      throw new ExpertModeRpcError(error?.isDSHRemoteError === true ? error : {
+      // A RemoteError is an Error, and an Error's message is not an own enumerable
+      // property, so putting the instance itself into the response loses the message
+      // on serialization. Carry the plain fields instead.
+      throw new ExpertModeRpcError(error?.isDSHRemoteError === true ? {
+        code: error.code,
+        message: error.message,
+        details: error.details ?? {},
+      } : {
         code: 'internal',
         message: error instanceof Error ? error.message : String(error),
         details: {},

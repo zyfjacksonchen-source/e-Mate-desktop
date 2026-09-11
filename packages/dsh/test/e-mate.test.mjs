@@ -361,19 +361,22 @@ test('managed profile installation is idempotent', () => {
     assert.equal(patchById.get('emate-legacy-migration').name, './plugins/legacy-migration.js')
     assert.equal(patchById.get('emate-model-policy').name, './plugins/model-policy.js')
     assert.deepEqual(patchById.get('emate-model-policy').inject, [
-      'apiProxy', 'connection', 'credentials', 'settings', 'storageDomain', 'llm', 'emateIdentity',
+      'sessionController', 'connection', 'credentials', 'settings', 'storageDomain', 'llm', 'emateIdentity',
     ])
     assert.equal(patchById.get('emate-identity').config.enterprise.clientId, 'e-mate-web')
     assert.equal(patchById.get('emate-identity').config.enterprise.organization, 'emate-v2')
     assert.equal(patchById.get('emate-share').name, './plugins/share.js')
-    assert.deepEqual(patchById.get('emate-share').inject, ['apiProxy', 'connection', 'credentials'])
+    assert.deepEqual(patchById.get('emate-share').inject, ['connection', 'credentials'])
+    // rc.1 removed the ApiProxy service; no row may declare a service nothing provides.
+    assert.equal(patchById.has('emate-artifact-open-boundary'), false)
+    assert.doesNotMatch(patch, /apiProxy/)
     assert.equal(patchById.get('emate-share').config.rootUrl, 'https://mvdcm.ecoremedia.net/e-mate/share')
     assert.equal(patchById.get('emate-audit').name, './plugins/audit.js')
     assert.deepEqual(patchById.get('emate-audit').inject, [
       'connection', 'sessionPersistence', 'storageDomain', 'timer', 'tools', 'emateModelPolicy', 'emateIdentity',
     ])
     assert.equal(patchById.get('emate-agent-operations').name, './plugins/agent-operations.js')
-    assert.deepEqual(patchById.get('emate-agent-operations').inject, ['systemPrompt', 'connection', 'sessions'])
+    assert.deepEqual(patchById.get('emate-agent-operations').inject, ['systemPrompt', 'connection', 'sessions', 'sessionController'])
     assert.equal(patchById.has('ui-sidebar'), false)
     assert.equal(patchById.has('emate-shell'), false)
     assert.match(patch, /\.\/plugins\/health\.js/)
@@ -385,7 +388,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-agent-operations[\s\S]*\.\/plugins\/agent-operations\.js/)
     assert.doesNotMatch(patch, /emate-skill-hub-agent|plugins\/skill-hub-agent\.js/)
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
-    assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
+    assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[sessionController, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, tools, emateModelPolicy, emateIdentity\]/)
     assert.equal(patchById.has('emate-image-generation'), false)
     assert.equal(patchById.get('emate-imagegen').config.rootUrl, 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1')
@@ -621,21 +624,35 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
   const requests = []
   const sessionLogCalls = []
   applyShare({
-    apiProxy: { downloads: { sessionLog: async (request, signal) => {
-      sessionLogCalls.push(request)
-      assert.equal(signal.aborted, false)
-      return new Response(new Uint8Array([80, 75, 3, 4]), {
-        headers: { 'content-type': 'application/zip' },
-      })
-    } } },
     credentials: { resolve: async ref => {
       assert.equal(ref, 'E_MATE_MODEL_SESSION_TOKEN')
       return { value: 'model-session-token-which-is-long-enough', source: 'test' }
     } },
-    connection: { rpc: { handle: (channel, handler, options) => {
-      registration = { channel, handler, options }
-      return async () => {}
-    } } },
+    connection: {
+      rpc: { handle: (channel, handler, options) => {
+        registration = { channel, handler, options }
+        return async () => {}
+      } },
+      // The native owner of the Session ZIP is the session-log-download row, which
+      // publishes GET /api/session.export with sessionId/includeDescendants
+      // (upstream/deepseek-harness/packages/session-query/session-log-export/src/index.ts:42,85-99).
+      createSharedFetchHandler: channel => {
+        assert.equal(channel, '/api')
+        return { fetch: async request => {
+          const url = new URL(request.url)
+          assert.equal(url.pathname, '/api/session.export')
+          assert.equal(request.method, 'GET')
+          assert.equal(request.signal.aborted, false)
+          sessionLogCalls.push({
+            sessionId: url.searchParams.get('sessionId'),
+            includeDescendants: url.searchParams.get('includeDescendants') === 'true',
+          })
+          return new Response(new Uint8Array([80, 75, 3, 4]), {
+            headers: { 'content-type': 'application/zip' },
+          })
+        } }
+      },
+    },
     effect: effect => effect(),
   }, {
     rootUrl: 'https://share.example',
@@ -1157,7 +1174,7 @@ test('expert mode persists in its native session and leaves other conversations 
   const first = kernelSession({ cwd: '/test' }, [])
   const second = kernelSession({ cwd: '/other' }, [])
   let flushes = 0
-  const ctx = { get: name => name === 'apiProxy' ? { sessions: { create: async request => ({ rpcId: request.rpcId, result: { ok: true, value: { sessionId: request.payload.sessionId } } }) } } : undefined, sessions: { get: id => id === 'one' ? first : id === 'two' ? second : undefined,
+  const ctx = { get: name => name === 'sessionController' ? { create: async request => ({ sessionId: request.sessionId }) } : undefined, sessions: { get: id => id === 'one' ? first : id === 'two' ? second : undefined,
     flush: async value => { assert.equal(value, first); flushes++; return true } } }
   let expertPolicy
   applyAgentOperations({ ...ctx, effect: () => {}, systemPrompt: { section(value) {
@@ -2144,7 +2161,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
   records.set('active', legacyPolicyRecord)
   const catalog = {
     groups: [{
-      id: 'enterprise',
+      // buildModelCatalog names each group after its provider
+      // (packages/api/session-controller/src/catalog.ts:46-47), which is also the
+      // key routableProviders carries.
+      id: 'e-mate-enterprise',
       name: 'e-Mate Enterprise',
       models: [
         { id: 'gpt-5.6-luna', name: 'e-Mate Chat' },
@@ -2154,30 +2174,29 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     }],
     failures: [],
   }
-  const apiProxy = {
-    sessions: {
-      models: async request => ({
-        rpcId: request.rpcId,
-        result: { ok: true, value: { current: structuredClone(session.current), routable: true, ...catalog } },
-      }),
-      selectModel: async request => {
-        calls.selected.push(structuredClone(request.payload))
-        session.current = {
-          provider: request.payload.provider,
-          model: request.payload.model,
-          ...request.payload.reasoningEffort === undefined ? {} : { reasoningEffort: request.payload.reasoningEffort },
-        }
-        return { rpcId: request.rpcId, result: { ok: true, value: { selected: structuredClone(session.current) } } }
-      },
-    },
-    llm: {
-      models: async request => ({ rpcId: request.rpcId, result: { ok: true, value: catalog } }),
+  // The pinned owner of both browser model surfaces is the Session Controller:
+  // modelCatalog and selectModel (packages/api/session-controller/src/index.ts:253-265).
+  const sessionController = {
+    modelCatalog: async () => ({
+      default: structuredClone(session.current),
+      routableProviders: ['e-mate-enterprise'],
+      groups: structuredClone(catalog.groups),
+      failures: [],
+    }),
+    selectModel: async request => {
+      calls.selected.push(structuredClone(request))
+      session.current = {
+        provider: request.provider,
+        model: request.model,
+        ...request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort },
+      }
+      return { selected: structuredClone(session.current) }
     },
   }
   try {
     const paths = installProfile(join(temporary, 'dsh-home'))
     const modelPolicyContext = {
-      apiProxy,
+      sessionController,
       connection: { rpc: { handle: (channel, handler, options) => {
         rpc = { channel, handler, options }
         return () => {}
@@ -2513,32 +2532,32 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     await modelPolicy.refresh({ force: true })
     assert.deepEqual(credentialValues, projectedCredentials)
 
-    const models = await apiProxy.sessions.models({ rpcId: 'models-1', payload: { sessionId: 'session-1' } })
-    assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), [
+    // One native catalog now covers what the retired `sessions.models` and
+    // `llm.models` entries both exposed, so the policy projects exactly once.
+    const models = await sessionController.modelCatalog()
+    assert.deepEqual(models.groups[0].models.map(model => model.id), [
       'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
     ])
-    assert.equal(models.result.value.routable, true)
-    const settingsModels = await apiProxy.llm.models({ rpcId: 'models-2', payload: {} })
-    assert.deepEqual(settingsModels.result.value.groups[0].models.map(model => model.id), [
-      'gpt-5.6-sol', 'gpt-5.6-luna', 'deepseek',
-    ])
-    const allowed = await apiProxy.sessions.selectModel({
-      rpcId: 'select-1', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+    assert.deepEqual(models.routableProviders, ['e-mate-enterprise'])
+    const allowed = await sessionController.selectModel({
+      sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna',
     })
-    assert.equal(allowed.result.ok, true)
-    assert.equal(allowed.result.value.selected.reasoningEffort, 'max')
+    assert.equal(allowed.selected.reasoningEffort, 'max')
     const historyBeforeSwitch = structuredClone(session.messages)
-    const switched = await apiProxy.sessions.selectModel({
-      rpcId: 'select-2', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-sol' },
+    const switched = await sessionController.selectModel({
+      sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-sol',
     })
-    assert.deepEqual(switched.result.value.selected, session.current)
-    assert.equal(switched.result.value.selected.reasoningEffort, 'medium')
+    assert.deepEqual(switched.selected, session.current)
+    assert.equal(switched.selected.reasoningEffort, 'medium')
     assert.deepEqual(session.messages, historyBeforeSwitch)
-    assert.equal((await apiProxy.sessions.models({ rpcId: 'models-3', payload: { sessionId: 'session-1' } })).result.value.current.model, 'gpt-5.6-sol')
-    const blocked = await apiProxy.sessions.selectModel({
-      rpcId: 'select-3', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'unknown' },
-    })
-    assert.equal(blocked.result.error.code, 'model-unavailable')
+    assert.equal((await sessionController.modelCatalog()).default.model, 'gpt-5.6-sol')
+    // A refused model never reaches the native owner, and the refusal keeps the
+    // native failure shape the renderer decodes.
+    await assert.rejects(
+      sessionController.selectModel({ sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'unknown' }),
+      error => error.isDSHRemoteError === true && error.code === 'session/model-unavailable'
+        && error.details.model === 'unknown',
+    )
     assert.deepEqual(calls.selected.map(call => call.model), ['gpt-5.6-luna', 'gpt-5.6-sol'])
     assert.ok(calls.selected.every(call => call.sessionId === 'session-1'))
     assert.deepEqual(
@@ -2574,8 +2593,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     )
     assert.doesNotMatch(JSON.stringify(llmSettings), /redacted-for-test/u)
     assert.deepEqual(
-      (await apiProxy.sessions.models({ rpcId: 'models-gpt-only', payload: { sessionId: 'session-1' } }))
-        .result.value.groups[0].models.map(model => model.id),
+      (await sessionController.modelCatalog()).groups[0].models.map(model => model.id),
       ['gpt-5.6-sol', 'gpt-5.6-luna'],
     )
     await assert.rejects(
@@ -2751,10 +2769,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
 
     providerAvailable = false
     assert.equal((await modelPolicy.refresh({ force: true })).revision, 7)
-    const cachedSwitch = await apiProxy.sessions.selectModel({
-      rpcId: 'select-4', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
+    const cachedSwitch = await sessionController.selectModel({
+      sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max',
     })
-    assert.equal(cachedSwitch.result.ok, true)
+    assert.equal(cachedSwitch.selected.model, 'gpt-5.6-luna')
     assert.deepEqual(session.messages, historyBeforeSwitch)
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
     openedDomains = 0
@@ -2769,8 +2787,8 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     // Simulate a restored native session whose persisted selection predates this policy.
     session.current = { provider: 'e-mate-enterprise', model: 'gpt-6-astra', reasoningEffort: 'medium' }
     const astraHistory = structuredClone(session.messages)
-    const restored = await apiProxy.sessions.models({ rpcId: 'astra-restored', payload: { sessionId: 'session-1' } })
-    assert.equal(restored.result.value.current.reasoningEffort, 'low')
+    const restored = await sessionController.modelCatalog()
+    assert.equal(restored.default.reasoningEffort, 'low')
     assert.deepEqual(llmSettings.providers['e-mate-enterprise'].models.find(model => model.id === 'gpt-6-astra').reasoningEfforts, { low: 'low' })
     const oldSelection = deepFreeze({ ...session.current, sessionId: 'astra-restored-stream' })
     const restoredOptions = deepFreeze(await requestPolicy({}, async () => oldSelection))
@@ -2780,8 +2798,8 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       assert.equal(restoredOptions.reasoningEffort, 'low', 'effective options reach the native adapter after migration')
       yield { type: 'finish', reason: { kind: 'stop' } }
     })())) {}
-    const selectedAstra = await apiProxy.sessions.selectModel({ rpcId: 'astra-select', payload: { ...session.current, sessionId: 'session-1' } })
-    assert.equal(selectedAstra.result.value.selected.reasoningEffort, 'low')
+    const selectedAstra = await sessionController.selectModel({ ...session.current, sessionId: 'session-1' })
+    assert.equal(selectedAstra.selected.reasoningEffort, 'low')
     assert.deepEqual(session.messages, astraHistory)
     records.set('active', storedLegacyPolicy({ ...policy(), image_primary_model_id: 'gpt-image-2-pro', default_chat_model_id: 'gpt-6-astra', default_chat_reasoning_effort: 'medium', image_fallback_upstream_model_id: 'gpt-image-2', allowed_model_ids: [...policy().allowed_model_ids.filter(id => id !== 'gpt-image-2.5-flare'), 'gpt-image-2-pro', 'gpt-image-2'] }))
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup()

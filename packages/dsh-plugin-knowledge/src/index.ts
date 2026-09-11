@@ -11,7 +11,7 @@ import { ownerOf } from './imports.ts'
 import { API_ROOT, CHANNEL, GRAPH_ASSET, HASH, SOURCE_ID, knowledgeFailure } from './contract.ts'
 import { READ_OPERATIONS, readRequestError } from './read-contract.ts'
 export const name = 'emate-knowledge'
-export const inject = ['emateIdentity', 'connection', 'webServer', 'timer', 'agents', 'sessions', 'sessionPersistence', 'subagents', 'jobs', 'goals', 'tools', 'emateXinKnowledge', 'apiProxy', 'agentDefaultModel', 'emateModelPolicy', 'llm']
+export const inject = ['emateIdentity', 'connection', 'webServer', 'timer', 'agents', 'sessions', 'sessionPersistence', 'subagents', 'jobs', 'goals', 'tools', 'emateXinKnowledge', 'sessionController', 'agentDefaultModel', 'emateModelPolicy', 'llm']
 const MAX_BYTES = 20 * 1024 * 1024
 const DOWNLOAD_ROOT = '/emate-knowledge-downloads/'
 function reject(message: string, code = 'invalid-request'): never { throw Object.assign(Error(message), { code }) }

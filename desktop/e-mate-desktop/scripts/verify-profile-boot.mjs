@@ -21,6 +21,7 @@ import {
 import { installProfilePackageResolver } from '../lib/module-resolution.js'
 import { prepareDesktopProfile } from '../lib/profile.js'
 import { loadProfileBaseContract } from '../src/base-contract.ts'
+import { authenticateRendererSession } from '../src/renderer-session-auth.ts'
 
 const BIN_NAME = '@e-mate/desktop-profile-smoke'
 const selectedTarget = { platform: 'win32', arch: 'x64' }
@@ -33,6 +34,46 @@ let pnpmRuntime
 let mountedSpec
 let nativeThemeSource = 'system'
 const trayItems = []
+
+/**
+ * Chromium-equivalent stand-in for one Electron renderer session: a persistent
+ * cookie jar whose redirects are followed inside the session. The profile smoke
+ * cannot construct a BrowserWindow, so it drives the production exchange step
+ * (@e-mate/desktop authenticateRendererSession) with this jar and then loads the
+ * marker URL exactly as the window does.
+ */
+function createRendererSession() {
+  const jar = new Map()
+  const cookieHeader = () => [...jar].map(([name, value]) => `${name}=${value}`).join('; ')
+  return {
+    cookieHeader,
+    async fetch(url, init) {
+      let target = url
+      for (let hop = 0; hop <= 5; hop += 1) {
+        const cookie = cookieHeader()
+        const response = await fetch(target, {
+          method: init.method,
+          redirect: 'manual',
+          cache: init.cache,
+          ...(cookie === '' ? {} : { headers: { cookie } }),
+        })
+        for (const value of response.headers.getSetCookie()) {
+          const pair = value.split(';', 1)[0]
+          const separator = pair.indexOf('=')
+          if (separator > 0) jar.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim())
+        }
+        const location = response.headers.get('location')
+        if (response.status >= 300 && response.status < 400 && location !== null) {
+          await response.body?.cancel()
+          target = new URL(location, target).href
+          continue
+        }
+        return { status: response.status, body: { cancel: async () => { await response.body?.cancel() } } }
+      }
+      throw new Error('renderer session authentication exceeded the redirect limit')
+    },
+  }
+}
 
 try {
   // Deliberately inject stale target state: the e-Mate desktop must still boot
@@ -154,9 +195,21 @@ try {
     }
   }
 
-  const expectedUrl = `http://127.0.0.1:${String(ctx.webServer.port)}/?dsh-desktop-mode=${prepared.mode}&dsh-desktop-platform=${selectedTarget.platform}`
+  const rendererOrigin = `http://127.0.0.1:${String(ctx.webServer.port)}`
+  const expectedUrl = `${rendererOrigin}/?dsh-desktop-mode=${prepared.mode}&dsh-desktop-platform=${selectedTarget.platform}`
   if (mountedSpec?.url !== expectedUrl) {
     throw new Error(`desktop plugin produced an unexpected renderer URL: ${String(mountedSpec?.url)}`)
+  }
+  // The Web root is browser-authenticated (client/connection browser-auth): the
+  // shell must hand the Electron adapter the Connection owner's process-token
+  // URL, and the adapter must exchange it inside the renderer session before
+  // loading the marker URL above.
+  const expectedAuthenticationUrl = ctx.connection.authenticatedUrl(rendererOrigin)
+  if (mountedSpec?.authenticationUrl !== expectedAuthenticationUrl) {
+    throw new Error(`desktop plugin produced an unexpected authentication URL: ${String(mountedSpec?.authenticationUrl)}`)
+  }
+  if (new URL(expectedAuthenticationUrl).searchParams.get('token') === null) {
+    throw new Error(`assembled authentication URL carries no process token: ${expectedAuthenticationUrl}`)
   }
   if (mountedSpec?.mode !== prepared.mode) {
     throw new Error(`desktop plugin produced an unexpected shell mode: ${String(mountedSpec?.mode)}`)
@@ -180,9 +233,11 @@ try {
     agentOptions: { provider: 'mock', model: 'mock' },
     setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx),
   })).agent
-  if (ctx.agentPresets.defaultId !== 'code'
-    || ctx.agentPresets.composedPreset(defaultAgent.ctx) !== 'code'
-    || ctx.tools.modeFor(defaultAgent) !== 'code') {
+  // 0.1.5 ships standard|ptc|minimal|cordis and the product profile selects native
+  // PTC by default; 'code' has no successor in this baseline.
+  if (ctx.agentPresets.defaultId !== 'ptc'
+    || ctx.agentPresets.composedPreset(defaultAgent.ctx) !== 'ptc'
+    || ctx.tools.modeFor(defaultAgent) !== 'ptc') {
     throw new Error('assembled Profile did not select the native PTC preset by default')
   }
   const ptc = await ctx.tools.execute({
@@ -250,14 +305,28 @@ try {
   if (disclosure.isError || !ctx.tools.schemas(disclosureAgent).some(schema => schema.name === 'skill_find')) {
     throw new Error(`assembled Profile Tool Search did not reveal the native skill_find Tool: ${JSON.stringify(disclosure)}`)
   }
-  const response = await fetch(expectedUrl)
+  // Three states, as the Electron shell reaches them: the bare root is refused,
+  // the process-token exchange mints the browser-session cookie inside the
+  // renderer session, and the marker URL then serves the application.
+  const unauthenticated = await fetch(expectedUrl, { redirect: 'manual' })
+  await unauthenticated.body?.cancel()
+  if (unauthenticated.status !== 401) {
+    throw new Error(`assembled Web root accepted an unauthenticated request with HTTP ${String(unauthenticated.status)}`)
+  }
+  const rendererSession = createRendererSession()
+  await authenticateRendererSession(rendererSession, expectedAuthenticationUrl)
+  const response = await fetch(expectedUrl, { headers: { cookie: rendererSession.cookieHeader() } })
   const html = await response.text()
   if (response.status !== 200) {
     throw new Error(`assembled Web root returned HTTP ${String(response.status)}`)
   }
-  const bootMatch = html.match(/window\.__DSH_BOOT__ = (\{.*?\})<\/script>/u)
+  // The pinned native index serializer emits one `globalThis["__DSH_BOOT__"]`
+  // row (host/webserver injections.ts), not the older `window.__DSH_BOOT__`
+  // assignment this gate used to look for.
+  const bootMatch = html.match(/globalThis\["__DSH_BOOT__"\] = (\{[^<]*\})<\/script>/u)
   if (bootMatch?.[1] === undefined) {
-    throw new Error('assembled Web root is missing window.__DSH_BOOT__')
+    const occurrences = (html.match(/__DSH_BOOT__/gu) ?? []).length
+    throw new Error(`assembled Web root carries no globalThis["__DSH_BOOT__"] row (${String(html.length)} bytes, ${String(occurrences)} name occurrences)`)
   }
   const graph = JSON.parse(bootMatch[1])
   const ids = new Set(graph.entries.map(entry => entry.id))
@@ -270,17 +339,36 @@ try {
     '@e-mate/dsh-plugin-genui',
     '@e-mate/dsh-plugin-vision-toolkit',
     '@deepseek-ai/dsh-client-ui-conversation',
+    // The native `ui-sidebar` row. The e-Mate shell answers it under that row's
+    // own package identity (see src/e-mate-profile.ts, shellIdentityOverride), so
+    // this id is the Sidebar the product serves.
     '@deepseek-ai/dsh-client-ui-sidebar',
+    '@e-mate/dsh-plugin-better-sidebar',
     ...(prepared.mode === 'compatibility' ? ['@deepseek-ai/dsh-client-ui-layout'] : []),
     '@deepseek-ai/dsh-client-ui-directory-picker-native',
     'dsh-at-file',
-    '@e-mate/dsh-plugin-better-sidebar',
     'dsh-file-viewer',
     'dsh-visualize',
   ]) {
     if (!ids.has(id)) {
       throw new Error(`assembled desktop Web graph is missing ${id}; got ${[...ids].sort().join(', ')}`)
     }
+  }
+  // The Sidebar has exactly one implementation, and it is the one the native
+  // `ui-sidebar` row loads: the e-Mate shell, installed under that row's package
+  // identity, whose client bundle registers that same id
+  // (packages/dsh/profile/plugins/emate-shell/tsdown.config.ts). A graph row for
+  // the shell's own package name would be a second Sidebar implementation, so
+  // requiring exactly one of the two identities fails closed if the Sidebar is
+  // missing and if a second mount reappears. @e-mate/dsh-plugin-better-sidebar is
+  // not either identity: it contributes a conversation view
+  // (packages/dsh-plugin-better-sidebar/src/client/index.tsx).
+  const sidebarImplementations = [
+    '@deepseek-ai/dsh-client-ui-sidebar',
+    '@e-mate/dsh-client-shell',
+  ].filter(id => ids.has(id))
+  if (sidebarImplementations.length !== 1) {
+    throw new Error(`assembled desktop Web graph must carry exactly one Sidebar implementation, got ${sidebarImplementations.length === 0 ? 'none' : sidebarImplementations.join(', ')}`)
   }
   for (const id of [
     '@deepseek-ai/dsh-client-ui-directory-picker-browse',
@@ -306,7 +394,7 @@ try {
       const path = entry.url
       const url = new URL(path, expectedUrl)
       if (url.origin !== new URL(expectedUrl).origin) throw new Error(`client bundle escaped the loopback origin: ${url.href}`)
-      const bundle = await fetch(url)
+      const bundle = await fetch(url, { headers: { cookie: rendererSession.cookieHeader() } })
       if (bundle.status !== 200) throw new Error(`client bundle returned HTTP ${bundle.status}: ${url.href}`)
       runInThisContext(await bundle.text(), { filename: url.href })
       if (!registered.has(entry.id)) throw new Error(`client bundle did not register its graph id: ${entry.id}`)

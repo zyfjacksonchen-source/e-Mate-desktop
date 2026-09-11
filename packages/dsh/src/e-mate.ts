@@ -32,6 +32,15 @@ export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.5-rc.1'
 export const HARNESS_COMMIT = '43c411a51c555e61e9b5f500442cb3404a2d70cd'
+/** Product Web shell package name in the bundled component store. */
+const EMATE_SHELL_PACKAGE = '@e-mate/dsh-client-shell'
+/**
+ * Package the pinned Web bundle names in its `ui-sidebar` row. The e-Mate shell
+ * takes that row over, and its client bundle registers this same identity
+ * (packages/dsh/profile/plugins/emate-shell/tsdown.config.ts).
+ */
+const NATIVE_SIDEBAR_PACKAGE = '@deepseek-ai/dsh-client-ui-sidebar'
+const SHELL_INSTALL_PACKAGE = `node_modules/${NATIVE_SIDEBAR_PACKAGE}/package.json`
 const packageRoot = resolve(import.meta.dirname, '..')
 const componentInventory = JSON.parse(
   readFileSync(join(packageRoot, 'profile', 'component-inventory.json'), 'utf8'),
@@ -94,6 +103,27 @@ function readJson(path) {
   }
 }
 
+/**
+ * Shell manifest text as it must be installed at the native Sidebar path. The
+ * pinned client module registry names each served graph row after the manifest
+ * that declares the resolved specifier (upstream
+ * packages/client/modules/src/index.ts, locatePkgJson/nearestPackage), and the
+ * shell client bundle registers that same native identity. An installed manifest
+ * keeping the shell's own name therefore leaves the native row with no matching
+ * package: the row is dropped from the served graph and the shell client never
+ * loads. Installing under the native identity keeps row, graph id and registered
+ * bundle id in agreement.
+ * @param source - bundled shell manifest text.
+ * @returns manifest text to install at the native Sidebar path.
+ */
+function shellInstallManifest(source) {
+  const manifest = JSON.parse(source)
+  if (manifest.name !== EMATE_SHELL_PACKAGE) {
+    throw new Error(`${EMATE_SHELL_PACKAGE} component package identity is invalid`)
+  }
+  return `${JSON.stringify({ ...manifest, name: NATIVE_SIDEBAR_PACKAGE }, null, 2)}\n`
+}
+
 function emptyBundlePatch(patch) {
   return patch.split('\n').map(line => line.trim()).filter(line => line !== '' && !line.startsWith('#')).join('\n') === '[]'
 }
@@ -143,7 +173,7 @@ export function installProfile(dshHome = resolveDshHome()) {
     ['plugins/identity/agreements.js', 'plugins/identity/agreements.js'],
     ['plugins/identity/agreements/e-mate-user-agreement.md', 'plugins/identity/agreements/e-mate-user-agreement.md'],
     ['plugins/identity/agreements/yixin-enterprise-disclaimer.md', 'plugins/identity/agreements/yixin-enterprise-disclaimer.md'],
-    ['plugins/emate-shell/package.json', 'node_modules/@deepseek-ai/dsh-client-ui-sidebar/package.json'],
+    ['plugins/emate-shell/package.json', SHELL_INSTALL_PACKAGE],
     ['plugins/emate-shell/index.js', 'node_modules/@deepseek-ai/dsh-client-ui-sidebar/index.js'],
     ['plugins/emate-shell/lib/client.js', 'node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js'],
     ['plugins/emate-shell/assets/emate-logo.png', 'node_modules/@deepseek-ai/dsh-client-ui-sidebar/assets/emate-logo.png'],
@@ -153,7 +183,11 @@ export function installProfile(dshHome = resolveDshHome()) {
     ['plugins/emate-shell/assets/lucide-send.svg', 'node_modules/@deepseek-ai/dsh-client-ui-sidebar/assets/lucide-send.svg'],
   ]
   for (const [source, target] of profileFiles) {
-    atomicWrite(join(paths.profile, target), readFileSync(join(packageRoot, 'profile', source)))
+    const content = readFileSync(join(packageRoot, 'profile', source))
+    atomicWrite(
+      join(paths.profile, target),
+      target === SHELL_INSTALL_PACKAGE ? shellInstallManifest(content.toString('utf8')) : content,
+    )
   }
   for (const name of RETIRED_PROFILE_PACKAGES) {
     rmSync(join(paths.profile, 'node_modules', ...name.split('/')), { recursive: true, force: true })
@@ -411,7 +445,7 @@ function profileCheck(paths) {
       && byId.get('emate-schedule-import')?.name === './plugins/schedule-import.js'
       && byId.get('emate-legacy-migration')?.name === './plugins/legacy-migration.js'
       && byId.get('emate-agent-operations')?.name === './plugins/agent-operations.js'
-      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify(['systemPrompt', 'connection', 'sessions'])
+      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify(['systemPrompt', 'connection', 'sessions', 'sessionController'])
       && !byId.has('emate-office-ocr')
       && !byId.has('emate-browser-computer-use')
       && !byId.has('emate-memory')
@@ -437,6 +471,11 @@ function profileCheck(paths) {
     return (emptyBundlePatch(patch) || patch.includes(entry))
       && (packageManifest?.dsh?.client === undefined || existsSync(join(root, 'lib', 'client.js')))
   })
+  // The shell must answer the native `ui-sidebar` row's own name, or the pinned
+  // client module registry drops that row from the served graph and the product
+  // Sidebar never reaches the browser. See shellInstallManifest.
+  const installedShell = readJson(join(paths.profile, ...SHELL_INSTALL_PACKAGE.split('/')))
+  const sidebarIdentity = installedShell?.name === NATIVE_SIDEBAR_PACKAGE
   const expectedBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PLUGIN_PACKAGES]
   const expectedDependencies = Object.fromEntries(PLUGIN_PACKAGES.map(name => [name, VERSION]))
   const dependencyEntries = manifest?.dependencies !== null && typeof manifest?.dependencies === 'object'
@@ -449,7 +488,7 @@ function profileCheck(paths) {
     && Object.entries(expectedDependencies).every(([name, version]) => manifest.dependencies?.[name] === version)
     && dependencyEntries.every(([name, version]) => typeof version === 'string'
       && !RETIRED_PROFILE_PACKAGES.has(name) && (!MANAGED_PROFILE_PACKAGES.has(name) || version === VERSION))
-    && patchValid && plugins.every(existsSync) && managedPlugins
+    && patchValid && plugins.every(existsSync) && managedPlugins && sidebarIdentity
   return { ok, detail: ok ? paths.profile : 'managed e-mate profile is missing or drifted; run e-mate setup' }
 }
 

@@ -9,17 +9,30 @@ const result = () => ({ schema_version: 1, share: { id, public_url: `${root}/s/$
 function fixture(request, overrides = {}) {
   let handler
   let exports = 0
+  const exported = []
   apply({
     credentials: { resolve: async () => ({ value: 'fixture-model-session-token-1234567890' }) },
-    apiProxy: { downloads: { sessionLog: async () => {
-      exports += 1
-      return new Response(new Uint8Array([80, 75, 3, 4]), { headers: { 'content-type': 'application/zip' } })
-    } } },
-    connection: { rpc: { handle: (_channel, value) => { handler = value; return () => {} } } },
+    connection: {
+      rpc: { handle: (_channel, value) => { handler = value; return () => {} } },
+      // The native owner of the Session ZIP is the session-log-download row, which
+      // publishes GET /api/session.export with sessionId/includeDescendants
+      // (upstream/deepseek-harness/packages/session-query/session-log-export/src/index.ts:42,85-99).
+      createSharedFetchHandler: channel => {
+        assert.equal(channel, '/api')
+        return { fetch: async request => {
+          const url = new URL(request.url)
+          assert.equal(url.pathname, '/api/session.export')
+          assert.equal(url.searchParams.get('includeDescendants'), 'true')
+          exported.push(url.searchParams.get('sessionId'))
+          exports += 1
+          return new Response(new Uint8Array([80, 75, 3, 4]), { headers: { 'content-type': 'application/zip' } })
+        } }
+      },
+    },
     effect: value => value(),
     ...overrides,
   }, { rootUrl: root, fetchImplementation: request })
-  return { call: (...args) => handler(...args), exports: () => exports }
+  return { call: (...args) => handler(...args), exports: () => exports, exported: () => exported }
 }
 
 test('share accepts decoded compressed JSON and preserves fixed enterprise base path', async () => {
@@ -33,6 +46,7 @@ test('share accepts decoded compressed JSON and preserves fixed enterprise base 
   const value = await f.call('create', { session_id: 'one' })
   assert.equal(value.ok, true)
   assert.equal(value.value.public_url, `${root}/s/${id}`)
+  assert.deepEqual(f.exported(), ['one'])
 })
 
 test('share rejects a response outside its exact configured base path', async () => {

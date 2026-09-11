@@ -3,6 +3,7 @@
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-goal'
@@ -24,7 +25,7 @@ export const name = 'desktop-shell'
 
 /** Services required before the shell can register its renderer generation. */
 /** Services required by the desktop shell; `desktopRuntime` is probed, not required. */
-export const inject = ['webServer', 'webRuntime', 'appExit', 'settings', 'workspaceRegistry', 'sessions']
+export const inject = ['webServer', 'webRuntime', 'appExit', 'settings', 'workspaceRegistry', 'sessions', 'connection']
 
 /** Standard settings namespace shared by tray and configuration surfaces. */
 export const DESKTOP_SETTINGS_NAMESPACE = 'dsh-desktop'
@@ -81,6 +82,26 @@ export function desktopRendererUrl(
   url.searchParams.set('dsh-desktop-mode', mode)
   url.searchParams.set('dsh-desktop-platform', platform)
   return url.href
+}
+
+/**
+ * Resolve the renderer window URL together with the process-token URL that
+ * authenticates its session before that URL is loaded.
+ * @param ctx - Host context carrying the Web carrier and the Connection owner.
+ * @param config - validated native window values.
+ * @param runtime - active Electron adapter values.
+ * @returns the marker-bearing Web root and the token URL to exchange first.
+ */
+function rendererAuthentication(
+  ctx: Context,
+  config: Config,
+  runtime: Context['desktopRuntime'],
+): { url: string; authenticationUrl?: string } {
+  const url = desktopRendererUrl(ctx.webServer.port, config.mode, runtime.platform)
+  // A context without Connection (hand-built plugin harness) holds no process
+  // token; the profile boot gate proves the shipped composition always has one.
+  const authenticationUrl = ctx.get('connection')?.authenticatedUrl(new URL(url).origin)
+  return authenticationUrl === undefined ? { url } : { url, authenticationUrl }
 }
 
 /**
@@ -160,27 +181,34 @@ export function apply(ctx: Context, config: Config): void {
     runtime.setThemeSource((next as ThemeSettings).preference)
   })
   ctx.effect(
-    () => runtime.schedule({
-      ...config,
-      url: desktopRendererUrl(ctx.webServer.port, config.mode, runtime.platform),
-      productName: 'e-Mate',
-      windowTitle: 'e-Mate',
-      iconPath,
-      trayIcons,
-      readThemeSource: () => {
-        const theme = ctx.settings.get(UI_THEME_SETTINGS_NAMESPACE) as ThemeSettings | undefined
-        if (theme === undefined) {
-          throw new Error('@e-mate/desktop: shell requires the ui-theme settings namespace')
-        }
-        return theme.preference
-      },
-      resourceRoots: () => workspaceRegistry.list().map(workspace => workspace.path),
-      resourceSessionRoot: sessionId => ctx.sessions.get(sessionId as SessionId)?.header.cwd,
-      requestQuit: appExit,
-      requestModeChange: async () => {
-        throw new Error(`@e-mate/desktop: shell mode is fixed to ${config.mode}`)
-      },
-    }),
+    () => {
+      const { url, authenticationUrl } = rendererAuthentication(ctx, config, runtime)
+      return runtime.schedule({
+        ...config,
+        url,
+        // The Web root is browser-authenticated: the Electron adapter exchanges
+        // this process-token URL inside the BrowserWindow session before loading
+        // the marker URL above, which otherwise answers HTTP 401.
+        ...(authenticationUrl === undefined ? {} : { authenticationUrl }),
+        productName: 'e-Mate',
+        windowTitle: 'e-Mate',
+        iconPath,
+        trayIcons,
+        readThemeSource: () => {
+          const theme = ctx.settings.get(UI_THEME_SETTINGS_NAMESPACE) as ThemeSettings | undefined
+          if (theme === undefined) {
+            throw new Error('@e-mate/desktop: shell requires the ui-theme settings namespace')
+          }
+          return theme.preference
+        },
+        resourceRoots: () => workspaceRegistry.list().map(workspace => workspace.path),
+        resourceSessionRoot: sessionId => ctx.sessions.get(sessionId as SessionId)?.header.cwd,
+        requestQuit: appExit,
+        requestModeChange: async () => {
+          throw new Error(`@e-mate/desktop: shell mode is fixed to ${config.mode}`)
+        },
+      })
+    },
     '@e-mate/desktop: native shell generation',
   )
 }

@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { adaptHarnessChatSource, adaptHarnessConversationSource } from './harness-conversation-adapter.mjs'
 import { adaptHarnessArtifactLinksSource, adaptHarnessArtifactLinksRendererSource, artifactLinksVitePlugin, ARTIFACT_LINKS_RENDERER_PATH } from './harness-artifact-links-adapter.mjs'
-import { apply as applyOpenBoundary } from '../packages/dsh/src/profile/artifact-open-boundary.ts'
 
 const harness = join(process.env.EMATE_TEST_NATIVE_ROOT ?? new URL('..', import.meta.url).pathname, 'upstream/deepseek-harness')
 const libraryRoot = join(harness, 'packages/client/ui-primitives')
@@ -84,7 +83,7 @@ test('real native MarkdownText resolves only proven local files and preserves au
   assert.doesNotMatch(renderToStaticMarkup(jsx(MarkdownText, { text: '[未提供身份](/workspace/chart.png)' })), /<button/)
 })
 
-test('DOM click travels actual MarkdownText and native vocabulary to fenced native mac/windows opener; missing/escaped files refuse', async t => {
+test('DOM click travels actual MarkdownText and native vocabulary to the native mac/windows opener', async t => {
   const { JSDOM } = requireHarness('jsdom')
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
   const names = ['window', 'document', 'navigator', 'HTMLElement', 'Node', 'IS_REACT_ACT_ENVIRONMENT']
@@ -100,15 +99,21 @@ test('DOM click travels actual MarkdownText and native vocabulary to fenced nati
   await writeFile(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jg0kAAAAASUVORK5CYII=', 'base64'))
   await writeFile(join(outside, 'private.txt'), 'must not open'); await symlink(join(outside, 'private.txt'), escaped)
   for (const platform of ['darwin', 'win32']) {
-    const commands = [], responses = []
-    const ctx = { workspaceRegistry: { list: () => [{ path: root }] }, effect: effect => effect(), apiProxy: { host: { openPath: async (request, signal) => {
-      await openNativePath(request.payload.path, signal, { platform, run: async (command, args) => { commands.push({ command, args }); return { stdout: '', stderr: '' } } })
-      return { rpcId: request.rpcId, result: { ok: true, value: { opened: true } } }
-    } } } }
-    applyOpenBoundary(ctx)
+    const commands = []
+    // The retired ApiProxy boundary is gone. rc.1 verifies an artifact open in the
+    // native route that owns it: the presented file's coordinates resolve through
+    // workspaceFiles inside the Session workspace before the route calls
+    // session.openWorkspacePath
+    // (upstream/deepseek-harness/packages/client/ui-deliverables/src/present-open.ts:64-74).
+    // This renderer-only fixture therefore asserts the renderer half only: the click
+    // reaches the native opener with the resolved path, and no product-side check
+    // refuses a missing file or a symlink out of the workspace any more.
     const waiting = []
     const openFile = path => {
-      waiting.push(ctx.apiProxy.host.openPath({ rpcId: 'synthetic', payload: { path: resolveWorkspacePath(root, path) } }, new AbortController().signal).then(result => responses.push(result)))
+      waiting.push(openNativePath(resolveWorkspacePath(root, path), new AbortController().signal, {
+        platform,
+        run: async (command, args) => { commands.push({ command, args }); return { stdout: '', stderr: '' } },
+      }))
     }
     const proven = vocabulary.producedFileMentions([report], openFile, () => '打开产物')
     const fileMentions = fileLinkOwner({ get: () => ({ forClosing: () => proven }) }, { openFile })
@@ -117,9 +122,10 @@ test('DOM click travels actual MarkdownText and native vocabulary to fenced nati
       fireEvent.click(view.getByRole('button')); cleanup()
     }
     await Promise.all(waiting)
-    assert.equal(commands.length, 2)
-    assert.equal(responses.filter(result => result.result.ok).length, 2)
-    assert.equal(responses.filter(result => !result.result.ok).length, 2)
+    // Every click reaches the native opener now, including the missing file and the
+    // symlink that resolves outside the workspace; only the two existing artifacts
+    // are on the produced list, so the other two carry their raw mention path.
+    assert.equal(commands.length, 4)
     for (const path of [report, image]) assert(commands.some(call => platform === 'darwin' ? call.command === 'open' && call.args[0] === path : call.command === 'powershell.exe' && call.args.at(-1).includes(path)))
     assert(!commands.some(call => call.args.some(argument => argument.includes(outside))))
   }

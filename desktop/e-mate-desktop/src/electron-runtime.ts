@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
+import { authenticateRendererSession } from './renderer-session-auth.ts'
 import { renderSvgPage as renderNativeSvgPage } from './svg-page-renderer.ts'
 import { DESKTOP_NOTIFICATION_OPEN, DESKTOP_NOTIFICATION_TAKE, type DesktopRendererBootstrap } from './desktop-bootstrap-contract.ts'
 import { DESKTOP_UPDATE_RUN_INTERACTIVE } from './desktop-update-trigger-contract.ts'
@@ -1065,6 +1066,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     window.once('ready-to-show', show)
     let tray: Tray | undefined
     try {
+      // The Web root is browser-authenticated: exchange the process token in
+      // this window's own session first, so the redirect's cookie authenticates
+      // the marker URL below and every later /api request.
+      if (spec.authenticationUrl !== undefined) {
+        await authenticateRendererSession(window.webContents.session, spec.authenticationUrl)
+      }
       await window.loadURL(spec.url)
       tray = new Tray(prepareTrayIcon(spec.trayIcons, this.platform))
       this.tray = tray

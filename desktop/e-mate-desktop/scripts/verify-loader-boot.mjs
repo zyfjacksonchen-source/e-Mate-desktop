@@ -118,6 +118,12 @@ try {
         port: 43120,
         register() { return () => {} },
       })
+      // The shell reads the Connection owner's process-token URL. This reduced
+      // activation composition supplies that seam instead of the real
+      // browser-auth owner; the profile boot smoke exercises the real one.
+      host.provide('connection', {
+        authenticatedUrl(base) { return `${base}/?token=loader-smoke-token` },
+      })
       host.provide('webRuntime', {})
       host.provide('appExit', () => {})
       host.provide('workspaceRegistry', { list: () => [] })
@@ -150,6 +156,9 @@ try {
   }
   if (mountedSpec?.url !== 'http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin') {
     throw new Error(`desktop plugin produced an unexpected renderer URL: ${String(mountedSpec?.url)}`)
+  }
+  if (mountedSpec?.authenticationUrl !== 'http://127.0.0.1:43120/?token=loader-smoke-token') {
+    throw new Error(`desktop plugin produced an unexpected authentication URL: ${String(mountedSpec?.authenticationUrl)}`)
   }
 } finally {
   try {

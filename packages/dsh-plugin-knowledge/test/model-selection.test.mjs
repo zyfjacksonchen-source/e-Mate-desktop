@@ -2,17 +2,21 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { resolveKnowledgeSelection } from '../src/model-selection.ts'
 
-test('knowledge uses the native composer pick instead of stale Agent options and resolves its default effort', async () => {
-  const calls = []
+test('knowledge reads the native Session Controller selection instead of stale Agent options and resolves its default effort', async () => {
+  const asked = []
   const selected = { provider: 'picked-provider', model: 'gpt-6-astra' }
+  const agent = { id: 'current-session', options: { provider: 'old-provider', model: 'old-model' } }
   const ctx = {
-    apiProxy: { sessions: { async models(request) { calls.push(request); return { result: { ok: true, value: { routable: true, current: selected } } } } } },
+    get(name) {
+      assert.equal(name, 'sessionController')
+      return { selectionFor(owner) { asked.push(owner); return { current: selected } } }
+    },
     emateModelPolicy: { async assertModel(model) { assert.equal(model, 'gpt-6-astra') } },
     llm: { async resolveCallConfig(value) { assert.equal(value, selected); return { ...value, reasoningEffort: 'medium' } } },
   }
-  const actual = await resolveKnowledgeSelection(ctx, { agent: { id: 'current-session', options: { provider: 'old-provider', model: 'old-model' } } })
+  const actual = await resolveKnowledgeSelection(ctx, { agent })
   assert.deepEqual(actual, { ...selected, reasoningEffort: 'medium' })
-  assert.deepEqual(calls[0].payload, { sessionId: 'current-session' })
+  assert.deepEqual(asked, [agent])
 })
 
 test('standalone selection reads the native default and fails when enterprise policy rejects it', async () => {
@@ -21,11 +25,28 @@ test('standalone selection reads the native default and fails when enterprise po
   await assert.rejects(resolveKnowledgeSelection(ctx), /disabled/)
 })
 
-test('unroutable selections and cancellation never reach model resolution', async () => {
-  const ctx = { apiProxy: { sessions: { async models() { return { result: { ok: true, value: { routable: false } } } } } } }
-  await assert.rejects(resolveKnowledgeSelection(ctx, { agent: { id: 'session' } }), { code: 'model-unavailable' })
+test('a missing native selection owner and cancellation never reach model resolution', async () => {
+  const ctx = { get: () => undefined, llm: { resolveCallConfig() { assert.fail('must not resolve without a native selection') } } }
+  await assert.rejects(resolveKnowledgeSelection(ctx, { agent: { id: 'session' } }), { code: 'model-selection-unavailable' })
   const cancel = new AbortController(); cancel.abort()
   await assert.rejects(resolveKnowledgeSelection({}, undefined, cancel.signal), { name: 'AbortError' })
+})
+
+test('a refused registry lookup or a rewritten selection never becomes resolved model output', async () => {
+  let resolved = 0
+  const owner = { selectionFor: () => ({ current: { provider: 'retired-provider', model: 'gone-model' } }) }
+  const refused = Object.assign(Error('provider "retired-provider" is not registered'), { code: 'llm-unavailable' })
+  await assert.rejects(resolveKnowledgeSelection({
+    get: () => owner,
+    emateModelPolicy: { async assertModel() {} },
+    llm: { async resolveCallConfig() { resolved += 1; throw refused } },
+  }, { agent: { id: 'session' } }), /is not registered/)
+  assert.equal(resolved, 1)
+  await assert.rejects(resolveKnowledgeSelection({
+    get: () => owner,
+    emateModelPolicy: { async assertModel() {} },
+    llm: { async resolveCallConfig() { return { provider: 'retired-provider', model: 'replacement-model' } } },
+  }, { agent: { id: 'session' } }), { code: 'model-changed' })
 })
 
 test('resumed UI imports retain their frozen native selection but recheck current model policy', async () => {

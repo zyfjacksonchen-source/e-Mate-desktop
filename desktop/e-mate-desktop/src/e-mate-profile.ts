@@ -89,6 +89,14 @@ const RETIRED_PROFILE_PACKAGES = new Set([
   'dsh-turn-fold',
 ])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
+/** Product Web shell package name in the bundled component store. */
+const EMATE_SHELL_PACKAGE = '@e-mate/dsh-client-shell'
+/**
+ * Package the pinned Web bundle names in its `ui-sidebar` row. The e-Mate shell
+ * takes that row over, and its client bundle registers this same identity
+ * (packages/dsh/profile/plugins/emate-shell/tsdown.config.ts).
+ */
+const NATIVE_SIDEBAR_PACKAGE = '@deepseek-ai/dsh-client-ui-sidebar'
 const PROFILE_INSTALL_RECEIPT = '.e-mate-install.json'
 const COMPONENT_STORE_METADATA = new Set(['.e-mate-component.json', '.e-mate-component-manifest.json'])
 const WINDOWS_MANAGED_PACKAGE_LAYOUT = 'win32-materialized-v1'
@@ -412,9 +420,14 @@ function managedPackageCurrent(
   }
 }
 
+/** Directory the native `ui-sidebar` row resolves, where the shell is installed. */
+function shellInstallTarget(profile: string): string {
+  return join(profile, 'node_modules', ...NATIVE_SIDEBAR_PACKAGE.split('/'))
+}
+
 function managedPackageTargets(profile: string): readonly string[] {
   return [
-    join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar'),
+    shellInstallTarget(profile),
     ...PLUGIN_PACKAGES.map(name => join(profile, 'node_modules', ...name.split('/'))),
     ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => join(profile, 'node_modules', plugin.name)),
   ]
@@ -566,6 +579,31 @@ function adaptedPluginPatch(source: string, name: string): ReadonlyMap<string, s
   return new Map()
 }
 
+/**
+ * Install the Web shell under the identity of the native Sidebar row it takes
+ * over. The pinned client module registry names each served graph row after the
+ * manifest that declares the resolved specifier
+ * (upstream packages/client/modules/src/index.ts, locatePkgJson/nearestPackage),
+ * so an installed manifest carrying the shell's own name leaves the native row
+ * with no matching package: the row is classified as no client row, dropped from
+ * the served graph, and the shell bundle is never loaded. The identity override
+ * keeps the Loader row, the served graph id and the registered bundle id in
+ * agreement, which is what leaves the product with exactly one Sidebar.
+ * @param source - bundled shell component root.
+ * @returns file overrides for installManagedPackage and its currency checks.
+ */
+function shellIdentityOverride(source: string): ReadonlyMap<string, string> {
+  const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as { name?: unknown }
+  if (manifest.name !== EMATE_SHELL_PACKAGE) {
+    throw new Error(`${EMATE_SHELL_PACKAGE} component package identity is invalid`)
+  }
+  const bundle = readFileSync(join(source, 'lib', 'client.js'), 'utf8')
+  if (!/\bid:\s*["']@deepseek-ai\/dsh-client-ui-sidebar["']/u.test(bundle)) {
+    throw new Error(`${EMATE_SHELL_PACKAGE} client bundle does not register ${NATIVE_SIDEBAR_PACKAGE}`)
+  }
+  return new Map([['package.json', `${JSON.stringify({ ...manifest, name: NATIVE_SIDEBAR_PACKAGE }, null, 2)}\n`]])
+}
+
 function adaptedEcosystemPatch(
   source: string,
   expected: (typeof ECOSYSTEM_PLUGIN_PACKAGES)[number],
@@ -650,9 +688,11 @@ function installedProfileCurrent(profile: string, dshHome: string): boolean {
       || managedBundles.some((name, index) => bundles[index] !== name)
       || [...RETIRED_PROFILE_PACKAGES].some(name => bundles.includes(name))) return false
 
+    const shellSource = bundledComponentSource(EMATE_SHELL_PACKAGE)
     if (!managedPackageCurrent(
-      bundledComponentSource('@e-mate/dsh-client-shell'),
-      join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar'),
+      shellSource,
+      shellInstallTarget(profile),
+      shellIdentityOverride(shellSource),
     )) return false
     for (const name of PLUGIN_PACKAGES) {
       const source = bundledComponentSource(name)
@@ -677,7 +717,7 @@ function installedProfileCurrent(profile: string, dshHome: string): boolean {
       join(profile, 'plugins', 'runtime-binding.json'),
       join(profile, 'plugins', 'health.js'),
       join(profile, 'plugins', 'model-policy.js'),
-      join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar', 'package.json'),
+      join(shellInstallTarget(profile), 'package.json'),
       ...PLUGIN_PACKAGES.map(name => join(profile, 'node_modules', ...name.split('/'), 'package.json')),
       ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => join(profile, 'node_modules', plugin.name, 'package.json')),
     ].every(existsSync)
@@ -757,10 +797,12 @@ export function installEmateDesktopProfile(
     rmSync(join(profile, 'node_modules', ...name.split('/')), { recursive: true, force: true })
   }
 
-  const shellSource = bundledComponentSource('@e-mate/dsh-client-shell')
-  const shellTarget = join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')
+  const shellSource = bundledComponentSource(EMATE_SHELL_PACKAGE)
+  const shellTarget = shellInstallTarget(profile)
   mkdirSync(dirname(shellTarget), { recursive: true })
-  installManagedPackage(shellSource, shellTarget, new Map(), deferCleanup, reuseInstalledGeneration)
+  installManagedPackage(
+    shellSource, shellTarget, shellIdentityOverride(shellSource), deferCleanup, reuseInstalledGeneration,
+  )
 
   for (const name of PLUGIN_PACKAGES) {
     const source = bundledComponentSource(name)

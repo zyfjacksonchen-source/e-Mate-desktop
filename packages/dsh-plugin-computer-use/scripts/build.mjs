@@ -123,7 +123,20 @@ exposure = replaceExactlyOnce(
             this.activate(agent);`,
   'existing Agent adoption guard',
 )
+// 0.1.5 replaced the Session event list with the snapshot accessor; the pinned
+// bundle still iterates the removed property and throws when an Agent activates.
+exposure = replaceExactlyOnce(exposure,
+  "for (const event of session.events) {",
+  "for (const event of session.snapshotEvents()) {",
+  'native session snapshot accessor')
 await writeFile(exposurePath, exposure)
+
+// The scheduled-lease scan needs the same 0.1.5 accessor, but its copy of the
+// seam lives in the vendored tree instead of here: contract.test.mjs asserts the
+// shipped lib/leases.js is byte-identical to upstream/plugins/dsh-computer-use/
+// lib/leases.js, so a build-time rewrite of this file would fail that guard.
+// The vendored tree is already an e-Mate 0.1.5-compat branch; SOURCE.md logs the
+// divergence and the shipped bytes are the ones the guard compares.
 
 await writeFile(join(root, 'lib/emate-explicit.js'), `const COMPUTER_USE_MENTION = '@[电脑操控](computer-use)'
 function isRecord(value) {
