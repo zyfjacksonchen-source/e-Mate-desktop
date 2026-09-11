@@ -2463,3 +2463,167 @@ e-mate 只保留"值优先从 keychain 解析"的一层（需确认 0.1.5 是否
 #11 → #10 → #2 → #15 → #6 → 其余 UI 类。每条都必须**新写**一个可失败、可复现的断言（不是叙述性说明），
 并在账本 `entries[hash].guards` 里补上对应文件路径，使 `withoutGuard` 计数下降。
 
+## 第 77 轮：Path C 切片 1 —— vendor 两个上游 + 建骨架包（工单里写「§76」，但 §76 已被 credentials 那轮占用）
+
+本切片只做「vendor + 骨架」，**没有**改折叠/导航行为、**没有**动 tidychat、**没有**改任何既有守卫、**没有**接进产品 profile。
+写入集：`upstream/plugins/dsh-turn-fold/**`、`upstream/plugins/dsh-harmony/**`、`packages/dsh-plugin-turn-fold/**`、`packages/dsh-plugin-harmony/**`、本节。
+
+### 77.1 vendor 的确切固定点与哈希
+
+| 上游 | 固定点 | 落位 | 说明 |
+|---|---|---|---|
+| `@ch4acko3/dsh-turn-fold` 0.6.0 | GitHub commit `69867494627d58da4d17f5842bda7d1c36fa34d2`（`release: v0.6.0`，2026-09-03 01:11:04 +0800） | `upstream/plugins/dsh-turn-fold/` | `git clone` + `git archive HEAD` 拷 tracked 内容（无 `.git`/`node_modules`）：17 个文件 + 我们的 `SOURCE.md` |
+| `dsh-harmony` 0.8.10 | npm tarball sha256 `a45b92a4acb9e71f97c1ab62bdb2ac79974c5429e4bd2631e8afab01af42f4c4`；integrity `sha512-397JkAGn1rz44Mq+2f9rn9jkUbzUD/yDMicxuXhYzRe5w+NYfu7DTPnAKKKo1zoNtclNxcWAquwCG8Ok4ncJ/g==`；shasum `45abbf5130c763958f27bc7f946f6ce313acef88`；npm `gitHead` `44e7de03d6414c5681eb314d1d9f1cfb2e2c9428`；发布 2026-08-14T21:40:45.927Z | `upstream/plugins/dsh-harmony/` | `npm pack dsh-harmony@0.8.10` 后解包**发布态**：69 个文件 + 我们的 `SOURCE.md` |
+
+- 每个文件的 sha256 都写进各自 `SOURCE.md` 的 inventory，并用脚本逐行 diff 校验过（两份都 MATCH）。
+- **当前对上游零改动**；以后任何本地改写必须逐条追加到这两个日志里（`upstream/deepseek-harness/vendor/README.md` 的同一精神）。
+- harmony 是**编译产物 vendor**：上游 `files` 只发布 `lib/`/`browser-dist/`/`assets/`/`scripts/`，没有 `src/` 与测试。
+- ⚠️ `upstream/plugins/` 下其余 10 个都是 **git submodule**（`.gitmodules`），这两个是**普通目录**（按工单：clone/pack 后拷 tracked 内容）。
+  改成 submodule 或保持普通目录由主线定；保持普通目录时父仓库可直接 `git add`，不需要走 §72.1 的「子模块内单独提交 + gitlink」流程。
+
+### 77.2 两个新包的形状（都是 `2.0.18` / `eMate.harnessVersion=0.1.5-rc.1` / MIT / private / 零依赖）
+
+| 包 | main | 挂载行（`cordis.patch.yml`） | 关键字段 |
+|---|---|---|---|
+| `packages/dsh-plugin-turn-fold`（`@e-mate/dsh-plugin-turn-fold`） | `lib/index.cjs` | `emate-turn-fold` = `@e-mate/dsh-plugin-turn-fold` `inject: [harmony]` | `dsh.harmony.patches: ['./lib/patch.cjs']`；`eMate.baseImports: ['@deepseek-ai/schemastery']`（`settings.cjs` 惰性 require） |
+| `packages/dsh-plugin-harmony`（`@e-mate/dsh-plugin-harmony`） | `lib/index.js` | `emate-harmony` = `@e-mate/dsh-plugin-harmony` | `dsh.harmony.patches` = 4 个 builtin 的复制路径；`eMate.baseImports: ['@deepseek-ai/dsh-settings','@deepseek-ai/schemastery']` |
+
+- 两个包都**没有** `dependencies`/`peerDependencies`：turn-fold 需要的 `@deepseek-ai/schemastery` 由 `baseImports` 走 Harness 的 vendored 3.18.2；harmony 需要而闭包缺的包**只报告不安装**（见 77.5）。
+- 两者都**未**进 `packages/dsh/profile/component-inventory.json`、`sync-emate-plugin-bundles` 与 desktop inventory 列表 —— 这是本切片刻意留空。
+- `packages/dsh-plugin-harmony/.gitignore` 忽略 `lib/ assets/ browser-dist/`（根 `.gitignore` 只覆盖 `packages/dsh-plugin-*/lib/`；这两个目录是构建产物，不该进版本库）。
+
+### 77.3 接缝断言：写在哪、跑了什么、结果
+
+| 包 | 构建命令 | 退出码 |
+|---|---|---|
+| turn-fold | `pnpm --dir packages/dsh-plugin-turn-fold run build`（= `scripts/build.mjs`：拷 7 个 vendored 文件进 `lib/` → 跑断言） | **0** |
+| harmony | `pnpm --dir packages/dsh-plugin-harmony run build` | **0** |
+
+断言对的是**编译产物**，不是 API：`lib/` 是 build output，所以检查器要求 Harness checkout 已构建且其 `node_modules/typescript` 存在，任缺一项都**带指令 fail closed**（绝不跳过）。
+
+**turn-fold**（目标 `@deepseek-ai/dsh-client-ui-chat@0.1.5-rc.1/lib/client.js`，sha256 `cf53ae8f5978901504286189a64506febf09cd237d097db3abf3f39b3953ba97`）：
+
+```
+OK   inject-turn-fold-runtime       1/1  line 2072
+OK   rewrite-node-render-loop       1/1  line 2535
+OK   install-turn-fold-services     1/1  line 8272
+OK   host symbols in ChatView scope: react, react_jsx_runtime, formatRunDuration, formatTokens, _deepseek_ai_dsh_client_ui_primitives, ReasoningRow
+```
+
+三个选择器就是 vendored `patch.cjs:54 / :100 / :72` 的原文；`test/package.test.mjs` 断言它们仍在 `patch.cjs` 里（防止检查器与它守护的代码漂移），并断言 `expect: 1` 出现 3 次。
+
+**host 符号是算出来的，不是抄注释的**：对 vendored `inline-source.cjs`（75020 字符）做完整自由标识符分析（277 个声明 vs 300 个被引用标识符），得到**恰好 6 个**宿主作用域符号。上游源码注释只列了 4 个，漏了：
+`_deepseek_ai_dsh_client_ui_primitives`（编译后 `@deepseek-ai/dsh-client-ui-primitives` 的别名，`inline-source.cjs:316` 的 `DisclosureRow` 调用）与
+`ReasoningRow`（`inline-source.cjs:342` 调用的原生思考行组件 —— 它**只在 ui-chat 的 factory 里**，legacy `ui-conversation/lib/client.js` 里 0 处出现）。六个都在 ChatView 的作用域链里绑定（`react`/`react_jsx_runtime`/`_deepseek…primitives` 是 factory 顶部 `let … = require(…)`，`formatRunDuration`/`formatTokens`/`ReasoningRow` 是 factory 内的函数声明）。
+
+**harmony**（4 个 builtin 各自的目标与 sha256 前 16 位）：
+
+| builtin | 目标（pinned） | sha256 | 结果 |
+|---|---|---|---|
+| `client-load-plan.patch.cjs` | `dsh-client-modules/lib/index.js` | `4a44f8cf7b61a26a` | `resolveMeta`=1（**current 分支** `this.locatePkgJson(loaderName, baseUrl)`，legacy 分支 0）、`graphRow`=1 |
+| `cordis-service-index.patch.cjs` | `@deepseek-ai/cordis@4.0.2/lib/index.js` | `1729cdbf8ee40b17` | `ReflectService` 类表达式/`notify`/`this.ctx.registry.values()` for-of/`runtime.fibers` for-of/`Fiber` 类表达式/构造函数内 `internal/plugin` 发布 try / `this.uid = null;` 全部 =1 |
+| `settings.patch.cjs` | `dsh-client-ui-settings-general/lib/client.js` | `489e0d80b2378762` | `SettingsPanel`/`panel className`/`navIcon`/`close`/`onSelect: setActiveId` 全 =1 |
+| `session-profile.patch.cjs` | `dsh-api-session-controller/lib/client.js` | `ff33d1f85a0b2f14` | `Session.open` + `this.doOpen(this.openGeneration)` =1 |
+
+选择器评估器是自己实现的（`scripts/tsquery-subset.mjs`）：本仓库**不引入** `@phenomnomnominal/tsquery`，所以按 tsquery 6.2.0 的 `getPath`/`getProperties`/`attribute`/`has` 语义复刻，遇到子集外的语法直接抛错。**两处交叉验证**（在 `/tmp` 临时装 tsquery 6.2.0 + typescript 6.0.3 跑的，没进仓库）：
+1. 用**真 tsquery** 跑 5 个选择器：TF-1→1@2072、TF-2→1@2535、TF-3→1@8272、HM-1(`resolveMeta`)→1@637、HM-2(`graphRow`)→1@329，与自制评估器一致；
+2. 自制评估器最初在第三处选择器上**假阴性**，原因很关键：`ts.SyntaxKind[kind]` 这种反查会把别名值映射到区间哨兵（`VariableStatement`→`FirstStatement`、`DebuggerStatement`→`LastStatement`），于是 `VariableStatement:has(…)` 永远匹配不到 0 次以上；tsquery 用的是它自己的 `syntaxKindName` 表。改为复刻该表后三处全中。这条差异已写进 `tsquery-subset.mjs` 注释。
+
+### 77.4 0.1.5 里**不存在**的 0.1.2-alpha 世代符号（后面切片要动的地方，含 file:line）
+
+turn-fold 注入运行时（`upstream/plugins/dsh-turn-fold/inline-source.cjs`）：
+
+| 位置 | 依赖的旧符号 | 0.1.5 的替身 |
+|---|---|---|
+| `:1048` | `var clock = timeline.playbackClock;` | 已删；实时时钟改用 `TurnLocation.start?.time` 或 `turn-tail.data.time`+`ttftMs` |
+| `:166-176`、`:1094` | `assistant-step.data.usage.{inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens,reasoningTokens}` | `turn-tail.data.tokenUsage.{uncachedInputTokens,outputTokens,totalTokens,cacheReadTokens?,cacheWriteTokens?,reasoningTokens?}`；0.1.5 的 `AssistantChatData.usage` 已是 `unknown` |
+| `:1159`、`:1217`、`:1225-1226` | `loc.turn.status` 按 0.1.1 世代取值（`closed`/endReason `completed|aborted|interrupted`） | 0.1.5 `TurnLocation.status` = `open|closed|unknown` → 标签与折叠判据需重映射 |
+| `:5` 注释 | 头注释仍写「Runtime injected into `…ui-conversation/lib/client.js`」 | 实际按版本路由到 ui-chat（`patch.cjs:37-41 usesUiChat`：`major > 0` → 0.1.5 走 dsh012 分支） |
+| （无） | `settingsNamespace()` | turn-fold **没用过**该已删函数：它走 `ctx.settings.register('dsh-turn-fold', schema, { base })`（0.1.5 仍在） |
+
+harmony（`upstream/plugins/dsh-harmony`）：
+
+| 位置 | 问题 | 结论 |
+|---|---|---|
+| `lib/settings.js:1` + `:6` | `import { settingsNamespace } from '@deepseek-ai/dsh-settings'` → `ctx.settings.register(settingsNamespace('dsh-harmony'), …)` | **0.1.5 已删 `settingsNamespace`**（§72.1 同款）→ 该行**不能挂**；本切片只挂 `emate-harmony`，上游 `harmony-settings` 行**刻意不挂**（`cordis.patch.yml` 里写明理由） |
+| `lib/profile.js:5`、`lib/session-profile.js:3` | `import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'`（加载期静态 import） | Harness 有 `@deepseek-ai/dsh-atomic-write@0.1.5-rc.1`，但 `base-contract.json` **未声明** → `prepareHarnessBaseImports` 不会链接它。**缺依赖，已报告，未安装** |
+| `lib/transform.js:2/:3/:4-6` | `magic-string`、`typescript`、`@phenomnomnominal/tsquery`（含 `dist/src/traverse.js`、`dist/src/matchers/sibling.js` 深路径） | 闭包全缺 |
+| `lib/compatibility.js:1`、`lib/dsh.js:5`、`lib/runtime.js:7` | `semver` | 闭包缺（注意：Harness checkout 里也**没有** `semver`） |
+| `lib/runtime.js:8`、`lib/orchestrator.js:3` | `typescript` | 只在 pinned Harness checkout 里有（6.0.3） |
+| `lib/dsh.js:9` | `require.resolve('@deepseek-ai/dsh/lib/bin.js')` | 仅 launcher 路径需要；Harness 的 `@deepseek-ai/dsh` 在 `apps/cli` |
+| `browser-dist/client.js:3` | 客户端 bundle 自注册 `id: 'dsh-harmony'` | 加载器按**包名**键控模块 → 本包发布 `dsh.client` 前必须处理这一行；本切片**不声明 `dsh.client`**，bundle 只保留在 vendor 里 |
+
+### 77.5 版本区间门：**只是状态告警，不是 gate**
+
+harmony 的 `target.version` 不满足时只走 `versionWarning`（`lib/runtime.js:1114-1117` → `addStatusWarnings`），transform 照跑；`lib/compatibility.js:54/77/99` 的 `semver.satisfies(…, { includePrerelease: true })` 只影响它的兼容性报告。实测：
+
+| builtin | 声明区间 | 0.1.5-rc.1 / pinned |
+|---|---|---|
+| `client-load-plan` | `>=0.1.1-rc.2 <0.1.2-0 \|\| >=0.1.2-alpha.4 <0.1.3-0` | **不满足** |
+| `cordis-service-index` | `>=4.0.1` | 满足（4.0.2） |
+| `settings` | `>=0.1.0-rc.8 <0.1.2-0 \|\| >=0.1.2-alpha.4 <0.1.3-0` | **不满足** |
+| `session-profile` | `>=0.1.2-alpha.4 <0.1.3-0` | **不满足** |
+
+所以检查器把区间**报告**出来、**不**据此 fail —— fail 的是「文件不存在 / 选择器不匹配 / 内层 exactlyOne 不成立」。区间判定用自制的最小子集（`seams.mjs#satisfiesRange`），语义对齐 `semver.satisfies(v, r, { includePrerelease: true })`（harmony 自己就是这么调的）。**交叉验证**：在 `/tmp` 装 `semver@7.8.5`，7 个区间 × 15 个版本 = **105 对，105/105 一致**；过程中它抓出过一个真错（默认模式那条「预发布只在同 tuple 内满足」的规则被误用，`0.1.1-rc.2` in `>=0.1.0-rc.8 <0.1.2-0 || …` 被判错），修正后归零。
+
+### 77.6 本轮刻意**不做**的事（留给后续切片）
+
+1. 不进 `component-inventory.json`、不跑 bundle sync、不碰 desktop —— 因此 `pnpm build`/`component-run` 的行为**完全没变**。
+2. 不改 `packages/dsh/profile/**`、不改 `AGENTS.md:65`、不动 tidychat（它是本切片之后才退役）。
+3. 不装任何依赖（harmony 缺的 `tsquery/magic-string/semver/typescript/atomic-write` 只报告）。
+4. 不挂 harmony 的 `settings` 行与 `dsh.client`。
+5. `upstream/` 两个新目录**没**改 `.gitmodules`。
+
+### 77.7 本轮门禁（实测）
+
+- `pnpm --dir packages/dsh-plugin-turn-fold run build` → EXIT=0；`… run test` → **6/6 通过**。
+- `pnpm --dir packages/dsh-plugin-harmony run build` → EXIT=0；`… run test` → **7/7 通过**（含区间判定与「上游 `harmony.patch.yml` 未随包发布」的断言）。
+- `pnpm run test:fast` → **EXIT=0**（harness-provenance 68/68 + 版本/站点 5/5；版本契约测试已把我的两个新包算进去）。
+- `git status`：新增 `packages/dsh-plugin-{turn-fold,harmony}/`、`upstream/plugins/dsh-{turn-fold,harmony}/`；产物 `lib/ assets/ browser-dist/` 均已被忽略。
+
+### 77.8 离线不可验证的部分
+
+1. harmony 从未在 0.1.5 上**运行过**：本切片只证明「4 个 builtin 的选择器在今天的编译产物上仍各命中一次 + 内层 exactlyOne 成立」，不证明 transform 产物语法正确、也不证明运行时行为。
+2. 缺依赖（`atomic-write`/`tsquery`/`magic-string`/`semver`/`typescript`）意味着 **harmony 目前根本 import 不起来**：`lib/plugin.js` 静态 import `profile.js`/`session-profile.js` → `@deepseek-ai/dsh-atomic-write`。切片 2 必须先解决这条，否则挂上去就是 profile 加载失败。
+3. 注入运行时的三处词汇迁移（时钟/指标/状态）只有真浏览器跑得出来；jsdom 证明不了展开/折叠几何。
+4. `@deepseek-ai/schemastery` 在**打包后的 desktop profile bundle** 里能否被 `settings.cjs` 的惰性 `require` 解析到，未验证（需挂载后启动）。
+5. harmony 客户端 bundle 的模块 id（`dsh-harmony` vs 包名）对加载器是否真的必须相等：只从 `packages/client/modules/src/index.ts:478-494` 的注册协议推断，未在真机验证。
+
+
+
+## 第 78 轮：切片 1 完成后的两件事 —— 凭据阻塞解除 + Path C 投递机制改判
+
+### 78.1 凭据面修复有效（`verify:profile` 已越过 `connection` 行）
+
+`packages/dsh/src/profile/credentials-os.ts` 的实现补齐 + 新守卫 `packages/dsh/test/credentials-provider-contract.test.mjs` **4/4 通过**
+（含反向用例"该守卫会拒绝导致 profile 启动失败的那个只有值面的 provider"，以及"钉住的凭据接缝恰好声明九个已验证成员"这种 fail-closed 断言）。
+重建后 `verify:profile` **不再报 `credentials.modifyRecord`**，前进到**下一个入口**：
+
+```
+failed to apply loader entry emate-canvas (@e-mate/dsh-plugin-canvas): cannot get property "webServer" without inject
+```
+
+即 canvas 插件在 0.1.5 下**未声明 inject 就读取 `ctx.webServer`**——同类"旧世代服务访问形状"问题，需回到固定版的注入声明方式。
+
+### 78.2 Path C 的投递机制改判：**用 e-mate 自己的 overlay 取代 dsh-harmony**
+
+切片 1 的实测结论（子代理取证）让 Path C 的成本变得具体：
+- **harmony 今天在 0.1.5 下根本 import 不起来**：`lib/plugin.js` 静态 import `@deepseek-ai/dsh-atomic-write`，而该包未出现在 `base-contract.json#runtime_imports`（闭包不链接）；
+  另缺 `@phenomnomnominal/tsquery`（含两个深路径）、`magic-string`、`semver`、`typescript`；
+- `dsh-harmony/settings` 行**不能挂**：`lib/settings.js:1` import 的正是 0.1.5 已删的 `settingsNamespace`（与 §72.1 那四个 vendored 插件同源）；
+- harmony 的区间门只是**告警**（`lib/runtime.js:1114-1117` 不满足 `target.version` 也照跑），实测只有 `cordis >=4.0.1` 满足；
+- `dsh.client` 不能声明：其 `browser-dist/client.js:3` 自注册 `id: 'dsh-harmony'`，加载器按包名键控。
+
+**裁决**：Path C 的**目标不变**（turn-fold 完整接管折叠与导航、tidychat 退役），但**投递机制从 harmony 改为 e-mate 既有的 overlay 通道**：
+即在 `desktop/patches/dsh-client-ui-chat@0.1.5-rc.1.patch` 里完成"安装 turn-fold 运行时 + 抑制原生轨道"，
+并登记 `DESKTOP_OVERLAYS`（准入表 + 清单断言 4→5）。理由：
+1. **零新增运行时依赖**（不再需要 tsquery/magic-string/semver/typescript 与 atomic-write 的闭包链接）；
+2. **可审计**：补丁是仓库里的字节，经 provenance 准入与测试钉住；harmony 是第三方在内存里改写**已编译 bundle**，无审计面；
+3. **与既有实践一致**：app-boot / win32-process / client-ui-workspace 已是同一条通道；
+4. **不需要给 harmony 打补丁**（它的 settings builtin 用了已删 API，等于要维护第二个我们无法验证的移植）。
+代价与 harmony 相同量级：ui-chat 重建后需重新生成补丁——这条风险已被既有的 fail-closed 断言模式覆盖。
+
+切片 1 已交付的资产**不浪费**：vendored `upstream/plugins/dsh-turn-fold/`（含逐文件 sha256 溯源）与三个选择器的命中证据
+（1@2072 / 1@2535 / 1@8272，另有 **6 个** host 符号而非上游注释的 4 个：多出 `_deepseek_ai_dsh_client_ui_primitives` 与 `ReasoningRow`）
+直接成为生成 overlay 时的接缝清单；`packages/dsh-plugin-{turn-fold,harmony}` 骨架可留作参考，harmony 包在改判后不再挂载。
+
