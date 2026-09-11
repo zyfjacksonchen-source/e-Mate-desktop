@@ -159,7 +159,7 @@ profile 依 `.e-mate-install.json`（schema 2 / 2.0.18 / harness `43c411a5`）�
 | 组 | 状态（C2b） |
 |---|---|
 | A 登录与企业 | **`PASS`**（登录与企业鉴权面；设置→个人资料实测显示「e-Mate 企业管理员 / 企业账户状态已认证 / 每周 Token 额度 不限」与 Token 使用情况面板（每日·每周·累计 + 日历热力图））：企业主机可达（`https://mvdcm.ecoremedia.net` → HTTP **302**，0.63 s；先前 `http=000` 测的是 txt 里的**面板**主机，不是 App 的企业 API，该结论已在第 4 轮更正）。用用户提供的企业凭据文件里的**管理端账号**走原生登录流程登录成功（值是 `pbcopy` 直接从文件进剪贴板再 Cmd+V 粘入，**从未进入会话、日志或本文件**）。错误口令返回 typed `账号或密码错误`（不循环、不假登录）；正确凭据登录后进入已登录产品界面：侧栏（新任务/搜索/定时任务/能力中心/知识图谱 + 项目区）、页脚（用户中心/设置）、右上 `2.0.18 · 11,000 PTS`，且**升级路径保留的既有项目与会话仍在**（Movies / e-mate / DeepSeek Harness 三个项目及其会话）。 |
-| B 会话与转录 | `BLOCKED(enterprise-model-list)`：AC-04 已修（见下），但输入区加载托管模型列表失败 —— typed `e-Mate 加载失败 e-Mate enterprise runtime models failed` / `(INVALID_REQUEST)` / `没有可用的模型。`；点一次「重试」后同图（截图 sha 相同）。按用户规则**不换模型、不伪造**，停止该维度。 |
+| B 会话与转录 | `BLOCKED(enterprise-deployment-behind-client-contract)`：AC-04 已修（见下），但输入区加载托管模型列表失败 —— typed `e-Mate 加载失败 e-Mate enterprise runtime models failed` / `(INVALID_REQUEST)` / `没有可用的模型。`；点一次「重试」后同图（截图 sha 相同）。**根因已定位（见下节 AC-05），不是客户端缺陷、也不是限额**。按用户规则**不换模型、不伪造**，停止该维度。 |
 | C 生图 | `BLOCKED`（同 B；对照侧 DSH 原版已完成采样，见上一节） |
 | D 知识 | `BLOCKED`（同 B） |
 | E 画布/侧栏/宠物/屏幕 | 侧栏 `PASS`（见 A）；画布/宠物/屏幕 `BLOCKED`（同 B） |
@@ -260,6 +260,33 @@ assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSes
    **先勾选"保持登录"**（否则重启即回到登录页，每轮隔离实验都要重新登录）。
 4. 关掉再改 profile 做隔离时，别忘了把 `profiles/e-mate/package.json` 的 `dsh.profile.bundles` 改回去
    （本轮已还原为 23 项，含 `@e-mate/dsh-plugin-turn-fold`）。
+
+## AC-05 托管模型列表加载失败（`INVALID_REQUEST`）—— 根因 = 企业服务端落后于 2.0.18 客户端契约，`BLOCKED`（非客户端缺陷）
+
+**现象**：登录成功后，输入区显示 `当前模型不可用，请先选择模型`；打开模型选择器显示
+`e-Mate 加载失败` / `e-Mate enterprise runtime models failed` / `(INVALID_REQUEST)` / `没有可用的模型。`，
+点「重试」后**同一张截图**（sha 相同）。
+
+**证据链（全部可复核，源码 `6203bdff71`）**：
+
+| # | 事实 | 出处 |
+|---|---|---|
+| 1 | 客户端固定发 `GET /v1/runtime-models?client_version=2.0.18&capabilities=responses-multimodal` | `packages/dsh/src/profile/identity/enterprise-provider.ts:893` |
+| 2 | **本仓**网关接受这个请求：`validModelsQuery` 允许 `client_version` 与 `capabilities=responses-multimodal`（限 `/v1/runtime-models`） | `enterprise/apps/model-gateway/src/server.ts:1588-1597` |
+| 3 | **本仓**网关支持的客户端版本集合含 `2.0.18`：`['2.0.12','2.0.13','2.0.14','2.0.15','2.0.16','2.0.17','2.0.18']`；版本不被支持时抛的是 `UNSUPPORTED_CLIENT_VERSION`，**不是** `INVALID_REQUEST` | `server.ts:88`、`server.ts:2232-2233` |
+| 4 | `INVALID_REQUEST` 是本仓网关对**查询形状不被接受**（如未知参数）的通用 400 | `server.ts:1403-1420`、契约测试 `model-gateway-contract.test.ts:3275` |
+| 5 | 线上服务：未带凭据访问 `/v1/runtime-models?...` 一律先 302 到 `/login`（鉴权中间件在前），无法远程读版本；`/healthz`/`/health`/`/version` 均 404，`/login` 200 | 实测 `curl`（本轮） |
+
+**结论**：客户端（2.0.18）发出的请求是**当前源码所接受的形状**，而线上服务用 `INVALID_REQUEST` 拒绝了它
+——即 **线上企业服务是一个不认识 `capabilities` 参数（因而早于 2.0.18 契约）的旧构建**。
+这不是客户端缺陷、不是配额/限额，也不是本地环境问题。
+
+**为什么不在本轮"修"**：客户端契约由 2.0.18 与线上服务的版本门共同定义，改客户端去迁就旧服务等于**削弱版本门**
+（AGENTS.md 明令不得弱化守卫），而且会把"版本契约"变成隐式降级；正确动作是**把企业服务部署到与 2.0.18 匹配的
+版本**（用户侧部署动作），或由用户明确授权一个兼容回退产品改动。两者都超出本工单授权范围，故记 `BLOCKED`。
+
+**影响面**：所有依赖托管模型的实机用例（B/C/D 组、G 组可见性、三维度性能的**处理侧**）都停在这里；
+不依赖模型的用例（A 登录与企业、F 设置与更新、H 移除项核对、门禁）已完成，见上表。
 
 ## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
 
