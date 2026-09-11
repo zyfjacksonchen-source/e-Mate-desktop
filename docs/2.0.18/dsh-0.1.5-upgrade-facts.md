@@ -1829,3 +1829,89 @@ shell 套件 281/281，`component-run check --component @e-mate/dsh-client-shell
   （已装，未改 lockfile）。
 - 根 `pnpm run build` 曾卡在 pet 的 `settingsNamespace`（已修）；聚合构建与 `component-run check` 全量结果见下一轮。
 
+
+
+## 第 48 轮：fork 补回 `ignorable` 追加面 + 新 fork SHA `d1d095bee7` + shell 编译面收口
+
+### 48.1 关键发现：0.1.5 的 `Session.append` 会**静默丢掉** `ignorable` 参数
+
+- 读侧契约在 0.1.5 里是完整的：`SessionEvent.ignorable?: true`（`core/session/src/types.ts:483`），
+  未知事件类型必须带这个标记才能在冷读/恢复时被跳过（`session-persistence/src/storage-contract.ts`、
+  `core/session/src/known-event-types.ts` 的模块注释）。
+- 写侧却没有入口：`append(type, data, ...opts)` 对非 surface 类型只接受 `[]`，第三个参数被丢弃。
+  e-mate 之前靠 fork 补丁（0.1.0 分支的 `b1c1907347`）提供这个参数，0.1.5 重基线时**没有带过来**
+  （`git log 183f08e9..HEAD -- packages/core/session packages/session` 为空）。
+- 后果：knowledge（24 条红）、imagegen、file-import、expert-mode 等插件写的事件都变成"必需事件"，
+  **冷读/恢复直接拒绝整个日志**（`SessionFormatUnsupportedError … "knowledge/workflow" … not marked ignorable`）。
+  这就是"同一种 bug 换个形式复现"的典型：功能表面正常，直到会话被恢复。
+- 处理：在新 fork 提交 `d1d095bee7` 里把追加面按 0.1.5 的签名重做（`isSurfaceEligibleType` 已在
+  `surface.ts:34` 导出，两条拒绝规则：非 true 的标记报错、surface 事件不允许 ignorable），
+  并加了 `packages/core/session/tests/ignorable-envelope.spec.ts`（3 条）钉住这三件事。
+  fork 会话包 502/502、tsc 干净。
+
+### 48.2 重新回填（第二处 fork 固定点）
+
+`e841a5c4add3f7e34c3f7efc8742313debf54922` → `d1d095bee770c3e9d302f844083e02f0b74576ee`，
+替换 84 个 tracked 文件 + submodule gitlink；`harness-provenance` 14/14 绿；
+harness 重新 `pnpm run build` 成功（只有 `lib/` 产物变化，未入版本库）。
+
+### 48.3 收口的门禁（本轮实测）
+
+| 门禁 | 状态 |
+| --- | --- |
+| `node --test packages/dsh/test/*.test.mjs` | **133/133** |
+| `pnpm run test:fast` | 68/68 + 5/5 |
+| knowledge（迁移后） | **126/126** |
+| memory-evolve | 9/9（含新增的 prefix 稳定性 2 条） |
+| pet | 18/18 |
+| shell 套件 | **281/281**（21 文件） |
+| `component-run check --component @e-mate/dsh-client-shell` | **EXIT=0**（build + 280 测试 + tsc） |
+| imagegen | 22/22 |
+| schedules / univer-office host smoke | 1/1 / EXIT=0 |
+
+### 48.4 生图与展示路径的两处"静默失真"（已修）
+
+1. `univer_screenshot` 把**生产者的** PNG 类型写进 attachment ref，而 0.1.5 的附件存储在保存时会把
+   有 alpha 的图转 WebP、不透明的转 JPEG，于是 ref 自相矛盾；pet 的事实读取器又要求 `image/png`，
+   导致截图事实永远不成立。现在 `image.mediaType` 用 store 核验过的 `ref.mediaType`，类型放宽为 `ImageMediaType`。
+2. `image-history.ts` 的图片回执回填在 0.1.5 下**从未运行**（`list()` 返回快照对象，直接在快照上
+   `.filter(header => header.origin === 'subagent')` 永远是 undefined）。已改为 `snapshot.header` + 读句柄，
+   并让它的守卫**具备咬合力**（把产品改回旧形状 → 4/8 红，改回新形状 → 8/8 绿）。
+
+### 48.5 首 token 与"轮次越多越慢"
+
+- 结论：**请求前缀在 0.1.5 上是稳定的**。新增守卫
+  `packages/dsh-plugin-memory-evolve/test/request-prefix-stability.test.ts` 用真实 AgentLoop + 产品自带的
+  动态 Tool Search 跑两轮（含一轮带图），断言：surface 上只有一条 `system/message`、两轮 tool schema 完全一致、
+  第二轮请求的前 N 条消息与第一轮**逐字节相同**。三条都过。
+- 内核依据：只有渲染后的 system prompt、surface 的 replace generation、或 tool schema 集合发生变化时
+  才会开启新的请求序列（`core/agent-loop/src/agent.ts:363-368`）；e-mate 侧没有任何插件设置
+  `startsRequestSeries`。
+- 另测：`estimateRequestBytes`（每步都会跑）在 1000 条消息下约 **0.8 ms/次**（50 次 28 ms），
+  不是首 token 瓶颈——所以**没有**做"提前优化"。
+- 之前那两处按字节压力压图的修复（ledger `0a4a78cac9`、`7ecbb19edc`）对应的守卫
+  `packages/dsh/test/request-size.test.mjs` 11/11、`e-mate.test.mjs` 36/36，均在 0.1.5 上通过。
+
+### 48.6 shell 包补上编译面（目标里点名的缺口）
+
+`packages/dsh/profile/plugins/emate-shell` 之前没有 tsconfig，tsdown 只转译不检查，所以该包的门禁
+**从不做类型检查**。现在：
+
+- `tsconfig.json`（strict/noEmit，React JSX，React 类型走 harness 的 @types；内核模块用 source paths：
+  cordis、webserver、ui-slots、ui-sidebar-right、session、session/types、session-projection、goal/types、
+  todo/types——后两个是 `SessionProjectionMap` 的合并来源，不进程序就看不到 `goal`/`todos` 键）；
+- `src/css-modules.d.ts`；`package.json` 增 `typecheck` 脚本；
+- `scripts/component-run.mjs check` 现在会跑组件声明的 `typecheck`（tsdown 只转译，没有这一步就看不见陈旧读法）。
+
+第一轮 64 个错误已归零，期间修的都是真问题：`ConversationSnapshot` 在 0.1.5 只有 `{views, activeTargets}`
+（chat 目标要从 `views.get('chat')` 取）、`ToolResultNode` 没有 `resultView`、节点定义的 `update` 变成必需、
+桌面资源请求是判别联合（调用点必须收敛）、`byId` 用 branded `SessionId` 索引、
+e-mate 自己的 Chat 节点 kind 要注册进 `ChatNodeDataMap`、tab 钩子面要取原生 title 座位的 props。
+侧边栏那枚"等待你确认"没有 0.1.5 的归属（`SessionSummary` 不发布每会话等待事实），按"宁可删掉发散实现"处理。
+
+### 48.7 隔离纪律（用户明确要求：e-mate 与本机 dsh 互不影响）
+
+本轮所有命令都在 `worktrees/emate-2.0.18-dsh015-upgrade`（或其 `upstream/deepseek-harness` 子模块）内执行：
+harness 构建、组件 install/build/test、enterprise install/test 都用工作区内路径；测试夹具用 `mkdtemp` 建临时目录。
+没有对 `~/.dsh`、安装好的 `DeepSeek Harness Official.app` 或用户 Profile 做任何写操作。
+
