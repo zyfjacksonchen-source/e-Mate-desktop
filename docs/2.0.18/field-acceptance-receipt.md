@@ -269,6 +269,19 @@ assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSes
 **未安装**：按 AGENTS.md，Windows 的安装态 GUI 验收必须在**已登录的交互式会话**上完成，
 远程命令回执不构成安装验收。故 C4 的安装态一律 `OPEN`。
 
+## 门禁终态（源码 `ed32110d33`）
+
+| 门禁 | 结果 |
+|---|---|
+| `pnpm run test:fast` | **EXIT 0**（68 + 39 用例全过） |
+| `node scripts/component-run.mjs check` | **EXIT 0** |
+| `pnpm run test:image-evidence` | **EXIT 0** |
+| `pnpm run enterprise:check` | **EXIT 0**（analytics-api / model-gateway 均 Done） |
+| `node scripts/harness-provenance.mjs verify-desktop` | **EXIT 0**（桌面侧 harness 运行时 = "pinned 原生 + 产品适配器"逐字节一致，这条正是 AC-04 修复的漂移门） |
+| `desktop/corepack yarn check` | **EXIT 0** —— 50 passed / 1 skipped（Test Files）、**517 passed / 5 skipped**（Tests）；内置 profile boot smoke 打印 **`turn-fold: the served chat bundle carries the injected runtime; the file on disk does not`**，即 AGENTS.md 豁免的核心事实（服务出去的字节带补丁、磁盘上的不带）在源码 `ed32110d33` 上复测为真 |
+
+`update-checker.ts` / `update-download.ts` 本轮未改动（`git diff 16ff8dff0f -- desktop/e-mate-desktop/src/update-*.ts` 为空）。
+
 ## 本文件不声称什么
 
 它不声称任何候选已通过验收。C1 已被 AC-01 判为 `FAIL` 并作废；在 C2/C4 完成实机用例之前，
