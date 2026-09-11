@@ -250,7 +250,18 @@ async function createAssembled(root, fixture, historyCount = 0) {
       assert.equal(result.isError, false)
       assert.equal(result.value.status, 'completed')
       assert.equal(result.value.images.length, 1)
-      assert.equal(result.value.images[0].attachment_id, 'sha256:' + fixture.sha256)
+      // 0.1.5's attachment store normalises on save (an alpha PNG becomes WebP), so the
+      // stored artifact is deliberately not byte-identical to the provider's PNG. Record
+      // and verify the two separately instead of comparing them: the provider receipt
+      // digests the bytes the image service returned, and the artifact the tool reports
+      // must describe exactly the stored bytes it points at.
+      assert.equal(receipt.request_receipts[0].image_sha256, fixture.sha256)
+      const storedRef = receipt.content[0].attachment
+      const stored = await native.ctx.attachments.readImage(storedRef)
+      assert.equal(result.value.images[0].attachment_id, storedRef.attachmentId)
+      assert.equal(storedRef.attachmentId, 'sha256:' + sha256(stored.data))
+      assert.equal(storedRef.bytes, stored.data.byteLength)
+      assert.deepEqual(storedRef, stored.ref)
       assert.deepEqual(result.content.map(block => block.type), ['text'])
       return validateDirectMeasurement(assembledMeasurement(active, start, performance.now(), fixture))
     },

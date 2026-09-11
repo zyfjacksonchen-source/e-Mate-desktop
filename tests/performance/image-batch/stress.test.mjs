@@ -26,7 +26,7 @@ function projectionLowerBound(f, receipt) {
   const started = performance.now()
   const session = f.Session.create(f.SessionId('projection-control'))
   session.append('emate/image-output', receipt, { ignorable: true })
-  assert.equal(session.events[0].data.content.length, receipt.content.length)
+  assert.equal(session.snapshotEvents()[0].data.content.length, receipt.content.length)
   assert.equal(session.deriveMessages().length, 0, 'presentation receipt is not model input')
   return performance.now() - started
 }
