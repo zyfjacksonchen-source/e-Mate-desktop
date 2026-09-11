@@ -148,7 +148,9 @@ export async function handleCanvas(ctx: any, endpoint: string, payload: unknown)
 
 /** Package assets share the native web server. No project bytes or host paths are served here. */
 export function apply(ctx: any): void {
-  ctx.effect(() => ctx.connection.rpc.handle(CHANNEL, (endpoint: string, payload: unknown) => handleCanvas(ctx, endpoint, payload), { authority: 'loopback' }), 'emate.canvas: native RPC')
+  // 0.1.5 declares handle(channel, handler); the retired per-channel authority option
+  // is dropped here like the other components, and trust stays the transport's decision.
+  ctx.effect(() => ctx.connection.rpc.handle(CHANNEL, (endpoint: string, payload: unknown) => handleCanvas(ctx, endpoint, payload)), 'emate.canvas: native RPC')
   // The asset route is optional in compositions that mount no web server: read it
   // through the service store and fail loud when it is missing, the pattern the
   // harness's own web-app row uses for the same service.
