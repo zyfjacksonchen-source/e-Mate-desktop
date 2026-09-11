@@ -678,13 +678,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/cosmokit@npm:^1.8.2":
-  version: 1.8.2
-  resolution: "@deepseek-ai/cosmokit@npm:1.8.2"
-  checksum: 10c0/2e15902445b984f2d245687f6c3590cc0251eaeec5fd5173138fc61f791a0af0c77e56b27f060ee6868213996578afd36efd52ef18d115aa0ca57fca89c6a2cb
-  languageName: node
-  linkType: hard
-
 "@deepseek-ai/cosmokit@npm:^1.8.3":
   version: 1.8.3
   resolution: "@deepseek-ai/cosmokit@npm:1.8.3"
@@ -4351,17 +4344,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/schemastery@npm:3.18.1":
-  version: 3.18.1
-  resolution: "@deepseek-ai/schemastery@npm:3.18.1"
-  dependencies:
-    "@deepseek-ai/cosmokit": "npm:^1.8.2"
-    "@standard-schema/spec": "npm:^1.1.0"
-  checksum: 10c0/3219b8012fb22fcf97bb530150d4492f1ec5b3bc80bb221c4edc6f4793e733ab726824aa7b58622e0108c46172059119685225e3cb0981acd405cfe9955d50de
-  languageName: node
-  linkType: hard
-
-"@deepseek-ai/schemastery@npm:^3.18.2":
+"@deepseek-ai/schemastery@npm:3.18.2":
   version: 3.18.2
   resolution: "@deepseek-ai/schemastery@npm:3.18.2"
   dependencies:
