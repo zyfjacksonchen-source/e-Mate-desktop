@@ -2801,6 +2801,51 @@ e-Mate 只保留产品适配（R2 端点、IPC 触发器、托盘文案、无签
 - `git status --porcelain` 对这两个路径**为空**。
 
 
+### 81.2 本轮复核：§81.1 裁决的更正与「采用上游 owner」的阻断取证（**结论：不采用，保留内联**）
+
+**裁决（主代理）：执行选项 (B)** —— 保留 `updates.ts` 的内联生命周期，**不改守卫**、**不重新应用** `e242604cf8`、**不改任何代码**。
+理由（由主代理承担）：`f3e9584358` 是**已随 2.0.16–2.0.18 发布**的既定决策，守卫以 fail-closed 固化它；且改用上游 owner 会改变**用户可见行为**
+（后台更新从「弹框确认」变成「被动通知」，见下第 4 条），该取舍需用户裁决，不能以结构性偏好替代。本节只记录事实，供后续任何人直接取用。
+
+**一、历史：分歧的全部来龙去脉（两个提交）**
+
+| 提交 | 标题 / 日期 | 对更新生命周期的动作（`git show --stat` 实测） |
+|---|---|---|
+| `e242604cf8` | `refactor(release): adopt native dsh desktop lifecycle`（2026-09-01） | **新增** `desktop/e-mate-desktop/src/update-lifecycle.ts`（**+336 行**，固定 SHA 上游 owner 的适配版）；`src/updates.ts` 变更 781 行 → **71 行薄委托**；`tests/package.spec.ts` 147 行、`tests/updates.spec.ts` 1439 行变更 |
+| `f3e9584358` | `release: prepare e-Mate Desktop 2.0.16`（2026-09-02） | **删除** `src/update-lifecycle.ts`（**-336 行**）；`src/updates.ts` 变更 280 行（生命周期**内联回**，该提交处 313 行）；`tests/package.spec.ts` 53 行、`tests/updates.spec.ts` 5 行变更（**守卫即在此提交加入**） |
+
+- 两者**都不是当前 HEAD 的祖先**（`git merge-base --is-ancestor <sha> HEAD` 均返回 NO），同在 `release/2.0.16` 线上 —— 即它们是**发布线**的历史，不在当前 2.0.18 线上。
+- 故当前 `src/updates.ts`（**333 行**）的内联形态 = **已发布的既定决策 + fail-closed 守卫**，不是遗漏或未完成。
+
+**二、四个阻断点（实测；改委托即同时触发，无法只满足其一）**
+
+1. **文件名被 fail-closed 禁止**：`tests/package.spec.ts:389-411` 的 `forbidden` 数组在 **`:396`** 含 `'src/update-lifecycle.ts'`，`:413` 断言 `expect(existsSync(new URL(path, packageRoot)), path).toBe(false)`。→ 只要 owner 落在该文件名下，该断言**必然**失败；**改名绕开守卫属规避，不做**。
+2. **内联文本被钉死**：`tests/package.spec.ts:416-419` 逐条断言 `updates.ts` **含字面量** `const runManualCheck = (): Promise<void> =>`、`invoke: runManualCheck`、`interactiveUpdate = runManualCheck`、`setInteractiveUpdateHandler?.(runManualCheck)`。真实薄委托版四条**全无**（**这四条**正是 `f3e9584358` 加入的，并替换掉 `e242604cf8` 的唯一一条委托断言 `setInteractiveUpdateHandler?.(() => lifecycle!.checkNow())`）。
+3. **引用同一性**：`tests/updates.spec.ts:82` `expect(harness.rendererCheck).toBe(harness.tray.invoke)` —— 托盘行与 IPC 触发器必须是**同一个函数引用**；上游 owner 自行注册托盘行（`update-lifecycle.ts:85`、`:93` 调 `options.registerTrayItem`），二者不再共享同一引用；`:82` 这一行同样是 `f3e9584358` 加入的（见该提交对 `updates.spec.ts` 的 diff）。同文件 `:91` 还断言 `confirmDownload` **被调用 3 次**（见下条）。
+4. **用户可见行为分歧（后台路径）**：现行代码在后台发现新版本后**仍会弹确认框** —— `updates.ts:196-202 offerDownload(version, automatic)`（`automatic` 仅按 `state.lastPromptedVersion` 去重，见 `:199`）→ `rememberPrompt` → `startDownload` → **`updates.ts:167 adapter.confirmDownload(version)`**；上游 owner 的后台路径**只做被动通知** —— `update-lifecycle.ts:164-170 announceBackgroundUpdate` 仅持久化 `lastNotifiedVersion` 并调 `adapter.notify(...)`，`confirmDownload` 只出现在 `startDownload`（`:236-238`，由手动/托盘路径进入，`:131`）。→ 改委托会把打包用户的后台更新从「弹框确认」变为「静默通知」，**属用户可见变更**。
+
+**三、更正记录（必须与 §81.1 同读）**
+
+- `facts:2784` 把守卫引用写作 `tests/package.spec.ts:400-419`，该区间**从 :400 起，恰好跳过 `:396`** —— 而 `:396` 正是 `'src/update-lifecycle.ts'`。
+- 因此 `facts:2793-2796` 的裁决（「vendor `update-lifecycle.ts` + 溯源」）**提议创建的文件名，正是同一份测试在同一段落里 fail-closed 禁止的文件**；且该裁决**未记录** `e242604cf8` 与 `f3e9584358`，读者无法看出这是「已做过、又被回退」的决策。
+- §81.1 的**结论一（不存在第二条更新路径）与受保护文件证据不受影响**，仍然成立。
+
+**四、非阻断项（已核实，勿重复推导）**
+
+- **状态兼容双向都已具备**：上游 `update-lifecycle.ts:344-351` 把 v2（`lastPromptedVersion`）迁移为 v3（`lastNotifiedVersion`，`migrated: true`），`:145` 载入后立即回写；现行 `updates.ts:285-290` 反向把 v3（`lastNotifiedVersion`，即 `e242604cf8` 那版写出的形状）迁移为 v2（`migrated: true`，`:107` 回写）。**状态路径由产品侧提供**：`electron-runtime.ts:206` `join(app.getPath('userData'), 'updates', 'state.json')`（上游 owner 只消费 `adapter.statePath`），故路径不随 owner 变化。
+- **依赖已就位**：`@deepseek-ai/dsh-atomic-write@0.1.5-rc.1` 已是 `desktop/e-mate-desktop/package.json:150` 的直接依赖（上游 `update-lifecycle.ts:4` 正是用它）→ **无需改依赖或 lockfile**。
+- **四处类型接缝（真实产品差异，不可抹平）**：`runtime.ts:61-74 DesktopTrayItem`（上游同名字段另有 `id?: 'check-for-updates'`，上游 `runtime.ts:70`）、`runtime.ts:111 confirmDownload(version)` 单参 vs 上游 `confirmDownload(version, channel?)`（上游 `runtime.ts:118`）、`runtime.ts:115 downloadAndOpen(version, signal)` 两参 vs 上游 `(version, signal, channel?)`（上游 `runtime.ts:122`）、`tray-locale.ts:5-9 DesktopTrayLabelKey` 键集（e-Mate 4 键 vs 上游十余键）。
+- **第五处接缝（本轮新发现，之前未记录）**：上游 `update-lifecycle.ts:13-18` 从 `./update-checker.ts` 导入 `checkForDesktopUpdate` 与 `type DesktopReleaseChannel`，并在 `:191-201` 传 `channel / currentChannel / allowDowngrade`；而**受保护的**本地 `update-checker.ts` 只导出 `checkForStableUpdate`（`:103`），全仓 `grep -rn 'DesktopReleaseChannel\|checkForDesktopUpdate' desktop/e-mate-desktop/src desktop/e-mate-desktop/tests` **零命中**。→ 采用上游 owner 必须在**不动受保护文件**的前提下、于 vendored 侧做导入/签名适配，**「直接拷贝即可」不成立**；这仍**不构成阻断**。
+- **上游溯源（本轮实测）**：`https://raw.githubusercontent.com/anywhere-labs/dsh-desktop/166c16cfc38c51d32c2316715548c0f8271db517/dsh-plugin-desktop/src/update-lifecycle.ts` → **HTTP 200** / **14612 bytes** / **394 lines** / `sha256 374ff0f10c799d6425c2320e0b714b045ae8d924b826c91a5accd58f1fa0cff1`。
+- **ownership note 可达性（更正工单假设）**：工单记为「note URL 404」，实测**不成立** —— `…/dsh-desktop/166c16cf…/.agents/notes/implemented/architecture/2026-08-19-desktop-update-lifecycle-ownership.md` → **200**（正文 `# Agent Note: Desktop update lifecycle ownership` / `Status: implemented`）；旧仓库名 `…/deepseek-harness-desktop/166c16cf…/…` 亦 **200**（重定向）。**404 只出现在 ref 写法上**：`…/dsh-desktop/main/…` → 404、`github.com/.../blob/main/...` → 404，而 `…/master/…` → 200（该仓库默认分支为 `master`）。→ note 本身可读，404 来自写错的分支名，不是笔记缺失。
+
+**五、受保护文件复核（本轮实测，与 §81.1 一致）**
+
+- HEAD 与 index 同 blob、工作区一致：`9c91c7735f3a10112e3161c6024293075ff75250`（`src/update-checker.ts`）、`20d1b5d96a0bf0850576fb338ec66f1a4d8664bc`（`src/update-download.ts`）。
+- `git status --porcelain -- <两路径>` **为空**。
+- 本轮**只改本文件**（本节），**未提交**，供主代理复核。
+
+
 ### 82 用户最终准则（治理级，优先于本文件其余内容）
 
 1. **企业管理面不影响本地 e-Mate 运行**；企业面只负责：**鉴权、模型下发、gateway、审计**。
