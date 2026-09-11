@@ -2072,3 +2072,17 @@ desktop client/tests 面已委派专项迁移（见 §49.3 的精确定位 + 本
 两处已分别委派专项迁移，写入集互斥（`src/client/**` 与 `tests/**`），验收命令都已写进工单：
 `tsc -p tsconfig.client.json` / `tsc -p tsconfig.tests.json` / 对应 vitest 套件。
 
+
+### 51.3 desktop 测试面现状（本轮实测，`vitest run` in desktop/e-mate-desktop）
+
+`Test Files 5 failed | 43 passed | 1 skipped`，`Tests 21 failed | 449 passed | 5 skipped`：
+
+- `tests/client-environment.spec.ts`：`Cannot find package 'zustand'` imported from
+  `node_modules/@deepseek-ai/dsh-client-store/lib/index.js` —— 桌面闭包缺依赖（安装层问题，不是测试问题）。
+- `tests/e-mate-profile.spec.ts`：仍 import 已删除的 `@deepseek-ai/dsh-host-apiproxy`（tests 面专项迁移中）。
+- `tests/package.spec.ts`（多条）：**`desktop/patches/dsh-sandbox-windows-acl@0.1.5-rc.1.patch` 不存在**；
+  "pinned 0.1.5 app-boot patch" 的 diff 内容漂移；安装顺序断言（PATH 注入位置）不匹配。
+  即 desktop 的 **patch 层文件需要按 0.1.5 重新落盘/更名**，这是桌面打包面的独立工作项。
+- client 面：`tsc -p tsconfig.client.json` 已从 9 错收敛到 **1 错**（`ctx.layout` 与原生 `ILayout` 冲突，
+  且 `layout-service.ts:12` 用 `ctx.reflect.provide('layout', …)` **抢注了原生服务名** —— 按"回到固定版 owner"的原则，
+  应删除桌面自带的 layout 服务，改用原生布局 store + 右列 owner 上报）。
