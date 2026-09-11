@@ -169,7 +169,7 @@ profile 依 `.e-mate-install.json`（schema 2 / 2.0.18 / harness `43c411a5`）�
 | C 生图 | `BLOCKED`（同 B；对照侧 DSH 原版已完成采样，见上一节） |
 | D 知识 | `BLOCKED`（同 B） |
 | E 画布/侧栏/宠物/屏幕 | 侧栏 `PASS`（见 A）；**能力中心 `PASS`（GUI 实测）**：发现 / 已安装(0) / 导入 三个页签、搜索与「全部市场/标签/上传 Skill」控件、远端目录**实际拉到**两条卡片（`t00-skill-smoke-20260830-b` 与 `小红书笔记分析`，含版本/分类/「查看详情」「安装并启用」）与「本机内置能力 3」；**定时任务 `PARTIAL`（GUI 实测）**：`已安排的任务` 页渲染完整（刷新/创建、搜索、三条建议卡、当前任务空态），但底部出现 typed 红字 `定时任务暂时无法读取。` —— 属**如实报错不假成功**，其读取路径同样经过企业 RPC，与 AC-05 同类阻塞；不记为通过。画布/宠物/屏幕 `BLOCKED`（同 B）。截图留档（不入库）：能力中心 `observation-2efc92ad…`、定时任务 `observation-4dc18655…`。 |
-| F 设置与更新 | **`PASS`（GUI 实测）**：设置面板完整渲染（个人资料 / 通用设置 / 智能伙伴 / 文件提及）；「通用设置」含 权限、语言、外观（浅色/深色/跟随系统）、字号大小、**对话显示（控制已完成轮次的过程内容）＝ 标准**、繁忙时的发送行为 —— 这条**就是 turn-fold runtime 注册的 locale + settings scope + settings card 在实机上的可见证据**；标题栏「检查更新」走原生更新检查，返回 `当前没有更新版本。` / `已安装版本：2.0.18`（只接受严格更新的稳定版）。截图留档（不入库）：通用设置 `observation-d9c19066…`、个人资料 `observation-16559901…`。 |
+| F 设置与更新 | **`PASS`（GUI 实测）**：设置面板完整渲染（个人资料 / 通用设置 / 智能伙伴 / 文件提及）；「通用设置」含 权限、语言、外观（浅色/深色/跟随系统）、字号大小、**对话显示（控制已完成轮次的过程内容）＝ 标准**、繁忙时的发送行为 —— 这条**就是 turn-fold runtime 注册的 locale + settings scope + settings card 在实机上的可见证据**；标题栏「检查更新」走原生更新检查，返回 `当前没有更新版本。` / `已安装版本：2.0.18`（只接受严格更新的稳定版）。截图留档（不入库）：通用设置 `observation-d9c19066…`、个人资料 `observation-16559901…`；**智能伙伴**页签（`小芯智能伙伴 / 启用小芯 / 已关闭` 开关）`observation-31f4a024…`；**文件提及**页签（`启用 @ 文件提及`、`忽略粘贴文本中的 @`、全局/工作区文件过滤 + 规则表 `desktop.ini`/`Thumbs.db`/`.DS_Store` + Exact/Regex + 添加 + 区分大小写）`observation-87388658…`。 |
 | G turn-fold 豁免 | 候选级 `PASS`，GUI 可见性 `BLOCKED`：`bundles/turn-fold` 在候选内；desktop `yarn check` 内置的 profile boot smoke 实测打印 `turn-fold: the served chat bundle carries the injected runtime; the file on disk does not`（即"服务出去的字节带补丁、磁盘上的不带"这一豁免核心断言为真）；折叠的肉眼可见性需要登录后的会话。 |
 | H 移除项核对 | **`PASS`（候选级）**：`app.asar` 与 `app.asar.unpacked/build/e-mate-profile` 中 `dsh-plugin-computer-use`/`dsh-computer-use`/`dsh-plugin-tidychat`/`emate-tidychat` 命中数全为 0；`bundles/` 无对应目录；`bundles/registry.json` 命中 0。GUI 入口核对需要登录态。 |
 | 性能三维度 | 生图对照侧已测（中位数 19330 ms / n=3）；处理侧与首响、多轮均 `BLOCKED`（同 A） |
@@ -372,7 +372,7 @@ GUI 组归属规则是 areas → 组（`enterprise`→A；`shell`/`profile-core`
 `plugin:canvas|pet|better-sidebar|office-skills|vision-toolkit|genui|file-import|tool-search|cdp|memory-evolve|schedules`→E；
 `desktop`/`scripts`/发布更新类→F；`plugin:computer-use`/`plugin:tidychat`→H）。
 
-## 门禁终态（源码 `ed32110d33`）
+## 门禁终态（源码 `9690b1d32c`，第 9 轮复跑）
 
 | 门禁 | 结果 |
 |---|---|
@@ -381,7 +381,11 @@ GUI 组归属规则是 areas → 组（`enterprise`→A；`shell`/`profile-core`
 | `pnpm run test:image-evidence` | **EXIT 0** |
 | `pnpm run enterprise:check` | **EXIT 0**（analytics-api / model-gateway 均 Done） |
 | `node scripts/harness-provenance.mjs verify-desktop` | **EXIT 0**（桌面侧 harness 运行时 = "pinned 原生 + 产品适配器"逐字节一致，这条正是 AC-04 修复的漂移门） |
-| `desktop/corepack yarn check` | **EXIT 0** —— 50 passed / 1 skipped（Test Files）、**517 passed / 5 skipped**（Tests）；内置 profile boot smoke 打印 **`turn-fold: the served chat bundle carries the injected runtime; the file on disk does not`**，即 AGENTS.md 豁免的核心事实（服务出去的字节带补丁、磁盘上的不带）在源码 `ed32110d33` 上复测为真 |
+| `desktop/corepack yarn check` | **EXIT 0** —— 50 passed / 1 skipped（Test Files）、**517 passed / 5 skipped**（Tests）；内置 profile boot smoke 打印 **`turn-fold: the served chat bundle carries the injected runtime; the file on disk does not`**，即 AGENTS.md 豁免的核心事实（服务出去的字节带补丁、磁盘上的不带）复测为真 |
+
+第 9 轮在同一 HEAD（`9690b1d32c`）上把五条门禁**整体复跑一遍**，全部 EXIT 0：
+`test:fast` → 0、`component-run check` → 0、`test:image-evidence` → 0、`enterprise:check` → 0、
+`desktop yarn check` → 0（含上表的 boot smoke turn-fold 断言）。
 
 `update-checker.ts` / `update-download.ts` 本轮未改动（`git diff 16ff8dff0f -- desktop/e-mate-desktop/src/update-*.ts` 为空）。
 
