@@ -158,12 +158,12 @@ profile 依 `.e-mate-install.json`（schema 2 / 2.0.18 / harness `43c411a5`）�
 
 | 组 | 状态（C2b） |
 |---|---|
-| A 登录与企业 | **`PASS`**（登录与企业鉴权面）：企业主机可达（`https://mvdcm.ecoremedia.net` → HTTP **302**，0.63 s；先前 `http=000` 测的是 txt 里的**面板**主机，不是 App 的企业 API，该结论已在第 4 轮更正）。用用户提供的企业凭据文件里的**管理端账号**走原生登录流程登录成功（值是 `pbcopy` 直接从文件进剪贴板再 Cmd+V 粘入，**从未进入会话、日志或本文件**）。错误口令返回 typed `账号或密码错误`（不循环、不假登录）；正确凭据登录后进入已登录产品界面：侧栏（新任务/搜索/定时任务/能力中心/知识图谱 + 项目区）、页脚（用户中心/设置）、右上 `2.0.18 · 11,000 PTS`，且**升级路径保留的既有项目与会话仍在**（Movies / e-mate / DeepSeek Harness 三个项目及其会话）。 |
-| B 会话与转录 | `BLOCKED`（被 AC-04 阻断：登录后主内容区空白） |
+| A 登录与企业 | **`PASS`**（登录与企业鉴权面；设置→个人资料实测显示「e-Mate 企业管理员 / 企业账户状态已认证 / 每周 Token 额度 不限」与 Token 使用情况面板（每日·每周·累计 + 日历热力图））：企业主机可达（`https://mvdcm.ecoremedia.net` → HTTP **302**，0.63 s；先前 `http=000` 测的是 txt 里的**面板**主机，不是 App 的企业 API，该结论已在第 4 轮更正）。用用户提供的企业凭据文件里的**管理端账号**走原生登录流程登录成功（值是 `pbcopy` 直接从文件进剪贴板再 Cmd+V 粘入，**从未进入会话、日志或本文件**）。错误口令返回 typed `账号或密码错误`（不循环、不假登录）；正确凭据登录后进入已登录产品界面：侧栏（新任务/搜索/定时任务/能力中心/知识图谱 + 项目区）、页脚（用户中心/设置）、右上 `2.0.18 · 11,000 PTS`，且**升级路径保留的既有项目与会话仍在**（Movies / e-mate / DeepSeek Harness 三个项目及其会话）。 |
+| B 会话与转录 | `BLOCKED(enterprise-model-list)`：AC-04 已修（见下），但输入区加载托管模型列表失败 —— typed `e-Mate 加载失败 e-Mate enterprise runtime models failed` / `(INVALID_REQUEST)` / `没有可用的模型。`；点一次「重试」后同图（截图 sha 相同）。按用户规则**不换模型、不伪造**，停止该维度。 |
 | C 生图 | `BLOCKED`（同 B；对照侧 DSH 原版已完成采样，见上一节） |
 | D 知识 | `BLOCKED`（同 B） |
 | E 画布/侧栏/宠物/屏幕 | 侧栏 `PASS`（见 A）；画布/宠物/屏幕 `BLOCKED`（同 B） |
-| F 设置与更新 | `BLOCKED`（同 B） |
+| F 设置与更新 | **`PASS`（GUI 实测）**：设置面板完整渲染（个人资料 / 通用设置 / 智能伙伴 / 文件提及）；「通用设置」含 权限、语言、外观（浅色/深色/跟随系统）、字号大小、**对话显示（控制已完成轮次的过程内容）＝ 标准**、繁忙时的发送行为 —— 这条**就是 turn-fold runtime 注册的 locale + settings scope + settings card 在实机上的可见证据**；标题栏「检查更新」走原生更新检查，返回 `当前没有更新版本。` / `已安装版本：2.0.18`（只接受严格更新的稳定版）。截图留档（不入库）：通用设置 `observation-d9c19066…`、个人资料 `observation-16559901…`。 |
 | G turn-fold 豁免 | 候选级 `PASS`，GUI 可见性 `BLOCKED`：`bundles/turn-fold` 在候选内；desktop `yarn check` 内置的 profile boot smoke 实测打印 `turn-fold: the served chat bundle carries the injected runtime; the file on disk does not`（即"服务出去的字节带补丁、磁盘上的不带"这一豁免核心断言为真）；折叠的肉眼可见性需要登录后的会话。 |
 | H 移除项核对 | **`PASS`（候选级）**：`app.asar` 与 `app.asar.unpacked/build/e-mate-profile` 中 `dsh-plugin-computer-use`/`dsh-computer-use`/`dsh-plugin-tidychat`/`emate-tidychat` 命中数全为 0；`bundles/` 无对应目录；`bundles/registry.json` 命中 0。GUI 入口核对需要登录态。 |
 | 性能三维度 | 生图对照侧已测（中位数 19330 ms / n=3）；处理侧与首响、多轮均 `BLOCKED`（同 A） |
