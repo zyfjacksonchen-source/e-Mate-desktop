@@ -53,6 +53,9 @@ async function resolvedChild(root: string, parts: string[]): Promise<string | nu
 }
 
 export function apply(ctx: any): void {
+  // 0.1.5 registers a Host RPC channel as (channel, handler): the removed
+  // per-channel `authority` option is now the transport's trust decision
+  // (a trusted API request), so passing one would claim a policy nothing reads.
   ctx.effect(() => ctx.connection.rpc.handle(
     CHANNEL,
     async (endpoint: string, payload: unknown) => {
@@ -105,6 +108,5 @@ export function apply(ctx: any): void {
         return unavailable('项目文件暂不可读取。')
       }
     },
-    { authority: 'loopback' },
   ), 'emate.betterSidebar: target-native RPC channel')
 }
