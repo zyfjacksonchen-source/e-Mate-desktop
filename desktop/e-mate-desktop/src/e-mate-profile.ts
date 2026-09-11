@@ -31,7 +31,7 @@ if (typeof EMATE_DESKTOP_PROFILE_VERSION !== 'string'
   || !/^\d+\.\d+\.\d+$/u.test(EMATE_DESKTOP_PROFILE_VERSION)) {
   throw new Error('e-Mate desktop package version must be a stable semantic version')
 }
-const HARNESS_COMMIT = '8cc7914c51a063cd2b851a9eb956c72b4c16471b'
+const HARNESS_COMMIT = 'ff9a977890dafc4fe9b05634470db9a33bc9a3ef'
 const sourceRoot = unpackedAsarPath(
   fileURLToPath(new URL('../build/e-mate-profile/', import.meta.url)),
 )

@@ -18,7 +18,7 @@
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "eMate": {
     "harnessVersion": "0.1.5-rc.1",
-    "harnessCommit": "8cc7914c51a063cd2b851a9eb956c72b4c16471b",
+    "harnessCommit": "ff9a977890dafc4fe9b05634470db9a33bc9a3ef",
     "baseImports": ["@deepseek-ai/cordis", "@deepseek-ai/dsh-attachment", "@deepseek-ai/dsh-tools"],
     "excludedFeatures": ["studio", "sidebar-entry", "standalone-gallery", "standalone-canvas", "settings", "template-sync", "updater", "user-api-keys", "model-fallback"]
   },

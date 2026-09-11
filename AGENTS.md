@@ -14,7 +14,7 @@ Subagents execute development only inside their assigned work order and write se
 
 ## Native baseline: return to the pinned owner
 
-1. Read `desktop/e-mate-desktop/base-contract.json` before changing runtime behavior. The only accepted Harness baseline is `@deepseek-ai/dsh@0.1.5-rc.1`, repository commit `8cc7914c51a063cd2b851a9eb956c72b4c16471b`. The only accepted Desktop reference is `anywhere-labs/deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517`.
+1. Read `desktop/e-mate-desktop/base-contract.json` before changing runtime behavior. The only accepted Harness baseline is `@deepseek-ai/dsh@0.1.5-rc.1`, repository commit `ff9a977890dafc4fe9b05634470db9a33bc9a3ef`. The only accepted Desktop reference is `anywhere-labs/deepseek-harness-desktop@166c16cfc38c51d32c2316715548c0f8271db517`.
 2. Trace the complete 0.1.5 native path before adding code. Reuse its Agent Loop, Session, event projection, Tool, approval, Job, Skill, workspace, storage, settings, plugin, slot, and lifecycle owners. Fix a shared native defect at its owner when possible; keep an e-Mate adapter only for a real product-specific difference.
 3. Never infer native behavior from a floating branch, another release candidate, a newer DSH version, or a historical e-Mate implementation. Do not add parallel UI, stores, routers, transports, Host or Agent Loop paths, Tool registries, updaters, package managers, or fallbacks. Delete divergence and route callers back to the pinned native owner.
 
@@ -60,6 +60,6 @@ Subagents execute development only inside their assigned work order and write se
 
 ## Current release direction: 0.1.5-rc.1 and one tidychat plugin
 
-The user directed the 0.1.5 migration onto the accepted baseline. Keep Harness 0.1.5-rc.1 at 8cc7914c51a063cd2b851a9eb956c72b4c16471b and the native dsh-desktop reference. The Agent Loop must remain unmodified; image/Vision capabilities use native plugin/Tool interfaces. Preserve existing image reference, edit routing, terminal deduplication and recovery fixes carried over from the 0.1.5 migration tree.
+The user directed the 0.1.5 migration onto the accepted baseline. Keep Harness 0.1.5-rc.1 at ff9a977890dafc4fe9b05634470db9a33bc9a3ef and the native dsh-desktop reference. The Agent Loop must remain unmodified; image/Vision capabilities use native plugin/Tool interfaces. Preserve existing image reference, edit routing, terminal deduplication and recovery fixes carried over from the 0.1.5 migration tree.
 
 Use dsh-tidychat for both message-process folding and conversation navigation. Do not install a second owner for either function. Automatic older-history loading is disabled, including restoration of previous autoLoad=true settings; preserve the native manual load action. Project file browsing is a separate capability and is not removed as a substitute for conversation navigation. Build, install and release acceptance still require the existing native Desktop owners and dual-platform evidence.
