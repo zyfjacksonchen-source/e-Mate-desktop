@@ -300,6 +300,12 @@ assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSes
 **影响面**：所有依赖托管模型的实机用例（B/C/D 组、G 组可见性、三维度性能的**处理侧**）都停在这里；
 不依赖模型的用例（A 登录与企业、F 设置与更新、H 移除项核对、门禁）已完成，见上表。
 
+**第 9 轮补充验证（排除"换个模型就能跑"的可能）**：输入区模型 chip 显示的是
+`deepseek-official/deepseek-v4-flash-vision-exp`（非企业模型名），但点开"模型"一级菜单**仍然走企业运行时策略**
+—— 它重新触发同一次 `/v1/runtime-models` 失败（同样的 `INVALID_REQUEST` / `没有可用的模型。`）。
+即：**产品设计上模型选择本身由企业策略门控**，不存在"绕开企业服务、改用本地 provider"的合法路径；
+这条也再次证明阻塞在服务端而不在客户端。按用户规则，**不换模型、不伪造**。
+
 ## AC-06 Windows 安装态（C5）—— 安装与就地替换 **PASS**，GUI 启动 `OPEN`（需已登录交互式会话）
 
 在一台**已装 e-Mate 2.0.17** 的远程 Windows 机器上（`win-codex`）做真实升级安装：
