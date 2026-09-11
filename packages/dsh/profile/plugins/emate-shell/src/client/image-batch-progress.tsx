@@ -1,5 +1,6 @@
 import { memo, useCallback, useRef, useState } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { IconEditOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -64,7 +65,8 @@ export function exactPreview(sessions: SessionListState, task: ImageBatchClientT
   const pointer = task.receipt
   if (childSessionId === undefined || pointer === undefined || pointer.ownerSessionId !== childSessionId
     || (pointer.status !== 'completed' && pointer.status !== 'needs-review')) return undefined
-  const values = sessions.byId[childSessionId]?.projectionValues as Readonly<Record<string, unknown>> | undefined
+  // The list is keyed by branded SessionId; task ids arrive in their plain wire spelling.
+  const values = sessions.byId[childSessionId as SessionId]?.projectionValues as Readonly<Record<string, unknown>> | undefined
   const rows = values?.eMateImageReceipts
   if (!Array.isArray(rows)) return undefined
   for (const row of rows) {

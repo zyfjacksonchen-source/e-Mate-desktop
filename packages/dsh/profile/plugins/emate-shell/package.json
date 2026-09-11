@@ -49,7 +49,8 @@
   },
   "scripts": {
     "build": "../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
-    "test": "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/*.spec.tsx"
+    "test": "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/*.spec.tsx",
+    "typecheck": "../../../../../upstream/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json"
   },
   "license": "MIT"
 }

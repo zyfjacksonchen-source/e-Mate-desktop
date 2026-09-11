@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore, type ComponentType } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { DesktopUpdateTriggerBridge } from '../../../../../../../desktop/e-mate-desktop/src/desktop-update-trigger-contract.ts'
 import { SessionShareAction, type SessionShareActionProps } from './session-share.tsx'
 import { collectInternalSubagentIds, highlightedProductSessionId, isTopLevelProductSession } from './session-visibility.ts'
@@ -78,7 +79,8 @@ export function HeaderControls({
     const candidate = highlightedProductSessionId(state)
     if (candidate === undefined || candidate !== currentSessionId
       || pathname !== `/chat/${encodeURIComponent(candidate)}`) return undefined
-    const row = state.byId[candidate]
+    // The list is keyed by branded SessionId; the route carries the plain spelling.
+    const row = state.byId[candidate as SessionId]
     return row !== undefined && !row.blank
       && isTopLevelProductSession(row, collectInternalSubagentIds(state)) ? candidate : undefined
   })

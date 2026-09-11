@@ -1,4 +1,6 @@
 import type { UseProjection, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import css from './task-details.module.css'
 import { openNativePetSettings } from './settings-chrome.tsx'
 import { createPetWorkFactsReader } from './pet-image-facts.ts'
@@ -67,7 +69,9 @@ interface TaskDetailsTabProps {
   useSessions: TaskDetailsProps['useSessions']
   useProjection: UseProjection
   useSessionPendingInteraction: TaskDetailsProps['useSessionPendingInteraction']
-  useTabInfo: () => { tab: { id: string; navigation: { params?: unknown } } }
+  // The native seat's own hook face: the tab record carries its id, title and navigation.
+  // The native title seat's own hook face: the tab record carries its id, title and navigation.
+  useTabInfo: PropsRuntime<'sidebar.right.pane.tab.title'>['useTabInfo']
   closeTab(tabId: string): void
 }
 

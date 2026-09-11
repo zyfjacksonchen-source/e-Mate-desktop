@@ -328,8 +328,11 @@ export function SidebarRoot({
         onClick={() => { openSession(row.id) }}
       >
         <span>{row.blank ? '新会话' : row.displayTitle}</span>
-        {row.running || row.pendingInteraction !== undefined
-          ? <i className={`${css.activity} ${row.pendingInteraction !== undefined ? css.waiting : ''}`} aria-label={row.pendingInteraction !== undefined ? '等待你确认' : '任务正在进行'} />
+        {/* 0.1.5's SessionSummary publishes no per-session pending-interaction fact:
+            that state is session-scoped (ui-session's pending-interaction hook), and the
+            waiting affordance lives with the session's own panel rather than a list row. */}
+        {row.running
+          ? <i className={css.activity} aria-label="任务正在进行" />
           : null}
       </button>
       <details className={css.taskMenu}>

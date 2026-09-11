@@ -115,6 +115,13 @@ export const legacyArtifactDefinition: ConversationNodeDefinition<LegacyArtifact
   },
 }
 
+// e-mate's own Chat node kind, registered into the native keyed domain.
+declare module '@deepseek-ai/dsh-client-ui-chat/client' {
+  interface ChatNodeDataMap {
+    'legacy-artifacts': LegacyArtifactEventData
+  }
+}
+
 interface LegacyArtifactsProps extends PropsRuntime<'conversation.chat.node', 'legacy-artifacts'> {
   readonly canDownload: boolean
 }

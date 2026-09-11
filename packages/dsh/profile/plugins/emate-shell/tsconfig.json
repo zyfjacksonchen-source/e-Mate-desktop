@@ -33,6 +33,9 @@
       "@deepseek-ai/dsh-client-ui-slots": [
         "../../../../../upstream/deepseek-harness/packages/client/ui-slots/src/index.ts"
       ],
+      "@deepseek-ai/dsh-client-ui-sidebar-right/client": [
+        "../../../../../upstream/deepseek-harness/packages/client/ui-sidebar-right/src/client/index.ts"
+      ],
       "@deepseek-ai/dsh-session/types": [
         "../../../../../upstream/deepseek-harness/packages/core/session/src/types.ts"
       ],
@@ -49,6 +52,8 @@
   },
   "include": [
     "src/**/*.ts",
-    "src/**/*.tsx"
+    "src/**/*.tsx",
+    "../../../../../upstream/deepseek-harness/packages/goal/goal/src/types.ts",
+    "../../../../../upstream/deepseek-harness/packages/todo/tool-todo/src/types.ts"
   ]
 }

@@ -76,8 +76,14 @@ for (const component of components) {
 }
 
 for (const component of components) {
+  const manifest = JSON.parse(readFileSync(resolve(component.root, 'package.json'), 'utf8'))
   run(['--config.shell-emulator=true', '--dir', component.root, 'run', 'build'], command === 'check'
     ? { ...process.env, EMATE_COMPONENT_CHECK: '1' }
     : process.env)
   if (command === 'check') run(['--config.shell-emulator=true', '--dir', component.root, 'run', 'test'])
+  // A component that declares a typecheck script owns a compiler face; tsdown only
+  // transpiles, so without this step stale native reads stay invisible to the gate.
+  if (command === 'check' && manifest.scripts?.typecheck !== undefined) {
+    run(['--config.shell-emulator=true', '--dir', component.root, 'run', 'typecheck'])
+  }
 }
