@@ -3071,3 +3071,19 @@ gitmv_exit=128
 | `node scripts/component-run.mjs check` | **EXIT 0**（turn-fold 三条 seam 各 1/1 + ChatView 作用域 6 个宿主符号，bundle sha256 `cf53ae8f5978901504286189a64506febf09cd237d097db3abf3f39b3953ba97`） |
 
 `test:fast` 只动一行：node --test 文件列表里加入 `scripts/no-core-rewrite-guard.test.mjs`。
+
+### 86 目标备注 E 项已过时：emate-shell 的编译面早已存在且在门禁内执行
+
+目标描述里写着「emate-shell 无 tsconfig.json，tsdown 只转译不类型检查，该包组件门禁从不做类型检查，需补」。**实测不成立**，该备注记录的是迁移早前的状态：
+
+| 实测项 | 结果 |
+|---|---|
+| `packages/dsh/profile/plugins/emate-shell/tsconfig.json` | **存在** |
+| `package.json` 脚本 | `build` / `test` / **`typecheck`** 均存在 |
+| `pnpm --dir packages/dsh/profile/plugins/emate-shell run typecheck` | **PASS**（exit 0） |
+| 组件清单行 | `@e-mate/dsh-client-shell`（`root: packages/dsh/profile/plugins/emate-shell`） |
+| `node scripts/component-run.mjs check --component @e-mate/dsh-client-shell` | **exit 0**，日志内含 `$ ../../../../../upstream/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json` |
+
+即：该组件的编译面**存在、通过、且确实由组件门禁执行**（不是"声明了但被跳过"）。
+**过程更正**：上一轮我用 `timeout 900 node …` 验证得到 exit 127——那是 macOS 默认**没有 `timeout`** 命令，命令根本没跑，**不是门禁失败**；本轮改为后台任务 + 等待，才是有效证据。这类"我自己引入的无效证据"必须记录，避免后人误读。
+
