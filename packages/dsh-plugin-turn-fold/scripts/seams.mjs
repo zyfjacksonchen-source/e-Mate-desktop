@@ -13,6 +13,12 @@
  * (the pinned fork checkout, commit d1d095bee770c3e9d302f844083e02f0b74576ee).
  * `lib/` is build output: run the pinned Harness build first, or this checker
  * fails closed with that instruction instead of guessing.
+ *
+ * The patches may only touch the bundle they were verified against, so the checker also
+ * holds the verified digest (`TARGET_BUNDLE_SHA256`, the AGENTS.md condition "the bundle
+ * hash must be verified"). A rebuilt bundle with a different digest is refused *before* a
+ * single selector is evaluated: no seam result is produced, no patch is authorized, and the
+ * failure names both the pinned and the resolved digest.
  */
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -30,6 +36,19 @@ export const TARGET = Object.freeze({
   package: '@deepseek-ai/dsh-client-ui-chat',
   file: 'lib/client.js',
 })
+
+/**
+ * sha256 of the compiled target those three selectors were verified against.
+ *
+ * This is the identity of the only bundle the patches may touch, so `assertSeams` compares
+ * the resolved bundle against it and refuses everything else. It is pinned deliberately
+ * rather than computed at run time: a Harness rebuild that changes the compiled shape must
+ * first re-verify the three selectors by hand, and only then may this value move.
+ *
+ * The file size is reported (`report.fileBytes`) but deliberately not asserted — the digest
+ * is the identity, and a second numeric pin would only be one more thing to disagree with it.
+ */
+export const TARGET_BUNDLE_SHA256 = 'cf53ae8f5978901504286189a64506febf09cd237d097db3abf3f39b3953ba97'
 
 /**
  * The three selectors are copied verbatim from the vendored
@@ -208,6 +227,30 @@ function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
 }
 
+/** Identifier of the bundle-hash gate, reported beside the three selector checks. */
+export const BUNDLE_HASH_CHECK_ID = 'verify-bundle-hash'
+
+/**
+ * Compare the resolved bundle digest against the pin, in the same result shape the selector
+ * checks use, so the gate is rendered and reported exactly like they are.
+ *
+ * Pure on purpose: it takes two digests and touches no filesystem, so it carries no file
+ * identity and cannot be the gate itself. The gate that owns the file is `assertSeams`,
+ * which is the only place the pin can refuse a patch.
+ *
+ * @param {string} actualSha256 digest of the resolved bundle
+ * @param {string} pinnedSha256 the digest that bundle must have; defaults to the pin
+ * @returns {{ result: {id: string, ok: boolean, found: number, expect: number, detail: string}, failures: string[] }}
+ */
+export function evaluateBundleHash(actualSha256, pinnedSha256 = TARGET_BUNDLE_SHA256) {
+  const ok = actualSha256 === pinnedSha256
+  const detail = ok
+    ? `resolved sha256 ${actualSha256} is the verified target`
+    : `resolved sha256 ${actualSha256} is not the verified target (pinned ${pinnedSha256})`
+  const result = { id: BUNDLE_HASH_CHECK_ID, ok, found: ok ? 1 : 0, expect: 1, detail }
+  return { result, failures: ok ? [] : [`${BUNDLE_HASH_CHECK_ID}: ${detail}`] }
+}
+
 function line(ts, sourceFile, node) {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
 }
@@ -282,27 +325,56 @@ export function evaluateHostSymbols(ts, sourceText, fileName, results) {
 }
 
 /**
- * Evaluate every seam against the pinned build.
- * @returns a report object; throws when any seam does not resolve as declared.
+ * Verify the bundle pin, then evaluate every seam against the pinned build.
+ *
+ * The order is the guard: the hash gate runs first, and when the resolved bundle is not the
+ * verified target this throws **before a single selector is evaluated**. Nothing downstream
+ * can then read the run as an authorization, so no patch is applied to a bundle whose shape
+ * was never verified — `report.evaluated` is false and both hook lists are empty.
+ *
+ * @param {{pinnedSha256?: string}} [options] exists so `test/seams.test.mjs` can drive the
+ *   mismatch path; `build.mjs` and the CLI call this with no argument, so the shipped gate
+ *   always uses `TARGET_BUNDLE_SHA256`.
+ * @returns a report object; throws when the pin mismatches, or when any seam does not
+ *   resolve as declared.
  */
-export function assertSeams() {
+export function assertSeams(options = {}) {
+  const pinnedSha256 = options.pinnedSha256 ?? TARGET_BUNDLE_SHA256
   const harnessRoot = findHarnessRoot()
   const ts = loadCompiler(harnessRoot)
   const target = locateTarget(harnessRoot, TARGET)
-  const sourceText = readFileSync(target.file, 'utf8')
+  const fileBytes = statSync(target.file).size
+  const fileSha256 = sha256(target.file)
 
-  const seams = evaluateSeams(ts, sourceText, target.file)
-  const hosts = evaluateHostSymbols(ts, sourceText, target.file, seams.results)
-  const failures = [...seams.failures, ...hosts.failures]
-  const report = {
+  const hash = evaluateBundleHash(fileSha256, pinnedSha256)
+  const identity = {
     packageName: target.name,
     packageVersion: target.version,
     file: target.file,
-    fileSha256: sha256(target.file),
+    fileBytes,
+    fileSha256,
+    pinnedSha256,
     harnessRoot,
-    seams: seams.results,
-    symbols: hosts.symbols,
+    hash: hash.result,
+    bundleVerified: hash.result.ok === true,
   }
+
+  if (hash.result.ok !== true) {
+    const report = { ...identity, evaluated: false, seams: [], symbols: [] }
+    const error = new Error(
+      `turn-fold seams failed against ${target.name}@${target.version}:\n  - ${hash.failures.join('\n  - ')}\n` +
+      `no patch is authorized for this bundle: the hash gate refused it (${fileBytes} bytes at ${target.file}) ` +
+      'before any selector was evaluated.',
+    )
+    error.report = report
+    throw error
+  }
+
+  const sourceText = readFileSync(target.file, 'utf8')
+  const seams = evaluateSeams(ts, sourceText, target.file)
+  const hosts = evaluateHostSymbols(ts, sourceText, target.file, seams.results)
+  const failures = [...seams.failures, ...hosts.failures]
+  const report = { ...identity, evaluated: true, seams: seams.results, symbols: hosts.symbols }
   if (failures.length > 0) {
     const error = new Error(`turn-fold seams failed against ${target.name}@${target.version}:\n  - ${failures.join('\n  - ')}`)
     error.report = report
@@ -316,7 +388,18 @@ export function formatReport(report) {
     `turn-fold seams vs ${report.packageName}@${report.packageVersion}`,
     `  build: ${report.file}`,
     `  sha256: ${report.fileSha256}`,
+    `  pinned: ${report.pinnedSha256}`,
   ]
+  if (report.hash !== undefined) {
+    rows.push(`  ${report.hash.ok ? 'OK  ' : 'FAIL'} ${report.hash.id.padEnd(30)} ${report.hash.found}/${report.hash.expect}  ${report.hash.detail}`)
+  }
+  if (report.evaluated === false) {
+    // A refused bundle has no seam results to show: printing the selector rows here would
+    // read as a pass for a bundle whose compiled shape was never inspected.
+    rows.push('  SKIP seam selectors and host symbols: the hash gate refused this bundle first')
+    rows.push('  REFUSED: no patch is applied to a bundle that is not the verified target')
+    return rows.join('\n')
+  }
   for (const seam of report.seams) {
     rows.push(`  ${seam.ok ? 'OK  ' : 'FAIL'} ${seam.id.padEnd(30)} ${seam.found}/${seam.expect}  ${seam.detail}`)
   }
