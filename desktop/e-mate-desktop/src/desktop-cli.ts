@@ -70,7 +70,14 @@ export async function runDesktopDshCli(
   if (profileName !== undefined) {
     argv.splice(2, argv.length - 2, ...withDefaultDesktopProfile(argv.slice(2), profileName))
   }
-  await load(DSH_ENTRY_URL)
+  // 0.1.5's bin entry runs itself only under `import.meta.main`, which is false for a
+  // module another entry imports, so the bootstrap starts the CLI through its exported
+  // runner instead of relying on the import's side effect.
+  const entry = await load(DSH_ENTRY_URL) as { runCli?: () => Promise<void> } | undefined
+  if (typeof entry?.runCli !== 'function') {
+    throw new Error('dsh-desktop: packaged dsh entry does not export runCli')
+  }
+  await entry.runCli()
 }
 
 function isDirectExecution(): boolean {
