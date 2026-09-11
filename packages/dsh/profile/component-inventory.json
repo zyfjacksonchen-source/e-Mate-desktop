@@ -114,12 +114,6 @@
       "root": "packages/dsh-plugin-imagegen",
       "desktop": "bundled-profile",
       "cli": true
-    },
-    {
-      "id": "@e-mate/dsh-plugin-turn-fold",
-      "root": "packages/dsh-plugin-turn-fold",
-      "desktop": "bundled-profile",
-      "cli": false
     }
   ]
 }
