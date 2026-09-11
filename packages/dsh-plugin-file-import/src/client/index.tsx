@@ -67,7 +67,7 @@ interface FileImportProps {
   readonly readAttachment: (ref: ImageAttachmentRef) => Promise<unknown>
   readonly imageLimits: () => { maxImageBytes: number; maxImagesPerMessage: number; maxMessageImageBytes: number; maxImagePixels: number; mediaTypes: readonly string[] } | undefined
   readonly notify: (level: 'info' | 'error', text: string) => void
-  readonly renderComposer: (parts: { accessory: ReactNode; controls: ReactNode; pending: boolean; addImages: (files: readonly File[]) => string | null }) => ReactNode
+  readonly renderComposer: (parts: { accessory: ReactNode; controls: ReactNode; picker: ReactNode; pending: boolean; addFiles: (files: readonly File[]) => string | null }) => ReactNode
 }
 const EMPTY_INPUT = { draft: '', phase: 'plain', fileRefs: [], imageIds: [], imageRefs: [], hydratedImageKeys: [], runtimeOnlyImageIds: [], imageStagePending: false }
 const ABSENT_ACTIONS: FileInputActions = {
@@ -508,7 +508,11 @@ export function FileImportControl({
   }
   return renderComposer({
     pending: busy || hydrating || hydrationPending,
-    addImages: files => { void intake(files); return null },
+    // rc.1's InputBar takes the composer's addFiles intake; returning null keeps
+    // the import transaction in this plugin's staging rows.
+    addFiles: files => { void intake(files); return null },
+    // A composer body that renders this plugin's own controls draws the trigger here;
+    // the rc.1 native tool row draws it from the conversation.input.left entry instead.
     controls: <>
       <button type="button" className={css.button} aria-label="添加本地图片或文件"
         title={isLoopback ? '添加本地图片或文件' : '本地文件导入仅支持当前电脑'} disabled={disabled}
@@ -516,6 +520,8 @@ export function FileImportControl({
       <input ref={picker} hidden type="file" multiple
         accept={`${[...IMAGE_MEDIA].join(',')},${Object.keys(ALLOWED_MEDIA_BY_EXTENSION).map(extension => `.${extension}`).join(',')}`} onChange={choose} />
     </>,
+    picker: <input ref={picker} hidden type="file" multiple
+      accept={`${[...IMAGE_MEDIA].join(',')},${Object.keys(ALLOWED_MEDIA_BY_EXTENSION).map(extension => `.${extension}`).join(',')}`} onChange={choose} />,
     accessory: input.fileRefs.length + rows.length === 0 ? null : <div className={css.rows} role="status" aria-live="polite" aria-label="附件">
       <FileCards files={input.fileRefs} remove={inputActions.removeFile} />
       {rows.map(row => <div key={row.id} className={css.row} data-phase={row.phase}>
@@ -552,6 +558,24 @@ export function apply(ctx: Context): void {
   }
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
   ctx.effect(() => inputTriggers.registerSource(source), 'file-import: @文件 source')
+  // rc.1 renders the composer's tool row from conversation.input.left and has no
+  // leftItems prop, so the trigger is its own entry; it asks the owning control to
+  // open its picker through the same request event the @文件 source dispatches.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+    name: 'conversation.input.left',
+    id: 'e-mate-file-import',
+    order: 12,
+    inject: (sessionId: string) => ({ sessionId, isLoopback: ctx.connection.isLoopback }),
+  }, function FileAttachControl({ sessionId, isLoopback }: any) {
+    // Busy/hydration admission stays with the owning control, whose listener refuses
+    // the request unless the composer is idle; this trigger only mirrors the platform gate.
+    return <button type="button" className={css.button} aria-label="添加本地图片或文件"
+      title={isLoopback ? '添加本地图片或文件' : '本地文件导入仅支持当前电脑'}
+      disabled={!isLoopback}
+      onClick={() => { document.dispatchEvent(new CustomEvent(FILE_PICK_EVENT, { detail: { sessionId } })) }}>
+      <IconPaperclipOutline16 size={16} />
+    </button>
+  }))
   ctx.slots.inject('e-mate.conversation.composer', () => {
     return ctx.slots.register({
       name: 'e-mate.conversation.composer',
@@ -562,12 +586,16 @@ export function apply(ctx: Context): void {
       const target = sessionId === undefined ? undefined : ctx.sessions.binding(sessionId)?.session
       const call = useCallback((endpoint: 'import' | 'stage-images', payload: Record<string, unknown>, signal?: AbortSignal) =>
         ctx.connection.rpc.call(CHANNEL, endpoint, payload, signal), [])
+      // rc.1 owns draft attachments per target session and names the three
+      // resolvers createDrafts / resolveDraftAttachments / releaseDraftAttachments.
       const createImages = useCallback((files: readonly File[]) =>
-        ctx.conversation.createDraftImages(files) as readonly DraftImageDescriptor[], [])
+        sessionId === undefined
+          ? []
+          : ctx.conversation.createDrafts(sessionId, files) as readonly DraftImageDescriptor[], [sessionId])
       const resolveDraftImages = useCallback((ids: readonly string[]) =>
-        ctx.conversation.draftImages(ids) as readonly DraftImageDescriptor[], [])
+        ctx.conversation.resolveDraftAttachments(ids) as readonly DraftImageDescriptor[], [])
       const releaseImages = useCallback((images: readonly DraftImageDescriptor[]) => {
-        ctx.conversation.releaseDraftImages(images as never)
+        ctx.conversation.releaseDraftAttachments(images as never)
       }, [])
       const readImage = useCallback(async (ref: ImageAttachmentRef) => {
         if (target === undefined || sessionId === undefined || ctx.sessions.binding(sessionId)?.session !== target) throw new Error('stale session')
@@ -593,12 +621,11 @@ export function apply(ctx: Context): void {
         readAttachment={readImage}
         imageLimits={limits}
         notify={sendNotice}
-        renderComposer={({ accessory, controls, pending, addImages }) => createElement(InputBar, {
+        renderComposer={({ accessory, picker, pending, addFiles }) => createElement(InputBar, {
           ...props,
-          addImages,
+          addFiles,
           blocked: props.blocked ?? (pending ? { reason: '附件正在导入，请稍候。' } : undefined),
-          accessory: accessory === null ? props.accessory : props.accessory == null ? accessory : <>{props.accessory}{accessory}</>,
-          leftItems: <>{props.leftItems}{controls}{renderSlot('e-mate.conversation.composer.after-upload', {})}</>,
+          accessory: <>{picker}{props.accessory}{accessory}</>,
         })} />
     })
   })

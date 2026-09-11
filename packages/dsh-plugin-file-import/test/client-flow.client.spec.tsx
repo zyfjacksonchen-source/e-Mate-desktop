@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SlotTestRuntime } from '../../../upstream/deepseek-harness/packages/test-support/client-runtime/src/index.ts'
 import { InputBar } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx'
 import { SessionInputShell } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
-import { registerChatNodeRenderers } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/chat/register-node-renderers.ts'
+// rc.1 moved the Chat renderer registrations (and the node definitions) to ui-chat.
+import { registerChatNodeRenderers } from '../../../upstream/deepseek-harness/packages/client/ui-chat/src/client/chat/register-node-renderers.ts'
 import { adaptHarnessConversationSource } from '../../../scripts/harness-conversation-adapter.mjs'
 import { stripTypeScriptTypes } from 'node:module'
 import { ComposerExpertMode } from '../../dsh/profile/plugins/emate-shell/src/client/composer-connectors.tsx'
@@ -34,6 +35,11 @@ function file(name = imported.display_name, type = 'text/plain'): File {
   return value
 }
 function picker(): HTMLInputElement { return document.querySelector('input[type=file]') as HTMLInputElement }
+/** Accessory children the plugin adds beyond its hidden picker host. */
+function visibleAccessoryChildren(accessory: unknown): unknown[] {
+  const children = (accessory as { props?: { children?: unknown[] } } | undefined)?.props?.children ?? []
+  return children.filter((child: any) => child !== null && child !== undefined && child !== false && child?.type !== 'input')
+}
 
 // React store fixture for the plugin's native InputState face. The actual
 // transformed native facade/store/hub are exercised by the adapter self-check.
@@ -83,7 +89,7 @@ function Composer({
     createDraftImages={createDraftImages} draftImages={resolveDraftImages} releaseDraftImages={releaseDraftImages}
     readAttachment={readAttachment} imageLimits={getImageLimits}
     notify={sendNotice}
-    renderComposer={({ accessory, controls, pending }) => <div data-composer-card>{accessory}<textarea readOnly value={input.draft} /><button disabled={pending}>发送</button>{controls}</div>} />
+    renderComposer={({ accessory, controls, pending, picker }) => <div data-composer-card>{picker}{accessory}<textarea readOnly value={input.draft} /><button disabled={pending}>发送</button>{controls}</div>} />
 }
 afterEach(cleanup)
 
@@ -540,7 +546,8 @@ describe('file import composer lifecycle', () => {
     const beginImageStage = vi.fn(() => true)
     const cancelImageStage = vi.fn()
     const addDurableImages = vi.fn(() => true)
-    const createDraftImages = vi.fn((selected: readonly File[]) => selected.map(value => ({ id: 'typed-native-id', file: value })))
+    // rc.1's createDrafts takes the target Session first.
+    const createDraftImages = vi.fn((_sessionId: string, selected: readonly File[]) => selected.map(value => ({ id: 'typed-native-id', file: value })))
     const releaseDraftImages = vi.fn()
     const Native = (props: any) => {
       lastNativeProps = props
@@ -551,16 +558,22 @@ describe('file import composer lifecycle', () => {
       const shell = new SessionInputShell({ actx: {} as never, defaultSink: vi.fn() })
       const adaptedSnapshot = () => ({
         ...shell.snapshot, fileRefs: [], imageRefs: [], hydratedImageKeys: [],
-        runtimeOnlyImageIds: shell.snapshot.imageIds, imageStagePending: false,
+        runtimeOnlyImageIds: shell.snapshot.attachmentIds, imageStagePending: false,
       })
-      const shellAddImages = vi.spyOn(shell, 'addImages')
+      const shellAddAttachments = vi.spyOn(shell, 'addAttachments')
       const absentMenu = { getSnapshot: () => null, subscribe: () => () => {} }
+      // A snapshot must keep its identity between changes or uSES re-renders forever.
+      const emptyUploads = {}
+      const absentUploads = { getSnapshot: () => emptyUploads, subscribe: () => () => {} }
       const locale = { revision: 0 }
       runtime.slots.installLocale({ getSnapshot: () => locale, subscribe: () => () => {}, bind: () => (key: string) => key } as never)
-      runtime.provide('inputTriggers', { registerSource(source: any) { trigger = source; return () => {} } } as never)
-      runtime.provide('connection', { isLoopback: true, rpc: { call: callImport } } as never)
-      runtime.provide('conversation', {
-        input: { for: () => ({ notify: vi.fn() }) }, draftImages: () => [], createDraftImages, releaseDraftImages,
+      // 0.1.5's test runtime exposes the real Context; services are provided on it.
+      runtime.ctx.provide('inputTriggers', { registerSource(source: any) { trigger = source; return () => {} } } as never)
+      runtime.ctx.provide('connection', { isLoopback: true, rpc: { call: callImport } } as never)
+      runtime.ctx.provide('conversation', {
+        input: { for: () => ({ notify: vi.fn() }) }, resolveDraftAttachments: () => [],
+        createDrafts: createDraftImages, releaseDraftAttachments: releaseDraftImages,
+        fileUploads: { getSnapshot: () => emptyUploads, subscribe: () => () => {} },
       } as never)
       await runtime.sessions.add({ id: 'one' }, { current: false })
       await runtime.sessions.add({ id: 'two' }, { current: false })
@@ -571,21 +584,29 @@ describe('file import composer lifecycle', () => {
       // Execute the exact adapted native registration, including its children
       // and inject. SlotTestRuntime uses production SlotRegistry + web-react.
       const source = adaptHarnessConversationSource(readFileSync(resolve(process.cwd(), 'packages/client/ui-conversation/lib/client.js'), 'utf8'))
-      const start = source.indexOf('\t\t\tslots.register({\n\t\t\t\tname: "conversation.composer.bar",')
-      const end = source.indexOf('\t\t\tslots.register({\n\t\t\t\tname: "conversation.composer",', start)
+      // rc.1 emits the composer-bar entry as a named registration factory; the
+      // slice ends at the next registration the same build emits.
+      const start = source.indexOf('const registerComposerBar = () => slots.register({\n\t\t\t\tname: "conversation.composer.bar",')
+      const end = source.indexOf('\n\t\t\tslots.inject("main", function* () {', start)
       expect(start).toBeGreaterThan(0)
       expect(end).toBeGreaterThan(start)
       await runtime.mount({ inject: ['slots'], apply(ctx: any) {
-        new Function('env', `const { slots, InputBar, react_jsx_runtime, NS, inputHub, concreteConversation, ctx, submissionPolicy, ABSENT_NOTICES, ABSENT_LEXICON, ABSENT_MENU_LAUNCHER } = env;\n${source.slice(start, end)}`)({
+        // rc.1 emits the bar as a factory the 'main' inject yields; invoke it the
+        // same way so the entry and its declared children exist.
+        new Function('env', `const { slots, InputBar, react_jsx_runtime, NS, inputHub, concreteConversation, ctx, submissionPolicy, ABSENT_NOTICES, ABSENT_LEXICON, ABSENT_FILE_UPLOADS, ABSENT_MENU_LAUNCHER } = env;\n${source.slice(start, end)}\nregisterComposerBar();`)({
           slots: ctx.slots, InputBar: Native, react_jsx_runtime: jsxRuntime, NS: 'conversation', ctx,
           inputHub: { shell: () => shell, inputTriggers: () => undefined }, concreteConversation: () => ctx.conversation,
-          submissionPolicy: { resolve: () => 'queue' }, ABSENT_NOTICES: shell.notices,
+          // Every inject hook source must be a real observable; rc.1's no-session
+          // branch reads submissionPolicy.busyEnter through the same binding.
+          submissionPolicy: { resolve: () => 'queue', busyEnter: { getSnapshot: () => false, subscribe: () => () => {} } },
+          ABSENT_NOTICES: shell.notices,
           ABSENT_LEXICON: shell.lexicon, ABSENT_MENU_LAUNCHER: absentMenu,
+          ABSENT_FILE_UPLOADS: absentUploads,
         })
         registerChatNodeRenderers(ctx)
         const shellSource = readFileSync(resolve(process.cwd(), '../../packages/dsh/profile/plugins/emate-shell/src/client/index.ts'), 'utf8')
-        const expertStart = shellSource.indexOf("  ctx.slots.inject('e-mate.conversation.composer.after-upload'")
-        const expertEnd = shellSource.indexOf("  ctx.slots.inject('conversation.input.right'", expertStart)
+        const expertStart = shellSource.indexOf("  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({\n    name: 'conversation.input.right', id: 'e-mate-expert-mode'")
+        const expertEnd = shellSource.indexOf('\n  ctx.slots.inject(', expertStart + 1)
         expect(expertStart).toBeGreaterThan(0)
         expect(expertEnd).toBeGreaterThan(expertStart)
         // Execute the actual product registration against the native registry.
@@ -593,9 +614,13 @@ describe('file import composer lifecycle', () => {
         ctx.slots.register({ name: 'conversation.input.plan' }, () => <button>原生计划</button>)
         ctx.slots.register({ name: 'conversation.input.model' }, () => <button>原生模型</button>)
       } })
-      const actions = { ...shell.actions, addImages: nativeAddImages, beginImageStage, cancelImageStage, addDurableImages, hydrateDurableImage: vi.fn(), removeDurableImage: vi.fn(), addFiles: vi.fn(() => true), removeFile: vi.fn() }
+      const actions = { ...shell.actions, addFiles: nativeAddImages, beginImageStage, cancelImageStage, addDurableImages, hydrateDurableImage: vi.fn(), removeDurableImage: vi.fn(), addFiles: vi.fn(() => true), removeFile: vi.fn() }
+      // rc.1 renders the composer tool row from conversation.input.left; 引用 is a
+      // sibling entry of the product's own attach trigger.
+      runtime.ctx.slots.register({ name: 'conversation.input.left', id: 'native-tool', order: 5 } as never,
+        () => <button type="button" aria-label="引用">原生工具</button>)
       runtime.renderSlot('conversation.composer.bar' as never, {
-        useInput: (select: any) => select(live), inputActions: actions, leftItems: <button type="button" aria-label="引用">原生工具</button>,
+        useInput: (select: any) => select(live), inputActions: actions,
       } as never)
       const nativeTextarea = screen.getByRole('textbox') // Fallback before the product plugin loads.
       expect(screen.queryByRole('button', { name: '添加本地图片或文件' })).toBeNull()
@@ -608,7 +633,9 @@ describe('file import composer lifecycle', () => {
       await runtime.sessions.setCurrent(undefined)
       const feature = await runtime.mount({ inject, apply })
       const textarea = screen.getByRole('textbox')
-      expect(lastNativeProps.accessory).toBeUndefined()
+      // rc.1 has no composer leftItems, so the plugin hosts its picker input in the
+      // bar's accessory region; the contribution must stay invisible until rows exist.
+      expect(visibleAccessoryChildren(lastNativeProps.accessory)).toHaveLength(0)
       expect(screen.queryByRole('switch', { name: '专家模式' })).toBeNull()
       expect(runtime.slots.entries('conversation.composer.bar' as never)).toHaveLength(1)
       expect(runtime.slots.entries('e-mate.conversation.composer' as never)).toHaveLength(1)
@@ -631,11 +658,11 @@ describe('file import composer lifecycle', () => {
       expect([mentions, upload, expert].map(button => button.tabIndex)).toEqual([0, 0, 0])
       expect(callImport).toHaveBeenCalledWith('/emate.expert-mode', 'get', { session_id: 'one' }, expect.any(AbortSignal))
       const typed = file('typed.png', 'image/png')
-      expect(lastNativeProps.addImages([typed])).toBeNull()
+      expect(lastNativeProps.addFiles([typed])).toBeNull()
       await waitFor(() => expect(callImport.mock.calls.filter(call => call[1] === 'stage-images')).toHaveLength(1))
       expect(nativeAddImages).not.toHaveBeenCalled()
       expect(beginImageStage).toHaveBeenCalledOnce()
-      expect(shellAddImages).not.toHaveBeenCalled()
+      expect(shellAddAttachments).not.toHaveBeenCalled()
       finishStage(staged)
       await waitFor(() => expect(addDurableImages).toHaveBeenCalledOnce())
       expect(createDraftImages).toHaveBeenCalledOnce()
@@ -651,7 +678,9 @@ describe('file import composer lifecycle', () => {
       // rc.7 SessionMaybeEntry adopts the first session, then remounts on a
       // different session; the product follows the same isolation boundary.
       expect(screen.getByRole('textbox')).not.toBe(textarea)
-      expect(lastNativeProps.accessory).toBeUndefined()
+      // rc.1 has no composer leftItems, so the plugin hosts its picker input in the
+      // bar's accessory region; the contribution must stay invisible until rows exist.
+      expect(visibleAccessoryChildren(lastNativeProps.accessory)).toHaveLength(0)
       finishImport(success)
       await runtime.flush()
       expect(screen.queryByRole('button', { name: `移除 ${imported.display_name}` })).toBeNull()
@@ -669,7 +698,10 @@ describe('file import composer lifecycle', () => {
       expect(picked).toHaveBeenCalledOnce()
       expect(callImport).toHaveBeenCalledWith('/emate.expert-mode', 'get', { session_id: 'two' }, expect.any(AbortSignal))
       await feature.dispose()
-      expect(screen.queryByRole('switch', { name: '专家模式' })).toBeNull()
+      // The expert switch now owns a native tool-row seat registered by the shell
+      // slice, so the feature's own contributions are what must leave with it.
+      expect(runtime.slots.entries('conversation.input.left' as never)
+        .filter(entry => entry.options.id === 'e-mate-file-import')).toHaveLength(0)
       expect(runtime.slots.entries('e-mate.conversation.composer' as never)).toHaveLength(0)
       expect(screen.getByRole('textbox')).toBeTruthy()
       expect(screen.getByRole('button', { name: '原生计划' })).toBeTruthy()

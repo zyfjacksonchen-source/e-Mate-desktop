@@ -518,8 +518,10 @@ export function apply(ctx: any): void {
       },
     }),
   }, ComposerMentions))
-  ctx.slots.inject('e-mate.conversation.composer.after-upload', () => ctx.slots.register({
-    name: 'e-mate.conversation.composer.after-upload', id: 'e-mate-expert-mode', order: 12,
+  // rc.1 renders the composer's tool row from conversation.input.left/right; the
+  // e-mate after-upload slot it used before is no longer rendered by a composer body.
+  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+    name: 'conversation.input.right', id: 'e-mate-expert-mode', order: 19,
     inject: (sessionId: string) => ({
       sessionId,
       request: async (endpoint: 'get' | 'set', active: boolean | undefined, signal: AbortSignal) => {
