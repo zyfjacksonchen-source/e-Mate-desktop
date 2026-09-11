@@ -12,13 +12,22 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type {} from './contracts.ts'
 import type { DesktopClientEnvironment } from './environment.ts'
 import { AdvancedFrame } from './AdvancedFrame.tsx'
-import { DesktopLayoutState } from './layout-state.ts'
-import { provideDesktopLayout } from './layout-service.ts'
+import {
+  desktopLayoutActions, desktopLayoutSource, desktopPanelInfoSource, DesktopLayoutState,
+} from './layout-state.ts'
+import { DesktopLayoutController, provideDesktopLayout } from './layout-service.ts'
 import { installAdvancedStyles } from './styles.ts'
 import { DesktopThemePresenter } from './theme-presenter.ts'
 
 /**
  * Provide the advanced layout service and own the desktop root slot.
+ *
+ * The root registration carries the native frame contract: the built-in 'root'
+ * slot, its four ui-layout child slots (sidebar, main — keyed, so the
+ * Conversation is one panel among the global ones — rightbar, and
+ * shell.overlay), plus the desktop's own title-strip utilities seat. The
+ * right column's track is the occupant's report through ctx.layout, never a
+ * desktop decision.
  * @param ctx - active browser Cordis context.
  * @param environment - validated mode and platform marker.
  */
@@ -27,11 +36,47 @@ export function applyAdvancedShell(ctx: ClientContext, environment: DesktopClien
     throw new Error(`@e-mate/desktop: advanced shell received mode ${JSON.stringify(environment.mode)}`)
   }
 
-  const desktopLayout = new DesktopLayoutState()
-  ctx.effect(
-    () => provideDesktopLayout(ctx, desktopLayout),
-    'desktop: layout service',
-  )
+  // One state instance behind both faces: ctx.layout writes through these bound
+  // actions and the frame reads the same facts through the injected useLayout
+  // hook and the root usePanelInfo hook.
+  const layoutState = new DesktopLayoutState(window.innerWidth)
+  const actions = desktopLayoutActions(layoutState)
+
+  ctx.effect(() => {
+    const controller = new DesktopLayoutController(actions, id =>
+      ctx.slots.entries('main').some(entry => entry.options.key === id))
+    const disposeService = provideDesktopLayout(ctx, controller)
+    const disposePanelInfo = ctx.slots.provideRoot({ hooks: { panelInfo: desktopPanelInfoSource(layoutState) } })
+    // Keep the selected main key valid as panel entries come and go.
+    const retainMainPanels = (): void => {
+      actions.retainMainPanels(ctx.slots.entries('main').flatMap(entry =>
+        entry.options.key === undefined ? [] : [entry.options.key]))
+    }
+    const disposePanels = ctx.slots.subscribe('main', retainMainPanels)
+    retainMainPanels()
+    const disposeRegistration = ctx.slots.register({
+      name: 'root',
+      children: {
+        'sidebar': { kind: 'single', scope: 'root' },
+        'main': { kind: 'keyed', scope: 'root' },
+        'rightbar': { kind: 'single', scope: 'root' },
+        'shell.overlay': { kind: 'list', scope: 'root' },
+        'desktop.titlebar.utilities': { kind: 'list', scope: 'session-maybe' },
+      },
+      inject: () => ({
+        platform: environment.platform,
+        actions,
+        hooks: { layout: desktopLayoutSource(layoutState) },
+      }),
+    }, AdvancedFrame)
+    return () => {
+      controller.dispose()
+      disposeRegistration()
+      disposePanels()
+      disposePanelInfo()
+      disposeService()
+    }
+  }, 'desktop: advanced root slot')
 
   ctx.effect(() => {
     document.body.dataset.dshDesktopMode = 'advanced'
@@ -53,16 +98,4 @@ export function applyAdvancedShell(ctx: ClientContext, environment: DesktopClien
       presenter.dispose()
     }
   }, 'desktop: theme presenter')
-
-  ctx.effect(() => ctx.slots.register({
-    name: 'root',
-    children: {
-      'sidebar': { kind: 'single', scope: 'root' },
-      'conversation': { kind: 'single', scope: 'session-maybe' },
-      'details': { kind: 'single', scope: 'session' },
-      'shell.overlay': { kind: 'list', scope: 'root' },
-      'desktop.titlebar.utilities': { kind: 'list', scope: 'session-maybe' },
-    },
-    inject: () => ({ layout: desktopLayout, platform: environment.platform }),
-  }, AdvancedFrame), 'desktop: advanced root slot')
 }

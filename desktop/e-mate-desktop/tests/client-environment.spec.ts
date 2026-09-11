@@ -1,11 +1,8 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import { provideDesktopLayout } from '../src/client/layout-service.ts'
+import { DesktopLayoutController, provideDesktopLayout } from '../src/client/layout-service.ts'
 import { parseDesktopClientEnvironment } from '../src/client/environment.ts'
-import {
-  computeDesktopColumns, DesktopLayoutState, MACOS_SIDEBAR_COLLAPSED, SIDEBAR_COLLAPSED,
-} from '../src/client/layout-state.ts'
+import { desktopLayoutActions, DesktopLayoutState } from '../src/client/layout-state.ts'
 import { installAdvancedStyles } from '../src/client/styles.ts'
 import {
   MACOS_DRAG_REGION_HEIGHT,
@@ -98,7 +95,7 @@ describe('advanced desktop layout', () => {
       expect(css).toMatch(/\.dshDesktopMacCaptionRow \{[^}]*position: relative;[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;/)
       expect(css).toMatch(/\.dshDesktopMacCaptionRow \{[^}]*background:\s*transparent;/)
       expect(css).toMatch(/\.dshDesktopConversationSurface \{[^}]*background:\s*var\(--emate-color-workspace, var\(--dsw-alias-bg-base\)\);/)
-      expect(css).toMatch(/\.dshDesktopDetailsSurface \{[^}]*background:\s*var\(--emate-color-workspace, var\(--dsw-alias-bg-base\)\);/)
+      expect(css).toMatch(/\.dshDesktopRightbarSurface \{[^}]*background:\s*var\(--emate-color-workspace, var\(--dsw-alias-bg-base\)\);/)
       expect(css).toMatch(new RegExp(`\\.dshDesktopMacCaptionRow::before \\{[^}]*height: ${MACOS_DRAG_REGION_HEIGHT}px;[^}]*-webkit-app-region: drag;`))
       expect(css).not.toMatch(/\.dshDesktopMacCaptionRow::before \{[^}]*z-index:/)
       expect(css).not.toMatch(/data-desktop-platform="darwin"\] \.dshDesktopSidebarSurface \{[^}]*-webkit-app-region:\s*drag;/)
@@ -106,7 +103,7 @@ describe('advanced desktop layout', () => {
       expect(css).toMatch(/html:has\(\[aria-modal="true"\]\) \.dshDesktopMacCaptionRow::before,[\s\S]*html:has\(\[aria-modal="true"\]\) \.dshDesktopSidebarSurface::before \{ -webkit-app-region: no-drag !important; \}/)
       expect(css).toContain(`grid-template-rows: ${WINDOWS_TITLEBAR_HEIGHT}px minmax(0, 1fr)`)
       expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-platform="win32"\] \.dshDesktopSidebarSurface \{ grid-row: 1 \/ -1; \}/)
-      expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-platform="win32"\] \.dshDesktopConversationSurface,\s*\.dshDesktopFrame\[data-desktop-platform="win32"\] \.dshDesktopDetailsSurface \{ grid-row: 2; \}/)
+      expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-platform="win32"\] \.dshDesktopConversationSurface,\s*\.dshDesktopFrame\[data-desktop-platform="win32"\] \.dshDesktopRightbarSurface \{ grid-row: 2; \}/)
       expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;/)
       expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*background:\s*var\(--emate-color-workspace, var\(--dsw-alias-bg-base\)\);/)
       expect(css).toMatch(/body\[data-dsh-desktop-mode="advanced"\] \{[^}]*--dsh-desktop-caption-safe-width:\s*0px;/)
@@ -116,6 +113,7 @@ describe('advanced desktop layout', () => {
       expect(css).toMatch(/\.dshDesktopWindowsCaptionRow::before \{[^}]*inset: 0 var\(--dsh-desktop-caption-safe-width\) 0 0;[^}]*-webkit-app-region: drag;/)
       expect(css).toMatch(/\.dshDesktopTitlebarUtilities \{[^}]*top: 1px;[^}]*right: 112px;[^}]*height: 32px;/)
       expect(css).toContain('right: calc(var(--dsh-desktop-caption-safe-width) + 112px);')
+      expect(css).toMatch(/\.dshDesktopFrame\[data-dragging\] \{ transition: none !important; \}/)
       expect(css).toContain('right: calc(var(--dsh-desktop-caption-safe-width) + 10px);')
       expect(css).not.toMatch(/data-desktop-platform="win32"[^{}]*header[^{}]*\{[^}]*padding-right/)
       expect(appendChild).toHaveBeenCalledWith(style)
@@ -133,57 +131,22 @@ describe('advanced desktop layout', () => {
       reflect: {
         provide: (name: string, value: unknown) => {
           expect(name).toBe('layout')
-          expect(value).toBeInstanceOf(DesktopLayoutState)
+          expect(value).toBeInstanceOf(DesktopLayoutController)
           return () => { disposed = true }
         },
       },
     } as unknown as ClientContext
 
-    const dispose = provideDesktopLayout(ctx, new DesktopLayoutState())
+    const layout = new DesktopLayoutController(desktopLayoutActions(new DesktopLayoutState(1440)), () => false)
+    const dispose = provideDesktopLayout(ctx, layout)
     expect(disposed).toBe(false)
     dispose()
     expect(disposed).toBe(true)
   })
-
-  it('uses the compatibility rail on Windows and the wider desktop rail on macOS', () => {
-    expect(computeDesktopColumns(1440, 0, 0)).toEqual({ sidebar: SIDEBAR_COLLAPSED, center: 1384, details: 0 })
-    expect(computeDesktopColumns(1440, 0, 0, MACOS_SIDEBAR_COLLAPSED))
-      .toEqual({ sidebar: MACOS_SIDEBAR_COLLAPSED, center: 1350, details: 0 })
-    expect(SIDEBAR_COLLAPSED).toBe(56)
-    expect(MACOS_SIDEBAR_COLLAPSED).toBe(90)
-  })
-
-  it('publishes mirrored panel transitions', () => {
-    const layout = new DesktopLayoutState()
-    const snapshots: object[] = []
-    layout.subscribe(() => { snapshots.push(layout.getSnapshot()) })
-    layout.toggleSidebar()
-    layout.openDetails()
-    layout.closeDetails()
-    expect(snapshots).toEqual([
-      { sidebar: 0, details: 0, narrow: false, narrowExpanded: false },
-      { sidebar: 0, details: 360, narrow: false, narrowExpanded: false },
-      { sidebar: 0, details: 0, narrow: false, narrowExpanded: false },
-    ])
-  })
-
-  it('closes details whenever the current conversation changes', () => {
-    const source = readFileSync(new URL('../src/client/AdvancedFrame.tsx', import.meta.url), 'utf8')
-    expect(source).toMatch(/const currentSession = useSessions\(state => state\.current\)/u)
-    expect(source).toMatch(/if \(previousSession\.current !== currentSession\) layout\.closeDetails\(\)/u)
-  })
-
-  it('lets the rail re-expand without losing its wide preference on narrow windows', () => {
-    const layout = new DesktopLayoutState()
-    layout.setNarrow(true)
-    expect(layout.getSnapshot()).toMatchObject({ sidebar: 280, narrow: true, narrowExpanded: false })
-    layout.toggleSidebar()
-    expect(layout.getSnapshot()).toMatchObject({ sidebar: 280, narrow: true, narrowExpanded: true })
-    layout.setNarrow(false)
-    expect(layout.getSnapshot()).toMatchObject({ sidebar: 280, narrow: false, narrowExpanded: false })
-  })
 })
 
+// Panel facts, gesture writes and the column solve moved to
+// client-advanced-frame.spec.ts with the 0.1.5 layout ownership.
 
 it('notification navigation waits for the native catalog and drops missing sessions safely', async () => {
   const { installNotificationNavigation } = await import('../src/client/index.ts')
