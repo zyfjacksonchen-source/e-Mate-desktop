@@ -66,7 +66,6 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
   assert.deepEqual(pkg.dsh.client, {
     inject: [
       '@deepseek-ai/dsh-api-remotes',
-      '@deepseek-ai/dsh-client-runtime',
       '@deepseek-ai/dsh-client-ui-conversation',
       '@deepseek-ai/dsh-client-ui-tool',
       '@deepseek-ai/dsh-client-ui-settings',
