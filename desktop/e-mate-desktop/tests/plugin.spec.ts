@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { ThemePreference } from '@deepseek-ai/dsh-client-ui-theme'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   apply,
@@ -137,7 +136,8 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
     notify: async (next, prev) => { await watcher?.(next, prev) },
     notifyTheme: (preference) => {
       themePreference = preference
-      settingsUpdated?.(settingsNamespace('ui-theme'), { preference })
+      // 0.1.5 namespaces are plain strings; the provider brands them at register.
+      settingsUpdated?.('ui-theme', { preference })
     },
   }
 }
