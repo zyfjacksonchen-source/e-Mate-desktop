@@ -1,6 +1,6 @@
 # @e-mate/dsh-plugin-office-skills
 
-A native Skill provider for `meeting-summary`, `lieflat-charts` and `install-univer-office` on the pinned Harness rc.7 Profile. The historical package path remains stable; document, PDF, spreadsheet and presentation work belongs to the separately installed rc.7-compatible Univer Office plugin. The installation Skill uses the existing trusted `dsh_plugin_manage` catalog and native recoverable installation; no Office runtime is bundled here.
+A native Skill provider for `meeting-summary`, `lieflat-charts` and `install-univer-office` on the pinned Harness 0.1.5-rc.1 Profile. The historical package path remains stable; document, PDF, spreadsheet and presentation work belongs to the separately installed 0.1.5-rc.1-compatible Univer Office plugin. The installation Skill uses the existing trusted `dsh_plugin_manage` catalog and native recoverable installation; no Office runtime is bundled here.
 
 The provider injects only `skills` and uses the native Skill registry and bundled rank. It retains both presets' instructions, resources, source records and licenses. Each `HOST.md` resolves the actual resource directory. Meeting summaries preserve original transcript facts; Lieflat primarily creates HTML visualizations and loads `univer` plus the corresponding Unit Skill when Office data or outputs are required.
 

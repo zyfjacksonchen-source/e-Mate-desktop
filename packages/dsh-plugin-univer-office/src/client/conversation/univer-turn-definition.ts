@@ -77,7 +77,7 @@ declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   }
 }
 
-/** rc.7 owns call locations; each root and its Code children share one hidden Chat node. */
+/** 0.1.5-rc.1 owns call locations; each root and its Code children share one hidden Chat node. */
 export const univerTurnDefinition = {
   kind: 'univerTurn',
   target: 'chat',

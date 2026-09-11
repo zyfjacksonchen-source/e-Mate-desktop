@@ -2,7 +2,7 @@
 
 Computer Use is exposed only when the current user request explicitly inserts `@电脑操控`. The visible user message keeps that exact label instead of an internal activation marker. The model cannot enable it on its own, and a grant from a prior turn is not reused. Webpage work uses the CDP browser adapter first.
 
-This package embeds the exact MIT-licensed `Anionex/dsh-computer-use` commit recorded in `SOURCE.md` and adapts its bundle identity to e-Mate 2.0.17 on Harness rc.7. Its Windows backend incorporates only the audited MIT Win32 primitives and exact blobs recorded there. Both platforms stay on the same native DSH Tool, Skill, Settings, approval, storage, attachment, subprocess, Service, and Profile owners.
+This package embeds the exact MIT-licensed `Anionex/dsh-computer-use` commit recorded in `SOURCE.md` and adapts its bundle identity to e-Mate 2.0.18 on Harness 0.1.5-rc.1. Its Windows backend incorporates only the audited MIT Win32 primitives and exact blobs recorded there. Both platforms stay on the same native DSH Tool, Skill, Settings, approval, storage, attachment, subprocess, Service, and Profile owners.
 
 Darwin uses the pinned Accessibility/CoreGraphics provider, with exact-window screenshot validation and zero cursor-animation wait in the shipped Profile. Win32 selects one UI Automation backend. Both platforms preserve foreground focus by default and keep the existing Tool, permission, lease, Job, Attachment, and per-turn explicit `@电脑操控` owners.
 

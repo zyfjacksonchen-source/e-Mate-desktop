@@ -107,7 +107,7 @@ Every content type supports isolated draft editing, side-by-side semantic compar
 
 ### 1. Install the e-Mate plugin when needed
 
-This plugin is distributed separately from the e-Mate application. Install the reviewed `@e-mate/dsh-plugin-univer-office@2.0.18` TGZ through e-Mate's native plugin installation flow. The host package manager installs its runtime dependencies for your operating system and architecture; network and registry access are required. The upstream `dsh-univer-office@0.2.14` package is not this rc.7 adaptation. Public catalog availability and installation acceptance are separate from building a local archive.
+This plugin is distributed separately from the e-Mate application. Install the reviewed `@e-mate/dsh-plugin-univer-office@2.0.18` TGZ through e-Mate's native plugin installation flow. The host package manager installs its runtime dependencies for your operating system and architecture; network and registry access are required. The upstream `dsh-univer-office@0.2.14` package is not this 0.1.5-rc.1 adaptation. Public catalog availability and installation acceptance are separate from building a local archive.
 
 ### 2. Describe what you need
 

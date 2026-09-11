@@ -27,7 +27,7 @@ const MUTATING_TOOLS = new Set([
   'browser_click', 'browser_type', 'browser_press', 'browser_navigate',
   'browser_back', 'browser_forward', 'browser_reload', 'browser_scroll',
 ])
-// Raw ToolDefinition schemas are projected unchanged by rc.7 Tools.schemas().
+// Raw ToolDefinition schemas are projected unchanged by 0.1.5-rc.1 Tools.schemas().
 // Parameter shorthand is valid only through defineTool, not tools.register.
 const OBJECT_SCHEMA = { type: 'object' as const, additionalProperties: false as const }
 const TEXT_OUTPUT: ToolDefinition['output'] = {

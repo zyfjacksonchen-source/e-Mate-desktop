@@ -42,7 +42,7 @@ export async function preparePluginArtifact(
   if (!pluginPlatformSupported(source)) throw new Error(`Univer Office 尚不支持当前平台 ${process.platform}-${process.arch}；仅支持 Apple Silicon macOS 和 x64 Windows。`)
   signal?.throwIfAborted()
   const artifact = source.artifact!
-  // rc.7 resolveProfileDir is <DSH_HOME>/profiles/<name>. Keep downloads outside
+  // 0.1.5-rc.1 resolveProfileDir is <DSH_HOME>/profiles/<name>. Keep downloads outside
   // the profile restored by DesktopPnpm's native install recovery snapshot.
   const cache = resolve(profileDir, '..', '..', 'e-mate', 'cache', 'plugin-artifacts')
   await mkdir(cache, { recursive: true, mode: 0o700 })

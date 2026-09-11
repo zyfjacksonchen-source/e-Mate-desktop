@@ -1609,9 +1609,9 @@ export function apply(ctx: any): void {
     )
   }
 
-  // rc.7 起 settings.plugin.item 改为 keyed 槽（按命名空间键控分发，消费端
+  // settings.plugin.item 是 keyed 槽（按命名空间键控分发，消费端
   // renderSlot(..., { entryKey: ns })），注册必须用 key 而不是 id；
-  // key 值 = 本插件的 settings 命名空间 'tidychat'，与旧版 id 相同。
+  // key 值 = 本插件的 settings 命名空间 'tidychat'。
   ctx.slots.inject('settings.plugin.item', () => ctx.slots.register(
     { name: 'settings.plugin.item', key: 'tidychat', order: 100, inject: () => ({}) },
     TidychatSettingsCard,

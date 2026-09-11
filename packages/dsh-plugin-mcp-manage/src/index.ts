@@ -40,7 +40,7 @@ const UNSUPPORTED_MCP = '2.0.18 仅允许受审计 HTTPS MCP；旧本地或自�
 const AUDITED_PLUGIN_SOURCES = new Map<string, PluginSource>([
   ['@xmanrui/dsh-im', 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'],
   [OPTIONAL_UNIVER_PACKAGE, {
-    kind: 'https-archive', version: '2.0.18', description: 'Univer Office：适配 DSH rc.7 的文档、表格和演示文稿工具。',
+    kind: 'https-archive', version: '2.0.18', description: 'Univer Office：适配 DSH 0.1.5-rc.1 的文档、表格和演示文稿工具。',
     platforms: ['darwin-arm64', 'win32-x64'],
     // Immutable candidate target; available only after promotion publishes these exact app-matched bytes.
     artifact: {

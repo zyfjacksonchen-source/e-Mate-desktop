@@ -12,7 +12,7 @@
 
 ## Native Host RPC contract
 
-Channel `/emate.knowledge`, authority `loopback`. The outer native response is `{ok:true,value:{schema_version:1,status:"success",value:{scope_key,result}}}` or `{ok:true,value:{schema_version:1,status:"failure",error:{code,message}}}`. This follows the existing Skill Hub business-result pattern: rc.7 transport error codes are closed, so knowledge-specific failures are carried in its business value and parsed once in the client bridge. `scope_key` is a noncredential owner fingerprint; each read captures the current native enterprise principal and checks it again after fully reading the response body. Account changes cancel pending reads and invalidate original-download handles. Same-account token refresh does not cancel an otherwise current read. A cold identity is bootstrapped through the existing identity service before capturing the owner.
+Channel `/emate.knowledge`, authority `loopback`. The outer native response is `{ok:true,value:{schema_version:1,status:"success",value:{scope_key,result}}}` or `{ok:true,value:{schema_version:1,status:"failure",error:{code,message}}}`. This follows the existing Skill Hub business-result pattern: 0.1.5-rc.1 transport error codes are closed, so knowledge-specific failures are carried in its business value and parsed once in the client bridge. `scope_key` is a noncredential owner fingerprint; each read captures the current native enterprise principal and checks it again after fully reading the response body. Account changes cancel pending reads and invalidate original-download handles. Same-account token refresh does not cancel an otherwise current read. A cold identity is bootstrapped through the existing identity service before capturing the owner.
 
 The only remote root is `https://mvdcm.ecoremedia.net/ecorex-agent/client/knowledge/v1`. No RPC accepts a URL, token, tenant, user or project override. Renderer never reads credentials or fetches this API directly.
 
@@ -60,7 +60,7 @@ For several `enterprise_knowledge` import or compilation batches in one native u
 
 Public compilation runs in a fresh isolated native Agent with only frozen-source reads and structured output. The Host hashes actual quotes and retains leases privately. A known citation rejection permits one bounded correction. Benchmark references select frozen query IDs; the Host supplies a fixed explanation and the service renders each metric/value/unit/period/sample field. Model prose cannot replace those numbers.
 
-`resolveKnowledgeSelection` reads the native session model endpoint, including an unsent composer selection, or the native default for a standalone operation. Enterprise policy validates the model and the existing LLM owner resolves effective thinking effort. `@deepseek-ai/dsh-agent` is an exact rc.7 Base import for `installModelSelection`; no new model configuration store is added.
+`resolveKnowledgeSelection` reads the native session model endpoint, including an unsent composer selection, or the native default for a standalone operation. Enterprise policy validates the model and the existing LLM owner resolves effective thinking effort. `@deepseek-ai/dsh-agent` is an exact 0.1.5-rc.1 Base import for `installModelSelection`; no new model configuration store is added.
 
 ## Checks
 
