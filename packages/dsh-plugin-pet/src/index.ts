@@ -2,12 +2,11 @@
 import { lstat, readFile } from 'node:fs/promises'
 import { ASSET_FILES, ASSET_PREFIX } from './assets.ts'
 import { DEFAULT_SETTINGS, PET_SETTINGS_NAMESPACE } from './settings.ts'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 export const inject = ['webServer', 'settings']
 const schema = z.object({ enabled: z.boolean().default(DEFAULT_SETTINGS.enabled), position: z.object({ x: z.number().min(0).max(1).default(0.97), y: z.number().min(0).max(1).default(0.97) }).default(DEFAULT_SETTINGS.position) })
 export function apply(ctx: any): void {
-  ctx.settings.register(settingsNamespace(PET_SETTINGS_NAMESPACE), schema)
+  ctx.settings.register(PET_SETTINGS_NAMESPACE, schema)
   for (const file of ASSET_FILES) {
     const asset = new URL(`./assets/${file}`, import.meta.url)
     ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: ASSET_PREFIX + file, async handler(req: any, res: any) {

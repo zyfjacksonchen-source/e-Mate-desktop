@@ -5,7 +5,6 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { auth as authorizeMcp, discoverOAuthServerInfo, type OAuthClientProvider, type OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
@@ -25,7 +24,8 @@ export { parseOAuthCallback } from './oauth-callback.ts'
 export const name = '@e-mate/dsh-plugin-mcp-manage'
 export const inject = ['connection', 'credentials', 'settings', 'subprocess', 'timer', 'tools', 'systemPrompt', 'userQuestions']
 export const CHANNEL = '/emate.mcpManage'
-export const SETTINGS_NAMESPACE = settingsNamespace('mcp-manage')
+/** Namespace id the provider parses and brands at registration. */
+export const SETTINGS_NAMESPACE = 'mcp-manage'
 export const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 
 const SERVER_NAME = /^[A-Za-z0-9_-]{1,32}$/u
@@ -1223,11 +1223,17 @@ export function apply(ctx: Context, config: ConfigShape): void {
     return reconcileTail
   }
 
-  installSettingsSection(ctx, SETTINGS_NAMESPACE, Config, config, {
-    setSource(source) { current = source },
-    onChange() { void reconcileSerial(); if (current().servers.some(spec => spec.name === XIN_SERVICE)) void xin.ensure({}, { interactive: false }) },
+  // 0.1.5 registers a namespace and returns its owner scope: the scope's getter
+  // replaces the old static-source closure, and its watch is the change signal.
+  const settingsSection = ctx.settings.register(SETTINGS_NAMESPACE, Config, {
+    base: config,
     validate: validateConfig,
   })
+  current = () => settingsSection.get()
+  ctx.effect(() => settingsSection.watch(() => {
+    void reconcileSerial()
+    if (current().servers.some(spec => spec.name === XIN_SERVICE)) void xin.ensure({}, { interactive: false })
+  }), 'mcp-manage: settings reconciliation')
   ctx.on('credentials/updated', ref => {
     if (String(ref).startsWith('EMATE_MCP_')) void reconcileSerial()
   })

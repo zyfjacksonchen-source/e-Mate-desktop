@@ -2,7 +2,9 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 const root = import.meta.dirname
-const zod = createRequire(join(root, '../../upstream/deepseek-harness/packages/host/apiproxy/package.json')).resolve('zod')
+// 0.1.5's host apiproxy no longer depends on zod, so resolve the copy this
+// package itself declares and bundles.
+const zod = createRequire(join(root, 'package.json')).resolve('zod')
 
 export default {
   entry: { index: join(root, 'lib/index.js') },

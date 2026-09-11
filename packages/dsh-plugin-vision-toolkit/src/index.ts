@@ -2,7 +2,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { bundledPythonPath } from '@e-mate/desktop/vision-toolkit'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -28,8 +27,8 @@ export const inject = [
   'emateCapabilities',
 ]
 
-const SETTINGS_NAMESPACE = settingsNamespace('vision-toolkit')
-const MODEL_SETTINGS_NAMESPACE = settingsNamespace('llm-pi-ai')
+const SETTINGS_NAMESPACE = 'vision-toolkit'
+const MODEL_SETTINGS_NAMESPACE = 'llm-pi-ai'
 const MODEL_ID = 'gpt-5.6-luna'
 // The enterprise projection uses the same revocable session credential as chat.
 // Provider API keys are deliberately removed by the identity owner at login.

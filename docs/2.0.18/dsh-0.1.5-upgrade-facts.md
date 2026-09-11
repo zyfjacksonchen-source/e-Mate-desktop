@@ -1706,3 +1706,63 @@ build 成功，源测试 29 条（1 skipped）+ 客户端 27 条全部通过。
 **教训**：接手时若看到"component-run check 仍失败在 shell 套件"这类描述，先自己跑一次该命令的
 **单组件**形式（`--component <id>`，见 component-run.mjs:11），不要相信叙述——当时它其实连 build 都没过去。
 
+
+
+## 第 46 轮：slot 名/服务 API 保真扫描（新增守卫）+ settings 命名空间迁移
+
+### 46.1 根因：0.1.5 改了原生 slot 名，而改名是静默失败
+
+0.1.0 的 slot 名在 0.1.5 里被改掉了一部分，且**两种失败都不报错**：
+
+- `ctx.slots.inject('<旧名>')` 永不触发（slot 从未声明），功能整块消失；
+- CSS 的 `[data-slot='<旧名>']` 永不匹配，样式静默失效。
+
+而每个包自己的 spec 都自带一份 fake 声明，所以**自洽的测试全绿**。已实测的实测点：
+
+| 旧名（0.1.0） | 0.1.5 声明者 | 影响 |
+| --- | --- | --- |
+| `conversation` | ui-conversation 在 `main` 下声明 `main.conversation` | 独立产品路由（/settings、/schedules、/capabilities、/knowledge）的正文遮蔽失效；`[data-slot='conversation']` 样式（home/chat-chrome）全部失效 |
+| `details` | ui-sidebar-right 占用 `rightbar.session`（且是 tab 域） | 宠物任务详情面板不再渲染 |
+| `ctx.layout.openDetails()/closeDetails()` | 0.1.5 的 ILayout 只有 `selectPanel/beginNavigation/toggleSidebar/openRightbar(track,fullscreen)/closeRightbar()` | 打开任务详情时运行期抛 TypeError |
+
+已完成的修复：`conversation` → `main.conversation`（产品源码 2 处 + 5 个 CSS 选择器 + 4 个 spec 文本），
+并在 skill-hub 里建成真正的原生组合回归（真实 ui-layout + LocaleRuntime + `releasePanelInfoSource()`），
+它现在会**真实地跑到** `ctx.layout.closeDetails is not a function` 这一行——即这条集成测试能抓住产品缺陷。
+`details`/rightbar 的 tab 化迁移见 46.4。
+
+### 46.2 新增守卫：`packages/dsh/test/slot-fidelity.test.mjs`
+
+源码面（不读 lib/），两条断言：
+
+1. 本仓库 `slots.inject(...)`/`slots.register({ name })` 用到的每个 slot 名，必须由**固定版 harness 或本仓库自己**声明（声明来源：`interface SlotMap` 合并块 + `children: {...}`/`.declare({...})` 子表）；
+2. 产品 shell 的每个 `data-slot='X'` 选择器必须是已声明的 slot。
+
+它会跳过字符串字面量里的同名文本（spec 里 `expect(source).not.toContain("ctx.slots.inject('x'")` 这类负断言不是使用点）。
+当前它精确报出 2 个真实缺口：`details`（迁移中）、`conversation`（header-controls spec 的 fake frame）。
+
+### 46.3 0.1.5 移除的两个 settings 导出（6 个插件受影响）
+
+- `settingsNamespace` 已从 `@deepseek-ai/dsh-settings` 移除。0.1.5 的 `ctx.settings.register(ns, schema, opts)` 自己
+  `parse` 并 brand 命名空间，命名空间就是普通字符串常量。**tsdown 会以 MISSING_EXPORT 直接构建失败**（pet 就是这样把整条聚合构建卡住的）。
+  已迁移：pet、tidychat、cdp、glass-composer、vision-toolkit、mcp-manage。
+- `installSettingsSection(ctx, ns, schema, base, { setSource, onChange, validate })` 整体消失。0.1.5 的等价物是
+  `const section = ctx.settings.register(ns, schema, { base, validate })`，其 `section.get()` 取代原来的静态 source 闭包、
+  `section.watch(cb)` 取代 `onChange`（都注册在插件 fiber 上）。mcp-manage 已按此迁移。
+
+### 46.4 仍在进行
+
+- 宠物任务详情面板 → 迁移到原生右栏 tab 域（`ctx.sidebarRightTabs.register` + `ctx.sidebarRight.openTab`），
+  由子代理执行，写入集限定 emate-shell 的 task-details/index/两个 spec。
+- `packages/dsh/test/e-mate.test.mjs`（28 通过 / 8 失败）与 `legacy-migration.test.mjs`（3/6）、`legacy-schedule.test.mjs`（1/1）
+  这批"读 lib 产物"的守卫需要 0.1.5 适配；其中 `ENOENT ... profile/bundles/<slug>` 是**生成物缺失**，不是守卫缺陷：
+  它由 `scripts/sync-emate-plugin-bundles.mjs` 从各组件 `lib/` 复制出来，故必须在组件聚合构建之后再跑。
+- `packages/dsh/test/e-mate.test.mjs` 的 `import { Inbox }` 已删除：0.1.5 的 `Inbox` 变成 `runtime-types.ts` 里的
+  **interface**（类型，运行期不存在），0.1.0 里它是运行期的类；该导入本来就未被使用。
+
+### 46.5 环境事实（本轮实测）
+
+- harness `pnpm run build` 成功（pnpm 11.7.0，290 个 workspace project），`packages/*/*/lib` 已是 0.1.5 产物；
+  在此之前**所有读 lib 的守卫都在读 0.1.0 的旧产物**——这是把"守卫失败"当成"守卫过时"之前必须先排除的变量。
+- `node --test packages/dsh/test/*.test.mjs`：133 条中 117 通过、16 失败，集中在上面的三个文件。
+- 根 `pnpm run build` 的失败点已定位为 pet 的 `settingsNamespace`（46.3），修复后待重跑聚合构建。
+

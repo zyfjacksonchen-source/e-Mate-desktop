@@ -8,7 +8,6 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 
 /** Existing tidychat namespace, registered through the pinned rc7 owner. */
 export const TIDYCHAT_SETTINGS_NAMESPACE = 'tidychat' as const
@@ -58,6 +57,6 @@ export const inject: string[] = []
 
 export function apply(ctx: Context, config?: Config): void {
   ctx.inject(['settings'], settingsCtx => {
-    settingsCtx.settings.register(settingsNamespace(TIDYCHAT_SETTINGS_NAMESPACE), Config, { base: config ?? {} })
+    settingsCtx.settings.register(TIDYCHAT_SETTINGS_NAMESPACE, Config, { base: config ?? {} })
   })
 }

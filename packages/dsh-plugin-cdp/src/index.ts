@@ -1,7 +1,6 @@
 /** DSH Tool and approval adapter over an e-Mate-managed Chrome DevTools endpoint. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -54,7 +53,8 @@ const ControlConfig: Schema<ControlSettings> = z.object({
   allowControl: z.boolean().default(true),
   endpoint: z.string().default(''),
 })
-export const CDP_CONTROL_SETTINGS_NAMESPACE = settingsNamespace('e-mate-cdp-control')
+/** Namespace id the settings provider parses and brands at registration. */
+export const CDP_CONTROL_SETTINGS_NAMESPACE = 'e-mate-cdp-control'
 
 interface TextResult { readonly text: string }
 
