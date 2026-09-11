@@ -4,7 +4,7 @@ import { resolve, join } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const harness = resolve(root, '../../upstream/deepseek-harness')
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
-if (pkg.eMate.harnessCommit !== 'd1d095bee770c3e9d302f844083e02f0b74576ee' || pkg.eMate.upstreamCommit !== 'f501139cfb155fd46717a79bb1c158da064dce15') throw new Error('Pet source pin mismatch')
+if (pkg.eMate.harnessCommit !== '8cc7914c51a063cd2b851a9eb956c72b4c16471b' || pkg.eMate.upstreamCommit !== 'f501139cfb155fd46717a79bb1c158da064dce15') throw new Error('Pet source pin mismatch')
 await rm(join(root, 'lib'), { recursive: true, force: true })
 const result = spawnSync(process.execPath, [join(harness, 'node_modules/tsdown/dist/run.mjs'), '--config', join(root, 'tsdown.config.ts')], { cwd: root, encoding: 'utf8' })
 if (result.status !== 0) throw new Error(`${result.stdout}\n${result.stderr}`)
