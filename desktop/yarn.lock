@@ -4528,7 +4528,7 @@ __metadata:
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
     "@types/react": "npm:^18"
-    dsh-at-file: "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz"
+    dsh-at-file: "patch:dsh-at-file@https%3A//github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz#~/.yarn/patches/dsh-at-file-https-02f89c5225.patch"
     dsh-file-viewer: "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch"
     dsh-visualize: "patch:dsh-visualize@file%3Avendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%23vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%3A%3Ahash=4f6f85&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-visualize-file-cdea8d1397.patch"
     electron: "npm:43.4.0"
@@ -7356,6 +7356,62 @@ __metadata:
     react:
       optional: true
   checksum: 10c0/37607ffb8db3915f653ddc17b83af288a9a0135aa4ba9c2be9e995dac40b2e880fb47ed598b588f0b92219640fcae6462f65cc2b4a91f8e4f3d1054959e1ca21
+  languageName: node
+  linkType: hard
+
+"dsh-at-file@patch:dsh-at-file@https%3A//github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz#~/.yarn/patches/dsh-at-file-https-02f89c5225.patch":
+  version: 0.6.2
+  resolution: "dsh-at-file@patch:dsh-at-file@https%3A//github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz#~/.yarn/patches/dsh-at-file-https-02f89c5225.patch::version=0.6.2&hash=4fd4fb"
+  dependencies:
+    zod: "npm:^4.4.3"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1-rc.1
+    "@deepseek-ai/dsh-agent": "*"
+    "@deepseek-ai/dsh-api-remotes": "*"
+    "@deepseek-ai/dsh-client-connection": "*"
+    "@deepseek-ai/dsh-client-locale": "*"
+    "@deepseek-ai/dsh-client-runtime": "*"
+    "@deepseek-ai/dsh-client-ui-conversation": "*"
+    "@deepseek-ai/dsh-client-ui-input-trigger": "*"
+    "@deepseek-ai/dsh-client-ui-settings": "*"
+    "@deepseek-ai/dsh-client-ui-slots": "*"
+    "@deepseek-ai/dsh-llm": "*"
+    "@deepseek-ai/dsh-settings": "*"
+    "@deepseek-ai/dsh-typert-protocol": "*"
+    "@deepseek-ai/dsh-typert-registry": "*"
+    react: ^18.2.0
+  peerDependenciesMeta:
+    "@deepseek-ai/cordis":
+      optional: true
+    "@deepseek-ai/dsh-agent":
+      optional: true
+    "@deepseek-ai/dsh-api-remotes":
+      optional: true
+    "@deepseek-ai/dsh-client-connection":
+      optional: true
+    "@deepseek-ai/dsh-client-locale":
+      optional: true
+    "@deepseek-ai/dsh-client-runtime":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-conversation":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-input-trigger":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-settings":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-slots":
+      optional: true
+    "@deepseek-ai/dsh-llm":
+      optional: true
+    "@deepseek-ai/dsh-settings":
+      optional: true
+    "@deepseek-ai/dsh-typert-protocol":
+      optional: true
+    "@deepseek-ai/dsh-typert-registry":
+      optional: true
+    react:
+      optional: true
+  checksum: 10c0/5c877209572847250637025c5ab0ad35ff7ea4d5200121a131e8d1eff24cc9dccb07166aa71d45419ea09ec526ed3fe8e8395ca407581b11131874bccad6cc7b
   languageName: node
   linkType: hard
 

@@ -272,7 +272,7 @@
     "@deepseek-ai/dsh-workspace": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
     "@larksuite/cli": "1.0.88",
-    "dsh-at-file": "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz",
+    "dsh-at-file": "patch:dsh-at-file@https%3A//github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz#~/.yarn/patches/dsh-at-file-https-02f89c5225.patch",
     "dsh-file-viewer": "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch",
     "dsh-visualize": "patch:dsh-visualize@file%3Avendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%23vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz%3A%3Ahash=4f6f85&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-visualize-file-cdea8d1397.patch",
     "fflate": "0.8.3",

@@ -1,0 +1,36 @@
+diff --git a/lib/index.js b/lib/index.js
+index 6bc8e01c6f744af2d9d567d9444ebe3268a092d3..1109888065e509c75cf50064cb1ff42bbfd799cf 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -15814,8 +15814,8 @@ var TYPERT_MANIFEST = {
+ };
+ 
+ // src/settings.ts
+-import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+-var AT_FILE_NAMESPACE = settingsNamespace("at-file");
++// 0.1.5 namespaces are plain strings; the provider brands them at register.
++var AT_FILE_NAMESPACE = "at-file";
+ var AtFileSettingsSchema = Schema.object({
+   enabled: Schema.boolean().default(true),
+   ignoreFiles: Schema.array(Schema.union([
+diff --git a/src/settings.ts b/src/settings.ts
+index 3888b9fea63b90fe8d221abfa69dd5126a89e4a6..0568ecfe7c1b67c80edd90d911ccc625bbe47e38 100644
+--- a/src/settings.ts
++++ b/src/settings.ts
+@@ -6,13 +6,14 @@
+  */
+ import type { Context } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+-import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings'
++import type { SettingsNamespace, SettingsScope } from '@deepseek-ai/dsh-settings'
+ import type { AtFileSettings } from './contract.ts'
+ import type { FileIgnoreRule } from './contract.ts'
+ import { DEFAULT_IGNORE_FILES } from './defaults.ts'
+ 
+ /** The branded namespace name (the Web allowlist must list the same string). */
+-export const AT_FILE_NAMESPACE = settingsNamespace('at-file')
++// 0.1.5 namespaces are plain strings; the provider brands them at register.
++export const AT_FILE_NAMESPACE: SettingsNamespace = 'at-file'
+ 
+ /** Schemastery schema of the `at-file` namespace section. */
+ export const AtFileSettingsSchema: z<AtFileSettings> = z.object({
