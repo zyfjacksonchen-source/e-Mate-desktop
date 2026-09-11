@@ -3095,7 +3095,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
         rpc = { channel, handler, options }
         return () => {}
       } } },
-      sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
+      sessionPersistence: { list: async () => [] },
       storageDomain: { open: async () => domain(openedDomains++ === 0 ? tables : taskTables) },
       emateIdentity: {
         localAccountSubject: () => accountSubject,
@@ -3301,7 +3301,7 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
     const bindingPath = writeAuditRuntimeBinding(temporary)
     await applyAudit({
       connection: { rpc: { handle: () => () => {} } },
-      sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
+      sessionPersistence: { list: async () => [] },
       storageDomain: { open: async () => domain(openedDomains++ === 0 ? usageTables : taskTables) },
       tools: {
         provenance(name, agent) {
@@ -3582,7 +3582,7 @@ test('audit replays persisted scenario candidates without reclassifying historic
   }
 
   try {
-    const first = await start({ list: async () => [], readFrom: async () => ({ events: [] }) })
+    const first = await start({ list: async () => [] })
     await new Promise(resolve => setImmediate(resolve))
     const liveEvents = events('audit-replay')
     for (const event of liveEvents.slice(0, 3)) {
@@ -3654,14 +3654,24 @@ test('audit replays persisted scenario candidates without reclassifying historic
     ).payload.taskId
 
     let readCount = 0
+    const closedReads = []
     let replayed
     const replayStarted = new Promise(resolve => { replayed = resolve })
+    const storedLog = sessionId => sessionId === crashSession ? events(sessionId).slice(0, 3) : events(sessionId)
+    // rc.1 removed readFrom: list() yields { header, revision } snapshots and each
+    // durable body read goes through an open read handle that is closed again.
     const restarted = await start({
-      list: async () => [{ id: 'audit-replay' }, { id: historicalSession }, { id: crashSession }],
-      readFrom: async (sessionId) => {
-        readCount += 1
-        if (readCount === 3) replayed()
-        return { events: sessionId === crashSession ? events(sessionId).slice(0, 3) : events(sessionId) }
+      list: async () => ['audit-replay', historicalSession, crashSession].map(id => ({ header: { id }, revision: 1 })),
+      open: async (sessionId, access) => {
+        assert.equal(access, 'read')
+        return {
+          read: async () => {
+            readCount += 1
+            if (readCount === 3) replayed()
+            return { events: storedLog(sessionId) }
+          },
+          close: async () => { closedReads.push(sessionId) },
+        }
       },
     })
     await replayStarted
@@ -3685,15 +3695,20 @@ test('audit replays persisted scenario candidates without reclassifying historic
     const sizeAfterReplay = taskTables.outbox.size
 
     const replayedAgain = await start({
-      list: async () => [{ id: 'audit-replay' }, { id: historicalSession }, { id: crashSession }],
-      readFrom: async sessionId => ({
-        events: sessionId === crashSession ? events(sessionId).slice(0, 3) : events(sessionId),
+      list: async () => ['audit-replay', historicalSession, crashSession].map(id => ({ header: { id }, revision: 1 })),
+      open: async sessionId => ({
+        read: async () => ({ events: storedLog(sessionId) }),
+        close: async () => { closedReads.push(sessionId) },
       }),
     })
     await new Promise(resolve => setImmediate(resolve))
     await replayedAgain.audit.drain()
     assert.equal(taskTables.outbox.size, sizeAfterReplay)
     assert.equal(JSON.stringify(replayRecords).includes('private-replay'), false)
+    // Both backfills close every durable read handle they opened.
+    for (const id of ['audit-replay', historicalSession, crashSession]) {
+      assert.equal(closedReads.filter(closed => closed === id).length, 2)
+    }
   } finally {
     for (const cleanup of allCleanups.reverse()) await cleanup()
     rmSync(temporary, { recursive: true, force: true })
@@ -3753,7 +3768,7 @@ test('audit isolates slow session writes and quarantines malformed task records'
   try {
     await applyAudit({
       connection: { rpc: { handle: () => () => {} } },
-      sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
+      sessionPersistence: { list: async () => [] },
       storageDomain: { open: async () => openedDomains++ === 0
         ? domain(usageTables, false)
         : domain(taskTables, true) },
@@ -3914,7 +3929,7 @@ test('audit startup flushes a persisted outbox through the Host identity transpo
   try {
     await applyAudit({
       connection: { rpc: { handle: () => () => {} } },
-      sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
+      sessionPersistence: { list: async () => [] },
       storageDomain: { open: async () => domain(openedDomains++ === 0 ? tables : taskTables) },
       emateIdentity: {
         uploadAudit: async records => {

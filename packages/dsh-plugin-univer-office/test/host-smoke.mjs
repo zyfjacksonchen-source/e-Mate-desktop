@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm/brand'
+import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -31,9 +31,11 @@ if (!hostBundle.includes('ELECTRON_RUN_AS_NODE')) {
     'Host bundle must set ELECTRON_RUN_AS_NODE so bundled Gateway/Worker entry scripts run as plain Node inside an Electron Desktop host'
   )
 }
-if (!hostBundle.includes('settingsNamespace')) {
+// 0.1.5's settings owner parses and brands the namespace at register(); the
+// rc.7 settingsNamespace() constructor no longer exists.
+if (!hostBundle.includes('settings.register(')) {
   throw new Error(
-    'Host bundle must use the pinned rc.7 settings namespace constructor'
+    'Host bundle must register its settings namespace through the pinned settings owner'
   )
 }
 try {
@@ -312,7 +314,7 @@ try {
   }
   const boardApiResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-board-api'),
+    callId: ToolCallId('host-smoke-board-api'),
     name: 'univer_api',
     arguments: { action: 'find', queries: ['insertImage'], unit: 'board', limit: 3 },
     agent: owner
@@ -324,7 +326,7 @@ try {
   }
   const baseApiResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-base-api'),
+    callId: ToolCallId('host-smoke-base-api'),
     name: 'univer_api',
     arguments: { action: 'find', queries: ['getSchema'], unit: 'base', limit: 3 },
     agent: owner
@@ -336,7 +338,7 @@ try {
   }
   const resourcesResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-resources'),
+    callId: ToolCallId('host-smoke-resources'),
     name: 'univer_resources',
     arguments: { action: 'registries' },
     agent: owner
@@ -349,7 +351,7 @@ try {
 
   const codeFileResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-execute-code-file'),
+    callId: ToolCallId('host-smoke-execute-code-file'),
     name: 'univer_execute',
     arguments: { file: FILE, codeFile: CODE_FILE, unitId: 'unit-1', worktreeId: WORKTREE },
     agent: owner
@@ -358,7 +360,7 @@ try {
 
   const ambiguousCodeResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-execute-ambiguous-code'),
+    callId: ToolCallId('host-smoke-execute-ambiguous-code'),
     name: 'univer_execute',
     arguments: {
       file: FILE,
@@ -373,7 +375,7 @@ try {
 
   const ambiguousInspectResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-inspect-ambiguous-selector'),
+    callId: ToolCallId('host-smoke-inspect-ambiguous-selector'),
     name: 'univer_inspect',
     arguments: { file: FILE, unitId: 'unit-1', range: 'A1:B2', elementIds: ['shape-1'] },
     agent: owner
@@ -382,7 +384,7 @@ try {
 
   const emptyElementIdsResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-inspect-empty-element-ids'),
+    callId: ToolCallId('host-smoke-inspect-empty-element-ids'),
     name: 'univer_inspect',
     arguments: { file: FILE, unitId: 'unit-1', elementIds: [] },
     agent: owner
@@ -391,7 +393,7 @@ try {
 
   const screenshotResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-screenshot'),
+    callId: ToolCallId('host-smoke-screenshot'),
     name: 'univer_screenshot',
     arguments: { file: FILE, unitId: 'unit-1', output: 'screenshots', pages: [1] },
     agent: owner
@@ -400,7 +402,7 @@ try {
 
   const printPdfResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-print-pdf'),
+    callId: ToolCallId('host-smoke-print-pdf'),
     name: 'univer_print_pdf',
     arguments: { file: FILE, unitId: 'unit-1', output: 'report.pdf' },
     agent: owner
@@ -409,7 +411,7 @@ try {
 
   const missingToolResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-missing-path'),
+    callId: ToolCallId('host-smoke-missing-path'),
     name: 'univer_status',
     arguments: { file: 'missing.univer' },
     agent: owner
@@ -419,7 +421,7 @@ try {
   if (canEnforcePermissionDenied) {
     const permissionToolResult = await toolContext.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('host-smoke-permission'),
+      callId: ToolCallId('host-smoke-permission'),
       name: 'univer_status',
       arguments: { file: LOCKED_FILE },
       agent: owner
@@ -429,7 +431,7 @@ try {
 
   const gatewayToolResult = await toolContext.tools.execute({
     signal: new AbortController().signal,
-    callId: CallId('host-smoke-gateway'),
+    callId: ToolCallId('host-smoke-gateway'),
     name: 'univer_status',
     arguments: { file: FILE },
     agent: owner
