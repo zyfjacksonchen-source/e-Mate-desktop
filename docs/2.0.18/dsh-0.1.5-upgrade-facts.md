@@ -2253,3 +2253,58 @@ npm 上另有 **0.6.3**。
 - `desktop yarn check` 已**越过 Electron 下载**，停在 `verify:cli`：`dsh artifact smoke returned "" instead of "0.1.5-rc.1"`
   —— 与 profile 加载失败同源（profile 起不来 → CLI 无输出），修好 72.2 后应一并复验。
 
+
+
+## 第 73 轮：交接状态（round 78-79，供下一位接手者直接续做）
+
+### 73.1 desktop 平台的当前位置
+
+`verify:profile` 的失败入口已从 3 → 1 → **credentials 服务面**：
+
+```
+failed to apply loader entry connection (@deepseek-ai/dsh-client-connection):
+credentials.modifyRecord is not a function
+```
+
+**已定性（含 file:line）**：0.1.5 里 `modifyRecord` 是**提供者能力** `CredentialProvider` 的抽象方法
+（`packages/credentials/credentials/src/index.ts:247` 声明，`credentials-local/src/index.ts:674` 实现），
+**不在消费服务面** `Credentials`（同文件 :171 起的服务类）上。调用方仍按 0.1.0 世代形状访问 `ctx.credentials.modifyRecord(...)`。
+修法：调用点回到提供者面（并确认 0.1.5 中该提供者的取用方式）。这是 host 面移植，不是测试问题。
+
+其余状态：
+- `dsh-at-file`（tarball pin）的 `settingsNamespace` 已用 **URL locator 补丁**修好并提交（`6cb1bc2b57`），
+  安装态已验证归零；它**不进** `DESKTOP_OVERLAYS`（该准入表只管 `@deepseek-ai/dsh*`）。
+- 四个 vendored 插件的 `settingsNamespace` 迁移完成（源码 + 无法重建的 `lib/` 生成产物）。
+  **`upstream/plugins/*` 是独立子模块**：父仓库不能 `git add`，须在各子模块内提交并更新父仓库 gitlink ——
+  当前四个子模块各带 1–4 处未提交改动。
+- `verify:closure` PASS、`verify:loader` PASS（此前的 async 迁移与 `CallId`→`ToolCallId` 已修）。
+- `desktop yarn check` 链上：类型/测试/闭包/loader/Python 轮子/客户端构建/Electron 下载**都已通过**，
+  停在 `verify:profile`（上面那条），其后还有 `verify:cli`（`dsh artifact smoke returned "" instead of "0.1.5-rc.1"`，同源）。
+
+### 73.2 dsh-turn-fold 替换 tidychat（方案阶段，子代理执行中）
+
+用户指令（覆盖 AGENTS.md 中"tidychat 独占折叠与导航"的旧约定）：用
+`https://github.com/CH4ACKO3/dsh-turn-fold` 取代 e-mate 自己的折叠与既有消息插件，并做 0.1.5 兼容。
+实测其 `@ch4acko3/dsh-turn-fold@0.6.0`：CJS 打包产物（`main: ./index.cjs`）、harmony 补丁式（`harmony.patch.yml` + `patch.cjs`）、
+peer 为 `ui-chat >=0.1.2-alpha.5 <0.1.3-0` 与 `ui-conversation/settings: >=0.1.0-rc.8 <=0.1.1-rc.2 || >=0.1.2-alpha.5 <0.1.3-0`，
+**硬 peer `dsh-harmony ^0.8.10`**，依赖 `schemastery ^3.18.1`。
+→ **0.1.5-rc.1 不满足它任何一条 peer 范围**，兼容工作即由此而来；方案必须逐条给出
+"0.1.2-alpha API → 0.1.5 替身（file:line）"、harmony 的处理、落位与挂载、tidychat 退役清单、守卫改指方式。
+
+### 73.3 仍未做的（按优先级）
+
+1. credentials 面的调用点移植 → 复验 `verify:profile` 与 `verify:cli` → 取 `desktop yarn check` 退出码。
+2. 四个 vendored 子模块提交 + 父仓库 gitlink 更新。
+3. turn-fold 方案审阅与落地；tidychat 退役（含 guard 改指，不能删断言）。
+4. `adaptedEcosystemPatch`（`dsh-at-file`/dsh-file-viewer/visualize 那类相对改写）**休眠但同源隐患**，与
+   `adaptedPluginPatch` 已修的那条同理，建议一并对齐。
+5. 18 条无测试修复的定向检查（已完成 1 条：专家模式橙点）；`ctx.apiProxy` 缺口移植；性能证据真 provider 重录。
+
+### 73.4 环境注意事项（会反复踩）
+
+- 改 `scripts/harness-provenance.mjs` 后**必须重录** `harness-provenance.mjs build`（它把自己的哈希写进前端构建记录），
+  且必须用继承的 11.7.0 pnpm：`npm_execpath=~/.cache/node/corepack/v1/pnpm/11.7.0/bin/pnpm.cjs node scripts/harness-provenance.mjs build`。
+- 新增任何 `@deepseek-ai/dsh*` 的 patch resolution，**必须**登记进 `scripts/harness-provenance.mjs` 的 `DESKTOP_OVERLAYS`（准入表），
+  否则 desktop check 直接报 "overlay is not admitted"。第三方依赖（非 `@deepseek-ai/dsh*`）不受此限。
+- desktop verify 脚本用 `cwd=desktop` + `corepack yarn workspace @e-mate/desktop run <script>`；不要用 root corepack 带 `--cwd`。
+
