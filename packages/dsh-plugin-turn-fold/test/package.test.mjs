@@ -6,8 +6,16 @@ import { dirname, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { HOST_SYMBOLS, SEAMS, TARGET, assertSeams } from '../scripts/seams.mjs'
-import { SHIPPED } from '../scripts/shipped.mjs'
+import {
+  BUNDLE_HASH_CHECK_ID,
+  HOST_SYMBOLS,
+  SEAMS,
+  TARGET,
+  TARGET_BUNDLE_SHA256,
+  assertSeams,
+  evaluateBundleHash,
+} from '../scripts/seams.mjs'
+import { EMATE, SHIPPED, VENDORED } from '../scripts/shipped.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repo = resolve(root, '..', '..')
@@ -21,7 +29,7 @@ test('owns the pinned identity without adding a runtime dependency', () => {
   assert.equal(manifest.license, 'MIT')
   assert.equal(manifest.private, true)
   assert.equal(manifest.eMate.harnessVersion, '0.1.5-rc.1')
-  assert.equal(manifest.eMate.harnessCommit, 'd1d095bee770c3e9d302f844083e02f0b74576ee')
+  assert.equal(manifest.eMate.harnessCommit, 'f9e0f1190e4021e63db579ef36b67484028e8c53')
   assert.equal(manifest.dependencies, undefined)
   assert.equal(manifest.peerDependencies, undefined)
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
@@ -40,18 +48,32 @@ test('mounts itself through its own cordis patch row without a second owner', as
   const patch = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8')
   assert.match(patch, /id: emate-turn-fold/u)
   assert.match(patch, /name: '@e-mate\/dsh-plugin-turn-fold'/u)
-  assert.match(patch, /inject: \[harmony\]/u)
+  // The row must not wait on a service the pinned Harness cannot provide: `harmony`
+  // exists in no 0.1.5 package, so an `inject: [harmony]` row stays PENDING forever
+  // and the provider never applies. The driver is part of this package instead.
+  const rows = patch.split('\n').filter(line => !line.trimStart().startsWith('#'))
+  assert.doesNotMatch(rows.join('\n'), /inject:/u, 'the row must not inject a non-existent service')
+  assert.doesNotMatch(rows.join('\n'), /harmony/u, 'the row no longer waits on a Harmony layer')
   const vendorPatch = await readFile(resolve(vendored, 'harmony.patch.yml'), 'utf8')
   assert.doesNotMatch(patch, /ch4acko3/u, 'the e-Mate row must not re-declare the upstream provider id')
   assert.match(vendorPatch, /ch4acko3-dsh-turn-fold/u)
 })
 
-test('copies the vendored bytes unchanged', async () => {
-  for (const relative of SHIPPED) {
+test('copies the vendored bytes unchanged and builds the e-Mate sources from src/', async () => {
+  assert.deepEqual([...SHIPPED], [...VENDORED, ...EMATE])
+  for (const relative of VENDORED) {
     const shipped = await readFile(resolve(root, 'lib', relative))
     const source = await readFile(resolve(vendored, relative))
     assert.deepEqual(shipped, source, `lib/${relative} differs from the vendored upstream file`)
   }
+  for (const relative of EMATE) {
+    const shipped = await readFile(resolve(root, 'lib', relative))
+    const source = await readFile(resolve(root, 'src', relative))
+    assert.deepEqual(shipped, source, `lib/${relative} differs from this package's src/${relative}`)
+  }
+  // The driver is reachable through the package's declared export surface.
+  assert.equal(manifest.exports['./transform'], './lib/transform.cjs')
+  assert.ok(existsSync(resolve(root, manifest.exports['./transform'])))
 })
 
 test('keeps the vendored patches loadable and locale-complete', () => {
@@ -81,6 +103,27 @@ test('guards exactly the selectors and host symbols the vendored source carries'
   for (const symbol of HOST_SYMBOLS) {
     assert.ok(inlineSource.includes(symbol.name), `${symbol.name} is no longer referenced by the injected runtime`)
   }
+})
+
+test('keeps one verified-bundle pin, shared by the checker and the runtime driver', async () => {
+  const engine = require('../lib/select.cjs')
+  assert.equal(engine.TARGET_BUNDLE_SHA256, TARGET_BUNDLE_SHA256, 'the checker and the shipped engine must export the same pin')
+  assert.equal(engine.BUNDLE_HASH_CHECK_ID, BUNDLE_HASH_CHECK_ID)
+  assert.equal(typeof engine.sha256, 'function')
+  assert.deepEqual(
+    engine.evaluateBundleHash('0'.repeat(64)),
+    evaluateBundleHash('0'.repeat(64)),
+    'the checker must evaluate through the shared engine, not a private copy',
+  )
+
+  // The pin is written exactly once in this package's own code. A second copy is how the
+  // build-time gate and the runtime gate would silently start judging different bundles.
+  const declaring = []
+  for (const relative of ['src/select.cjs', 'src/transform.cjs', 'scripts/seams.mjs', 'scripts/tsquery-subset.mjs']) {
+    const text = await readFile(resolve(root, relative), 'utf8')
+    if (/[0-9a-f]{64}/u.test(text)) declaring.push(relative)
+  }
+  assert.deepEqual(declaring, ['src/select.cjs'], 'the bundle pin must be declared in the shared engine and nowhere else')
 })
 
 test('resolves every seam against the pinned 0.1.5 build', () => {

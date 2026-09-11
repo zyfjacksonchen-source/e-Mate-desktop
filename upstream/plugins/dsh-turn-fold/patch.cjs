@@ -18,9 +18,20 @@ function manifestVersion(filename) {
 }
 
 function activeDshVersion() {
+  // e-Mate: the owning driver resolves the version from the patch target's own
+  // manifest and supplies it here, so loading this module does not depend on an
+  // ambient '@deepseek-ai/dsh' installation being resolvable from this file.
+  const pinned = process.env.DSH_TURN_FOLD_ACTIVE_VERSION
+  if (typeof pinned === 'string' && pinned.length > 0) return pinned
+
   const entry = process.env.DSH_HARMONY_ACTIVE_DSH_ENTRY ?? process.env.DSH_HARMONY_DSH_ENTRY
   if (entry !== undefined && typeof findPackageJSON === 'function') {
-    const manifest = findPackageJSON('@deepseek-ai/dsh', pathToFileURL(path.resolve(entry)))
+    // 'findPackageJSON' throws for a package it cannot resolve rather than
+    // returning undefined, which would skip the fallbacks below.
+    let manifest
+    try {
+      manifest = findPackageJSON('@deepseek-ai/dsh', pathToFileURL(path.resolve(entry)))
+    } catch {}
     if (manifest !== undefined) return manifestVersion(manifest)
   }
 

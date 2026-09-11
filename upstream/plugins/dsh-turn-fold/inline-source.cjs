@@ -1,8 +1,11 @@
 'use strict'
 
-// Runtime injected into @deepseek-ai/dsh-client-ui-conversation/lib/client.js.
-// It executes inside the target module factory, where react,
-// react_jsx_runtime, formatRunDuration, and formatTokens are already in scope.
+// Runtime injected into the compiled chat renderer bundle. The version router in
+// patch.cjs selects the target: @deepseek-ai/dsh-client-ui-chat/lib/client.js on
+// 0.1.2 and later, and @deepseek-ai/dsh-client-ui-conversation/lib/client.js on the
+// 0.1.0/0.1.1 line it kept for compatibility. It executes inside the target module
+// factory, where react, react_jsx_runtime, formatRunDuration, formatTokens,
+// ReasoningRow and the @deepseek-ai/dsh-client-ui-primitives alias are in scope.
 const dictionaries = require('./locales.cjs')
 const { DEFAULT_SUMMARY_FIELDS, SETTINGS_NAMESPACE, SUMMARY_FIELDS } = require('./settings.cjs')
 
@@ -163,9 +166,15 @@ function __ch4acko3DshTurnFoldGetSettingsSnapshot() {
 function __ch4acko3DshTurnFoldNumber(value) {
   return typeof value === "number" && isFinite(value) && value >= 0 ? value : null;
 }
-function __ch4acko3DshTurnFoldUsage(usage) {
+// Token accounting has two owners on 0.1.5 and they spell the uncached prompt
+// bucket differently: a settled step carries TokenUsage (llm/src/types.ts:149,
+// whose inputTokens is uncached input) while the Turn tail carries the exact
+// per-turn TurnTokenUsage (llm/token-meter/src/turn-usage.ts:13,
+// uncachedInputTokens). Both are disjoint-count records: cached input is
+// reported separately and billed input is the sum of the three buckets.
+function __ch4acko3DshTurnFoldUsage(usage, uncachedKey) {
   if (typeof usage !== "object" || usage === null) return null;
-  var uncached = __ch4acko3DshTurnFoldNumber(usage.inputTokens);
+  var uncached = __ch4acko3DshTurnFoldNumber(usage[uncachedKey]);
   var output = __ch4acko3DshTurnFoldNumber(usage.outputTokens);
   if (uncached === null || output === null) return null;
   var cacheRead = usage.cacheReadTokens === void 0 ? 0 : __ch4acko3DshTurnFoldNumber(usage.cacheReadTokens);
@@ -761,7 +770,7 @@ function __ch4acko3DshTurnFoldSummaryParts(metrics, running, settled, completed,
     } else if (field === "tokensPerSecond") {
       if (typeof value === "number") parts.push({ field: field, text: __ch4acko3DshTurnFoldText("summary.tokensPerSecond", { count: value >= 10 ? Math.round(value) : Math.round(value * 10) / 10 }) });
     } else if (typeof value === "number") {
-      parts.push(__ch4acko3DshTurnFoldCountPart(field, "summary." + field, value, formatTokens(value), metrics.tokenUsagePartial && settled ? "≥ " : ""));
+      parts.push(__ch4acko3DshTurnFoldCountPart(field, "summary." + field, value, formatTokens(value, durationT), metrics.tokenUsagePartial && settled ? "≥ " : ""));
     }
   }
   return parts.length === 0 ? [{ field: "activity", text: __ch4acko3DshTurnFoldText("summary.activity") }] : parts;
@@ -1044,24 +1053,15 @@ function __ch4acko3DshTurnFoldDisclosure(props) {
     ]
   });
 }
-function __ch4acko3DshTurnFoldPlaybackTime(timeline) {
-  var clock = timeline.playbackClock;
-  return clock !== void 0 && clock.kind === "historical" && typeof clock.time === "number" && isFinite(clock.time)
-    ? clock.time
-    : null;
-}
 function __ch4acko3DshTurnFoldPlanMetrics(plan, nodeStore, timeline) {
   var turnLoc = timeline.turns.get(plan.turn);
   var startEv = turnLoc === void 0 ? void 0 : turnLoc.start;
   var endEv = turnLoc === void 0 ? void 0 : turnLoc.end;
   var startTime = startEv !== void 0 && typeof startEv.time === "number" ? startEv.time : null;
   var complete = startTime !== null && endEv !== void 0 && typeof endEv.time === "number";
-  var playbackTime = __ch4acko3DshTurnFoldPlaybackTime(timeline);
-  var durationMs = complete && endEv.time >= startTime
-    ? endEv.time - startTime
-    : startTime !== null && playbackTime !== null
-      ? Math.max(0, playbackTime - startTime)
-      : null;
+  // 0.1.5 has no playback clock (the 0.1.2-era timeline.playbackClock is gone and
+  // nothing replaced it), so a running turn is the only unsettled duration source.
+  var durationMs = complete && endEv.time >= startTime ? endEv.time - startTime : null;
   var metrics = {
     startTime: startTime,
     durationMs: durationMs,
@@ -1091,7 +1091,7 @@ function __ch4acko3DshTurnFoldPlanMetrics(plan, nodeStore, timeline) {
     if (node.kind !== "assistant-step") continue;
     metrics.modelCalls++;
     var data = node.data === void 0 ? {} : node.data;
-    var usage = __ch4acko3DshTurnFoldUsage(data.usage);
+    var usage = __ch4acko3DshTurnFoldUsage(data.usage, "inputTokens");
     if (usage === null) usageReliable = false;
     else {
       usageSamples++;
@@ -1125,13 +1125,32 @@ function __ch4acko3DshTurnFoldPlanMetrics(plan, nodeStore, timeline) {
       metrics.reasoningTokens = null;
     }
   }
+  // The 0.1.5 owner of exact per-Turn accounting and of the recorded latency is the
+  // Turn tail (TurnTailChatData.tokenUsage/ttftMs/tokensPerSecond,
+  // ui-chat/src/client/contract/chat-nodes.ts:94-97). It is absent exactly when the
+  // loaded evidence is incomplete, which is the partial ("at least") reading; the
+  // per-step sum above stays the source for a turn that has not settled yet.
+  var tail = plan.tailKey === void 0 ? void 0 : nodeStore.get(plan.tailKey);
+  var tailData = tail === void 0 ? void 0 : tail.data;
+  if (tailData !== void 0) {
+    var tailUsage = __ch4acko3DshTurnFoldUsage(tailData.tokenUsage, "uncachedInputTokens");
+    if (tailUsage !== null) {
+      metrics.inputTokens = tailUsage.inputTokens;
+      metrics.outputTokens = tailUsage.outputTokens;
+      metrics.cacheReadTokens = tailUsage.cacheReadTokens;
+      metrics.cacheWriteTokens = tailUsage.cacheWriteTokens;
+      metrics.reasoningTokens = tailUsage.reasoningTokens;
+      metrics.tokenUsagePartial = false;
+    }
+    if (typeof tailData.ttftMs === "number") metrics.timeToFirstToken = tailData.ttftMs;
+    if (typeof tailData.tokensPerSecond === "number") metrics.tokensPerSecond = tailData.tokensPerSecond;
+  }
   return metrics;
 }
 function __ch4acko3DshTurnFoldRender(props) {
   var order = props.order;
   var nodeStore = props.nodeStore;
   var timeline = props.timeline;
-  var playbackTime = __ch4acko3DshTurnFoldPlaybackTime(timeline);
   var renderNode = props.renderNode;
   var sessionId = props.sessionId;
   var orderPositions = new Map();
@@ -1222,7 +1241,7 @@ function __ch4acko3DshTurnFoldRender(props) {
         completed: plan.endReason === "completed",
         metrics: __ch4acko3DshTurnFoldPlanMetrics(plan, nodeStore, timeline),
         termination: plan.endReason === "aborted" || plan.endReason === "interrupted" ? plan.endReason : void 0,
-        running: plan.status !== "closed" && playbackTime === null,
+        running: plan.status !== "closed",
         settled: plan.status === "closed",
         t: props.t
       }, "ch4acko3-dsh-turn-fold-summary-" + String(sessionId) + "-" + plan.turn) });
