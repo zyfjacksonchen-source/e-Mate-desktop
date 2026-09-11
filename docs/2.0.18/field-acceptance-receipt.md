@@ -166,7 +166,7 @@ profile 依 `.e-mate-install.json`（schema 2 / 2.0.18 / harness `43c411a5`）�
 | H 移除项核对 | **`PASS`（候选级）**：`app.asar` 与 `app.asar.unpacked/build/e-mate-profile` 中 `dsh-plugin-computer-use`/`dsh-computer-use`/`dsh-plugin-tidychat`/`emate-tidychat` 命中数全为 0；`bundles/` 无对应目录；`bundles/registry.json` 命中 0。GUI 入口核对需要登录态。 |
 | 性能三维度 | 生图对照侧已测（中位数 19330 ms / n=3）；处理侧与首响、多轮均 `BLOCKED`（同 A） |
 
-## AC-04 登录后主内容区空白（`main.conversation` 槽条目崩溃）—— **FAIL → `OPEN`（本轮发现，未修）**
+## AC-04 登录后主内容区空白（`main.conversation` 槽条目崩溃）—— **FAIL（C2b）→ 根因定位并修复（`b687a97c4b`），待 C2c/C5 复测**
 
 **现象**：以正确凭据登录 C2b 后，侧栏与页脚正常渲染，**主内容区（对话/首页座位）整块空白**，
 点击会话条目也不切换（`effect.observedStateChanged` 始终 false）。
@@ -195,9 +195,46 @@ CONSOLE:11570] "slot entry crashed in 'main.conversation': ReferenceError: pendi
 - 对照线索：同一个 pinned Harness 的 DSH 原版 GUI（`127.0.0.1:3180`，本会话所在界面）主内容区渲染正常，
   差异只可能来自 e-Mate profile 额外挂载的约 12 个客户端 bundle。
 
-**下一步（下一轮）**：勾选"保持登录"后按插件二分（knowledge / file-import / genui / vision-toolkit /
-canvas / better-sidebar / shell 内部模块），并用 `window.addEventListener('error')` 或 React 组件栈取到确切组件名；
-不修好这条，B–F 组与处理侧性能都无法执行。
+**根因（第 5 轮定位，实测）**：e-Mate 的 **harness conversation adapter**（`scripts/harness-conversation-adapter.mjs`）
+在给 pinned `ConversationRoot` 注入 e-Mate CSS 钩子时，用了一个该编译作用域**从未声明的标识符**：
+
+```js
+change('\t\t\t\t"data-composer-seat": "",',
+  '\t\t\t\t"data-composer-seat": "",\n\t\t\t\t"data-emate-has-interactions": pending.length > 0 ? "true" : "false",', 'canvas/interaction-seat')
+```
+
+`ConversationRoot` 真正声明的是 `pendingInteraction`（`SessionPendingInteraction | undefined`，
+选择器是 `snapshot.get(sessionId)`，从 `ReadonlyMap` 快照取值 —— **是单个交互对象，不是列表**）。
+于是会话座位第一次渲染就抛 `ReferenceError`，被 slot 注册表捕获后整块主内容区空白；侧栏渲染在别处所以仍然正常。
+
+**为什么所有门禁都是绿的**：adapter 自己的测试把**错误文本**断言成了期望值
+（`harness-conversation-adapter.test.mjs:676` 断言 `pending\.length > 0`），而没有任何门禁**在浏览器里执行这份被适配的
+bundle**——即"测试把缺陷钉住了"。定位手段：用 TypeScript AST 对每个客户端 bundle 做**未绑定标识符**分析
+（对 `pending` 逐个解析其所在作用域链是否存在同名绑定），唯一真阳性就在这份被适配的 ui-conversation bundle 里
+（其余命中项都是 `const [pending, setPending] = useState()` 这类数组解构声明，属分析器假阳性，已复核）。
+
+**修复（`b687a97c4b`）**：seam 改成读取原生绑定的存在性判断
+`"data-emate-has-interactions": pendingInteraction === void 0 ? "false" : "true"`；测试不再钉字面量，而是
+把发射出来的标识符**绑回原生声明**：
+
+```js
+const interactionAttribute = /"data-emate-has-interactions": ([A-Za-z_$][\w$]*)/u.exec(adapted)
+assert.ok(interactionAttribute !== null, 'the interaction seat attribute is missing')
+assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSessionPendingInteraction', 'u'))
+```
+
+**实机因果验证（诊断式，非候选复测）**：把同一处 seam 按位施加到已安装 C2b 的
+`app.asar.unpacked/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js` 后重启登录 ——
+主内容区**完整渲染**：e-Mate 首页主视觉「和小芯一起开始工作吧」、四张快速开始卡
+（小红书笔记创作 / 计划方案撰写 / 快速外部连接 / 深度数据分析）、
+「探索未至之境 预览版」输入区（模型 chip、专家模式 / 外部连接 / 通用会话、发送按钮），
+侧栏与项目/会话列表同时可用。截图留档（不入库）：
+`~/.dsh-computer-use/artifacts/session-27e2cf42-7243-4aad-a60b-4065c4b0d9ef/observation-f65e2afd-0503-4b2c-b7e6-051e41cc5b1f.png`。
+
+**正确性旁证**：`node scripts/harness-provenance.mjs sync-desktop` 与 `verify-desktop` 均 EXIT 0
+（后者会把桌面侧 bundle 与"pinned 原生 + 产品适配器"逐字节比对），`test:fast` 68+39 全绿。
+
+**下一步**：C2c（macOS）与 C5（Windows）以此源码重建后复测本条，然后继续 B–F 组与三维度性能测量。
 
 ## 附录：本机实机操作的复现配方（不含量值）
 
