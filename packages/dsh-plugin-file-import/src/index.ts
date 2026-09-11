@@ -18,7 +18,8 @@ import {
 } from './contract.ts'
 
 export const name = 'emate-file-import'
-export const inject = ['connection', 'workspaceRegistry', 'attachments', 'sessions']
+export const inject = [
+  'webServer','connection', 'workspaceRegistry', 'attachments', 'sessions']
 
 interface WorkspaceView {
   readonly path: string

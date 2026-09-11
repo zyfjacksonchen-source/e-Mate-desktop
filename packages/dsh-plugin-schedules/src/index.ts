@@ -7,7 +7,8 @@ import {
 } from '@deepseek-ai/dsh-schedule'
 
 export const name = 'emate-schedules'
-export const inject = ['connection', 'sessionPersistence']
+export const inject = [
+  'webServer','connection', 'sessionPersistence']
 export const SCHEDULES_CHANNEL = '/emate.schedules'
 const RECENT_RUN_LIMIT = 20
 

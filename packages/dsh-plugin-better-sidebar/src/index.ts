@@ -3,7 +3,8 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 export const name = 'emate-better-sidebar'
-export const inject = ['connection', 'workspaceRegistry']
+export const inject = [
+  'webServer','connection', 'workspaceRegistry']
 export const CHANNEL = '/emate.betterSidebar'
 
 const MAX_FILE_BYTES = 512 * 1024

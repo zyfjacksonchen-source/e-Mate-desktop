@@ -1,5 +1,6 @@
 export const name = 'emate-agent-operations'
-export const inject = ['systemPrompt', 'connection', 'sessions']
+export const inject = [
+  'webServer','systemPrompt', 'connection', 'sessions']
 
 class ExpertModeRpcError extends Error {
   constructor(error) { super(error.message); this.rpcError = error }

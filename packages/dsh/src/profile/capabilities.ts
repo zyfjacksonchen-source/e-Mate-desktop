@@ -1,5 +1,6 @@
 export const name = 'emate-capabilities'
-export const inject = ['connection']
+export const inject = [
+  'webServer','connection']
 export const CAPABILITIES_CHANNEL = '/emate.capabilities'
 
 const ID = /^[a-z][a-z0-9.-]{1,63}$/u

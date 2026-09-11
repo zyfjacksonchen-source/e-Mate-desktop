@@ -22,7 +22,8 @@ import { readFeishuConnection } from './feishu-status.ts'
 export { parseOAuthCallback } from './oauth-callback.ts'
 
 export const name = '@e-mate/dsh-plugin-mcp-manage'
-export const inject = ['connection', 'credentials', 'settings', 'subprocess', 'timer', 'tools', 'systemPrompt', 'userQuestions']
+export const inject = [
+  'webServer','connection', 'credentials', 'settings', 'subprocess', 'timer', 'tools', 'systemPrompt', 'userQuestions']
 export const CHANNEL = '/emate.mcpManage'
 /** Namespace id the provider parses and brands at registration. */
 export const SETTINGS_NAMESPACE = 'mcp-manage'

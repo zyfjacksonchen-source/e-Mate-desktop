@@ -60,6 +60,25 @@
 # Keep the pinned rc.7 Web seam as the only search path. The enterprise model
 # policy projects this device-global credential reference into the native
 # Credentials service; no per-session Skill or second provider is required.
+# 0.1.5 splits the Web transport out of the app row: web-startup provides
+# webStartup (parsed flags), and the webserver row registers the service every
+# canvas/better-sidebar/file-import/mcp-manage/schedules/identity/capabilities/
+# agent-operations plugin injects. Both rows are the native bundle's own.
+# The desktop composes this row without the web bundle's web-startup provider:
+# webStartup only exists for the CLI/web startup path, and an inject on a service
+# this composition never provides would leave the row pending forever, so every
+# plugin that registers a route would fail on a missing webServer. The service
+# itself is still the pinned native package; only its host/port come from here,
+# and the desktop's own startup overrides them.
+- id: webserver
+  name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: '127.0.0.1'
+    port: 3080
+    compression: gzip
+    compressionLevel: 1
+    compressionThresholdBytes: 1024
+
 - id: web
   config:
     searchProvider: deepseek-official

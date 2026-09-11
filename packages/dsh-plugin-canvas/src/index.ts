@@ -149,7 +149,12 @@ export async function handleCanvas(ctx: any, endpoint: string, payload: unknown)
 /** Package assets share the native web server. No project bytes or host paths are served here. */
 export function apply(ctx: any): void {
   ctx.effect(() => ctx.connection.rpc.handle(CHANNEL, (endpoint: string, payload: unknown) => handleCanvas(ctx, endpoint, payload), { authority: 'loopback' }), 'emate.canvas: native RPC')
-  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: ASSET_PATH.slice(0, -1), handler: async (req: any, res: any) => {
+  // The asset route is optional in compositions that mount no web server: read it
+  // through the service store and fail loud when it is missing, the pattern the
+  // harness's own web-app row uses for the same service.
+  const webServer = ctx.get('webServer')
+  if (webServer === undefined) throw new Error('emate.canvas: webServer service missing while registering the asset route')
+  ctx.effect(() => webServer.register({ kind: 'prefix', path: ASSET_PATH.slice(0, -1), handler: async (req: any, res: any) => {
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end(); return }
     const path = new URL(req.url, 'http://local.invalid').pathname.slice(ASSET_PATH.length)
     if (!/^(?:editor\.js|editor\.css|fonts\/[A-Za-z0-9_./-]+\.(?:woff2?|ttf))$/u.test(path) || path.includes('..')) { res.writeHead(404); res.end(); return }
