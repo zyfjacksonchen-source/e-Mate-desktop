@@ -8,7 +8,11 @@
 | # | 平台 | 源码 HEAD | DMG 字节 | DMG sha256 | 状态 |
 |---|---|---|---|---|---|
 | C1 | macOS | `a10b485f06` | 466413297 | `65cef6f47e6a5d1c03146472cd75c85c4288d170cf953a47d905646232e6c98b` | **已作废**（见 AC-01） |
-| C2 | macOS | `5bed0f831b` | 构建中 | 构建中 | 待验收 |
+| C2 | macOS | `5bed0f831b` | 466413246 | `6234906b786570c1f1d5dcc158c4cb7eca09596fdb9152c6141cb10544774a14` | **已作废**（AC-01 修复载体；AC-02 缺陷在其上暴露） |
+| **C2b** | macOS | `a215988139` | 466417923 | `d5254bd60f778709f2dee0cf42d542a847fe25007aeac4d5c3b7c135302c2b59` | **待验收（当前安装态）** |
+| **C4** | Windows | `a215988139` | 335410291 | `67797411e7043bbc467e4099fc091f0966d5d4ab213fe4a15122112f17788bc4` | **待验收（未安装）** |
+
+C2b/C4 同源：父仓 HEAD = `a215988139`（已推送），Harness gitlink = 子模块 HEAD = `e217fb0c8d8e377be6d9c0514446f9455821a79b`。
 | C3 | Windows | `a10b485f06` | 构建中 | 构建中 | 将被 C4 取代 |
 | C4 | Windows | `5bed0f831b` | 未开始 | 未开始 | 待构建 |
 
@@ -54,19 +58,121 @@ Cannot find module '.../home/profiles/e-mate/node_modules/@e-mate/dsh-plugin-tid
 **复测要求**：C2 必须**保留当前这套被弄坏的 profile**再安装一次，验证 App 能自愈并正常启动；
 这条用例在 C2 上重跑前保持 `OPEN`。
 
+## AC-02 安装态「无法加载插件」、界面完全不渲染 —— **FAIL（C2）→ 源码已修（`a215988139`），待 C2b 复测**
+
+**操作**：C2 安装完成后 `open -a e-Mate`（profile 已自愈为 2.0.18）。
+**现象**：模态告警 「e-Mate could not load all plugins.」——
+`Failed plugins: - @deepseek-ai/dsh-client-ui-sidebar - @e-mate/dsh-plugin-find-skill`，
+`The client Loader did not provide an error message.`；主窗口只有该告警，**没有任何产品界面**。
+
+**实机取证**（`ELECTRON_ENABLE_LOGGING=1` 直接运行 `Contents/MacOS/e-Mate` 捕获渲染进程 console）：
+
+```
+Error: failed to import loader entry 41292524 (dsh-file-viewer): client-modules: require(
+"@deepseek-ai/dsh-client-runtime/client") missed the module table — not a platform seed word,
+not a materialized module, and no registered package factory
+```
+
+**根因（两条，互为遮蔽）**：
+
+1. **`conversationEvents` 是 rc.6 的客户端服务名。** 0.1.5-rc.1 把会话节点注册表搬到
+   `uiConversation.events`（`packages/client/ui-conversation`）；本仓已迁移的贡献者
+   （univer-office、ui-chat、ui-trajectory）全都用新拼写。e-Mate shell 与
+   `@e-mate/dsh-plugin-find-skill` 仍 inject 旧名，而 Cordis 对无法满足的 inject 永久保持
+   PENDING —— 两者都不激活，渲染进程的健康检查（`src/client/boot-health.ts`，判据是
+   fiber state ≠ ACTIVE）于是把它们报成"加载失败"。全 profile 里只有这两个插件声明该服务名，
+   与告警列出的两个名字**完全对应**。
+   同一类漂移还包括两个 vendored 生态包：`dsh-file-viewer` / `dsh-at-file` 的 client bundle
+   在模块初始化处 `require("@deepseek-ai/dsh-client-runtime/client")`，而 0.1.5 没有这个包
+   （两者只用到 `defineStore` / `createSnapshotStore`，都已是 0.1.5 平台 seed 词
+   `@deepseek-ai/dsh-client-store` 的导出）。
+
+2. **槽重复声明。** inject 修好后 shell 才第一次真正 apply，随即暴露第二层缺陷：Gallery 视图把
+   `conversation.message.images` 重新声明为 `conversation.view` 座位的子槽，而 pinned
+   `ui-chat` 条目（`packages/client/ui-chat/src/client/apply.ts:105`）已经声明过它；
+   ui-slots 拒绝第二次声明（`slot "…" is already declared`）并中止整个 shell apply。
+
+**为什么所有既有门禁都抓不到**：`test:fast`、`component-run check`、profile boot smoke 都只验证
+"bundle 被装配、被服务、能注册"——没有一个**真正执行 bundle 工厂并激活 Cordis 客户端插件**；
+`packages/dsh/test/client-inject-edges.test.mjs` 只按"**包**是否存在"判定客户端边，而服务是包里的
+一个**名字**。这正是"升级安装后"才会暴露的那一类缺陷。
+
+**修复（`a215988139`，子模块 `e217fb0c`，均已推送）**：
+1. shell 与 find-skill 的 4+1 处注册改走 `ctx.uiConversation.events`，inject 名改 `uiConversation`；
+2. Gallery 不再重复声明 `conversation.message.images`；
+3. 两个 vendored 生态包的 yarn patch 把退役 specifier 改指 `@deepseek-ai/dsh-client-store`；
+4. find-skill 子模块的客户端依赖由 rc.6 升到 0.1.5-rc.1（类型面：cordis / ui-conversation / ui-chat / ui-renderer）；
+5. 新守卫：`client-inject-edges.test.mjs` 拒绝任何已交付客户端贡献 inject 已退役的客户端服务名；
+   find-skill 契约测试与 shell 契约断言改为 0.1.5 拼写。
+
+**实机因果验证（诊断式，不构成候选验收）**：把 1–3 三处改动**按位**施加到已安装 C2 的 profile
+bundle 上再重启 App —— 模态告警消失，主窗口渲染出完整产品界面（登录页：`欢迎回来` /
+`全场景办公 AI Agent` / 右上 `2.0.18 · 11,000 PTS · 已整合`）。
+截图留档（按 AGENTS.md，验收截图不入库）：`~/.dsh-computer-use/artifacts/session-27e2cf42-7243-4aad-a60b-4065c4b0d9ef/observation-27f11cb9-12bf-427f-8fcb-6cf774c6d536.png`。
+
+**复测要求**：必须用**重新构建**的候选（C2b）复现同一现象已消失 —— 手工改 profile 只证明因果，
+不构成候选或安装态验收。在 C2b 上重跑之前，本条保持 `OPEN`。
+
+## AC-02 复测（C2b）—— **PASS**
+
+**候选字节**：DMG `e-Mate-2.0.18-mac-universal.dmg` 466417923 字节 / sha256 `d5254bd6…`；
+`hdiutil attach` → `ditto` 覆盖安装到 `/Applications/e-Mate.app` 后，
+安装态与 DMG 内 App 的 `Contents/Resources/app.asar` sha256 完全一致
+（`3a551840fa7d77be8ec97f52be6f82df856e2f56fee1a9e4af0b93ae6ed458b4`）。
+
+**候选内证据**（`app.asar.unpacked/build/e-mate-profile`）：
+- `plugins/emate-shell/lib/client.js` 481571 字节：`conversationEvents` 0 处、`uiConversation.events.register` 4 处；
+- `bundles/find-skill/lib/client.js`：`conversationEvents` 0 处、`uiConversation` 2 处；
+- `ecosystem/dsh-file-viewer/lib/client.js` 与 `ecosystem/dsh-at-file/lib/client.js`：
+  退役 specifier 0 处、`@deepseek-ai/dsh-client-store` 各 1 处；
+- `bundles/turn-fold/` 存在。
+
+**实机证据**：`open -a e-Mate` → 3 个进程、`127.0.0.1:3080` LISTEN；
+**没有**任何 "could not load all plugins" 告警或失败页；主窗口 1280×787 渲染出完整产品界面
+（页头 `e-Mate | AI OFFICE AGENT`、右上 `2.0.18 · 11,000 PTS`、登录卡 `欢迎回来`/
+`账号或邮箱`/`密码`/`保持登录`/`登录`/`注册新账号`、主视觉 `全场景办公 AI Agent`）。
+渲染进程 console（`ELECTRON_ENABLE_LOGGING=1` 直接运行二进制捕获）只剩一条既有良性提示
+`[genui] fence-registry 扩展点不存在（原版 DSH）——启用 DOM 渲染通道`，
+**没有** `failed to import loader entry`。
+截图留档（按 AGENTS.md 不入库）：
+`~/.dsh-computer-use/artifacts/session-27e2cf42-7243-4aad-a60b-4065c4b0d9ef/observation-04b5df1a-4483-4a38-9e4b-14e4c04588a6.png`。
+
+## AC-03 AC-01 复测（C2b，升级安装路径）—— **PASS**
+
+保留上一版被改动的 profile（含手工诊断补丁）直接覆盖安装 C2b：App 启动成功，
+profile 依 `.e-mate-install.json`（schema 2 / 2.0.18 / harness `43c411a5`）自愈，
+无 tidychat 残留，无悬空 bundle。C2 上测得的启动即退出在 C2b 上不再出现。
+
+## 性能：生图延迟（对照 = DSH 原版，同渠道同提示词）—— **部分完成**
+
+| 侧 | 渠道/模型 | 提示词 | 样本 | 结果 |
+|---|---|---|---|---|
+| 对照：DSH 原版（本机 127.0.0.1:3180 会话） | `openai` / `gpt-image-2.5-flare` | 固定测试卡提示词 | 3 | 19650 / 17938 / 19330 ms，全部 completed，中位数 **19330 ms** |
+| 处理：e-Mate C2b | 同一渠道（插件配置相同） | 同一提示词 | 待测（需登录） | `OPEN` |
+
+首响与多轮延迟：`OPEN`（需登录后实测；对照侧需以企业模型同条件运行，方法见 plan §4）。
+
 ## 其余用例
 
-| 组 | 状态 |
+| 组 | 状态（C2b） |
 |---|---|
-| A 登录与企业 | `OPEN`（C2） |
-| B 会话与转录 | `OPEN`（C2） |
-| C 生图 | `OPEN`（C2） |
-| D 知识 | `OPEN`（C2） |
-| E 画布/侧栏/宠物/屏幕 | `OPEN`（C2） |
-| F 设置与更新 | `OPEN`（C2） |
-| G turn-fold 豁免 | `OPEN`（C2；C1 已具备承载，但未实测可见性） |
-| H 移除项核对 | `OPEN`（C2） |
-| 性能三维度 | `OPEN`（C2） |
+| A 登录与企业 | `BLOCKED(enterprise-unreachable)`：App 正常渲染到登录页，但企业服务本机不可达（实测 `curl` 面板地址 `http=000` 超时），且会话内被授权的目录中没有 App 登录密码（`企业服务器地址 (2).txt` 与 `e-Mate-管理端与审计面板账号.txt` 只有面板/管理端/审计账号）。不伪造登录，不用其他模型绕过。 |
+| B 会话与转录 | `BLOCKED`（同 A：会话需要登录态） |
+| C 生图 | `BLOCKED`（同 A；对照侧 DSH 原版已完成采样，见上一节） |
+| D 知识 | `BLOCKED`（同 A） |
+| E 画布/侧栏/宠物/屏幕 | `BLOCKED`（同 A；登录页本身已证明 shell/侧栏 owner 可加载——见 AC-02 复测） |
+| F 设置与更新 | `BLOCKED`（同 A） |
+| G turn-fold 豁免 | 候选级 `PASS`，GUI 可见性 `BLOCKED`：`bundles/turn-fold` 在候选内；desktop `yarn check` 内置的 profile boot smoke 实测打印 `turn-fold: the served chat bundle carries the injected runtime; the file on disk does not`（即"服务出去的字节带补丁、磁盘上的不带"这一豁免核心断言为真）；折叠的肉眼可见性需要登录后的会话。 |
+| H 移除项核对 | **`PASS`（候选级）**：`app.asar` 与 `app.asar.unpacked/build/e-mate-profile` 中 `dsh-plugin-computer-use`/`dsh-computer-use`/`dsh-plugin-tidychat`/`emate-tidychat` 命中数全为 0；`bundles/` 无对应目录；`bundles/registry.json` 命中 0。GUI 入口核对需要登录态。 |
+| 性能三维度 | 生图对照侧已测（中位数 19330 ms / n=3）；处理侧与首响、多轮均 `BLOCKED`（同 A） |
+
+## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
+
+`dist/e-Mate-2.0.18-win-x64-Setup.exe` 335410291 字节 / sha256 `67797411…`；
+`dist/win-unpacked/e-Mate.exe` 225577472 字节 / sha256 `ab3cbd85…`；
+构建自带校验通过（`packaged node-pty smoke passed`、`Windows installer verification passed`），构建 `EXIT=0`。
+**未安装**：按 AGENTS.md，Windows 的安装态 GUI 验收必须在**已登录的交互式会话**上完成，
+远程命令回执不构成安装验收。故 C4 的安装态一律 `OPEN`。
 
 ## 本文件不声称什么
 
