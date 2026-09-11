@@ -294,6 +294,24 @@ assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSes
 **影响面**：所有依赖托管模型的实机用例（B/C/D 组、G 组可见性、三维度性能的**处理侧**）都停在这里；
 不依赖模型的用例（A 登录与企业、F 设置与更新、H 移除项核对、门禁）已完成，见上表。
 
+## AC-06 Windows 安装态（C5）—— 安装与就地替换 **PASS**，GUI 启动 `OPEN`（需已登录交互式会话）
+
+在一台**已装 e-Mate 2.0.17** 的远程 Windows 机器上（`win-codex`）做真实升级安装：
+
+| 步骤 | 实测结果 |
+|---|---|
+| 安装包字节 | `e-Mate-2.0.18-win-x64-Setup.exe` sha256 `9CE78A84773AF58399822DCDAA0CF00EC86A1CA86C0CC5DC75ADED26D033070E` = 候选回执值 |
+| 升级前 | `%LOCALAPPDATA%\Programs\e-Mate\resources\app.asar` = `B1AFC48FA3AF41FB01F2E28AEC02133C242F5C90CA0314C09E1C31448B08357A`（2.0.17），注册表 `e-Mate 2.0.17` |
+| 静默安装 `/S` | 退出码 **0** |
+| 升级后 | `app.asar` = `1194E32E1CCDCA81A337D9CC27EC5035B1AB93160EECE95F70A5A6662B1E0FF7`，**与候选 `dist/win-unpacked/resources/app.asar` 逐字节相同**；注册表 `e-Mate 2.0.18`；`e-Mate.exe` sha256 `16B9522E84F8DD55821001B3165980AFA40F79D1EEB0794309429634106359F2` = 候选值 |
+
+即：**同源字节安装、就地替换、安装后身份正确**，这三项在真实 Windows 升级路径上成立。
+
+**GUI 启动 = `OPEN`**：从非交互 SSH 会话 `Start-Process e-Mate.exe` 后 35 s 实测 **0 个进程**、
+`3080` 无监听、未生成 DSH home —— Electron 需要交互式窗口站。按 AGENTS.md
+"Installed GUI acceptance still requires the signed-in interactive Windows session"，
+Windows 的 **GUI/登录态/模型相关用例**一律保持 `OPEN`，不得用远程命令回执替代。
+
 ## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
 
 `dist/e-Mate-2.0.18-win-x64-Setup.exe` 335410291 字节 / sha256 `67797411…`；
