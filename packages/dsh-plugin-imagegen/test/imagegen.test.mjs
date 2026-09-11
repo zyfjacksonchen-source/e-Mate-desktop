@@ -19,7 +19,7 @@ const cleanups = []
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 const json = value => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
 const success = id => json({ id, data: [{ b64_json: PNG.toString('base64') }], usage: { images: 1 } })
-const receipts = owner => owner.session.events.filter(event => event.type === 'emate/image-output').map(event => event.data)
+const receipts = owner => owner.session.snapshotEvents().filter(event => event.type === 'emate/image-output').map(event => event.data)
 const snake = ref => ({ attachment_id: ref.attachmentId, media_type: ref.mediaType, bytes: ref.bytes, width: ref.width, height: ref.height, ...(ref.name ? { name: ref.name } : {}) })
 
 async function fixture(request = async (_url, _init, ordinal) => success(`fixture-${ordinal}`)) {
@@ -51,7 +51,7 @@ async function fixture(request = async (_url, _init, ordinal) => success(`fixtur
   const firstOwner = owner()
   async function call(name, args, options = {}) {
     const agent = options.agent ?? firstOwner, callId = options.callId ?? `call-${++serial}`, rootCallId = options.rootCallId ?? callId
-    if (!agent.session.events.some(event => event.type === 'tool/call' && event.data.callId === rootCallId)) {
+    if (!agent.session.snapshotEvents().some(event => event.type === 'tool/call' && event.data.callId === rootCallId)) {
       agent.session.append('tool/call', { turn: 1, step: 1, callId: rootCallId, name: options.parent ? 'run_code' : name, arguments: '{}' })
     }
     return ctx.tools.execute({ name, arguments: args, agent, callId, rootCallId, signal: options.signal ?? new AbortController().signal,
@@ -223,7 +223,8 @@ test('persisted task query survives host recreation without re-generating or rea
   const f = await fixture()
   const generated = await f.call('generate_image', { prompt: 'persisted' })
   assert.equal(generated.isError, false, JSON.stringify(generated))
-  const restored = Session.create(f.agent.id, f.agent.session.events, f.agent.session.header)
+  // Session.create(id, seed, header) keeps its arity in 0.1.5; only the seed accessor changed to snapshotEvents().
+  const restored = Session.create(f.agent.id, f.agent.session.snapshotEvents(), f.agent.session.header)
   const { host } = ImageGen.createImageHost(f.ctx, ImageGen.managedRoot('https://images.example.test/v1'))
   const task = await host.find(generated.value.task_id, { agent: { ...f.agent, session: restored }, callId: 'recover', rootCallId: 'recover' })
   const refs = await host.images(task)
@@ -264,6 +265,7 @@ test('native typed tool-result image blocks confer edit scope without parsing ar
     { type: 'tool/result', data: { message: { content: [{ type: 'tool-result', isError: false, content: [{ type: 'image', attachment: ref }] }] } } },
     { type: 'tool/result', data: { message: { content: [{ type: 'text', text: JSON.stringify({ type: 'image', attachment: { ...ref, name: 'untrusted' } }) }] } } },
   ] }
+  session.snapshotEvents = () => session.events
   assert.deepEqual(ImageGen.sessionImageRefs(session), [ref])
 })
 

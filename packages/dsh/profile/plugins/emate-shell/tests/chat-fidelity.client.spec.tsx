@@ -60,7 +60,7 @@ describe('target conversation fidelity contract', () => {
     expect(chatCss).toContain('[data-produced-files-row] > button[title]')
     expect(chatCss).toContain('Beautiful UI Tool Chips icon geometry (MIT)')
     expect(chatCss).toContain("[data-sample='bash'] + div > button")
-    expect(chatCss).toMatch(/\[data-slot='conversation'\] \[aria-expanded\]:focus-visible[^}]*outline: none;[^}]*box-shadow: none;/u)
+    expect(chatCss).toMatch(/\[data-slot='main.conversation'\] \[aria-expanded\]:focus-visible[^}]*outline: none;[^}]*box-shadow: none;/u)
     expect(homeCss).toContain('--dsw-static-deepseek-500: var(--emate-color-brand);')
     expect(homeCss).toContain('--dsw-alias-state-business-primary: var(--emate-color-brand);')
     expect(source).toContain("ctx.slots.inject('conversation.composer.dock'")

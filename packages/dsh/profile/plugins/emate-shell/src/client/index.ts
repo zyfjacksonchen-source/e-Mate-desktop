@@ -217,14 +217,14 @@ function StandaloneProductSurface() {
 
 /** Keep standalone product routes from inheriting a resident Session's body or header. */
 export function registerRouteScopedConversationHeader(ctx: any): void {
-  ctx.slots.inject('conversation', () => {
+  ctx.slots.inject('main.conversation', () => {
     let disposeShadow: (() => void) | undefined
     const sync = () => {
       const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
       if (hide === (disposeShadow !== undefined)) return
       if (hide) {
         ctx.layout.closeDetails()
-        disposeShadow = ctx.slots.register({ name: 'conversation', priority: -1 }, StandaloneProductSurface)
+        disposeShadow = ctx.slots.register({ name: 'main.conversation', priority: -1 }, StandaloneProductSurface)
       } else {
         const dispose = disposeShadow
         disposeShadow = undefined

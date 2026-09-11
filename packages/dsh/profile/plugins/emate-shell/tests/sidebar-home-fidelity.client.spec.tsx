@@ -1046,7 +1046,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).toMatch(/ctx\.connection\.rpc\.call\('\/emate\.schedules', 'list', \{\}\)/u)
     expect(source).toMatch(/ctx\.theme\.getTheme\(\)\.active\.colorScheme/u)
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
-    expect(styles).toMatch(/:global\(\[data-slot='conversation'\] > div\[data-phase\]\)\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/u)
+    expect(styles).toMatch(/:global\(\[data-slot='main.conversation'\] > div\[data-phase\]\)\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/u)
     expect(styles).toContain('--dsw-alias-button-info-fill: var(--emate-color-brand);')
     expect(styles).toMatch(/button:first-child\) \{\s*display: none !important;/u)
     expect(styles).not.toContain("content: '/'")

@@ -4,7 +4,7 @@
 
 /* Match the surrounding e-Mate system type scale without replacing any target
    message or tool renderer. */
-:global([data-slot='conversation']) {
+:global([data-slot='main.conversation']) {
   --dsw-font-markdown-base: 14px/22px var(--dsw-font-family);
   --dsw-font-markdown-base-strong: 600 14px/22px var(--dsw-font-family);
   --dsw-font-markdown-base-italic: italic 14px/22px var(--dsw-font-family);
@@ -67,14 +67,14 @@
 
 /* Keep rc.7's real ProducedFiles/openFile chain and make only its client
    projection the compact file capsule used by the target reference. */
-:global([data-slot='conversation'] div:has(> [data-produced-files-row])) {
+:global([data-slot='main.conversation'] div:has(> [data-produced-files-row])) {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-top: 12px;
 }
 
-:global([data-slot='conversation'] div:has(> [data-produced-files-row]) > span:first-child) {
+:global([data-slot='main.conversation'] div:has(> [data-produced-files-row]) > span:first-child) {
   display: none;
 }
 
@@ -155,7 +155,7 @@
 
 /* Keep target disclosure behavior while replacing its non-brand focus ring
    with the same visible hover surface used across e-Mate. */
-:global([data-slot='conversation'] [aria-expanded]:focus-visible) {
+:global([data-slot='main.conversation'] [aria-expanded]:focus-visible) {
   outline: none;
   box-shadow: none;
   background: var(--dsw-alias-interactive-bg-hover);

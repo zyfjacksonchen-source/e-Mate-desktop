@@ -127,7 +127,8 @@ test('graph rejects invented identities, duplicate nodes, dangling edges and mor
 })
 
 test('knowledge domain failures survive the real pinned native RPC envelope codec', async () => {
-  const { serverResponseSchema } = await import('../../../upstream/deepseek-harness/packages/host/apiproxy/src/api/rpc.schema.ts')
+  // 0.1.5 moved the RPC envelope schema from host/apiproxy's api/rpc.schema to client/connection.
+  const { serverResponseSchema } = await import('../../../upstream/deepseek-harness/packages/client/connection/src/rpc-schema.ts')
   const { knowledgeRpc } = await import('../src/index.ts')
   const { parseKnowledgeRpc } = await import('../src/contract.ts')
   const host = createKnowledgeHost({ localAccountPrincipal: () => principal, request: async () => reply(result) })
@@ -255,7 +256,7 @@ test('UI prepare freezes the original Xin subject before start without exposing 
   const ui = run.ctx.emateKnowledgeUi
   const prepared = (await ui.call('ui.import.prepare', { paths: [file], scope: { kind: 'project', project_id: 17 } })).result
   const agent = run.ctx.agents.get(prepared.session_id)
-  const marker = agent.session.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'ui-import').data
+  const marker = agent.session.snapshotEvents().find(event => event.type === 'knowledge/workflow' && event.data.kind === 'ui-import').data
   assert.equal(marker.xin_subject, createHash('sha256').update('xin-a').digest('hex'))
   assert.equal(xin.calls.length, 0)
   assert.doesNotMatch(JSON.stringify(prepared), /xin_subject|xinSubject|xin-a/)
@@ -280,7 +281,7 @@ test('same-subject cold imports retain the original binding, while legacy missin
   const agent = await first.workflow.openOperation({ provider: 'mock', model: 'mock-model' })
   const options = { operationId: 'stable_import_operation', paths: [file], scope: { kind: 'project', project_id: 17 } }
   await assert.rejects(first.workflow.importFiles({ agent }, options), { code: 'not-found' })
-  const originalBatch = structuredClone(agent.session.events.find(event => event.type === 'knowledge/workflow' && event.data.kind === 'import-batch').data)
+  const originalBatch = structuredClone(agent.session.snapshotEvents().find(event => event.type === 'knowledge/workflow' && event.data.kind === 'import-batch').data)
   const sessionId = agent.id; await first.dispose(); xin.epoch++
   const second = await nativeApplyReview(t, root, xin)
   const restored = await second.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock-model' } }); t.after(() => restored.dispose())

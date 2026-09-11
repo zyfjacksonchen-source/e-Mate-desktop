@@ -1,21 +1,12 @@
 import { fileURLToPath } from 'node:url'
 import tsconfigPaths from '../../upstream/deepseek-harness/node_modules/vite-tsconfig-paths/dist/index.js'
 import { standardDecoratorPlugin } from '../../upstream/deepseek-harness/vitest.shared.ts'
-
-const upstreamModules = fileURLToPath(new URL('../../upstream/deepseek-harness/node_modules/', import.meta.url))
+import { emateClientTestAliases } from '../../scripts/emate-client-test-aliases.mjs'
 
 export default {
   resolve: {
     dedupe: ['react', 'react-dom'],
-    alias: {
-      'react-dom': `${upstreamModules}.pnpm/node_modules/react-dom`,
-      react: `${upstreamModules}.pnpm/node_modules/react`,
-      '@testing-library/react': `${upstreamModules}@testing-library/react`,
-      '@deepseek-ai/dsh-client-runtime/client': fileURLToPath(new URL(
-        '../../upstream/deepseek-harness/packages/client/runtime/src/client/index.ts',
-        import.meta.url,
-      )),
-    },
+    alias: emateClientTestAliases,
   },
   plugins: [
     tsconfigPaths({

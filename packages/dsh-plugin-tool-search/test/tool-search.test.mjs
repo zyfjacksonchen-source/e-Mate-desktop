@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { CallId, LlmAdapter } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+// 0.1.5 renamed the tool-call id brand CallId -> ToolCallId.
+import { ToolCallId, LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { SessionPersistence, SessionPersistenceNotFoundError, SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import * as ToolSearch from '../lib/index.mjs'
 import * as Schedule from '../../../upstream/deepseek-harness/packages/schedule/schedule/lib/index.js'
@@ -30,8 +32,8 @@ function toolCallResponse(id, name, args) {
   const argumentsJson = JSON.stringify(args)
   return [
     { type: 'block-start', index: 0, blockType: 'tool-call' },
-    { type: 'tool-call-delta', index: 0, id: CallId(id), name, argumentsDelta: argumentsJson },
-    { type: 'block-end', index: 0, block: { type: 'tool-call', id: CallId(id), name, arguments: argumentsJson } },
+    { type: 'tool-call-delta', index: 0, id: ToolCallId(id), name, argumentsDelta: argumentsJson },
+    { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId(id), name, arguments: argumentsJson } },
     { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } },
     { type: 'finish', reason: { kind: 'tool-calls' } },
   ]
@@ -67,19 +69,22 @@ class ScriptedAdapter extends LlmAdapter {
 async function harness(config = {}, install = true) {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(PersistenceProbe)
+  ctx.on('session/flush', () => {})
   await ctx.plugin(AgentLoop, { agents: [] })
   const plugin = install ? await ctx.plugin(ToolSearch, config) : undefined
   return { ctx, plugin }
 }
 
-function createAgent(ctx, id) {
-  return ctx.agentLoop.create(SessionId(id), { provider: 'mock', model: 'mock' })
+// 0.1.5 AgentLoop.create() is asynchronous.
+async function createAgent(ctx, id) {
+  return await ctx.agentLoop.create(SessionId(id), { provider: 'mock', model: 'mock' })
 }
 
 async function execute(ctx, agent, name, args, parent) {
   ordinal += 1
   return await ctx.tools.execute({
-    callId: CallId(`tool-search-${ordinal}`),
+    callId: ToolCallId(`tool-search-${ordinal}`),
     name,
     arguments: args,
     agent,
@@ -108,8 +113,22 @@ test('keeps the upstream generation and edit tools visible with the accepted nat
   assert.match(profilePatch, /model: deepseek-v4-flash/u)
 })
 
-class PersistenceProbe extends Service {
-  constructor(ctx) { super(ctx, 'sessionPersistence') }
+// 0.1.5 addresses Session storage through handle-based SessionPersistence; a bare Service named
+// 'sessionPersistence' no longer satisfies the agent loop's handle-based write path.
+class PersistenceProbe extends SessionPersistence {
+  stored = new Map()
+  async create(header) { const entry = { header, events: [] }; this.stored.set(header.id, entry); return this.handle(entry, 'write') }
+  // Appends are durable on resolution here; nothing buffers, so the service-wide flush is a no-op.
+  async flush() {}
+  async open(id, access) { const entry = this.stored.get(id); if (entry === undefined) throw new SessionPersistenceNotFoundError(id); return this.handle(entry, access) }
+  async stat(id) { const entry = this.stored.get(id); return entry === undefined ? undefined : this.snapshot(entry) }
+  async list() { return [...this.stored.values()].map(entry => this.snapshot(entry)) }
+  snapshot(entry) { return { header: entry.header, revision: SessionPersistenceRevision(`probe-${entry.header.id}-${entry.events.length}`), eventCount: entry.events.length } }
+  handle(entry, access) {
+    return { id: entry.header.id, header: entry.header, inheritedEventCount: SessionLogOffset(0), access,
+      read: async (offset = 0, length = Number.MAX_SAFE_INTEGER) => ({ eventState: 'detached', events: structuredClone(entry.events.slice(offset, offset + length)) }),
+      append: async events => { entry.events.push(...events) }, flush: async () => {}, close: async () => {}, [Symbol.asyncDispose]: async () => {} }
+  }
 }
 
 test('keeps pinned Schedule tools Agent-local and executes them through the native definitions', async (t) => {
@@ -121,7 +140,7 @@ test('keeps pinned Schedule tools Agent-local and executes them through the nati
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(Schedule)
   await ctx.plugin(ToolSearch, { maxResults: 5 })
-  const agent = createAgent(ctx, 'schedule-disclosure')
+  const agent = await createAgent(ctx, 'schedule-disclosure')
 
   assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list'])
   const created = await execute(ctx, agent, 'schedule_create', { prompt: '生成日报', after_seconds: 3600 })
@@ -143,7 +162,7 @@ test('restores a Schedule request header without restricting Agent-local tool na
   ctx.on('session/flush', () => {})
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(Schedule)
-  const agent = createAgent(ctx, 'schedule-restore')
+  const agent = await createAgent(ctx, 'schedule-restore')
   agent.session.append('request/header', {
     header: {
       config: { provider: 'mock', model: 'mock' },
@@ -170,7 +189,7 @@ test('keeps Schedule tools visible when Tool Search registers first', async (t) 
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(ToolSearch, { maxResults: 5 })
   await ctx.plugin(Schedule)
-  const agent = createAgent(ctx, 'schedule-late-registration')
+  const agent = await createAgent(ctx, 'schedule-late-registration')
 
   assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list'])
   assert.deepEqual((await execute(ctx, agent, 'schedule_list', {})).value, [])
@@ -182,7 +201,7 @@ test('discloses deferred native tools without replacing their execution path', a
   ctx.tools.register(fixture('read_file', 'Read a local file'))
   ctx.tools.register(fixture('browser_navigate', 'Navigate the current webpage'))
   ctx.tools.register(fixture('office_write', 'Create an office document'))
-  const agent = createAgent(ctx, 'native-disclosure')
+  const agent = await createAgent(ctx, 'native-disclosure')
 
   assert.deepEqual(names(ctx, agent), ['read_file', TOOL_SEARCH_NAME])
   assert.equal((await execute(ctx, agent, 'office_write', {})).isError, true)
@@ -190,7 +209,7 @@ test('discloses deferred native tools without replacing their execution path', a
   assert.deepEqual(found.value.tools, [{ name: 'office_write', status: 'loaded' }])
   assert.deepEqual(names(ctx, agent), ['office_write', 'read_file', TOOL_SEARCH_NAME])
   assert.equal((await execute(ctx, agent, 'office_write', {})).isError, false)
-  assert.equal(agent.session.events.some(event => event.type === 'tool-search/selection'), false)
+  assert.equal(agent.session.snapshotEvents().some(event => event.type === 'tool-search/selection'), false)
 })
 
 test('keeps the rc.7 native web_search definition directly visible', async (t) => {
@@ -198,7 +217,7 @@ test('keeps the rc.7 native web_search definition directly visible', async (t) =
   t.after(async () => ctx.fiber.dispose())
   ctx.tools.register(fixture('web_search', 'Search the public web'))
   ctx.tools.register(fixture('long_tail_probe', 'Deferred external capability'))
-  const agent = createAgent(ctx, 'native-search')
+  const agent = await createAgent(ctx, 'native-search')
 
   assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME, 'web_search'])
   assert.equal((await execute(ctx, agent, 'web_search', { query: 'e-Mate' })).isError, false)
@@ -221,8 +240,8 @@ test('uses bounded CJK aliases without changing the initial header or adding a p
   ctx.tools.register(fixture('image_metadata', 'Inspect image metadata and error logs'))
   baselineCtx.tools.register(fixture('imagegen', 'Generate or edit one image'))
   baselineCtx.tools.register(fixture('image_metadata', 'Inspect image metadata and error logs'))
-  const agent = createAgent(ctx, 'cjk-image-disclosure')
-  const baselineAgent = createAgent(baselineCtx, 'baseline-image-disclosure')
+  const agent = await createAgent(ctx, 'cjk-image-disclosure')
+  const baselineAgent = await createAgent(baselineCtx, 'baseline-image-disclosure')
   const initialHeader = JSON.stringify(ctx.tools.schemas(agent))
 
   assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
@@ -231,7 +250,7 @@ test('uses bounded CJK aliases without changing the initial header or adding a p
   assert.equal(initialHeader.includes('批量生图'), false)
   const generation = await execute(ctx, agent, TOOL_SEARCH_NAME, { query: '批量生图六张' })
   assert.deepEqual(generation.value.tools, [{ name: 'image_batch', status: 'loaded' }])
-  assert.equal(agent.session.events.some(event => JSON.stringify(event).includes('批量生图六张')), false)
+  assert.equal(agent.session.snapshotEvents().some(event => JSON.stringify(event).includes('批量生图六张')), false)
 })
 
 test('CJK image aliases find an edit but do not recall imagegen for diagnostics', async (t) => {
@@ -242,11 +261,11 @@ test('CJK image aliases find an edit but do not recall imagegen for diagnostics'
   t.after(async () => ctx.fiber.dispose())
   ctx.tools.register(fixture('imagegen', 'Generate or edit one image'))
   ctx.tools.register(fixture('image_metadata', 'Inspect image metadata and error logs'))
-  const editAgent = createAgent(ctx, 'cjk-image-edit')
+  const editAgent = await createAgent(ctx, 'cjk-image-edit')
   const edit = await execute(ctx, editAgent, TOOL_SEARCH_NAME, { query: '把图中3处武汉全部改成成都' })
   assert.deepEqual(edit.value.tools, [{ name: 'imagegen', status: 'loaded' }])
 
-  const diagnosticAgent = createAgent(ctx, 'cjk-image-negative')
+  const diagnosticAgent = await createAgent(ctx, 'cjk-image-negative')
   const diagnostic = await execute(ctx, diagnosticAgent, TOOL_SEARCH_NAME, { query: '检查图片元数据和错误日志' })
   assert.equal(diagnostic.value.tools.some(tool => tool.name === 'imagegen'), false)
   assert.deepEqual(names(ctx, diagnosticAgent), [TOOL_SEARCH_NAME])
@@ -256,6 +275,8 @@ test('a real pinned spawn child receives the first-party image tool without disc
   const ctx = new Context()
   t.after(async () => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(PersistenceProbe)
+  ctx.on('session/flush', () => {})
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)
   await ctx.plugin(SpawnInProcess, { providerName: 'spawn' })
@@ -284,7 +305,7 @@ test('a real pinned spawn child receives the first-party image tool without disc
       return textResponse('leaf complete')
     },
   ]))
-  const parent = createAgent(ctx, 'image-leaf-parent')
+  const parent = await createAgent(ctx, 'image-leaf-parent')
   const run = await ctx.subagents.start('spawn', {
     label: 'e-mate:image-leaf:test',
     prompt: [{ type: 'text', text: leafPrompt }],
@@ -299,10 +320,10 @@ test('a real pinned spawn child receives the first-party image tool without disc
   assert.equal(result.stopReason, 'completed')
   assert.deepEqual(executed, [leafArgs])
   assert.deepEqual(names(ctx, run.localAgent), ['imagegen'])
-  const searchCall = run.localAgent.session.events.find(event => event.type === 'tool/call'
+  const searchCall = run.localAgent.session.snapshotEvents().find(event => event.type === 'tool/call'
     && event.data.name === TOOL_SEARCH_NAME)
   assert.equal(searchCall, undefined)
-  assert.equal(run.localAgent.session.events.some(event => event.type === 'tool-search/selection'), false)
+  assert.equal(run.localAgent.session.snapshotEvents().some(event => event.type === 'tool-search/selection'), false)
   assert.equal((await execute(ctx, run.localAgent, 'unrelated_write', {})).isError, true)
   await run.dispose()
 })
@@ -312,7 +333,7 @@ test('restores only a post-plugin request/header and never mistakes a legacy ful
   t.after(async () => ctx.fiber.dispose())
   ctx.tools.register(fixture('read_file', 'Read a local file'))
   ctx.tools.register(fixture('office_write', 'Create an office document'))
-  const restored = createAgent(ctx, 'restored')
+  const restored = await createAgent(ctx, 'restored')
   restored.session.append('request/header', {
     header: {
       config: { provider: 'mock', model: 'mock' },
@@ -323,7 +344,7 @@ test('restores only a post-plugin request/header and never mistakes a legacy ful
     },
     reason: 'initial',
   })
-  const legacy = createAgent(ctx, 'legacy')
+  const legacy = await createAgent(ctx, 'legacy')
   legacy.session.append('request/header', {
     header: {
       config: { provider: 'mock', model: 'mock' },
@@ -403,7 +424,7 @@ test('an unknown-global tools/change race restores the native surface without bl
   const { ctx } = await harness({}, false)
   t.after(async () => ctx.fiber.dispose())
   ctx.tools.register(fixture('native_probe', 'Native capability'))
-  const agent = createAgent(ctx, 'tools-change-failure')
+  const agent = await createAgent(ctx, 'tools-change-failure')
   await ctx.plugin(ToolSearch)
   assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
 
@@ -417,7 +438,7 @@ test('rebuilds from the real inherited view and preserves selected eligible glob
   const { ctx } = await harness()
   t.after(async () => ctx.fiber.dispose())
   ctx.tools.register(fixture('first_probe', 'First capability'))
-  const agent = createAgent(ctx, 'late-tool')
+  const agent = await createAgent(ctx, 'late-tool')
   assert.deepEqual((await execute(ctx, agent, TOOL_SEARCH_NAME, { query: 'first capability' })).value.tools, [
     { name: 'first_probe', status: 'loaded' },
   ])
@@ -433,7 +454,7 @@ test('rebuild drops removed selections instead of reviving them after re-registr
   const { ctx } = await harness()
   t.after(async () => ctx.fiber.dispose())
   const remove = ctx.tools.register(fixture('ephemeral_probe', 'Ephemeral capability'))
-  const agent = createAgent(ctx, 'removed-tool')
+  const agent = await createAgent(ctx, 'removed-tool')
   await execute(ctx, agent, TOOL_SEARCH_NAME, { query: 'ephemeral capability' })
   assert.deepEqual(names(ctx, agent), ['ephemeral_probe', TOOL_SEARCH_NAME])
 
@@ -447,7 +468,7 @@ test('rejects nested Code Mode dispatch and invalid requests without changing vi
   const { ctx } = await harness({ maxResults: 1, maxQueryChars: 8 })
   t.after(async () => ctx.fiber.dispose())
   ctx.tools.register(fixture('probe', 'Probe a target'))
-  const agent = createAgent(ctx, 'invalid')
+  const agent = await createAgent(ctx, 'invalid')
   const before = names(ctx, agent)
 
   for (const [args, parent] of [
@@ -490,7 +511,7 @@ test('keeps a seventy-tool native catalog out of the initial request schema', as
     ctx.tools.register(fixture(`synthetic_tool_${index}`, `Synthetic capability number ${index}`))
   }
   const fullCatalogBytes = Buffer.byteLength(JSON.stringify(ctx.tools.schemas()))
-  const agent = createAgent(ctx, 'seventy-tools')
+  const agent = await createAgent(ctx, 'seventy-tools')
   const initialSchemas = ctx.tools.schemas(agent)
   const initialBytes = Buffer.byteLength(JSON.stringify(initialSchemas))
 

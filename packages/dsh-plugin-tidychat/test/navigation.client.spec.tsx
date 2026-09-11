@@ -17,7 +17,7 @@ it('mounts native navigation, jumps to a user row and preserves manual history l
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ clearRect() {}, fillRect, setTransform() {}, beginPath, moveTo() {}, lineTo() {}, closePath() {}, fill() {} } as never)
   const runtime = await SlotTestRuntime.create()
   const id = await runtime.sessions.add({ id: 'tidychat-test', snapshot: { nodes: [{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: 'first' }] }] } } as never)
-  runtime.provide('webUiSettings', { bind: () => ({ getSnapshot: () => ({ status: 'ready', writable: true, value: { autoLoad: true, navAccent: 'blue' } }), subscribe: () => () => {} }) })
+  runtime.ctx.provide('webUiSettings', { bind: () => ({ getSnapshot: () => ({ status: 'ready', writable: true, value: { autoLoad: true, navAccent: 'blue' } }), subscribe: () => () => {} }) })
   const loads = vi.fn()
   document.getElementById('older')!.addEventListener('click', loads)
   try {
@@ -47,7 +47,7 @@ it('mounts native navigation, jumps to a user row and preserves manual history l
 it('mounts the keyed native settings slot with fold/navigation controls but no automatic-loading control', async () => {
   const runtime = await SlotTestRuntime.create()
   const set = vi.fn(async () => {})
-  runtime.provide('webUiSettings', { bind: () => ({ getSnapshot: () => ({ status: 'ready', writable: true, value: { autoLoad: true } }), subscribe: () => () => {}, set }) })
+  runtime.ctx.provide('webUiSettings', { bind: () => ({ getSnapshot: () => ({ status: 'ready', writable: true, value: { autoLoad: true } }), subscribe: () => () => {}, set }) })
   try {
     await runtime.root.declare({ 'settings.plugin.item': { kind: 'keyed' } } as never,
       (({ renderSlot }: any) => <>{renderSlot('settings.plugin.item', {}, { entryKey: 'tidychat' })}</>) as never)
@@ -79,7 +79,7 @@ it('draws fixed 6x2 CSS pixel ticks at 10px pitch with fading neighbours and a 2
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(drawing as never)
   const runtime = await SlotTestRuntime.create()
   const id = await runtime.sessions.add({ id: 'tidychat-ticks', snapshot: { nodes: Array.from({ length: 6 }, (_, i) => ({ kind: 'user', seq: i + 1, time: 1, content: [{ type: 'text', text: `message ${i + 1}` }] })) } } as never)
-  runtime.provide('webUiSettings', { bind: () => ({ getSnapshot: () => ({ status: 'ready', writable: true, value: {} }), subscribe: () => () => {} }) })
+  runtime.ctx.provide('webUiSettings', { bind: () => ({ getSnapshot: () => ({ status: 'ready', writable: true, value: {} }), subscribe: () => () => {} }) })
   try {
     await runtime.declare({ 'conversation.session.header.utilities': { kind: 'list', scope: 'session' } } as never)
     await runtime.mount({ apply, inject: [...inject] })

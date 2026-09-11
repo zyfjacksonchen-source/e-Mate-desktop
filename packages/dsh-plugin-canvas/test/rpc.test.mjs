@@ -18,6 +18,9 @@ const ref = { attachmentId: `sha256:${hash}`, mediaType: 'image/png', bytes: png
 const asset = { ownerSessionId: 'parent', ref }
 const intent = { id: 'request', kind: 'image', pageId: 'page-1', sessionId: 'parent', sourceIds: [], imported: [] }
 const event = (seq, type, data) => ({ seq, type, data })
+// Test double: kernel Session 0.1.5 exposes snapshotEvents() instead of the removed `events` property;
+// the double keeps its mutable array exactly as the test drives it.
+const sessionDouble = (header, events = []) => ({ header, events, snapshotEvents() { return this.events } })
 function nativeEvents(status = 'completed') {
   return [event(0, 'turn/start', { turn: 1 }), event(1, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: `${intentMarker('request')}\ndraw a tree` }] }),
     event(2, 'tool/call', { turn: 1, callId: 'image-call', name: 'imagegen' }),
@@ -27,7 +30,7 @@ async function setup(t) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'canvas-rpc-')))
   const native = new Context(); const fiber = await native.plugin(LocalFileSystem, { cwd: root })
   t.after(async () => { await fiber.dispose(); await rm(root, { recursive: true, force: true }) })
-  const session = { header: { id: 'parent' }, events: nativeEvents() }
+  const session = sessionDouble({ id: 'parent' }, nativeEvents())
   let reads = 0
   const ctx = { fs: native.fs, workspaceRegistry: { archivedSessionIds: [], list: () => [{ path: root, sessionIds: ['parent'] }] },
     sessions: { get: id => id === 'parent' ? session : undefined }, sessionPersistence: { async load() { throw new Error('not found') } },
@@ -88,10 +91,10 @@ test('only exact native request turns and completed receipts return image artifa
 test('a completed child task is importable before the whole batch ends; foreign receipt correlations are rejected', async t => {
   const h = await setup(t)
   const taskId = `sha256:${'d'.repeat(64)}`
-  const child = { header: { id: 'child', parentSession: 'parent' }, events: [event(1, 'emate/image-output', {
+  const child = sessionDouble({ id: 'child', parentSession: 'parent' }, [event(1, 'emate/image-output', {
     schema_version: 2, status: 'completed', call_id: 'child-call', revision: 2, parent_session_id: 'child',
     client_request_id: `image-${'d'.repeat(64)}`, output: ref,
-  })] }
+  })])
   h.ctx.sessions.get = id => id === 'child' ? child : id === 'parent' ? h.session : undefined
   h.session.events = nativeEvents().slice(0, 3)
   h.session.events[2].data.name = 'image_batch'
@@ -107,7 +110,7 @@ test('a completed child task is importable before the whole batch ends; foreign 
 test('same-workspace sessions isolate projects and explicitly copy legacy files without deleting them', async t => {
   const h = await setup(t)
   h.ctx.workspaceRegistry.list = () => [{ path: h.root, sessionIds: ['parent', 'other'] }]
-  h.ctx.sessions.get = id => ['parent', 'other'].includes(id) ? { header: { id }, events: [] } : undefined
+  h.ctx.sessions.get = id => ['parent', 'other'].includes(id) ? sessionDouble({ id }) : undefined
   const call = (id, endpoint, value = {}) => handleCanvas(h.ctx, endpoint, { session_id: id, ...value })
   const old = { ...emptyProject('main'), title: '旧工作区海报' }
   await saveProject(h.ctx.fs, h.root, old, null)

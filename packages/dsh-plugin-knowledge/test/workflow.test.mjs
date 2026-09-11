@@ -252,7 +252,7 @@ test('native filesystem import streams only original bytes to Host and requires 
   const publicResult = await run.workflow.importFiles({ agent: run.caller }, { paths, operationId: randomUUID(), scope: { kind: 'public' }, publicIntentId: intent })
   assert.equal(publicResult.scope.kind, 'public')
   assert.equal(requests[2].body.provenance.intent_receipt.kind, 'public_library_action')
-  assert.doesNotMatch(JSON.stringify(run.caller.session.events), /\"(?:bytes|base64)\":/)
+  assert.doesNotMatch(JSON.stringify(run.caller.session.snapshotEvents()), /\"(?:bytes|base64)\":/)
 })
 
 test('folder collection rejects escapes and oversized files before reading any original', async t => {
@@ -287,7 +287,7 @@ test('project original upload uses the exact native ticket and queries the durab
   assert.equal(calls.filter(call => call.name === 'find_imported_source').length, 2)
   assert.equal(calls.filter(call => call.name === 'prepare_source_upload').length, 1)
   assert.deepEqual((await run.workflow.importsStatus({ agent: run.caller }, operationId, { kind: 'project', project_id: 42 })).sources, [uploaded])
-  assert.doesNotMatch(JSON.stringify(run.caller.session.events), /api\/uploads|tttttttttt/)
+  assert.doesNotMatch(JSON.stringify(run.caller.session.snapshotEvents()), /api\/uploads|tttttttttt/)
   assert.equal(run.adapter.requests.length, 0)
 })
 
@@ -330,7 +330,7 @@ test('simultaneous starts share one create request and one native Job; a differe
 
 test('natural-language public purpose is backed by the real current user message, not a model-supplied receipt', async t => {
   const run = await runtime(t)
-  const parent = run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
+  const parent = await run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
   let intent
   run.ctx.tools.register({ name: 'record_public_import', description: 'Record this requested public import.', parameters: { type: 'object', properties: {} }, output: { schema: { type: 'object', properties: { id: { type: 'string' } } }, render: () => [] },
     async execute(_args, exec) { intent = await run.workflow.recordUserPublicIntent(exec, ['/files/source.pdf']); exec.concludeTurn(); return { id: intent } },
@@ -401,7 +401,7 @@ test('checkpoint normalization matches the actual B Pydantic defaults and preser
 
 test('negative/excluded files and ambiguous basenames never obtain public intent or trigger upload', async t => {
   const run = await runtime(t)
-  const parent = run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
+  const parent = await run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
   const rejected = []
   run.ctx.tools.register({ name: 'attempt_public_import', description: 'Attempt this file import.', parameters: { type: 'object', properties: { path: { type: 'string' } } }, output: { schema: { type: 'object', properties: { blocked: { type: 'boolean' } } }, render: () => [] },
     async execute(args, exec) {
@@ -499,7 +499,7 @@ test('benchmark selections produce only the fixed Host explanation, never model-
 
 test('read-only Host tools reuse the same native execution owner authorization before and after account changes', async t => {
   const run = await runtime(t)
-  const parent = run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
+  const parent = await run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
   let captured, owner
   run.ctx.tools.register({ name: 'authorize_knowledge_read', description: 'Authorize a knowledge read.', parameters: { type: 'object', properties: {} }, output: { schema: { type: 'object', properties: { owner: { type: 'string' } } }, render: () => [] },
     async execute(_args, exec) { captured = exec; owner = await run.workflow.authorize(exec); exec.concludeTurn(); return { owner } },
@@ -524,7 +524,7 @@ test('the native picked provider is frozen before the first turn and survives re
   first.ctx.llm.registerAdapter(['picked'], picked)
   picked.script.push(toolChunks('first-topic', 'structured_output', output))
   assert.equal(first.caller.options.provider, 'mock')
-  assert.equal(first.caller.session.events.some(event => event.type === 'request/header'), false)
+  assert.equal(first.caller.session.snapshotEvents().some(event => event.type === 'request/header'), false)
   const input = { ...request(), model: { id: 'picked-model', reasoning_effort: 'medium' }, topics: [{ key: 'one' }, { key: 'two' }] }
   const started = await first.workflow.start({ agent: first.caller }, input)
   assert.equal((await done(first, started)).status, 'failed')
@@ -772,14 +772,14 @@ test('an existing UI operation session cannot be adopted by the next enterprise 
   const owner = await run.workflow.authorize({ agent: run.caller })
   run.caller.session.append('knowledge/workflow', { schema_version: 1, kind: 'ui-import', owner, operationId: randomUUID() }, { ignorable: true })
   await run.ctx.sessions.flush(run.caller.session)
-  const before = run.caller.session.events.length
+  const before = run.caller.session.snapshotEvents().length
   run.changeAccount()
   await assert.rejects(run.workflow.authorize({ agent: run.caller }), { code: 'scope-changed' })
   await assert.rejects(run.workflow.recordPublicIntent(run.caller, ['/private/old.pdf']), { code: 'scope-changed' })
   await assert.rejects(run.workflow.importFiles({ agent: run.caller }, { operationId: randomUUID(), paths: ['/private/old.pdf'] }), { code: 'scope-changed' })
   await assert.rejects(run.workflow.start({ agent: run.caller }, request()), { code: 'scope-changed' })
   assert.equal(run.backend.calls.length, 0)
-  assert.equal(run.caller.session.events.length, before)
+  assert.equal(run.caller.session.snapshotEvents().length, before)
   assert.equal(events(run.caller).find(event => event.kind === 'operation-session').owner, owner)
 })
 
@@ -798,7 +798,7 @@ test('a canonical compilation session retains its original owner for UI executio
 
 test('ordinary chat needs its real native turn, and a later turn may bind the new current owner', async t => {
   const run = await runtime(t)
-  const chat = run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
+  const chat = await run.ctx.agentLoop.create(randomUUID(), { provider: 'mock', model: 'model' })
   await assert.rejects(run.workflow.authorize({ agent: chat }), { code: 'scope-changed' })
   const accepted = []; let oldExecution
   run.ctx.tools.register({ name: 'check_knowledge_owner', description: 'Read this native turn owner.', parameters: {},

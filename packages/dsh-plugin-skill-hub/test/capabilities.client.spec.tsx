@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SlotTestRuntime } from '../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { apply as registerNativeLayout, inject as nativeLayoutInject } from '../../../upstream/deepseek-harness/packages/client/ui-layout/src/client/index.ts'
+import { LocaleRuntime } from '../../../upstream/deepseek-harness/packages/client/locale/src/client/index.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerRouteScopedConversationHeader } from '../../dsh/profile/plugins/emate-shell/src/client/index.ts'
 import { CapabilitiesPage, CapabilityControl } from '../src/client/capabilities.tsx'
@@ -115,8 +116,11 @@ describe('capability center fidelity surface', () => {
       const active = { id: `${colorScheme}-test`, colorScheme, tokens: {} }
       return { preference: colorScheme, active, themes: [active], revision: colorScheme === 'light' ? 1 : 2 }
     }
-    runtime.provide('theme', { getTheme: () => snapshot('light') } as never)
-    runtime.provide('connection', {
+    runtime.ctx.provide('theme', { getTheme: () => snapshot('light') } as never)
+    const locale = new LocaleRuntime(runtime.ctx)
+    runtime.ctx.provide('locale', locale)
+    runtime.slots.installLocale(locale)
+    runtime.ctx.provide('connection', {
       rpc: { call: vi.fn(async (route: string, endpoint: string) => {
         if (route === '/emate.capabilities') return { ok: true, value: { schema_version: 1, items: capabilityItems } }
         if (endpoint === 'catalog.search') return { ok: true, value: skillHubSuccess({ items: [hubCard], next_cursor: null }) }
@@ -128,8 +132,17 @@ describe('capability center fidelity surface', () => {
     } as never)
 
     try {
+      runtime.releasePanelInfoSource()
       await runtime.mount({ inject: [...nativeLayoutInject], apply: registerNativeLayout })
-      runtime.slots.register({ name: 'conversation' } as never, () => <div data-phase="active" />)
+      // The native shape: a main-panel entry declares 'main.conversation' and
+      // renders it; the route-scoped shadow then registers into that slot at a
+      // lower priority, so ascending priority makes it the one that renders.
+      runtime.slots.register({
+        name: 'main',
+        key: 'conversation',
+        children: { 'main.conversation': { kind: 'single', scope: 'session-maybe' } },
+      } as never, (props: any) => props.renderSlot('main.conversation', {}))
+      runtime.slots.register({ name: 'main.conversation' } as never, () => <div data-phase="active" />)
       const view = runtime.renderRoot()
       await runtime.mount({ inject: ['slots', 'layout'], apply: registerRouteScopedConversationHeader })
       await runtime.mount({ inject: [...skillHubInject], apply: registerSkillHub })

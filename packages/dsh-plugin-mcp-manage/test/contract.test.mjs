@@ -15,6 +15,9 @@ const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.
 const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
 const statusSource = readFileSync(new URL('../src/status.ts', import.meta.url), 'utf8')
 const runtime = readFileSync(new URL('../lib/index.mjs', import.meta.url), 'utf8')
+// Test double: kernel Session 0.1.5 exposes snapshotEvents() instead of the removed `events` property;
+// the double keeps its mutable array exactly as the test drives it.
+const sessionDouble = () => { const session = { events: [] }; session.snapshotEvents = () => session.events; return session }
 
 test('Feishu readiness requires verified structured user authority and never merely configured credentials', () => {
   assert.equal(feishuConnectionState({ identities: { user: { available: true, verified: true, status: 'needs_refresh' } } }), 'connected')
@@ -407,7 +410,7 @@ function xinHarness(revoke, hooks = {}) {
   return { owner, restart: () => createXinConnection(ctx, operations), ctx, entries, credentials, seenRefs, calls, guards, posts,
     principal: value => { principal = value },
     execution(agent, turn = 1, callId = `call-${++nextCall}`) {
-      agent.session ??= { events: [] }
+      agent.session ??= sessionDouble()
       for (const pre of preSteps) pre({ agent, turn }, async () => ({ kind: 'accept' }))
       agent.session.events.push({ type: 'tool/call', data: { turn, callId } })
       return { agent, callId, rootCallId: callId, signal: new AbortController().signal }
@@ -698,7 +701,7 @@ async function nativeXinHarness(t) {
   })
   t.after(async () => { await owner.dispose(); await runtime.fiber.dispose() })
   return { ...h, owner, runtime, writes, knowledgeCalls, xinAuthority(value) { Object.assign(capability, value) }, async agent(id) {
-    const agent = { id, session: { events: [] } }
+    const agent = { id, session: sessionDouble() }
     let scope
     await runtime.plugin(Object.assign(inner => { scope = createScope(inner, agent) }, { inject: ['tools','systemPrompt'] }))
     await runtime.waterfall(agent, 'agent/pre-step', { agent, turn: 1, step: 1, messages: [], signal: new AbortController().signal }, async () => ({ kind: 'accept' }))

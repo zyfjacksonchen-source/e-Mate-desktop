@@ -1,4 +1,4 @@
-:global([data-slot='conversation'] > div[data-phase]) {
+:global([data-slot='main.conversation'] > div[data-phase]) {
   --emate-color-canvas: oklch(0.966318 0.003973 106.474);
   --emate-color-workspace: oklch(0.984548 0.002637 106.448);
   --emate-color-surface: oklch(0.966318 0.003973 106.474);
@@ -27,7 +27,7 @@
   overflow: clip;
 }
 
-:global(body[data-ds-dark-theme] [data-slot='conversation'] > div[data-phase]) {
+:global(body[data-ds-dark-theme] [data-slot='main.conversation'] > div[data-phase]) {
   --emate-color-canvas: oklch(0.296426 0.00355 106.614);
   --emate-color-workspace: oklch(0.177638 0 0);
   --emate-color-surface: oklch(0.243535 0 0);
@@ -682,7 +682,7 @@
 }
 
 @media (max-width: 767px) {
-  :global([data-slot='conversation'] > div[data-phase]) {
+  :global([data-slot='main.conversation'] > div[data-phase]) {
     height: 100% !important;
     margin: 0;
     border: 0;

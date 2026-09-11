@@ -27,7 +27,7 @@ async function fixture(t){
   let identity={tenantId:'enterprise',userId:'user-a'}
   ctx.reflect.provide('emateIdentity',{localAccountPrincipal:()=>identity,request:async()=>{throw Error('No network in adapter tests')}})
   const authority=createKnowledgeWorkflow(ctx),adapter=new Adapter();ctx.llm.registerAdapter(['mock'],adapter)
-  const agent=ctx.agentLoop.create(randomUUID(),{provider:'mock',model:'model'}),calls=[],batches=new Map()
+  const agent=await ctx.agentLoop.create(randomUUID(),{provider:'mock',model:'model'}),calls=[],batches=new Map()
   const owner=()=>digest([identity.tenantId,identity.userId])
   let read=async(endpoint,request)=>({scope_key:owner(),result:{endpoint,request}})
   const freeze=(action,options)=>{const key=action+':'+options.operationId,hash=digest(options);if(batches.has(key)&&batches.get(key)!==hash)throw Object.assign(Error('private conflict'),{code:'idempotency-conflict'});batches.set(key,hash)}
@@ -47,9 +47,9 @@ async function fixture(t){
   t.after(async()=>{unregister();await authority.dispose();await ctx.fiber.dispose()})
   return {ctx,agent,calls,workflow,selection,owner,setRead(fn){read=fn},change(){identity={...identity,userId:'user-b'};authority.changed()},
     async run(actions,text='请整理本次指定资料'){
-      const before=agent.session.events.length;adapter.script.push(...actions)
+      const before=agent.session.snapshotEvents().length;adapter.script.push(...actions)
       const message=createUserMessage({content:[{type:'text',text}],source:{kind:'user'}});agent.followup(message);await agent.whenIdle()
-      const events=agent.session.events.slice(before)
+      const events=agent.session.snapshotEvents().slice(before)
       const results=events.filter(e=>e.type==='tool/result').flatMap(e=>e.data.message.content).filter(c=>c.type==='tool-result').map(c=>JSON.parse(c.content[0].text))
       return {message,events,results}
     },
