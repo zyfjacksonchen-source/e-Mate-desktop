@@ -3087,3 +3087,126 @@ gitmv_exit=128
 即：该组件的编译面**存在、通过、且确实由组件门禁执行**（不是"声明了但被跳过"）。
 **过程更正**：上一轮我用 `timeout 900 node …` 验证得到 exit 127——那是 macOS 默认**没有 `timeout`** 命令，命令根本没跑，**不是门禁失败**；本轮改为后台任务 + 等待，才是有效证据。这类"我自己引入的无效证据"必须记录，避免后人误读。
 
+### 87 第 107 轮：sidebar 身份接管闭环、knowledge 原生选择委托、Computer Use 完全删除、性能证据守卫收口
+
+本轮四个独立写集，全部实测，最终 HEAD `61e84b2018`（父仓，未推）。
+
+#### 87.1 目标备注里的「剩余阻塞 A–E」已全部过时
+
+目标描述仍写着 component-run 失败在 shell 套件 8 文件 13 测试（A–E 五项）。**本轮实测不成立**：
+
+| 命令 | 结果 |
+|---|---|
+| `pnpm run test:fast` | **EXIT 0** — 68/68 + 38/38 |
+| `node scripts/component-run.mjs check` | **EXIT 0** — 各组件 `fail 0` |
+| `cd desktop && corepack yarn check` | **EXIT 0** — 517 passed / 5 skipped，closure 247 节点，licenses 547→546 包，`verify:profile` 冒烟通过 |
+
+同样过时的是「emate-shell 无 tsconfig.json / 组件门禁从不类型检查」——§86 已证伪，本轮再次实测该组件 `check` 内含 `tsc -p tsconfig.json`。
+
+#### 87.2 sidebar 身份接管（唯一未解析导入的真正根因）
+
+`desktop/e-mate-desktop/scripts/verify-profile-boot.mjs` 报
+`assembled desktop Web graph is missing @deepseek-ai/dsh-client-ui-sidebar` 的根因是**产品缺陷**，不是测试问题：
+
+- 固定版 Web bundle 的原生行是 `ui-sidebar / @deepseek-ai/dsh-client-ui-sidebar`
+  （`bundle/web-app/cordis.patch.yml:220-221`）；e-Mate 把 shell 装到**该包路径**，
+  但清单里保留自己的 `name: @e-mate/dsh-client-shell`。
+- `client/modules/src/index.ts` 的 `locatePkgJson()`(:791-826) → `nearestPackage()`(:828-852)
+  **只接受 name 等于解析出的包名的清单**，不匹配就返回 undefined，被 `resolveMeta()`(:743-764)
+  缓存成「非客户端行」——服务图 id 永远取**清单名**，于是整行被静默丢弃，
+  e-Mate 整个 Web chrome（home/chat/account/settings/gallery/会话路由）从未到达浏览器。
+- 截图证据（改建前的临时探针）：`GRAPH_IDS` 里有 `…-sidebar-files/-right/-documentpreview`
+  却**既没有**原生 id **也没有** shell 自己的 id。
+
+**裁决 (b)**：保留接管，安装期把清单 `name` 改写为原生身份
+（`shellIdentityOverride()`，同时用于安装点与「已安装世代」校验，因此 2.0.17 装出来的旧 profile
+会在下次启动被**修复**而不是被误判为最新）。否决 (a)：shell 客户端 bundle 是**按原生 id 编译**的
+（`tsdown.config.ts:3` `clientBundle('@deepseek-ai/dsh-client-ui-sidebar', …)`），
+另起一行需要重编 shell 客户端 + 新 bundle patch + 新的 `dsh.profile.bundles` 条目，
+并且会留下**两个** sidebar 实现——正是契约禁止的双 owner。
+
+同时纠正一处事实：`@e-mate/dsh-plugin-better-sidebar` **不是** sidebar 实现，
+它只注册一个 `conversation.view`（`src/client/index.tsx:122`，id `project-files`）。
+因此正确的冒烟判据是「必须含原生 id + 恰好一个实现（原生 id / shell 自己的名字）」，
+而不是把它们当成两个候选 owner。完整记录见 `docs/2.0.18/sidebar-identity-takeover.md`。
+
+#### 87.3 knowledge 模型选择：从「半套重实现」改为委托原生 owner
+
+未提交的工作区改动把已删除的 `ctx.apiProxy.sessions.models(...)` RPC 换成了
+「projection `pending` → `agentDefaultModel`」，**漏了原生组合链的第二步**。
+原生 owner 是 `SessionController.selectionFor(agent).current`
+（`api/session-controller/src/agent.ts:276-305`：未发送的 composer 选择 → 已记录的 request header → 部署默认）。
+改为直接委托，`sessionController` 同步进 `inject` 与 `cordis.patch.yml`；
+测试中原先给已删除 RPC 打桩的两条断言随之改写（旧契约码 `model-unavailable` 随 RPC 一起消失，
+新形态是「无原生选择源 → `model-selection-unavailable` 失败闭锁」+ `model-changed`）。
+**负向控制**：把委托改回默认值 → 2 红；删掉失败闭锁分支 → 1 红；两次均按 sha256 原样还原。
+
+#### 87.4 Computer Use 完全删除
+
+用户裁定「win 和 mac 双端都取消删除插件和对应的前端展示 / 配套 / 环境 / 依赖」。
+删除 **186 个跟踪文件**（`packages/dsh-plugin-computer-use/` 30 + `upstream/plugins/dsh-computer-use/` 156，
+生成物 `profile/bundles/computer-use/` 本就不跟踪）。组件清单 19→18，bundle registry 17→16。
+两个安装器把该包加入 `RETIRED_PROFILE_PACKAGES`，因此**已装 2.0.17 的 profile 会在下次启动真正删掉它**
+（含 `dsh.profile.bundles` 条目）。前端 `@电脑操控` 触发器整块移除，裸 `@` 名册变为 文件/目标/计划/Skill；
+CDP 提示词不再提 Computer Use（守卫改成负向断言），IM 技能不再承诺用它读屏上二维码。
+**删除本身有守卫**：两个 profile 修复测试都改为种一个陈旧的
+`@e-mate/dsh-plugin-computer-use` 并断言下次安装删目录、删依赖、删 bundle 条目。
+完整记录见 `docs/2.0.18/computer-use-removal.md`。
+明确**不改**：`enterprise/apps/analytics-api/tests/production.test.ts:269`（那是一串必须 404 的
+企业路由负向夹具，该路由从未实现，删它只会丢掉一条活断言）、`docs/2.0.17/**` 与
+`tests/regression/2.0.17/**`（冻结台账）、ledger 的 guardFiles 列表（保持证据原样，改为给三个
+owner 条目加 `disposition`）。
+
+#### 87.5 性能/质量证据守卫收口（§50.2 的收尾）
+
+§50.2 定性过的 6 个守卫文件（`tests/performance/**`、`tests/quality/**`）本轮全部实测并修到绿：
+
+| 守卫 | 修前 | 修后 |
+|---|---|---|
+| `image-single/contract.test.mjs` | 15/17（2 红） | **EXIT 0** |
+| `image-batch/stress.test.mjs` | 4/6（2 红） | **EXIT 0** |
+| `image-batch/release-evidence-protocol.test.mjs`、`real-provider-benchmark.test.mjs`、`quality/noninferiority.test.mjs`、`real-study.test.mjs` | 已绿 | 保持 EXIT 0 |
+
+两个根因各修一处：
+
+1. **0.1.5 新增的必填字段（本轮新发现，§50.2 未记录）**：`assistant/message` 现在要求
+   `stream: AssistantStreamRecord[]`（`core/session/src/types.ts:321`），缺了会被
+   `assertAssistantSettlementShape`（`index.js:279-291`）以
+   `seed assistant/message at index N has invalid settlement fields` 拒绝。
+   共享夹具 `image-single/native-fixture.mjs:98` 直接构造消息、没有任何流式记录，故补 `stream: []`。
+   这一处修好了两个文件各一条失败。
+2. **§50.2 已定性的归一化等式**：`stress.test.mjs:29` 还在用已被删除的 `session.events`
+   （改成 `snapshotEvents()[0]`）；`worker.mjs:253` 还在断言
+   `attachment_id === 'sha256:' + 提供方 PNG 摘要`，而 0.1.5 的附件存储在保存时**主动归一化**
+   （alpha PNG → WebP），该等式在设计上不再成立。按 §50.2 的裁决**分开验证两件事**：
+   提供方字节由 **request receipt 的 `image_sha256`**（`host.ts:184`）自证，
+   存储产物由「报告出来的 ref 必须精确描述它指向的存储字节」自证
+   （id 就是该产物摘要、bytes 就是该产物长度、且等于 store 自己给出的 ref）。
+   注意 `image_sha256` 在 `ImageRequestReceipt` 上，随 `ImageOutputReceipt.request_receipts` 暴露，
+   不在输出回执顶层——第一版写错位置时实测 `actual: undefined`，据此改正。
+
+**负向控制（三个，均实测 exit 1，且按 sha256 原样还原）**：恢复 `session.events`、
+把存储 ref 的 id 拿提供方摘要去比、把提供方摘要改错。三者都会让对应文件转红，
+证明新断言是承重的而不是「怎么写都绿」。
+
+**并把这个盲区本身堵上**：`tests/performance/**` 与 `tests/quality/**` 原先**不被任何门禁执行**，
+这正是它们能漂到 0.1.5 之后还没人发现的原因。新增
+`pnpm run test:image-evidence`（六个文件，53 条，约 10 s）并把它接进 `verify:rc`
+（`build:harness → test:fast → component-run check → test:image-evidence → dsh test`）。
+
+#### 87.6 一处必须更正的旧结论：canvas 的 `session.events` 迁移**不需要重做**
+
+本会话早前我曾把 canvas 的 8 处 `session.events` 改成 `snapshotEvents()`，结果 4–5 条测试转红
+（`false !== true`），当时归因为「语义不同」但未定论。本轮查清：
+
+`packages/dsh-plugin-canvas/src/native-artifacts.ts:14-21` 的 `inspectSession()`
+**已经在边界上完成迁移**——`NativeKernelSession` 接口(:4-8)只声明 `snapshotEvents()`，
+活会话走 `{ header: live.header, events: live.snapshotEvents() }`(:17)，
+持久化会话走(:18-20)。因此下游 :57/:80/:83/:88/:109/:114 等处的 `session.events`
+读的是**本地物化出来的对象**，不是原生 Session，本来就是对的。
+
+我的错误改动把本地对象的 `events` 换成了它并不存在的 `snapshotEvents()`——这才是那 4–5 条红的原因。
+**结论：canvas 无需再改**；目标备注里「redo or drop the canvas snapshotEvents migration」按
+**drop（已正确）** 结案。
+
+
