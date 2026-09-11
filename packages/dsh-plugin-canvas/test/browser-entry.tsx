@@ -2,10 +2,29 @@ import * as React from 'react'
 import * as ReactDOM from 'react-dom'
 import * as Client from 'react-dom/client'
 import * as JSX from 'react/jsx-runtime'
-import { ClientModuleSystem } from '../../../upstream/deepseek-harness/packages/client/modules/src/client/system.ts'
+import { createClientModuleSystem, type ClientBundleRegistration, type ClientModuleLoaderTarget } from '../../../upstream/deepseek-harness/packages/client/modules/src/client/index.ts'
 import { insertAsset } from '../src/client/model.ts'
-import { emptyPage, emptyProject } from '../src/contract.ts'
-const modules = new ClientModuleSystem({ modules: [], staticModules: { react: React, 'react-dom': ReactDOM, 'react-dom/client': Client, 'react/jsx-runtime': JSX } })
+import { ASSET_PATH, EDITOR_MODULE, emptyPage, emptyProject } from '../src/contract.ts'
+// 0.1.5 boot: the HTML facade owns a registration queue, and its create() materializes the modules
+// bundle and hands that queue to the module system, which switches it to live registration
+// (upstream modules/src/index.ts bootInjections -> client/index.ts createClientModuleSystem).
+// The editor graph row's bundle stays unloaded until the first import.
+const pendingQueue: ClientBundleRegistration[] = []
+const target: ClientModuleLoaderTarget = {
+  mode: 'queue',
+  pendingQueue,
+  load(registration) { pendingQueue.push(registration) },
+  create(options) { return createClientModuleSystem(target, { id: '@deepseek-ai/dsh-client-modules', exports: {} }, options) },
+}
+;(window as any).__ModuleLoader__ = target
+const modules = target.create({
+  boot: {
+    rev: 'fixture',
+    entries: [{ id: EDITOR_MODULE, url: ASSET_PATH + 'editor.js', rev: 'fixture' }],
+    batches: [{ phase: 'application', url: ASSET_PATH + 'editor.js', rev: 'fixture', entries: [EDITOR_MODULE] }],
+  },
+  staticModules: { react: React, 'react-dom': ReactDOM, 'react-dom/client': Client, 'react/jsx-runtime': JSX },
+})
 const reference = document.createElement('canvas'); reference.width = new URLSearchParams(location.search).has('narrow') ? 40 : 400; reference.height = 300
 const drawing = reference.getContext('2d')!
 drawing.fillStyle = new URLSearchParams(location.search).has('dark') ? '#151515' : '#fff8ec'; drawing.fillRect(0, 0, 400, 300)
@@ -41,8 +60,7 @@ const bridge = { sessionId: 'parent', close() {}, subscribe() { return () => {} 
 ;(window as any).readCanvasFixture = () => project
 const button = document.getElementById('open')!
 button.addEventListener('click', async () => {
-  await import(/* @vite-ignore */ new URL('/emate-canvas-assets/editor.js', location.origin).href)
-  const editor = await modules.import('@e-mate/dsh-plugin-canvas/editor') as any
+  const editor = await modules.import(EDITOR_MODULE) as any
   button.remove()
   Client.createRoot(document.getElementById('root')!).render(React.createElement(editor.CanvasPanel, { sessionId: 'parent', bridge, initialProjectId: 'main' }))
 })
