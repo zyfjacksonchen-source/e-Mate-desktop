@@ -37,7 +37,10 @@
 - id: agent-presets
   name: '@deepseek-ai/dsh-agent-presets'
   config:
-    default: code
+    # 0.1.5 ships standard|ptc|minimal|cordis; 'code' has no successor and the
+    # resolver fails loud (agent-preset/not-found) on the first session that names
+    # no preset. Native PTC is the 2.0.18 default agent preset.
+    default: ptc
 
 - id: sandbox-policy
   name: '@deepseek-ai/dsh-sandbox-policy'
