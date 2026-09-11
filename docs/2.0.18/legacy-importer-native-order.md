@@ -1,0 +1,134 @@
+# Legacy session importer: native step order
+
+Work order: fix the e-Mate legacy-session importer so the artifacts it emits are native-valid, add a
+guard that fails if it ever emits a first-step surface again, and report (not decide) what to do about
+the fifteen already-broken `legacy-*` artifacts. Read-only with respect to the user session store.
+
+## 1. Verdict
+
+- The importer no longer pins `SESSION_FORMAT_VERSION = 0`; it stamps **3** and stamps `isSeeded: false`.
+  That change landed in `d61829f86e` ("2.0.18 dsh 0.1.5: port the dsh guard ledger and its product paths"),
+  which also states it: "legacy-migration.ts pinned SESSION_FORMAT_VERSION 0 and used the deleted
+  create/append/inspect facade. Now v3 with the required isSeeded header field". Evidence:
+  `git show 76dd5a1481:packages/dsh/src/legacy-migration.ts` → line 24 `const SESSION_FORMAT_VERSION = 0`;
+  `git show d61829f86e:packages/dsh/src/legacy-migration.ts` → line 24 `= 3`.
+  The fifteen broken artifacts on disk were written by the 2.0.16/2.0.17 build, which is why they carry
+  `version: 0` headers.
+- The **event order defect is still present at HEAD**: every turn was emitted as
+  `turn/start -> user/message -> step/start`. That is the exact shape the Harness refuses during
+  v0 -> v3 migration. Fixed in this change.
+- The importer writes the current format (v3), so today's reader happens to read its output; the order was
+  still non-native and would have failed any forward migration of those artifacts. The guard now pins the
+  released-v0 rule, not the incidental v3 acceptance.
+
+## 2. The native rule and the minimal valid order
+
+- Refusal site: `upstream/deepseek-harness/packages/session/session-format-v2-to-v3/src/migration.ts:56`
+  `if (SURFACE_TYPES.has(event.type) && this.head === undefined) throw new SessionFormatUnsupportedMigrationError('format v2 surface before first step cannot acquire a system head without changing chronology')`.
+  `SURFACE_TYPES = {system/message, user/message, assistant/message, tool/result}` (`src/payload.ts:9`).
+- The head is acquired only by `step/start` (`migration.ts:72-74` calls `emitSystem` when `head === undefined`),
+  and `emitSystem` itself requires an open step (`migration.ts:109-111`).
+- Therefore the minimal native-valid order for a format-0 stream is: **every surface event must follow a
+  `step/start`**; a turn that has a user message must open a step before it and close it before
+  `turn/end`. Measured against the real store: **140/140 native v0 records open a step before their first
+  surface event** (0 violations), 13,998 `step/start` vs 13,996 `step/end`; the canonical turn reads
+  `turn/start -> agent/inbox/spliced -> step/start -> user/message -> assistant/message -> step/end -> turn/end`
+  (e.g. `session-40e09af9-3e6f-43af-b604-aad33a072ba5` seq 4/6/7/94/95/96).
+- Released-v0 payload validation confirms this is a semantic rule, not a payload rule:
+  `session-format-v0-to-v1/src/validation.ts:127-131` and `src/payload-validation.ts:200-202, 281-286`
+  validate `turn`, `step` coordinates and message fields but not step-vs-surface order.
+
+## 3. Hermetic reproduction (copy of one real artifact, shipped reader)
+
+Copy `legacy-006cedfc5dfab7138d54d459db37de36/` from the real store into a scratch root that keeps the
+project directory name (the reader checks header `cwd` against it), then open it with
+`@deepseek-ai/dsh-session-persistence-jsonl` (`compression: 'zstd'`). Sixteen-dir project layout:
+`<root>/<encoded cwd>/<session id>/session.jsonl.zstd`.
+
+- Fork build (`upstream/deepseek-harness/packages/session/session-persistence-jsonl/lib/index.js`):
+  all 15 refuse with
+  `format v2 surface before first step cannot acquire a system head without changing chronology; source v0 artifact remains unchanged`.
+- Published 0.1.5-rc.1 (`desktop/e-mate-desktop/node_modules/@deepseek-ai/dsh-session-persistence-jsonl`):
+  identical refusal for all 15.
+- Stored event orders (raw rows): `legacy-006cedfc5dfab7138d54d459db37de36` =
+  `turn/start, user/message, step/start, assistant/message, step/end, turn/end, session/title`;
+  `legacy-b18bc5fa012c8baffbc4cac30602e52e` and `legacy-d1dfc48d8b509103d851c4196e502597` =
+  `turn/start, user/message, turn/end, session/title` (a user message with **no step at all**).
+- The same refusal reproduces in-process through the shipped catalog
+  (`session-format-catalog/lib/index.js`: `createRestore(<v0 header>, {recovery:'strict', validation:'current'})`
+  → `decodeRow` per row → `finish()`), which is the instrument the new guard uses.
+
+## 4. Change
+
+Tracked source: `packages/dsh/src/legacy-migration.ts` (+48/-12 with the test file's 1-line expectation).
+`packages/dsh/profile/plugins/legacy-migration.js` and `packages/dsh/lib/**` are **generated**
+(`.gitignore:13-14`; `packages/dsh` `build` = clean-emate-build + sync-emate-plugin-bundles + tsdown), so the
+fix is in the TypeScript owner and the compiled copies were regenerated by `pnpm --filter @e-mate/dsh build`.
+
+- `planRuntime`: assistant items are collected first, then the turn is emitted as
+  `turn/start -> step/start{turn,1} -> [user/message] -> {assistant/message -> step/end}* -> turn/end`,
+  opening a new step only when no step is open. A turn with only a user message now closes its step
+  before `turn/end`; a turn with neither input nor assistant items emits no step at all.
+- `planCowAgent`: the group's step is opened before its first row; assistant rows reuse the open step or
+  open the next one, and the step is closed before `turn/end`.
+- Step numbering for assistant messages is unchanged in the one-assistant-per-turn case (step 1) and only
+  shifts when a turn has a user message plus several assistant messages.
+- Resulting shape (CowAgent fixture, measured):
+  `turn/start, step/start, user/message, assistant/message, step/end, turn/end, emate/legacy-artifacts, session/title`.
+
+## 5. Guard (added in `packages/dsh/test/legacy-migration.test.mjs`)
+
+- `opens a step before the first surface event of every imported session` (line 545): drives the real
+  importer over the CowAgent and ECoreX Runtime fixtures through the real `JsonlSessionPersistence` and
+  asserts no surface event precedes the first `step/start` in any emitted session.
+- `replays an imported session as released v0 without a surface before its step` (line 587): reads the
+  emitted rows back and replays them through the shipped released-v0 -> v3 catalog under a v0 header,
+  asserting the chain restores them and that the user and assistant surfaces survive.
+- **Red before the fix** (unfixed built importer, `node --test packages/dsh/test/legacy-migration.test.mjs`, exit 1):
+  `AssertionError [ERR_ASSERTION]: legacy-2ae5e3c41c01353bf18387cb91800dad: user/message at 1 precedes the first step/start (turn/start user/message step/start assistant/message step/end turn/end emate/legacy-artifacts session/title)`
+  and `AssertionError: user/message at 1 precedes the first step/start` (1 !== -1).
+- **Green after the fix**: exit 0, 11 pass / 0 fail.
+- End-to-end over the **real** legacy sources (`~/.emate/state/runtime.sqlite3` +
+  `ECoreX/state/runtime.sqlite3`, temp DSH home, sources read-only): 15 imported, 15 read through
+  `JsonlSessionPersistence`, and **15/15 replay clean through the released-v0 catalog chain** — the same
+  rows that refuse when read from the store's stored artifacts.
+
+## 6. The fifteen already-broken artifacts — options, not a decision
+
+Measured facts that any option must respect:
+
+- Re-running the importer over the real sources reproduces exactly the same 15 canonical ids, with
+  **identical user and assistant message texts** for all 15 (`stored` vs `fresh` text comparison: 15/15
+  identical). The only structural difference is the added step open/close rows.
+- The migration is **already failing closed today**, before and after this change: with the store's
+  fifteen artifacts present, `migrateLegacySessions` reads each existing target
+  (`readStoredSession` inside the existing-identity loop) and the read refuses, so
+  `runOptionalLegacyMigration` logs `e-Mate legacy session migration rejected; current sessions remain
+  authoritative` and rejects with `e-Mate legacy session migration rejected`. `emate-legacy-migration` is a
+  shipped profile plugin (`packages/dsh/profile/cordis.patch.yml:134-136`), so this repeats on every boot
+  while the legacy sources exist.
+
+| Option | Input it needs | Cost | Risk |
+|---|---|---|---|
+| A. Back up and remove the fifteen session directories, then let the (fixed) importer re-create them from the original sources | The original sources still exist and are readable: `~/.emate/state/runtime.sqlite3` (23.8 MB) and `ECoreX/state/runtime.sqlite3` (15.2 MB); app quit so the store is not being written | 15 directory moves + one importer run (seconds); receipt and evidence files are rewritten | Message content is reproduced identically (measured); anything the app appended to those sessions after the import would be lost — the text comparison shows nothing was appended. Artifacts published under `e-mate/attachments/legacy-v1/objects` are content-addressed and are reused, not deleted |
+| B. Repair in place: read the stored rows without the migrating reader and re-emit them in valid order under the same ids | A raw frame reader + writer in product code (the migrating reader cannot read them by definition); a decision on whether the repaired artifact stays v0 or is republished as v3 | New product code path plus tests; touches user data in place | Rewrites existing user artifacts; needs its own fail-closed story. Adds no content that option A would not also produce |
+| C. Leave them and make the importer tolerant of an unreadable existing target | A product decision to replace the existing-identity fail-closed check with a skip-and-warn for the known shape | One condition in `migrateLegacySessions` | Weaker guard: a genuinely conflicting artifact would be skipped instead of failing closed. The fifteen stay unreadable |
+| D. Do nothing further | — | — | Fifteen sessions stay unreadable and the plugin effect keeps rejecting on every boot |
+
+Option A is the only one that is both content-lossless (measured) and does not weaken an existing
+fail-closed guard; options B and C are product decisions for the main agent.
+
+## 7. Commands and exit codes
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @e-mate/dsh build` | exit 0 (regenerates `lib/legacy-migration-CBIj4tUz.js`, sha256 `c45617af…`, and `profile/plugins/legacy-migration.js`, sha256 `807dea29…`) |
+| `node --test packages/dsh/test/legacy-migration.test.mjs` before the fix | exit 1, 2 failing (guard red) |
+| `node --test packages/dsh/test/legacy-migration.test.mjs` after the fix | exit 0, 11 pass / 0 fail |
+| `pnpm run test:fast` | exit 0 (68 + 17 pass, 0 fail) |
+| `node scripts/component-run.mjs check` | exit 1 — unrelated: another writer deleted `packages/dsh-plugin-tidychat` in this shared worktree while this work was in progress, so the manifest read fails ENOENT before any component check |
+
+Nothing is committed. The change is `packages/dsh/src/legacy-migration.ts` and
+`packages/dsh/test/legacy-migration.test.mjs`; `packages/dsh/src/profile/credentials-os.ts`,
+`packages/dsh/src/profile/identity/index.ts` and the new `packages/dsh/test/model-credential-renewal.test.mjs`
+are concurrent work by another writer, not part of this change.
