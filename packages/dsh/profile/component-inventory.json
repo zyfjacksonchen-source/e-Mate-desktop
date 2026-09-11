@@ -110,12 +110,6 @@
       "cli": false
     },
     {
-      "id": "@e-mate/dsh-plugin-tidychat",
-      "root": "packages/dsh-plugin-tidychat",
-      "desktop": "bundled-profile",
-      "cli": true
-    },
-    {
       "id": "@e-mate/dsh-plugin-imagegen",
       "root": "packages/dsh-plugin-imagegen",
       "desktop": "bundled-profile",

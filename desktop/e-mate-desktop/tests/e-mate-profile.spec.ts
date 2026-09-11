@@ -221,7 +221,6 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('dsh-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-subagent')
-    expect(manifest.dsh.profile.bundles).toContain('@e-mate/dsh-plugin-tidychat')
     expect(manifest.dsh.profile.bundles).not.toContain('@kelearns/dsh-navigation-bar')
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-genui', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-vision-toolkit', 'lib', 'index.mjs'))).toBe(true)
@@ -330,7 +329,6 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(missing, 'product components missing from the composed desktop profile').toEqual([])
     expect(existsSync(join(home, 'profiles', 'e-mate', 'plugins', 'emate-shell'))).toBe(true)
     expect(rows.some(row => row.name === '@kelearns/dsh-navigation-bar')).toBe(false)
-    expect(rows.filter(row => row.name === '@e-mate/dsh-plugin-tidychat')).toHaveLength(1)
     expect(rows.find(row => row.id === 'emate-better-sidebar')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-better-sidebar',
     }))
@@ -930,7 +928,6 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(existsSync(retiredNavigation)).toBe(false)
     expect(repaired.dependencies['@kelearns/dsh-navigation-bar']).toBeUndefined()
     expect(repaired.dsh.profile.bundles).not.toContain('@kelearns/dsh-navigation-bar')
-    expect(repaired.dsh.profile.bundles.filter(name => name === '@e-mate/dsh-plugin-tidychat')).toHaveLength(1)
   })
 })
 

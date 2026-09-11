@@ -269,7 +269,6 @@ try {
     '@e-mate/dsh-plugin-skill-hub',
     '@e-mate/dsh-plugin-genui',
     '@e-mate/dsh-plugin-vision-toolkit',
-    '@e-mate/dsh-plugin-tidychat',
     '@deepseek-ai/dsh-client-ui-conversation',
     '@deepseek-ai/dsh-client-ui-sidebar',
     ...(prepared.mode === 'compatibility' ? ['@deepseek-ai/dsh-client-ui-layout'] : []),

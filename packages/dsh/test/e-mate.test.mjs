@@ -244,7 +244,6 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-schedules',
       '@e-mate/dsh-plugin-tool-search',
-      '@e-mate/dsh-plugin-tidychat',
       '@e-mate/dsh-plugin-imagegen',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
