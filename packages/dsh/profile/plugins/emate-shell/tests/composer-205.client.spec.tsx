@@ -308,7 +308,10 @@ describe('e-Mate 2.0.17 composer projection', () => {
       insert: { source: '电脑操控', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' },
     })
     const signal = new AbortController().signal
-    await expect(registered?.codec?.serialize('computer-use', signal)).resolves.toBe('@电脑操控')
+    // rc.1 splices the serializer's output into the prompt text, so the model
+    // form carries the explicit selection while the draft keeps @电脑操控.
+    await expect(registered?.codec?.serialize('computer-use', signal))
+      .resolves.toBe('@[电脑操控](computer-use)')
     expect(readFileSync('src/client/home.module.css', 'utf8')).toContain("font-family: 'DshChipCell', -apple-system")
   })
 

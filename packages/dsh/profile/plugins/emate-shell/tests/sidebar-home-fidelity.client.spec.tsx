@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SessionRuntime, type SessionId, type SessionListState, type SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import { RemoteError, SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { SessionInputShell } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
 import { HomeProjection, SchedulesOverlayProjection } from '../src/client/home.tsx'
 import {
@@ -53,37 +54,27 @@ function nativeSessionState(overrides: Record<string, unknown>): SessionListStat
 
 describe('native Subagent top-level visibility', () => {
   it('consumes the real client Session projection produced by Host session-added frames', async () => {
-    const sessions = new SessionRuntime(new Context(), {} as never, {
-      commands: {
-        list: () => Promise.resolve({ ok: true, value: [] }),
-        execute: () => Promise.resolve({ ok: true, value: undefined }),
-      },
-    } as never)
-    sessions.handleHostEnvelope({
-      rpcId: 'parent-added' as never,
-      payload: { type: 'host/session-added', sessionId: 'parent' as SessionId, blank: false },
-    })
-    sessions.handleHostEnvelope({
-      rpcId: 'child-added' as never,
-      payload: {
-        type: 'host/session-added', sessionId: 'child' as SessionId, blank: false,
-        parentSessionId: 'parent' as SessionId, origin: 'subagent',
-      },
-    })
-    sessions.handleHostEnvelope({
-      rpcId: 'fork-added' as never,
-      payload: {
-        type: 'host/session-added', sessionId: 'fork' as SessionId, blank: false,
-        parentSessionId: 'parent' as SessionId,
-      },
-    })
-    await Promise.resolve()
+    // 0.1.0 replayed 'host/session-added' envelopes into the removed
+    // SessionRuntime; 0.1.5 publishes the same rows through SlotTestRuntime's
+    // TestSessions, whose list is the real SessionListState the useSessions
+    // standard hook reads.
+    const runtime = await SlotTestRuntime.create()
+    await runtime.sessions.add({ id: 'parent', summary: { blank: false } }, { current: false })
+    await runtime.sessions.add({
+      id: 'child',
+      summary: { parentId: 'parent' as SessionId, origin: 'subagent', blank: false },
+    }, { current: false })
+    await runtime.sessions.add({
+      id: 'fork',
+      summary: { parentId: 'parent' as SessionId, blank: false },
+    }, { current: false })
 
-    const state = sessions.list.getSnapshot()
+    const state = runtime.sessions.list.getSnapshot()
     const internal = collectInternalSubagentIds(state)
     expect(state.byId['child' as SessionId]).toMatchObject({ parentId: 'parent', origin: 'subagent' })
     expect(state.byId['fork' as SessionId]).toMatchObject({ parentId: 'parent', blank: false })
     expect(state.ids.filter(id => isTopLevelProductSession(state.byId[id]!, internal)).sort()).toEqual(['fork', 'parent'])
+    await runtime.dispose()
   })
 
   it('converges subagent evidence without hiding roots or ordinary fork lineage', () => {
@@ -143,57 +134,53 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     const promptSessionIds: string[] = []
     const replySessionIds: string[] = []
     let promptAttempts = 0
-    let runtime!: SessionRuntime
-    const api = {
-      sessions: {
-        history: vi.fn(async () => ({ rpcId: 'history', result: { ok: true, value: { events: [], hasMore: false } } })),
-        prompt: vi.fn(async (request: { sessionId: SessionId }) => {
-          promptSessionIds.push(request.sessionId)
-          promptAttempts += 1
-          if (promptAttempts === 1) {
-            return { rpcId: 'prompt-failed', result: { ok: false, error: { code: 'internal', message: 'retry', details: {} } } }
-          }
-          const reply = {
-            rpcId: 'reply',
-            payload: {
-              type: 'session/event', sessionId: request.sessionId,
-              event: {
-                type: 'assistant/message', seq: 0, time: Date.now(), surfaceOp: 'append',
-                data: {
-                  turn: 1, step: 0,
-                  message: {
-                    id: 'assistant-reply', role: 'assistant',
-                    content: [{ type: 'text', text: 'done' }],
-                    source: { kind: 'model', provider: 'fake', model: 'fake' },
-                  },
-                },
-              },
-            },
-          }
-          replySessionIds.push(reply.payload.sessionId)
-          runtime.handleMuxEnvelope(reply as never)
-          return { rpcId: 'prompt-ok', result: { ok: true, value: { accepted: true } } }
-        }),
+    // 0.1.0 listed Sessions by replaying 'host/session-added' into the removed
+    // SessionRuntime and stubbed the 'session.prompt' wire method; 0.1.5 owns
+    // both on the real Session face that SlotTestRuntime provides.
+    const runtime = await SlotTestRuntime.create()
+    const reply = {
+      type: 'event',
+      event: {
+        type: 'assistant/message', seq: 0, time: Date.now(), surfaceOp: 'append',
+        data: {
+          turn: 1, step: 0,
+          message: {
+            id: 'assistant-reply', role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            source: { kind: 'model', provider: 'fake', model: 'fake' },
+          },
+          stream: [],
+        },
       },
     }
-    runtime = new SessionRuntime(new Context(), api as never, {
-      commands: {
-        list: () => Promise.resolve({ ok: true, value: [] }),
-        execute: () => Promise.resolve({ ok: true, value: undefined }),
-      },
-    } as never)
-    for (const [sessionId, blank, cwd] of [
-      [source, false, '/work/source'],
-      [project, true, '/work/project-a'],
-      [general, true, '/home/test/.dsh/e-mate/general'],
-    ] as const) {
-      runtime.handleHostEnvelope({
-        rpcId: `add-${sessionId}` as never,
-        payload: { type: 'host/session-added', sessionId, blank, cwd },
-      })
+    // The old wire stub echoed the accepted reply as a 'session/event' mux
+    // envelope and left the rejected send to SessionRuntime's promptError; the
+    // Session face now appends to the Session event feed and mirrors a rejected
+    // send into the Session snapshot, so the stub does both at this boundary.
+    const prompt = async function (this: { sessionId: SessionId }) {
+      promptAttempts += 1
+      if (promptAttempts === 1) {
+        const error = new RemoteError('gateway/internal', 'retry', {})
+        await runtime.sessions.updateSessionSnapshot(this.sessionId, draft => {
+          draft.promptError = { op: 'send', error }
+        })
+        return { ok: false as const, error }
+      }
+      replySessionIds.push(this.sessionId)
+      await runtime.sessions.appendEvent(this.sessionId, reply as never)
+      return { ok: true as const, value: { accepted: true as const } }
     }
-    await Promise.resolve()
-    runtime.open(source)
+    await runtime.sessions.add({ id: source, summary: { blank: false, cwd: '/work/source' } }, { current: false })
+    await runtime.sessions.add({
+      id: project,
+      summary: { blank: true, cwd: '/work/project-a' },
+      session: { prompt },
+    }, { current: false })
+    await runtime.sessions.add({
+      id: general,
+      summary: { blank: true, cwd: '/home/test/.dsh/e-mate/general' },
+    }, { current: false })
+    runtime.sessions.open(source)
     const workspaces = {
       baselinesReady: true,
       items: [
@@ -208,44 +195,58 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     })
     const ctx = {
       workspaces: { list: { getSnapshot: () => workspaces }, connectWorkspace },
-      sessions: runtime,
+      sessions: runtime.sessions,
     }
 
     render(<SessionRouteProjection
       useSessions={selector => React.useSyncExternalStore(
-        listener => runtime.list.subscribe(listener),
-        () => selector(runtime.list.getSnapshot()),
+        listener => runtime.sessions.list.subscribe(listener),
+        () => selector(runtime.sessions.list.getSnapshot()),
       )}
       useWorkspaces={useReadyWorkspaces}
-      getSessions={() => runtime.list.getSnapshot()}
-      openSession={id => { runtime.open(id as SessionId) }}
+      getSessions={() => runtime.sessions.list.getSnapshot()}
+      openSession={id => { runtime.sessions.open(id as SessionId) }}
     />)
 
     await expect(startSessionFromRoute(ctx, 'project-a')).resolves.toBe(true)
     await waitFor(() => {
-      expect(runtime.list.getSnapshot().current).toBe(project)
+      expect(runtime.sessions.list.getSnapshot().current).toBe(project)
       expect(location.pathname).toBe('/chat/project-blank')
     })
-    await waitFor(() => { expect(runtime.binding(project)?.session.getSnapshot().openState).toBe('open') })
+    await waitFor(() => { expect(runtime.sessions.binding(project)?.session.getSnapshot().openState).toBe('open') })
 
     const composerSessionIds: string[] = []
     let promptDone: Promise<unknown> = Promise.resolve()
     const input = new SessionInputShell({
-      actx: runtime.scope(project) as never,
-      defaultSink: (text, _imageIds, mode) => {
-        const composerSessionId = runtime.list.getSnapshot().current
+      actx: runtime.sessions.scope(project) as never,
+      // 0.1.0 stubbed the 'session.prompt' wire method, whose request carried the
+      // addressed sessionId; 0.1.5 addresses the bound Session face directly, so
+      // the call site records the session that face belongs to and maps its
+      // RemoteResult onto the composer's SubmitOutcome.
+      defaultSink: (text, _imageIds, mode, signal) => {
+        const composerSessionId = runtime.sessions.list.getSnapshot().current
         if (composerSessionId === undefined) throw new Error('composer lost its Session')
         composerSessionIds.push(composerSessionId)
-        const session = runtime.binding(composerSessionId)?.session
+        const session = runtime.sessions.binding(composerSessionId)?.session
         if (session === undefined) throw new Error('composer Session is not addressable')
-        promptDone = session.prompt([{ type: 'text', text }], mode)
+        promptSessionIds.push(session.sessionId)
+        const outcome = session.prompt([{ type: 'text', text }], mode, signal).then(result => result.ok
+          ? { kind: 'success' as const }
+          : { kind: 'error' as const, text: result.error.message })
+        promptDone = outcome
+        return outcome
+      },
+      commandAttachments: {
+        serialize: async () => [],
+        release: () => {},
+        unsupportedNotice: token => token,
       },
     })
     input.setDraft('first prompt')
     input.submit()
     await promptDone
-    expect(runtime.binding(project)?.session.getSnapshot().promptError).toMatchObject({ op: 'send' })
-    expect(runtime.list.getSnapshot().current).toBe(project)
+    expect(runtime.sessions.binding(project)?.session.getSnapshot().promptError).toMatchObject({ op: 'send' })
+    expect(runtime.sessions.list.getSnapshot().current).toBe(project)
     expect(location.pathname).toBe('/chat/project-blank')
     input.setDraft('retry prompt')
     input.submit()
@@ -266,8 +267,9 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(composerSessionIds).toEqual(['project-blank', 'project-blank'])
     expect(promptSessionIds).toEqual(['project-blank', 'project-blank'])
     expect(workspaces.items[0]?.sessionIds).toContain('project-blank')
-    expect(runtime.list.getSnapshot().byId[project]?.cwd).toBe('/work/project-a')
+    expect(runtime.sessions.list.getSnapshot().byId[project]?.cwd).toBe('/work/project-a')
     input.dispose()
+    await runtime.dispose()
   })
 
   it('keeps the stable chat route when the native owner reuses a general blank Session', async () => {
