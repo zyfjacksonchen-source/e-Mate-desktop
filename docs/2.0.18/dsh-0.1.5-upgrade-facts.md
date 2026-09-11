@@ -2627,3 +2627,28 @@ failed to apply loader entry emate-canvas (@e-mate/dsh-plugin-canvas): cannot ge
 （1@2072 / 1@2535 / 1@8272，另有 **6 个** host 符号而非上游注释的 4 个：多出 `_deepseek_ai_dsh_client_ui_primitives` 与 `ReasoningRow`）
 直接成为生成 overlay 时的接缝清单；`packages/dsh-plugin-{turn-fold,harmony}` 骨架可留作参考，harmony 包在改判后不再挂载。
 
+
+### 79.1 webServer 阻塞定位到两步（本轮实测，含决定性探针）
+
+**机制**：`connection.rpc.handle(channel, handler)` 把通道路由注册到**调用方自己的** `webServer` 上
+（`packages/client/connection/src/rpc-host.ts:178-181` 的 `owner.webServer.register(route)`）。
+因此任何注册 RPC 通道的插件都必须让 `webServer` 出现在**它自己的行 inject 里**。
+
+**关键事实（此前一直误判的原因）**：**行（bundle patch row）的 `inject:` 才是加载器采用的那份**，
+模块源码里的 `export const inject` 不是。实测证据：把 4 个组件的**行** inject 补上 `webServer` 后，
+错误从 `cannot get property "webServer"` **变成** `duplicate loader entry id: webserver` —— 说明行 inject 生效了，
+插件开始真正等待该服务，而服务仍未注册。
+
+**探针结果（临时插桩 verify-profile-boot.mjs，跑完已还原）**：
+- 组合出的 entry 列表**包含** `webserver`；原生 web-app bundle 的三行都在：
+  `web-startup`（`@deepseek-ai/dsh-web-app/startup`）、`webserver`（`inject: [webStartup]`、host/port 为 `!!js ctx.webStartup.*`）、
+  `web-runtime`（同样 `inject: [webStartup]`）。
+- 但该 `webserver` 行**始终不激活**：桌面组合里没有任何东西在加载窗口内提供 `webStartup`
+  （`web-startup` 自身要等 `cmdlineArgs`，而 smoke 是在 boot 回调里才 `provideCmdline(host, …)`，时序上晚于加载器结算）。
+- 自行 `- insert:` 同 id 行会被加载器**拒绝**（duplicate id）；对原生行打 `inject: []` 的补丁**未能覆盖**（实测仍等待）。
+
+**下一步（二选一，都属主代理决策）**：
+(a) 让 `webStartup` 在这个组合里真实存在：保证 `cmdlineArgs` 在加载结算前就绪（或在桌面 profile 里明确提供该 seat）；或
+(b) 在桌面 profile 里**禁用**原生 web 三行，改用 e-mate 自己的、id 不同的传输行（避免 duplicate id），由桌面自己持有 host/port。
+倾向 (a)：它保留固定版原生 owner，只补齐它依赖的 seat；若时序不可控再退到 (b)。
+

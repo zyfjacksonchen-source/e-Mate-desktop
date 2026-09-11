@@ -1,4 +1,4 @@
 - insert:
     - id: emate-file-import
       name: '@e-mate/dsh-plugin-file-import'
-      inject: [connection, workspaceRegistry, attachments, sessions]
+      inject: [connection, workspaceRegistry, attachments, sessions, webServer]

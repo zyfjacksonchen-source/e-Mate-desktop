@@ -1,4 +1,4 @@
 - insert:
     - id: emate-schedules
       name: '@e-mate/dsh-plugin-schedules'
-      inject: [connection, sessionPersistence]
+      inject: [connection, sessionPersistence, webServer]

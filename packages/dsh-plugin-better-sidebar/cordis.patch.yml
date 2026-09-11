@@ -1,4 +1,4 @@
 - insert:
     - id: emate-better-sidebar
       name: '@e-mate/dsh-plugin-better-sidebar'
-      inject: [connection, workspaceRegistry]
+      inject: [connection, workspaceRegistry, webServer]
