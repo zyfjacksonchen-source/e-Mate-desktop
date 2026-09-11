@@ -23,11 +23,12 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import { createApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
-import { serverResponseSchema } from '@deepseek-ai/dsh-host-apiproxy/api'
-import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
+import SessionController from '@deepseek-ai/dsh-api-session-controller'
+import { HostConnectionService, serverResponseSchema } from '@deepseek-ai/dsh-client-connection'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { composeEntries } from '@deepseek-ai/dsh-app-boot'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -42,6 +43,123 @@ const roots: string[] = []
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
+
+/** The image limits a Host context's attachment service declares for projections. */
+const TEST_IMAGE_LIMITS = Object.freeze({
+  maxImageBytes: 5 * 1024 * 1024,
+  maxImagesPerMessage: 20,
+  maxMessageImageBytes: 100 * 1024 * 1024,
+  maxImagePixels: 40_000_000,
+  maxImageDimension: 2000,
+  mediaTypes: Object.freeze(['image/png'] as const),
+})
+
+/**
+ * Provide the capability services the 0.1.5 Session owner injects but these
+ * expert-mode scenarios never reach. 0.1.5 deleted
+ * `@deepseek-ai/dsh-host-apiproxy`; the renderer-facing Session surface is now
+ * `@deepseek-ai/dsh-api-session-controller` (`session/create`), whose inject
+ * list assumes a complete Host composition.
+ * @param ctx - hand-built Host context mounting the Session owner.
+ */
+function installSessionApiCapabilities(ctx: Context): void {
+  ctx.provide('agentDefaultModel', {
+    currentSelection: () => ({ provider: 'unused', model: 'unused' }),
+    saveSelection: () => Promise.resolve(),
+  } as never)
+  ctx.provide('attachments', { imageLimits: TEST_IMAGE_LIMITS } as never)
+  ctx.provide('fileUploads', { registerAgentResolver: () => () => {} } as never)
+  ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [] } as never)
+  ctx.provide('typert', {
+    lookups: { configure: () => () => {} },
+    contexts: { configureHost: () => () => {} },
+  } as never)
+}
+
+/**
+ * The composed profile mounts the `session-query-sqlite` provider row, which is not a
+ * declared dependency of this package; the spec mounts the declared engine base and
+ * implements the two search methods these scenarios never call.
+ */
+class ExpertModeSessionQuery extends SessionQueryEngine {
+  override searchSessions(): never {
+    throw new Error('the expert-mode scenarios do not search Sessions')
+  }
+
+  override searchEvents(): never {
+    throw new Error('the expert-mode scenarios do not search Session events')
+  }
+}
+
+/**
+ * Mount the 0.1.5 owner of the renderer-facing `session/create` Remote method.
+ * @param ctx - Host context carrying the Session owner's capability services.
+ * @returns the controller fiber to keep in the scenario's disposal list.
+ */
+function mountSessionController(ctx: Context) {
+  return ctx.plugin(SessionController, { nativeOpen: false })
+}
+
+/**
+ * Answer the retired host API proxy key through the 0.1.5 owner. The composed
+ * `emate-agent-operations` row still resumes a Session by calling
+ * `ctx.get('apiProxy').sessions.create(...)`
+ * (`packages/dsh/src/profile/agent-operations.ts:45`); that plugin's own
+ * migration onto `ctx.sessionController` is owned outside this spec, so the
+ * scenarios bind the key it reads to the same controller the migrated call uses.
+ * @param ctx - Host context with the Session Controller mounted.
+ */
+function provideHostApiProxySeam(ctx: Context): void {
+  ctx.provide('apiProxy', {
+    sessions: {
+      create: async (request: {
+        readonly rpcId: string
+        readonly payload: { readonly sessionId: SessionId; readonly cwd: string }
+      }) => {
+        try {
+          return {
+            rpcId: request.rpcId,
+            result: { ok: true as const, value: await ctx.sessionController.create(request.payload) },
+          }
+        } catch (error) {
+          const remote = error as { code?: string; message?: string; details?: Record<string, unknown> }
+          return {
+            rpcId: request.rpcId,
+            result: {
+              ok: false as const,
+              error: {
+                code: remote.code ?? 'internal',
+                message: remote.message ?? String(error),
+                details: remote.details ?? {},
+              },
+            },
+          }
+        }
+      },
+    },
+  })
+}
+
+/**
+ * Authorize the loopback requests these scenarios drive. They exercise the Host
+ * Connection trust fence (the untrusted-origin refusal), not the browser cookie
+ * handshake that owns its own upstream coverage.
+ * @returns the browser-authentication seam the connection carrier reads.
+ */
+function loopbackBrowserAuth(): ConstructorParameters<typeof HostConnectionService>[2] {
+  return {
+    isAuthenticated: () => true,
+  } as unknown as ConstructorParameters<typeof HostConnectionService>[2]
+}
+
+/**
+ * Read one stored Session's `emate/expert-mode` payloads in append order.
+ * @param events - events read through a persistence read handle.
+ * @returns each recorded expert-mode state.
+ */
+function expertModeStates(events: readonly SessionEvent[]): readonly { active: boolean }[] {
+  return events.flatMap(event => event.type === 'emate/expert-mode' ? [event.data] : [])
+}
 
 // Complete Windows payloads are physical copies: cold installation alone takes
 // ~53s on the native runner. This is an integration deadline, not a latency SLA.
@@ -173,7 +291,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       'ui-theme:\n  preference: dark\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n',
     )
 
-    const prepared = prepareDesktopProfile(undefined, home, process.platform, 'e-mate')
+    const prepared = await prepareDesktopProfile(undefined, home, process.platform, 'e-mate')
     const rows = composeEntries([prepared.patches])
     expect(prepared.profile.name).toBe('e-mate')
     expect(prepared.mode).toBe(process.platform === 'linux' ? 'compatibility' : 'advanced')
@@ -250,22 +368,28 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     const ctx = new Context()
     const services = [ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 }),
       ctx.plugin(SystemPrompt, {}), ctx.plugin(SessionStore), ctx.plugin(AgentRegistry),
-      ctx.plugin(UserQuestionService), ctx.plugin(LlmRuntime), ctx.plugin(ToolRuntime), ctx.plugin(AgentLoop)]
+      ctx.plugin(UserQuestionService), ctx.plugin(LlmRuntime), ctx.plugin(ToolRuntime), ctx.plugin(AgentLoop),
+      ctx.plugin(SessionProjectionRegistry), ctx.plugin(ExpertModeSessionQuery)]
     try {
       await Promise.all(services.map(fiber => fiber.await()))
       services.push(ctx.plugin({ name: 'expert-test-connection', inject: ['webServer'],
-        apply: (owner: Context) => { new HostConnectionService(owner, []) } }))
+        apply: (owner: Context) => { new HostConnectionService(owner, [], loopbackBrowserAuth()) } }))
       await services.at(-1)!.await()
+      installSessionApiCapabilities(ctx)
+      const sessionController = mountSessionController(ctx)
+      services.push(sessionController)
+      await sessionController.await()
+      provideHostApiProxySeam(ctx)
       const moduleUrl = pathToFileURL(join(profile, agentOperations!.name!)).href
       const plugin = await import(/* @vite-ignore */ moduleUrl)
       const fiber = ctx.plugin(plugin)
       services.push(fiber)
       await fiber.await()
-      const api = createApiProxy(ctx, { cwd: home, defaultModelSelection: () => ({ provider: 'unused', model: 'unused' }) })
-      ctx.provide('apiProxy', api)
+      // Creation goes through the 0.1.5 owner of the renderer-facing
+      // `session/create` Remote method, not the deleted host API proxy.
       for (const sessionId of ['expert-first', 'expert-second']) {
-        const created = await api.sessions.create({ rpcId: sessionId as never, payload: { sessionId: SessionId(sessionId), cwd: home } })
-        expect(created.result.ok).toBe(true)
+        const created = await ctx.sessionController.create({ sessionId: SessionId(sessionId), cwd: home })
+        expect(created.sessionId).toBe(sessionId)
       }
       const first = ctx.sessions.get(SessionId('expert-first'))!
       const second = ctx.sessions.get(SessionId('expert-second'))!
@@ -298,7 +422,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       expect(await rpc('get', { session_id: first.id })).toEqual({ ok: true, value: { active: true } })
       expect(await policy(first)).toContain('enterprise-knowledge Skill')
       expect(await policy(second)).toBe('')
-      const restored = ctx.sessions.create(SessionId('expert-restored'), { seed: first.events })
+      const restored = ctx.sessions.create(SessionId('expert-restored'), { seed: first.snapshotEvents() })
       expect(await policy(restored)).toContain('enterprise-knowledge Skill')
       expect(await rpc('set', { session_id: first.id, active: false })).toEqual({ ok: true, value: { active: false } })
       expect(await policy(first)).toContain('用户已关闭')
@@ -804,7 +928,12 @@ describe('expert mode native cold-session RPC', () => {
       const session = seed.sessions.create(sessionId, { meta: { cwd: root,
         ...(sessionId === childId ? { origin: 'subagent', parentSession: id } : {}) } })
       session.append('emate/expert-mode', { active: true }, { ignorable: true })
-      await seed.sessions.flush(session)
+      // 0.1.5 durably writes through a persistence handle: `sessions.flush` only
+      // checkpoints Sessions the persistence owner already tracks, so the seed log
+      // is created and closed explicitly before the reading context mounts.
+      const handle = await seed.sessionPersistence.create(session.header)
+      await handle.append(session.snapshotEvents())
+      await handle.close()
     }
     await seed.fiber.dispose()
     const ctx = new Context()
@@ -816,15 +945,21 @@ describe('expert mode native cold-session RPC', () => {
       await ctx.plugin(LlmRuntime)
       await ctx.plugin(ToolRuntime)
       await ctx.plugin(AgentLoop)
+      await ctx.plugin(SessionProjectionRegistry)
+      await ctx.plugin(ExpertModeSessionQuery)
       await ctx.plugin(JsonlSessionPersistence, { root: persistenceRoot, compression: 'none' })
       await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
       await ctx.plugin({ name: 'expert-cold-connection', inject: ['webServer'],
-        apply: (owner: Context) => { new HostConnectionService(owner, []) } })
-      ctx.provide('apiProxy', createApiProxy(ctx, { cwd: root,
-        defaultModelSelection: () => ({ provider: 'unused', model: 'unused' }) }))
+        apply: (owner: Context) => { new HostConnectionService(owner, [], loopbackBrowserAuth()) } })
+      installSessionApiCapabilities(ctx)
+      await mountSessionController(ctx).await()
+      provideHostApiProxySeam(ctx)
       const source = new URL('../../../packages/dsh/src/profile/agent-operations.ts', import.meta.url).href
       await ctx.plugin(await import(/* @vite-ignore */ source))
-      const resume = vi.spyOn(ctx.agents, 'resume')
+      // 0.1.5 hands every Context its own traced service proxy, so a spy on one
+      // `ctx.agents` read never observes another Context's call; the registry
+      // prototype is the owner every resume reaches.
+      const resume = vi.spyOn(AgentRegistry.prototype, 'resume')
       let next = 0
       const rpc = async (endpoint: string, payload: object) => {
         const rpcId = `expert-cold-${++next}`
@@ -850,20 +985,24 @@ describe('expert mode native cold-session RPC', () => {
       expect(resume).toHaveBeenCalledTimes(1)
       expect(ctx.agents.get(id)?.session).toBe(ctx.sessions.get(id))
       expect(ctx.sessions.get(id)?.header.cwd).toBe(root)
-      const states = (await ctx.sessionPersistence.inspect(id)).events
-        .filter(event => event.type === 'emate/expert-mode').map(event => event.data)
+      const stored = await ctx.sessionPersistence.open(id, 'read')
+      const states = expertModeStates((await stored.read()).events)
+      await stored.close()
       expect(states).toEqual([{ active: true }, { active: false }])
       const refused = await rpc('set', { session_id: childId, active: false })
-      expect(refused).toMatchObject({ ok: false, error: { code: 'agent-busy', details: { reason: 'use subagent delivery for this child session' } } })
+      // 0.1.5's Session owner publishes the refusal as the Remote error
+      // `session/agent-busy` (`packages/api/session-controller/src/agent.ts:97`)
+      // with the same details; the deleted host proxy owned the `agent-busy` code.
+      expect(refused).toMatchObject({ ok: false, error: { code: 'session/agent-busy', details: { reason: 'use subagent delivery for this child session' } } })
       expect(ctx.agents.get(childId)).toBeUndefined()
       const liveChild = ctx.sessions.create(SessionId('expert-live-child'), {
         meta: { cwd: root, origin: 'subagent', parentSession: id },
       })
-      const childEventsBefore = liveChild.events.length
+      const childEventsBefore = liveChild.snapshotEvents().length
       expect(await rpc('set', { session_id: liveChild.id, active: true })).toMatchObject({
-        ok: false, error: { code: 'agent-busy', details: { reason: 'use subagent delivery for this child session' } },
+        ok: false, error: { code: 'session/agent-busy', details: { reason: 'use subagent delivery for this child session' } },
       })
-      expect(liveChild.events).toHaveLength(childEventsBefore)
+      expect(liveChild.snapshotEvents()).toHaveLength(childEventsBefore)
       expect(await rpc('set', { session_id: id, active: 'yes' })).toMatchObject({ ok: false, error: { code: 'internal', details: {} } })
       expect(await rpc('get', { session_id: 'missing' })).toMatchObject({ ok: false, error: { code: 'internal', details: {} } })
     } finally {
