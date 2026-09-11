@@ -304,7 +304,8 @@
    "areas": [
     "desktop",
     "other"
-   ]
+   ],
+   "disposition": "removed with its parallel update path, and the removal is itself guarded: the Windows update transaction script lived in desktop build output (never tracked, absent now) and its dedicated script lane is gone, while desktop/e-mate-desktop/tests/package.spec.ts:341 and :344 assert that check:win-package no longer names windows-update-transaction and that test:windows-update-transaction is undefined, so a second Windows update path cannot come back unnoticed. The current update owner, src/updates.ts, carries no receipt concept at all"
   },
   {
    "hash": "f0c974f8fecca1a6ab82451f0e29515502f3be7a",
