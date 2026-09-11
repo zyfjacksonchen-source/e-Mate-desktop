@@ -28,7 +28,8 @@ test('vision_glance resolves only an exact current-session image attachment', as
     signal,
     agent: { session: { header: { cwd: workspace },
       deriveMessages: () => [],
-      events: [{ type: 'emate/image-output', data: { output: attachment, content: [{ type: 'image', attachment }] } }],
+      // rc.1 publishes history through snapshotEvents(), not an events array.
+      snapshotEvents: () => [{ type: 'emate/image-output', data: { output: attachment, content: [{ type: 'image', attachment }] } }],
     } },
   }
 
@@ -47,7 +48,7 @@ test('vision_glance resolves only an exact current-session image attachment', as
 })
 
 test('vision_glance rejects an attachment id outside the current Agent session', async () => {
-  const exec = { signal: new AbortController().signal, agent: { session: { deriveMessages: () => [], events: [] } } }
+  const exec = { signal: new AbortController().signal, agent: { session: { deriveMessages: () => [], snapshotEvents: () => [] } } }
   await assert.rejects(
     withResolvedVisionGlanceImages({ attachments: { readImage: async () => assert.fail('must not read') } }, [attachmentId], exec, async () => {}),
     error => error?.name === 'VisionToolkitError' && error?.code === 'input'
@@ -56,7 +57,7 @@ test('vision_glance rejects an attachment id outside the current Agent session',
 })
 
 test('vision_glance fails typed before reading when the Agent workspace is unavailable', async () => {
-  const exec = { agent: { session: { deriveMessages: () => [{ content: [{ type: 'image', attachment }] }] } } }
+  const exec = { agent: { session: { deriveMessages: () => [{ content: [{ type: 'image', attachment }] }], snapshotEvents: () => [] } } }
   await assert.rejects(
     withResolvedVisionGlanceImages({ attachments: { readImage: async () => assert.fail('must not read') } }, [attachmentId], exec, async () => {}),
     error => error?.name === 'VisionToolkitError' && error?.code === 'input'
@@ -92,7 +93,7 @@ test('vision_glance reads historical user, assistant and tool images after compa
     for (const event of events) {
       const exec = { agent: { session: { header: { cwd: workspace },
         deriveMessages: () => [{ role: 'user', content: [{ type: 'text', text: '分析之前的图片' }] }],
-        events: [event],
+        snapshotEvents: () => [event],
       } } }
       let staged
       await withResolvedVisionGlanceImages({ attachments: { readImage: async ref => {

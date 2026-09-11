@@ -388,7 +388,7 @@ targetTest('Vision read tools do not create artifact directories and write tools
     })
     const byName = name => definitions.find(definition => definition.name === name)
     const exec = {
-      agent: { session: { header: { id: 'vision-test', cwd: workspace } } },
+      agent: { session: { header: { id: 'vision-test', cwd: workspace }, snapshotEvents: () => [] } },
       signal: new AbortController().signal,
     }
     const writeArgs = new Map([
@@ -699,7 +699,8 @@ targetTest('Vision restores native Skill loading across instruction updates with
           : { kind: 'user' },
       }), { surfaceOp: 'append' })
     } else if (mode === 'code') {
-      session.append('tool/code-dispatch', {
+      // Session format v3 renamed the PTC dispatch events.
+      session.append('tool/ptc-dispatch', {
         parentCallId: CallId('run-code'), subCallId: callId, name: 'skill',
         arguments: { name: 'vision-tools' }, isError: false, content,
       })
