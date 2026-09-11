@@ -238,17 +238,21 @@ test('managed profile installation is idempotent', () => {
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
     assert.equal(readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8'), patch)
     profileManifest.dependencies['@e-mate/dsh-plugin-computer-use'] = '2.0.17'
+    profileManifest.dependencies['@e-mate/dsh-plugin-tidychat'] = '2.0.17'
     profileManifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
     profileManifest.dependencies['@e-mate/dsh-plugin-idesign'] = '2.0.12'
     profileManifest.dependencies['@e-mate/dsh-plugin-search-mcp'] = '2.0.11'
     profileManifest.dependencies['@e-mate/dsh-plugin-xin-assistant'] = '2.0.10'
     profileManifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
     const retiredComputerUse = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
+    const retiredTidychat = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-tidychat')
     const retiredXin = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
     const retiredIDesign = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-idesign')
     const retiredSearchMcp = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp')
     mkdirSync(retiredComputerUse, { recursive: true })
     writeFileSync(join(retiredComputerUse, 'stale.txt'), 'retired')
+    mkdirSync(retiredTidychat, { recursive: true })
+    writeFileSync(join(retiredTidychat, 'stale.txt'), 'retired')
     mkdirSync(retiredXin, { recursive: true })
     writeFileSync(join(retiredXin, 'stale.txt'), 'retired')
     mkdirSync(retiredIDesign, { recursive: true })
@@ -257,6 +261,7 @@ test('managed profile installation is idempotent', () => {
     writeFileSync(join(retiredSearchMcp, 'stale.txt'), 'retired')
     profileManifest.dsh.profile.bundles.push(
       '@e-mate/dsh-plugin-computer-use',
+      '@e-mate/dsh-plugin-tidychat',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-idesign',
       '@e-mate/dsh-plugin-search-mcp',
@@ -267,18 +272,21 @@ test('managed profile installation is idempotent', () => {
     installProfile(dshHome)
     const repairedManifest = JSON.parse(readFileSync(join(first.profile, 'package.json'), 'utf8'))
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-computer-use'], undefined)
+    assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-tidychat'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-im'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-idesign'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-search-mcp'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-xin-assistant'], undefined)
     assert.equal(repairedManifest.dependencies['@yuxianglin/dsh-bridge-browser'], undefined)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-computer-use'), false)
+    assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-tidychat'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-im'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-idesign'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-search-mcp'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-xin-assistant'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@yuxianglin/dsh-bridge-browser'), false)
     assert.equal(existsSync(retiredComputerUse), false)
+    assert.equal(existsSync(retiredTidychat), false)
     assert.equal(existsSync(retiredXin), false)
     assert.equal(existsSync(retiredIDesign), false)
     assert.equal(existsSync(retiredSearchMcp), false)

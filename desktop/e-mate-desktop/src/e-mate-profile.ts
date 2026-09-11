@@ -82,6 +82,7 @@ const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-im',
   '@e-mate/dsh-plugin-search-mcp',
   '@e-mate/dsh-plugin-subagent',
+  '@e-mate/dsh-plugin-tidychat',
   '@e-mate/dsh-plugin-xin-assistant',
   '@omdsh-dev/dsh-genui',
   '@yuxianglin/dsh-bridge-browser',

@@ -818,6 +818,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     }
     manifest.dependencies['@xmanrui/dsh-im'] = 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'
     manifest.dependencies['@e-mate/dsh-plugin-computer-use'] = '2.0.17'
+    manifest.dependencies['@e-mate/dsh-plugin-tidychat'] = '2.0.17'
     manifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
     manifest.dependencies['@e-mate/dsh-plugin-idesign'] = '2.0.12'
     manifest.dependencies['@e-mate/dsh-plugin-search-mcp'] = '2.0.11'
@@ -831,18 +832,21 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     mkdirSync(retiredNavigation, { recursive: true })
     writeFileSync(join(retiredNavigation, 'cordis.patch.yml'), "- insert:\n    - id: dsh-navigation-bar\n      name: '@kelearns/dsh-navigation-bar'\n")
     const retiredComputerUse = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use')
+    const retiredTidychat = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-tidychat')
     const retiredXin = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
     const retiredIDesign = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-idesign')
     const retiredSearchMcp = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp')
     const retiredSidebar = join(profile, 'node_modules', 'dsh-better-sidebar')
     const retiredTurnFold = join(profile, 'node_modules', 'dsh-turn-fold')
     mkdirSync(retiredComputerUse, { recursive: true })
+    mkdirSync(retiredTidychat, { recursive: true })
     mkdirSync(retiredXin, { recursive: true })
     mkdirSync(retiredIDesign, { recursive: true })
     mkdirSync(retiredSearchMcp, { recursive: true })
     mkdirSync(retiredSidebar, { recursive: true })
     mkdirSync(retiredTurnFold, { recursive: true })
     writeFileSync(join(retiredComputerUse, 'stale.txt'), 'retired', { flag: 'w' })
+    writeFileSync(join(retiredTidychat, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredXin, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredIDesign, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredSearchMcp, 'stale.txt'), 'retired', { flag: 'w' })
@@ -850,6 +854,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     writeFileSync(join(retiredTurnFold, 'stale.txt'), 'retired', { flag: 'w' })
     manifest.dsh.profile.bundles.push(
       '@e-mate/dsh-plugin-computer-use',
+      '@e-mate/dsh-plugin-tidychat',
       '@xmanrui/dsh-im',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-idesign',
@@ -869,6 +874,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     )
     expect(repaired.dsh.profile.bundles.at(-1)).toBe('@xmanrui/dsh-im')
     expect(repaired.dependencies['@e-mate/dsh-plugin-computer-use']).toBeUndefined()
+    expect(repaired.dependencies['@e-mate/dsh-plugin-tidychat']).toBeUndefined()
     expect(repaired.dependencies['@e-mate/dsh-plugin-im']).toBeUndefined()
     expect(repaired.dependencies['@e-mate/dsh-plugin-idesign']).toBeUndefined()
     expect(repaired.dependencies['@e-mate/dsh-plugin-search-mcp']).toBeUndefined()
@@ -877,6 +883,7 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
     expect(repaired.dependencies['dsh-better-sidebar']).toBeUndefined()
     expect(repaired.dependencies['dsh-turn-fold']).toBeUndefined()
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-computer-use')
+    expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-tidychat')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-idesign')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')
