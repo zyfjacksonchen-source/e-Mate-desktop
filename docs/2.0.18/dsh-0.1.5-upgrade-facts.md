@@ -1766,3 +1766,66 @@ build 成功，源测试 29 条（1 skipped）+ 客户端 27 条全部通过。
 - `node --test packages/dsh/test/*.test.mjs`：133 条中 117 通过、16 失败，集中在上面的三个文件。
 - 根 `pnpm run build` 的失败点已定位为 pet 的 `settingsNamespace`（46.3），修复后待重跑聚合构建。
 
+
+
+## 第 47 轮：守卫账本转绿（133/133）+ 三处"静默失真"的产品修复
+
+### 47.1 `packages/dsh/test/*.test.mjs`：117/133 → **133/133**
+
+三类根因，全部按 0.1.5 真实契约修，没有一处靠删断言过关：
+
+1. **格式 v3**：`packages/dsh/src/legacy-migration.ts` 里 `SESSION_FORMAT_VERSION = 0`，且 header 缺 v3 必需的 `isSeeded`。
+   契约证据：`session-format/src/catalog.ts`（`encodeCurrentHeader` 比对 `chain.currentVersion`）、
+   `session-format-catalog/src/generated.ts:15`（`currentVersion: 3`）、`core/session/src/types.ts:93`。
+2. **持久化门面换代**：0.1.0 的 `create(meta)/append(id, …)/inspect(id)/list()→headers` 全部消失；
+   0.1.5 是 `create(header)→write handle`、`open(id,'read'|'write')→handle`、`list()/stat()→snapshot({header,revision,…})`，
+   正文读取走 `handle.read(offset,length,{signal}) → {events,eventState}`。产品侧受影响的三个文件：
+   `legacy-migration.ts`、`profile/agent-operations.ts`（`inspect()`）、`profile/audit.ts`（`readFrom()`）。
+   **另一处实测陷阱**：只 `create` 而未 `append/flush` 的 write handle，`close()` 后不会 materialize，
+   于是 `list()` 里根本没有它——原来的"导入前后 list() 对比"断言会退化成无意义比较。所以 fixture 必须先 `flush()`。
+3. **生成物缺失不是缺陷**：`packages/dsh/profile/bundles/<slug>` 由 `scripts/sync-emate-plugin-bundles.mjs`
+   从各组件 `lib/` 复制；三个守卫只是缺这棵树，脚本本身健康（exit 0、幂等）。
+
+其余 5 条是"测试仍按 0.1.0 断言"：`--dump-config` 的插件行在 0.1.5 被 boot 解析成 profile 内 file URL；
+shell manifest 的 `dsh.client.inject` 已换成 `@deepseek-ai/dsh-api-session-controller` + `@deepseek-ai/dsh-client-ui-chat`
+（`@deepseek-ai/dsh-client-runtime` 这个包在 0.1.5 已不存在）；`deepFreeze` 移到 `@deepseek-ai/dsh-util-values`；
+后台子代理分支改用 `ctx.subagents.startContinuable()`；expert-mode fixture 改为 `snapshotEvents()` 并新增
+"持久化事件必须带 `ignorable: true`"的断言（`emate/expert-mode` 不在 `KNOWN_SESSION_EVENT_TYPES` 里）。
+
+### 47.2 附件存储在 0.1.5 **会改写图片字节**（这是设计，不是 bug）
+
+`attachment-local` 的 `saveImage` 走 `prepareImageFile` + `normalizationPolicy`：有 alpha → **WebP**，不透明 → **JPEG**，
+并按总像素预算缩放（`DEFAULT_MAX_IMAGE_PIXELS` 等）。因此"提供方返回的字节" ≠ "CAS 里的字节"，也不再等于 attachment id 的哈希。
+
+产品侧被这一点"静默说谎"的地方已修：
+
+- `dsh-plugin-univer-office` 的 `univer_screenshot`：原来把**生产者的** PNG 类型填进 `image.mediaType`，
+  而 `bytes/width/height` 取自 CAS ref——ref 自相矛盾；pet 的事实读取器又要求 `image.mediaType === 'image/png'`，
+  于是截图事实永远不成立。现在 `image.mediaType` 用 **store 核验过的** `ref.mediaType`，类型放宽为 `ImageMediaType`。
+- `emate-shell` 的 `pet-image-facts.ts`：接受 store 可能产出的三种图片类型（png/jpeg/webp），
+  生产者字段 `item.mediaType === 'image/png'` 保持不变（截图服务本身仍产 PNG）。
+- `dsh-plugin-imagegen` 的测试：原断言"CAS 字节 === 提供方 PNG"改用**存储字节**做恒等式
+  （ref 必须描述存储字节、`readImage` 能取回、顺序一致）；`image_sha256` 保留为"提供方返回字节的摘要"
+  （它的用途是把乱序回执与请求对上，不是 CAS id）。imagegen 22/22 绿。
+
+### 47.3 宠物任务面板迁到原生右栏（已完成）
+
+见提交 `d52e2f48cd`：`sidebarRightTabs.register` + `sidebar.right.pane.tab(.title)` 两个座位 +
+`sidebarRight.openTab(kind,{params:{taskId}})` + `sidebarRight.close(tabId)`；route-scoped 隐藏改为
+toggle 原生 owner 自己的展开态（调 `layout.closeRightbar()` 只是"上报"，会让 frame 的 track 与座位错位）。
+另外该面板原本读的 `snapshot.pending / runningCalls / byId[].pendingInteraction` 在 0.1.5 都不存在，
+已重绑到 `useSession`（running/queue/lastAgentError）、`useSessions`（title/jobs）、`useProjection`（goal/todos）、
+`useSessionPendingInteraction`；"正在执行的工具"这一行**删除**而不是给个恒为 0 的默认值（那是发散载荷）。
+shell 套件 281/281，`component-run check --component @e-mate/dsh-client-shell` EXIT=0。
+
+### 47.4 仍在进行 / 未完成
+
+- `packages/dsh-plugin-knowledge`：产品源码仍调 `sessionPersistence.readFrom`（workflow/recovery/ui-operations），
+  正在按 `open(id,'read')` 迁移；`dsh-plugin-memory-evolve` 仅剩 1 条"live Harness session"失败（`src/scope.ts:71`）。
+- `packages/dsh-plugin-pet/src/client/native-projection.ts` 仍按旧 harness（`78a2b9856218`）声明
+  `runningCalls/pending/byId[].pendingInteraction`；其 `update()` 与 shell 的 `pet-image-facts` 读这些字段会在运行期抛错。
+  这是与 47.3 同类的"陈旧契约"，正在迁移。
+- `enterprise/` 需要一次 `pnpm install` 才能让 model-gateway 夹具解析到 `@e-mate/admin-contract` 工作区链接
+  （已装，未改 lockfile）。
+- 根 `pnpm run build` 曾卡在 pet 的 `settingsNamespace`（已修）；聚合构建与 `component-run check` 全量结果见下一轮。
+
