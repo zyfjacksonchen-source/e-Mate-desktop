@@ -537,6 +537,30 @@ describe('published package surface', () => {
     expect(installedBoot.indexOf('if (!Array.isArray(parsed)) throw new Error')).toBeGreaterThan(earlyReturn)
   })
 
+  it('keeps the four desktop typecheck programs partitioned', () => {
+    const appManifest = JSON.parse(readFileSync(new URL('package.json', packageRoot), 'utf8')) as {
+      scripts?: Record<string, string>
+    }
+    const typecheck = appManifest.scripts?.typecheck ?? ''
+    for (const face of ['tsconfig.json', 'tsconfig.client.json', 'tsconfig.tests.json', 'tsconfig.tests.client.json']) {
+      expect(typecheck).toContain(`-p ${face}`)
+    }
+    const readFace = (name: string): { include?: string[]; exclude?: string[] } => {
+      const raw = readFileSync(new URL(name, packageRoot), 'utf8')
+      return JSON.parse(raw.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/^\s*\/\/.*$/gmu, ''))
+    }
+    // A client spec belongs to the client test face and must be excluded from the
+    // node test face: compiling it into both programs drags the client Session
+    // declarations into the host program and fails it on duplicate owners.
+    const testFace = readFace('tsconfig.tests.json')
+    const clientTestFace = readFace('tsconfig.tests.client.json')
+    const excludedClientSpecs = (testFace.exclude ?? []).filter(path => path.endsWith('.spec.ts'))
+    expect(excludedClientSpecs.length).toBeGreaterThan(0)
+    expect([...excludedClientSpecs].sort()).toEqual(
+      (clientTestFace.include ?? []).filter(path => path.endsWith('.spec.ts')).sort(),
+    )
+  })
+
   it('rebuilds the product inventory before the packaging step copies its profile', () => {
     const sync = readFileSync(new URL('scripts/sync-emate-profile.mjs', packageRoot), 'utf8')
     const productBuild = sync.indexOf("execFileSync('corepack', ['pnpm', 'run', 'build']")
