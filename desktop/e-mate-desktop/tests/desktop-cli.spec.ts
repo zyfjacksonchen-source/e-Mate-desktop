@@ -28,6 +28,7 @@ describe('packaged dsh bootstrap', () => {
       KEEP: 'value',
     }
     const argv = ['/Applications/e-Mate', '/app.asar/lib/desktop-cli.js', '--dump-config']
+    const runCli = vi.fn(async () => {})
     const load = vi.fn(async (url: string) => {
       expect(environment).toEqual({ KEEP: 'value' })
       expect(argv).toEqual([
@@ -38,11 +39,15 @@ describe('packaged dsh bootstrap', () => {
         '--dump-config',
       ])
       expect(url).toMatch(/\/node_modules\/@deepseek-ai\/dsh\/lib\/bin\.js$/u)
+      // 0.1.5's bin entry runs itself only under import.meta.main, so the bootstrap starts
+      // the CLI through the runner the entry exports.
+      return { runCli }
     })
 
     await runDesktopDshCli(environment, load, argv)
 
     expect(load).toHaveBeenCalledOnce()
+    expect(runCli).toHaveBeenCalledOnce()
   })
 
   it('defaults profile and plugin commands without overriding explicit or global modes', () => {
