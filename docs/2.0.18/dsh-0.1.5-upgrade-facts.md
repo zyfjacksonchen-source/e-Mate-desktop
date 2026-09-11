@@ -1915,3 +1915,26 @@ e-mate 自己的 Chat 节点 kind 要注册进 `ChatNodeDataMap`、tab 钩子面
 harness 构建、组件 install/build/test、enterprise install/test 都用工作区内路径；测试夹具用 `mkdtemp` 建临时目录。
 没有对 `~/.dsh`、安装好的 `DeepSeek Harness Official.app` 或用户 Profile 做任何写操作。
 
+
+### 48.8 附：ledger 里另外三类守卫的运行结论（本轮实测）
+
+- **enterprise/**（19 个守卫文件）：`cd enterprise && pnpm run test` **EXIT=0**（analytics-api 有 6 条按环境 skip）。
+  注意需先在该目录 `pnpm install` 才能解析 `@e-mate/admin-contract` 等工作区链接。
+- **tests/performance + tests/quality**（18 个）：`tests/performance/image-single/contract.test.mjs` 已从 14/17 修到 **15/17**，
+  修的是同一类"0.1.5 存储会改写字节"的陈旧断言 + 旧限额 + 旧 CAS 变量名 + `session.events`。
+  剩 2 条要**重录原始证据**（`worker.mjs:253` 与 native 三步用例比对的是归一化之前的 recorded digest），
+  这属于一次需要授权的取证步骤，而不是放宽断言。
+- **desktop/**（19 个）：用 `corepack yarn check`（工作目录 `desktop`）验证中；本轮改了
+  `base-contract.json` 等固定点，必须跑这一关。
+
+### 48.9 本轮门禁总览（含本轮新收口的类型门）
+
+| 门禁 | 结果 |
+| --- | --- |
+| `node scripts/component-run.mjs check`（全部组件，含新加的 typecheck 步） | **EXIT=0** |
+| `pnpm run test:fast` | 68/68 + 5/5 |
+| `node --test packages/dsh/test/*.test.mjs` | 133/133 |
+| `cd enterprise && pnpm run test` | EXIT=0 |
+| shell 套件 / shell 组件 check | 281/281 / EXIT=0（build+280 测试+tsc） |
+| knowledge / memory-evolve / pet / imagegen | 126/126 / 9/9 / 18/18 / 22/22 |
+
