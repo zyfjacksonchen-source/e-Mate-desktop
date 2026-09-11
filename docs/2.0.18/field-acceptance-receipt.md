@@ -296,6 +296,46 @@ assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSes
 **未安装**：按 AGENTS.md，Windows 的安装态 GUI 验收必须在**已登录的交互式会话**上完成，
 远程命令回执不构成安装验收。故 C4 的安装态一律 `OPEN`。
 
+## 附加验收 (a)：2.0.11 之后 236 条修复的逐条覆盖（机械口径，逐项点到）
+
+**口径**（写进 `docs/2.0.18/regression-coverage.json` 的 `rule` 字段）：一条 ledger 记录若它点名的
+**每个 guard 路径都存在于磁盘**、且都能映射到当前 **EXIT 0** 的门禁，则记 `guarded`；完全没有 guard 的记
+`no-guard`（需要有明确的 disposition）；guard 路径有缺失的记 `partial`（缺失本身就是证据：能力被移除时它的
+guard 一起被移除）。映射规则是纯路径前缀 → 门禁，不含人工判断。
+
+**总计 `236` 条 = `151` guarded + `70` partial + `15` no-guard**（逐条结果见
+`docs/2.0.18/regression-coverage.json`，含每条的 `gates` 与缺失的 `gaps`）。
+
+| 覆盖它的门禁（已实测 EXIT 0） | 条目数 |
+|---|---|
+| `component-run check`（组件套件） | 85 |
+| `desktop yarn check`（桌面套件 + profile boot smoke） | 38 |
+| `test:fast`（root 套件） | 30 |
+| `test:fast`（`scripts/*.test.mjs`） | 18 |
+| `enterprise:check / enterprise:test` | 25 |
+| `test:image-evidence` | 4 |
+
+**70 条 `partial` 的缺失 guard 集中在同一类**：`scripts/release*.test.mjs`、`scripts/desktop-admission.test.mjs`、
+`scripts/change-impact.test.mjs`、`scripts/performance-acceptance*.test.mjs`、
+`desktop/e-mate-desktop/tests/{release-manifest,mac-update-installer,windows-update-installer,windows-update-transaction,profile-release}.spec.ts`
+—— 正是 AGENTS.md 明令**不得恢复**的那批"已移除的发布/更新编排"（schema-2 签名编排、Profile 热更新发布、
+自定义健康回滚、本地流程协调器、性能准入、并行包/更新路径）。它们的 disposition 与
+`docs/2.0.18/regression-ledger.json` 里已记录的"随能力移除"一致；**本轮没有、也不得**为它们补回门禁。
+
+**15 条 `no-guard`**（需要 disposition 而不是伪装成已验证）：`3be5826b3b` 手工更新回执、`fb90ab94d8` skill-hub Base ABI、
+`4fb3e06b61` 批量策略控件可见性、`7cf82e2cd5` Skill Hub 快照导入的 Node 24 固定、`5793e06dab` canvas 私有归档依赖、
+`c3ec64ae45` 画廊轮播控件避让、`f25c27c7be` knowledge 绑定规范 Xin 操作、`680b689501` canvas 批量图片动作 hover/focus、
+`820267ca3d` canvas 浅色图上的 hover 动作可读性、`d1012e633b` 跨 checkout 保留源伴生字节、`3aa78749ba` office 可选 PPT 复核、
+`dbefa84bb9` profile 声明 pinned web-react 运行时导入、`987725f7e0` 活动轮关闭时停嵌套 shimmer、`077f524469` 专家模式橙点、
+`26b2f789ec` 原生服务模型映射的图片包裹体。其中 **A/F/H 组已用实机 GUI 覆盖到**（登录与企业、设置与更新、移除项核对），
+其余属于 B/C/D/E 组，执行状态随下表。
+
+**ledger 的 areas 分布**（25 类，含 `other` 81 / `scripts` 59 / `desktop` 55 / `shell` 42 / `profile-core` 35 /
+`enterprise` 29 / `plugin:knowledge` 21 / `plugin:office-skills` 14 / `plugin:mcp-manage` 11 / `plugin:canvas` 11 …）：
+GUI 组归属规则是 areas → 组（`enterprise`→A；`shell`/`profile-core`→B；图片类→C；`plugin:knowledge`→D；
+`plugin:canvas|pet|better-sidebar|office-skills|vision-toolkit|genui|file-import|tool-search|cdp|memory-evolve|schedules`→E；
+`desktop`/`scripts`/发布更新类→F；`plugin:computer-use`/`plugin:tidychat`→H）。
+
 ## 门禁终态（源码 `ed32110d33`）
 
 | 门禁 | 结果 |
