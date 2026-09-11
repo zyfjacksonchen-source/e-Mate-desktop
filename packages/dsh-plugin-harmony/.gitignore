@@ -1,6 +1,0 @@
-# Vendored `dsh-harmony` output copied in by scripts/build.mjs — rebuildable, never tracked.
-# (`lib/` is also covered by the root .gitignore; the other two are not.)
-lib/
-assets/
-browser-dist/
-node_modules/
