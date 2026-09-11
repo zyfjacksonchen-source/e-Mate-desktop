@@ -2106,3 +2106,35 @@ desktop client/tests 面已委派专项迁移（见 §49.3 的精确定位 + 本
 受限子进程的 `STARTUPINFO`/`dwFlags` 构造点（原生 addon `@deepseek-ai/node-addon-system` 或 subprocess provider），
 再决定：在该 owner 上恢复隐藏窗口，或在证明上游已隐藏后把守卫改成断言原生行为。**不能**只改守卫让它变绿。
 
+
+### 51.5 更正上一轮的判断：Windows 隐藏控制台**没有回归**；真正还没落地的是 tool-fs 升级元数据
+
+**(a) 更正**：上一轮我按 `dsh-sandbox-windows-acl` 判定"隐藏控制台补丁被退役且未吸收"，**结论错了**——
+0.1.5 把控制台创建收敛进了 `@deepseek-ai/dsh-win32-process`，而 e-mate 的 overlay
+`desktop/patches/dsh-win32-process@0.1.5-rc.1.patch` **正是这条修复**（patch 两个 hunk 分别对应
+`spawnPipedProcess` 与 `spawnJobProcess`，`dwFlags: 256→257` + 新增 `wShowWindow: 0`）。
+实测安装态证据：`desktop/e-mate-desktop/node_modules/@deepseek-ai/dsh-win32-process/lib/index.js` 里
+`dwFlags: 257` 与 `wShowWindow: 0` **各出现 2 次**，`desktop/package.json` 的两条 resolutions 与 `yarn.lock` 都有该 patch 选择器。
+所以退役 sandbox-acl 补丁是**正确**的；错的是守卫仍指向旧 owner。已把守卫改为断言 win32-process
+（含"受限路径仍经 `spawnSandboxed`/`spawnSandboxedInherited` 抵达同一创建点"），并把被我的 async 迁移
+移动过的两处 `main.ts` 标记（`const prepared = await prepareDesktopProfile`）同步。`package.spec.ts` 5 红 → 2 红。
+
+**(b) 仍未落地（OPEN）**：`ignores redundant filesystem escalation metadata under the current policy`
+守卫要求 `@deepseek-ai/dsh-tool-fs@^0.1.5-rc.1` 有 `~/.yarn/patches/…-redundant-escalation.patch`，
+且安装态 lib 里含 `const redundantEscalation =`、`if (!redundantEscalation) validateEscalationArgs(`、
+`args.justification === void 0 || redundantEscalation`。现状实测：
+- 安装态 `dsh-tool-fs@0.1.5-rc.1/lib/index.js` 里 `redundantEscalation` 出现 **0 次**；
+- harness 源码里也**没有**该标识符；
+- `desktop/package.json` 里 tool-fs 相关 resolutions **0 条**。
+- 而 0.1.5 的 `packages/fs/tool-fs/src/sandbox.ts:88` 是**无条件**先跑
+  `validateEscalationArgs(args.sandbox_permissions, args.justification)`，之后才判断
+  "是否挂载了可升级的沙箱后端"（`escalationModes.length === 0` 才报错）。
+
+即：**这条修复既没被上游吸收，也没有搬到别的 owner**——在"当前策略本就不受限（例如 danger-full-access）"时，
+模型多带一个 `justification`/`sandbox_permissions` 会被硬拒，而不是被忽略。需要把 overlay 按 0.1.5 重新落盘
+（旧的放在 `~/.yarn/patches/`，与 `desktop/patches/` 的那批不同家），或在确认产品策略下不再可能发生后退掉这条守卫——
+但**不能**在没搞清 0.1.5 语义前直接删断言。
+
+**(c) 另一条 OPEN**：`binds empty machine patch handling to the pinned 0.1.5 app-boot patch` ——
+`desktop/patches/dsh-app-boot@0.1.5-rc.1.patch` 的内容与守卫钉的期望不一致（patch 漂移），需比对 0.1.5 的 boot 源码后重新生成或更正期望。
+
