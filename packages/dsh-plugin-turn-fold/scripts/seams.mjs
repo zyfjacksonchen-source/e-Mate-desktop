@@ -83,7 +83,8 @@ export const HOST_SYMBOLS = Object.freeze([
 
 const IGNORED_DIRECTORIES = new Set(['.git', '.github', 'build', 'dist', 'lib', 'node_modules'])
 
-function findHarnessRoot() {
+/** Exported so `test/seams.test.mjs` can read the real pinned bundle for its negative controls. */
+export function findHarnessRoot() {
   const candidates = [
     process.env.EMATE_HARNESS_ROOT,
     resolve(repoRoot, 'upstream', 'deepseek-harness'),
@@ -97,7 +98,8 @@ function findHarnessRoot() {
   )
 }
 
-function loadCompiler(harnessRoot) {
+/** Exported so `test/seams.test.mjs` can parse mutated copies with the pinned compiler. */
+export function loadCompiler(harnessRoot) {
   const manifest = join(harnessRoot, 'package.json')
   if (!existsSync(manifest)) throw new Error(`turn-fold seams: pinned Harness manifest is missing: ${manifest}`)
   const require = createRequire(manifest)
@@ -136,7 +138,8 @@ function harnessPackages(harnessRoot) {
   return packages
 }
 
-function locateTarget(harnessRoot, spec) {
+/** Exported so `test/seams.test.mjs` can locate the real target file without hard-coding a path. */
+export function locateTarget(harnessRoot, spec) {
   const installed = join(harnessRoot, 'node_modules', ...spec.package.split('/'))
   const root = existsSync(join(installed, 'package.json'))
     ? installed
@@ -210,14 +213,20 @@ function line(ts, sourceFile, node) {
 }
 
 /**
- * Evaluate every seam against the pinned build.
- * @returns a report object; throws when any seam does not resolve as declared.
+ * Evaluate every seam against one compiled source text.
+ *
+ * Pure on purpose: it takes the compiler and the text, touches no filesystem, and can
+ * therefore be driven with deliberately mutated copies of the pinned bundle.
+ * `test/seams.test.mjs` does exactly that, so the rule below is proven to *reject* a
+ * missing or duplicated anchor instead of quietly accepting one.
+ *
+ * @param {*} ts the pinned Harness TypeScript compiler module
+ * @param {string} sourceText the compiled module text to inspect
+ * @param {string} fileName path recorded on the parsed source file (diagnostics only)
+ * @returns {{ results: Array<{id: string, ok: boolean, found: number, expect: number, detail: string}>, failures: string[] }}
  */
-export function assertSeams() {
-  const harnessRoot = findHarnessRoot()
-  const ts = loadCompiler(harnessRoot)
-  const target = locateTarget(harnessRoot, TARGET)
-  const sourceFile = ts.createSourceFile(target.file, readFileSync(target.file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+export function evaluateSeams(ts, sourceText, fileName) {
+  const sourceFile = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
   const engine = createSelectorEngine(ts)
 
   const results = []
@@ -244,22 +253,55 @@ export function assertSeams() {
     if (!ok) failures.push(`${seam.id}: selector matched ${matched.length}, expected ${seam.expect}`)
     results.push({ id: seam.id, ok, found: matched.length, expect: seam.expect, detail })
   }
+  return { results, failures }
+}
 
+/**
+ * Resolve the host symbols the injected runtime reads, from the seam-1 anchor's scope
+ * chain. The coupling is fail-closed on purpose: with no resolved anchor there is no
+ * scope to read, so every symbol is reported unresolved rather than assumed present.
+ *
+ * @param {*} ts the pinned Harness TypeScript compiler module
+ * @param {string} sourceText the same text `results` were produced from
+ * @param {string} fileName path recorded on the parsed source file (diagnostics only)
+ * @param {Array<{id: string, ok: boolean, found: number, expect: number, detail: string}>} results the `results` returned by `evaluateSeams`
+ * @returns {{ symbols: Array<{name: string, reason: string, resolved: boolean}>, failures: string[] }}
+ */
+export function evaluateHostSymbols(ts, sourceText, fileName, results) {
+  const sourceFile = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+  const engine = createSelectorEngine(ts)
   const anchor = results[0]?.ok === true ? engine.query(sourceFile, SEAMS[0].selector)[0] : undefined
   const bindings = anchor === undefined ? new Set() : enclosingScopeBindings(ts, anchor)
+  const failures = []
   const symbols = HOST_SYMBOLS.map(symbol => {
     const resolved = bindings.has(symbol.name)
     if (!resolved) failures.push(`host symbol ${symbol.name} is not bound in the ChatView scope chain`)
     return { ...symbol, resolved }
   })
+  return { symbols, failures }
+}
+
+/**
+ * Evaluate every seam against the pinned build.
+ * @returns a report object; throws when any seam does not resolve as declared.
+ */
+export function assertSeams() {
+  const harnessRoot = findHarnessRoot()
+  const ts = loadCompiler(harnessRoot)
+  const target = locateTarget(harnessRoot, TARGET)
+  const sourceText = readFileSync(target.file, 'utf8')
+
+  const seams = evaluateSeams(ts, sourceText, target.file)
+  const hosts = evaluateHostSymbols(ts, sourceText, target.file, seams.results)
+  const failures = [...seams.failures, ...hosts.failures]
   const report = {
     packageName: target.name,
     packageVersion: target.version,
     file: target.file,
     fileSha256: sha256(target.file),
     harnessRoot,
-    seams: results,
-    symbols,
+    seams: seams.results,
+    symbols: hosts.symbols,
   }
   if (failures.length > 0) {
     const error = new Error(`turn-fold seams failed against ${target.name}@${target.version}:\n  - ${failures.join('\n  - ')}`)
