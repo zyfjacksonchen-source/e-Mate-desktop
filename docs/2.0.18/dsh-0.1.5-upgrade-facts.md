@@ -2418,3 +2418,17 @@ e-mate 只保留"值优先从 keychain 解析"的一层（需确认 0.1.5 是否
 **验收**：`verify:profile` 越过 `connection` 行；`verify:cli` 的 `dsh artifact smoke returned "" instead of "0.1.5-rc.1"` 一并复验；
 并新增一条守卫：e-mate 的 provider 必须实现 `CredentialProvider` 的**全部抽象成员**（可用 `Object.getOwnPropertyNames` + 抽象方法表对照，fail-loud）。
 
+
+### 75.4 切片 4 的让位方式：原生轨道**只能**用 ui-chat overlay 压掉（已实测）
+
+`TurnNavigator` 在 `packages/client/ui-chat/src/client/chat/ChatView.tsx:763` **无条件渲染**（既无设置开关，也无槽位占位），
+其唯一内部 gate 是 `items.length < 2`（`TurnNavigator.tsx`），而 `items` 来自 ui-chat 内部的 `railItems`——e-mate 侧无法让它为空。
+轨道 DOM **没有稳定的 data-* 钩子**，全部走 CSS Module 哈希类名（`css.slot`/`css.frame`/`css.marks`…），
+所以"shell CSS 覆盖"这条路不可靠，也没有便宜的原生开关。
+
+**结论（供切片 4 执行）**：压掉原生轨道必须加**第 4 条 overlay** —— `desktop/patches/dsh-client-ui-chat@0.1.5-rc.1.patch`，
+并同步：① 在 `scripts/harness-provenance.mjs` 的 `DESKTOP_OVERLAYS` 登记 `@deepseek-ai/dsh-client-ui-chat`（准入表，否则 desktop check 直接报 not admitted）；
+② 更新 `scripts/harness-provenance.test.mjs` 的 overlay 清单断言（当前钉四条：app-boot / client-ui-workspace / win32-process / tool-fs）；
+③ overlay 内容应只做"不渲染该轨道"这一件事，并在补丁注释与 facts 里写明原因（Path C = 用户选择的完整接管）。
+折叠侧的让位是**原生设置**，不需要补丁：`transcriptView: 'normal'`（`ui-chat/src/chat-settings.ts:12-18` 的既有键）。
+
