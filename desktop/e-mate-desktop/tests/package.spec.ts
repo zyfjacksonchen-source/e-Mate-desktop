@@ -180,7 +180,7 @@ describe('published package surface', () => {
     const applyRecovered = main.indexOf('Object.entries(shellEnvironmentResolution.updates)')
     const snapshot = main.indexOf('const environment = loadLayeredEnv')
     const install = main.indexOf('const pnpmRuntime = installDesktopPnpmRuntime')
-    const prepare = main.indexOf('const prepared = prepareDesktopProfile')
+    const prepare = main.indexOf('const prepared = await prepareDesktopProfile')
     const installDsh = main.indexOf('const dshRuntime = process.platform === \'win32\'')
     const boot = main.indexOf('const ctx = await boot')
     const beginRendererHealth = main.indexOf('runtime.beginRendererBootMonitoring()')
@@ -230,7 +230,7 @@ describe('published package surface', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
     const pnpm = readFileSync(new URL('src/pnpm.ts', packageRoot), 'utf8')
     const claim = main.indexOf('const recoveryClaim = await installRecovery.claim()')
-    const prepare = main.indexOf('const prepared = prepareDesktopProfile')
+    const prepare = main.indexOf('const prepared = await prepareDesktopProfile')
     const rendererHealth = main.indexOf('const rendererReport = await rendererBoot')
     const installHealth = main.indexOf('await installRecovery.markHealthy(verifyingInstall.transactionId)')
 
@@ -562,31 +562,33 @@ describe('published package surface', () => {
   })
 
   it('starts restricted Windows shells with a hidden console show state', () => {
-    const patchResolution = 'patch:@deepseek-ai/dsh-sandbox-windows-acl@npm%3A0.1.5-rc.1#./patches/dsh-sandbox-windows-acl@0.1.5-rc.1.patch'
+    // 0.1.5 consolidated console creation into win32-process (spawnPipedProcess and
+    // spawnJobProcess) and the sandbox package delegates into it, so the overlay that
+    // hides the window targets that owner instead of the retired sandbox-acl patch.
+    const patchResolution = 'patch:@deepseek-ai/dsh-win32-process@npm%3A0.1.5-rc.1#./patches/dsh-win32-process@0.1.5-rc.1.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
-    const patch = readFileSync(new URL('patches/dsh-sandbox-windows-acl@0.1.5-rc.1.patch', workspaceRoot), 'utf8')
+    const patch = readFileSync(new URL('patches/dsh-win32-process@0.1.5-rc.1.patch', workspaceRoot), 'utf8')
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+    const processManifest = workspaceRequire.resolve('@deepseek-ai/dsh-win32-process/package.json')
     const sandboxManifest = workspaceRequire.resolve('@deepseek-ai/dsh-sandbox-windows-acl/package.json')
-    const sandboxLocalManifest = workspaceRequire.resolve('@deepseek-ai/dsh-sandbox-local/package.json')
-    const sandboxLocalRequire = createRequire(sandboxLocalManifest)
     const sandboxLib = join(dirname(sandboxManifest), 'lib')
-    const runtimeChunks = readdirSync(sandboxLib).filter(name => /^types-.*\.js$/u.test(name))
+    const sandboxRuntime = readdirSync(sandboxLib).filter(name => /^types-.*\.js$/u.test(name))
 
     expect(workspaceManifest.resolutions).toMatchObject({
-      '@deepseek-ai/dsh-sandbox-windows-acl@npm:0.1.5-rc.1': patchResolution,
-      '@deepseek-ai/dsh-sandbox-windows-acl@npm:^0.1.5-rc.1': patchResolution,
+      '@deepseek-ai/dsh-win32-process@npm:0.1.5-rc.1': patchResolution,
+      '@deepseek-ai/dsh-win32-process@npm:^0.1.5-rc.1': patchResolution,
     })
-    expect(sandboxLocalRequire.resolve('@deepseek-ai/dsh-sandbox-windows-acl/package.json'))
-      .toBe(sandboxManifest)
-    expect(lockfile).toContain('@deepseek-ai/dsh-sandbox-windows-acl@patch:@deepseek-ai/dsh-sandbox-windows-acl@npm%3A0.1.5-rc.1#./patches/dsh-sandbox-windows-acl@0.1.5-rc.1.patch')
+    expect(lockfile).toContain('@deepseek-ai/dsh-win32-process@patch:@deepseek-ai/dsh-win32-process@npm%3A0.1.5-rc.1#./patches/dsh-win32-process@0.1.5-rc.1.patch')
     expect(patch.match(/^\+\s*dwFlags: 257,\r?$/gmu)).toHaveLength(2)
     expect(patch.match(/^\+\s*wShowWindow: 0,\r?$/gmu)).toHaveLength(2)
-    expect(runtimeChunks).toHaveLength(1)
-    const installedRuntime = readFileSync(join(sandboxLib, runtimeChunks[0] as string), 'utf8')
+    // Both restricted spawn paths reach that console creation through this package.
+    expect(sandboxRuntime).toHaveLength(1)
+    const sandboxRuntimeSource = readFileSync(join(sandboxLib, sandboxRuntime[0] as string), 'utf8')
+    expect(sandboxRuntimeSource).toContain('function spawnSandboxed(')
+    expect(sandboxRuntimeSource).toContain('function spawnSandboxedInherited(')
+    const installedRuntime = readFileSync(join(dirname(processManifest), 'lib', 'index.js'), 'utf8')
     expect(installedRuntime.match(/dwFlags: 257,/gu)).toHaveLength(2)
     expect(installedRuntime.match(/wShowWindow: 0,/gu)).toHaveLength(2)
-    expect(installedRuntime).toContain('api.createProcessAsUserW(token, null, commandLine, null, null, 1, 0, null')
-    expect(installedRuntime).toContain('api.createProcessAsUserW(token, null, commandLine, null, null, 1, 4, null')
     expect(installedRuntime).not.toContain('134217728')
   })
 
