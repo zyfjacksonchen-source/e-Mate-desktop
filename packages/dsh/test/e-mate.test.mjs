@@ -321,7 +321,9 @@ test('managed profile installation is idempotent', () => {
       name: '@deepseek-ai/dsh-client-ui-trajectory',
       disabled: true,
     })
-    assert.equal(patchById.get('agent-presets').config.default, 'code')
+    // 2.0.18 ships native PTC as the default Agent preset, so the profile pins
+    // 'ptc'; this assertion still described the pre-2.0.18 'code' default.
+    assert.equal(patchById.get('agent-presets').config.default, 'ptc')
     assert.equal(patchById.get('sandbox-policy').config.mode, 'danger-full-access')
     assert.equal(patchById.get('approval').config.policy, 'never')
     assert.equal(patchById.get('permission').config.defaultPreset, 'danger-full-access')

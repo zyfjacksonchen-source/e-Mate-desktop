@@ -2700,3 +2700,29 @@ identity / capabilities / agent-operations）已通过。
 且它的行同时声明了 8 个服务。下一步应逐字比较 canvas 与那 7 个的**行结构**（layer 顺序 / 是否 insert 块内 / 是否有 client 半边），
 而不是继续在 canvas 代码里找。
 
+
+## 第 80 轮：用户校准 —— 弃用 e-Mate WebUI 测试路线，改用 computer use
+
+用户明确：**e-Mate 的 WebUI 端仅用于测试验收、不是生产环境**；随后进一步校准为
+**不再使用 e-Mate WebUI 测试方案，转为 computer use 测试，因此不需要再"倒腾 WebUI"**。
+
+据此的硬边界（后续必须遵守）：
+1. **不得为 WebUI/profile-smoke 线的阻塞去改出货组合**。本轮据此**回退了 5 个组件行上的 `webServer` 注入**
+   （提交 `f61817d256`）——它改动了桌面出货组合，并直接打红了桌面 profile 规格
+   （`desktop/e-mate-desktop/tests/e-mate-profile.spec.ts:461-464` 钉死了 `emate-schedules` 的 inject）。
+   桌面打包/发布路径（`dist:mac` / `dist:win` / `package:dir`）本身不经过 `yarn check`，
+   但 `check` 含 `verify:profile`（WebUI/profile-smoke 线），该线**不再是本目标要追的门禁**。
+2. **验收改用 computer use**（skill `computer-use`：macOS 无障碍优先的观察与控制），不再依赖 WebUI 冒烟。
+3. 本目标的两条硬门禁不变：`pnpm run test:fast` 与 `node scripts/component-run.mjs check`。
+
+**本轮顺带修好的桌面线红点**：`packages/dsh/test/e-mate.test.mjs:324` 断言 `agent-presets.config.default === 'code'`，
+而 2.0.18 契约是 **native PTC 为默认 preset**、profile 写的是 `ptc`（`packages/dsh/profile/cordis.patch.yml:43`）。
+已把该断言**改指**为 `ptc`（保留断言、加注释说明 2.0.18 契约），桌面源检查的测试面因此变为 **514 passed / 0 failed / 5 skipped**。
+
+**桌面线现存的唯一红点（下一轮收口）**：`verify:cli` →
+`Error: dsh artifact smoke returned "" instead of "0.1.5-rc.1"`。
+已手工复现：`ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --expose-internals lib/desktop-cli.js --version`
+→ stdout 为空、退出码 0。`lib/desktop-cli.js`（3.3 KB 引导层）把 `--version` **原样透传**给
+`@deepseek-ai/dsh/lib/bin.js`（经 `packagedDependencyPath` 解析），所以空输出来自 harness CLI 的版本路径，
+需直接跑该 bin 判定。
+
