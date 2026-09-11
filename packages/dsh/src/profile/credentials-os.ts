@@ -1,8 +1,18 @@
+/**
+ * e-Mate's OS-backed credential provider: the product profile's single owner of
+ * the `credentials` service. The value face resolves through the OS keychain;
+ * the record face delegates to the native file-backed provider mounted in its
+ * own isolated `credentials` scope over the same harness home, so record
+ * locking, atomic writes, on-disk reconciliation and validation stay native.
+ */
+
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { constants } from 'node:fs'
+import { constants, existsSync } from 'node:fs'
 import { access, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { basename, dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { loadTargetCredentials } from './target-runtime.js'
 
 export const name = 'emate-credentials-os'
@@ -518,12 +528,25 @@ export async function checkOsCredentialBackend(
   return { ok: false, detail: 'unsupported or unavailable credential store platform' }
 }
 
-export async function apply(ctx: any, config: ProviderConfig = {}) {
-  const bindingPath = config.bindingPath ?? join(import.meta.dirname, 'runtime-binding.json')
-  const target = await loadTargetCredentials(bindingPath)
-  const backend = config.backend ?? createOsCredentialBackend(process.platform, target.binding.dsh_home)
-  const store = new CredentialStore(target.launchEnvironmentOf(ctx), backend)
-  class OsCredentialProvider extends target.CredentialProvider {
+/** The native file-backed provider whose record face this provider composes. */
+const RECORD_PROVIDER_PACKAGE = '@deepseek-ai/dsh-credentials-local'
+/** Its directory name in a flat runtime; the pinned tree uses the unscoped one. */
+const RECORD_PROVIDER_DIRECTORY = 'dsh-credentials-local'
+
+/**
+ * Build the product's `credentials` provider: values from the OS store, records
+ * from the native provider.
+ *
+ * Exported so the component contract test can hold the class against every
+ * abstract member of the bound seam — TypeScript erases abstract signatures, so
+ * the runtime class carries no list to compare against.
+ * @param Base - the bound `CredentialProvider` class this provider extends.
+ * @param store - OS-backed value store.
+ * @param records - native record provider over the same harness home.
+ * @returns the provider class to mount.
+ */
+export function createOsCredentialProvider(Base: any, store: CredentialStore, records: any) {
+  return class OsCredentialProvider extends Base {
     override resolve(ref: string) {
       return store.resolve(ref)
     }
@@ -540,6 +563,114 @@ export async function apply(ctx: any, config: ProviderConfig = {}) {
     override async unset(ref: string) {
       if (await store.unset(ref)) this.notifyUpdated(ref)
     }
+
+    override readRecord(key: string) {
+      return records.readRecord(key)
+    }
+
+    override describeRecord(key: string) {
+      return records.describeRecord(key)
+    }
+
+    override listRecords() {
+      return records.listRecords()
+    }
+
+    override modifyRecord(key: string, mutate: (current: unknown) => Promise<unknown>) {
+      return records.modifyRecord(key, mutate)
+    }
+
+    override async deleteRecord(key: string) {
+      await records.deleteRecord(key)
+    }
   }
-  await ctx.plugin(OsCredentialProvider)
+}
+
+/**
+ * Mount the native file-backed provider that owns the record face.
+ *
+ * Cordis refuses a second registration of one service name in one scope, and
+ * the product profile must keep e-mate's provider as the only owner of
+ * `credentials`; the record face therefore runs in an isolated scope of that
+ * name, where it answers this plugin alone and the root scope is untouched.
+ * @param ctx - the plugin context.
+ * @param credentialsModule - bound path of the seam package this build extends.
+ * @param dshHome - harness home holding the credentials document.
+ * @returns the native provider instance backing the record face.
+ */
+export async function mountRecordProvider(ctx: any, credentialsModule: string, dshHome: string) {
+  const Provider = await loadRecordProvider(credentialsModule)
+  const isolated = ctx.isolate('credentials')
+  await isolated.plugin(Provider, { dshHome })
+  return isolated.get('credentials')
+}
+
+/**
+ * Load the native record provider from the runtime that supplies the bound seam
+ * package.
+ * @param credentialsModule - bound path of the seam package.
+ * @returns its provider class.
+ */
+async function loadRecordProvider(credentialsModule: string) {
+  const entry = await resolveRecordProviderEntry(credentialsModule)
+  const loaded = await import(pathToFileURL(entry).href)
+  if (typeof loaded.default !== 'function') throw new Error('e-Mate record provider is unavailable')
+  return loaded.default
+}
+
+/**
+ * Resolve the record provider's entry file. Node's own resolution covers an
+ * installed runtime; the pinned tree links only declared dependencies, so the
+ * package directory beside the bound seam package is the second route. Both
+ * shipped layouts place it there — `node_modules/@deepseek-ai/dsh-credentials-local`
+ * flat, `packages/credentials/credentials-local` in the pinned tree — and the
+ * manifest's own name decides which directory is the provider.
+ * @param credentialsModule - bound path of the seam package.
+ * @returns absolute path of the record provider's entry file.
+ */
+async function resolveRecordProviderEntry(credentialsModule: string): Promise<string> {
+  try {
+    return createRequire(credentialsModule).resolve(RECORD_PROVIDER_PACKAGE)
+  } catch (error) {
+    // Only absence falls through to the sibling package; every other resolution
+    // failure is a real defect and must surface.
+    if ((error as NodeJS.ErrnoException | null)?.code !== 'MODULE_NOT_FOUND') throw error
+  }
+  const root = boundPackageRoot(credentialsModule)
+  for (const directory of [
+    join(dirname(root), RECORD_PROVIDER_DIRECTORY),
+    join(dirname(root), `${basename(root)}-local`),
+  ]) {
+    const manifestPath = join(directory, 'package.json')
+    if (!existsSync(manifestPath)) continue
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    if (manifest.name === RECORD_PROVIDER_PACKAGE && typeof manifest.main === 'string') {
+      return resolve(directory, manifest.main)
+    }
+  }
+  throw new Error(`e-Mate record provider is missing beside ${credentialsModule}`)
+}
+
+/**
+ * The package root owning one bound runtime module.
+ * @param modulePath - absolute path of the module file.
+ * @returns absolute path of its package root.
+ */
+function boundPackageRoot(modulePath: string): string {
+  let current = dirname(modulePath)
+  while (!existsSync(join(current, 'package.json'))) {
+    const parent = dirname(current)
+    if (parent === current) throw new Error(`e-Mate runtime module ${modulePath} has no package root`)
+    current = parent
+  }
+  return current
+}
+
+export async function apply(ctx: any, config: ProviderConfig = {}) {
+  const bindingPath = config.bindingPath ?? join(import.meta.dirname, 'runtime-binding.json')
+  const target = await loadTargetCredentials(bindingPath)
+  const backend = config.backend ?? createOsCredentialBackend(process.platform, target.binding.dsh_home)
+  const store = new CredentialStore(target.launchEnvironmentOf(ctx), backend)
+  const records = await mountRecordProvider(ctx, target.binding.credentials_module, target.binding.dsh_home)
+  await ctx.plugin(createOsCredentialProvider(target.CredentialProvider, store, records))
 }
