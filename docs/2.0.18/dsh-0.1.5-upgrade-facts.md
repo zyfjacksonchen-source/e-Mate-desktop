@@ -2391,3 +2391,30 @@ peer 为 `ui-chat >=0.1.2-alpha.5 <0.1.3-0` 与 `ui-conversation/settings: >=0.1
 6. **守卫改指 + 文档**：`packages/dsh/test/e-mate.test.mjs:247`、`desktop/.../e-mate-profile.spec.ts:224/267/316/459/854-916`、
    `desktop/.../scripts/verify-profile-boot.mjs:272`（tidychat 移入 retired 拒绝表，turn-fold 移出）、`regression-ledger.{md,json}`、`AGENTS.md:65`。
 
+
+## 第 76 轮：credentials 阻塞的真正根因（e-mate 的 OS 凭据提供者只实现了值面）
+
+`verify:profile` 的 `credentials.modifyRecord is not a function` 已定位到**产品侧的一个第二 owner + 契约缺口**：
+
+- 0.1.5 的 `CredentialProvider`（`packages/credentials/credentials/src/index.ts:170`）有 **9 个抽象成员**：
+  `resolve:183` / `describe:191` / `set:201` / `unset:209` / **`readRecord:217` / `describeRecord:224` / `listRecords:234` / `modifyRecord:247` / `deleteRecord:256`**。
+- e-mate 的 `packages/dsh/src/profile/credentials-os.ts:526` `OsCredentialProvider extends target.CredentialProvider` **只 override 了四个值面方法**（resolve/describe/set/unset）。
+  其底层 `CredentialStore`（同文件 :417）**是值面的**（只有 resolve/describe/set/unset），没有记录面。
+- 于是 0.1.5 的 harness 在启动路径调用 `credentials.modifyRecord(...)`
+  （`packages/client/connection/src/browser-auth.ts:166`，签名 `initializeSecret(credentials: CredentialProvider)`；同类 `llm/llm-pi-ai/src/auth.ts:172` 经 `writableStore(ctx)`）时命中该实例 → 抛错，profile 加载失败。
+- 另外：产品 profile 第 1–2 行挂的是**原生** `@deepseek-ai/dsh-credentials-local`（服务名 `credentials`），
+  而 e-mate 又挂了自己的 `emate-credentials-os`（同一服务名的另一个 provider）→ **同一服务两个 owner**，正是仓库规则禁止的形态。
+
+### 修法（推荐 B，理由：一个 owner + 原生语义）
+
+**(B) 组合式单 owner**：保留 e-mate 的 `credentials` provider 作为**唯一** owner，
+值面继续走 OS keychain（`CredentialStore`），**记录面（五个方法）委托给一个原生 `credentials-local` 实例**（同一 DSH home、同一文件锁/原子写/`reconcileFromDisk` 语义，
+实现见 `packages/credentials/credentials-local/src/index.ts:674` 起的 `modifyRecord`）。
+这样既满足 0.1.5 的 9 成员契约，又不引入第二套存储语义。
+
+**(A) 退回原生 owner（备选）**：如果 OS keychain 只对"值"有意义，则记录面整体交给原生 `credentials-local`，
+e-mate 只保留"值优先从 keychain 解析"的一层（需确认 0.1.5 是否留了插点；当前抽象类未提供插点，故 A 需要更多设计）。
+
+**验收**：`verify:profile` 越过 `connection` 行；`verify:cli` 的 `dsh artifact smoke returned "" instead of "0.1.5-rc.1"` 一并复验；
+并新增一条守卫：e-mate 的 provider 必须实现 `CredentialProvider` 的**全部抽象成员**（可用 `Object.getOwnPropertyNames` + 抽象方法表对照，fail-loud）。
+
