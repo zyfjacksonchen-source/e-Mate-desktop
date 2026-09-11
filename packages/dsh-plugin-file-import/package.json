@@ -32,7 +32,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-connection",
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-input-trigger",
         "@deepseek-ai/dsh-client-ui-primitives"
@@ -42,7 +41,7 @@
   },
   "eMate": {
     "harnessVersion": "0.1.5-rc.1",
-    "harnessCommit": "d1d095bee770c3e9d302f844083e02f0b74576ee",
+    "harnessCommit": "8cc7914c51a063cd2b851a9eb956c72b4c16471b",
     "excludedFeatures": [
       "independent-store",
       "independent-router",

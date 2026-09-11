@@ -50,7 +50,6 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation"
       ],
       "platform": "web"
@@ -62,7 +61,7 @@
   },
   "eMate": {
     "harnessVersion": "0.1.5-rc.1",
-    "harnessCommit": "d1d095bee770c3e9d302f844083e02f0b74576ee",
+    "harnessCommit": "8cc7914c51a063cd2b851a9eb956c72b4c16471b",
     "baseImports": [
       "@deepseek-ai/dsh-home-paths",
       "@deepseek-ai/dsh-skill",
