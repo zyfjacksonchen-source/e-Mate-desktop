@@ -591,7 +591,7 @@ describe('published package surface', () => {
   })
 
   it('ignores redundant filesystem escalation metadata under the current policy', () => {
-    const fsPatch = 'patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch'
+    const fsPatch = 'patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-96e5961b48.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
 

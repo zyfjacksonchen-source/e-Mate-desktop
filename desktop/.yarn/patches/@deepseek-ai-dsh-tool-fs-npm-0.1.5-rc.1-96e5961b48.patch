@@ -1,5 +1,5 @@
 diff --git a/lib/index.js b/lib/index.js
-index 9ca09ebf3cb8b2ee4ca95257c13134df0412d906..91b4066183a0fa95bc1f1e3d08c01066ce851ce6 100644
+index 9ca09ebf3cb8b2ee4ca95257c13134df0412d906..ca4ae21026c84e05590093113742ac047ffca603 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -1186,9 +1186,12 @@ var FsSandboxController = class {
@@ -7,12 +7,12 @@ index 9ca09ebf3cb8b2ee4ca95257c13134df0412d906..91b4066183a0fa95bc1f1e3d08c01066
  	*/
  	async resolvePolicy(toolName, args, exec) {
 -		validateEscalationArgs(args.sandbox_permissions, args.justification);
-+		// e-Mate: a composition that mounts no sandboxing filesystem cannot escalate,
-+		// so redundant escalation metadata is ignored instead of failing the mutation.
-+		const redundantEscalation = this.escalationModes.length === 0;
-+		if (!redundantEscalation) validateEscalationArgs(args.sandbox_permissions, args.justification);
  		const standingPolicy = this.policy?.resolve({ ...exec.agent ? { session: exec.agent.session } : {} });
 -		if (args.sandbox_permissions === void 0 || args.justification === void 0) return standingPolicy;
++		// e-Mate: escalation metadata that only restates the standing policy (or asks
++		// for the standing danger-full-access mode) is redundant, not malformed.
++		const redundantEscalation = args.sandbox_permissions !== void 0 && standingPolicy !== void 0 && (args.sandbox_permissions === standingPolicy.mode || standingPolicy.mode === "danger-full-access");
++		if (!redundantEscalation) validateEscalationArgs(args.sandbox_permissions, args.justification);
 +		if (args.sandbox_permissions === void 0 || args.justification === void 0 || redundantEscalation) return standingPolicy;
  		if (this.escalationModes.length === 0) throw new Error("sandbox_permissions is not available in this composition (no sandboxing filesystem to escalate)");
  		const policy = standingPolicy;

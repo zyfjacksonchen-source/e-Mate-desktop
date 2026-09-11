@@ -3596,9 +3596,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch":
+"@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-96e5961b48.patch":
   version: 0.1.5-rc.1
-  resolution: "@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch::version=0.1.5-rc.1&hash=2ebad6"
+  resolution: "@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-96e5961b48.patch::version=0.1.5-rc.1&hash=f1dcea"
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.2"
     diff: "npm:^9.0.0"
@@ -3613,7 +3613,7 @@ __metadata:
     "@deepseek-ai/dsh-system-prompt": ^0.1.5-rc.1
     "@deepseek-ai/dsh-tools": ^0.1.5-rc.1
     "@deepseek-ai/dsh-user-approval": ^0.1.5-rc.1
-  checksum: 10c0/463a5e4ee655fe51a427a3e4a2bb31de9e052c8f8f3713c33cc0e595493d4e6f738bda466785b67247ac8a6f94db51c9980916c71ad375c923e041b0ab478bfb
+  checksum: 10c0/e76d9fb2251028a078463fb669b77c02ce5f666fa77bfb5c7f15565b9b3ee069042d2ddb6db6a14cffca259fcf32d8da383a982e7db31844bcb41a52b123d3ce
   languageName: node
   linkType: hard
 

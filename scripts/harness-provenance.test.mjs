@@ -125,11 +125,12 @@ test('runs manager-free Harness build scripts in order through inherited pnpm an
   }
 })
 
-test('keeps exactly the three pinned Desktop overlays', () => {
+test('keeps exactly the admitted pinned Desktop overlays', () => {
   assert.deepEqual([...DESKTOP_OVERLAYS], [
     ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.5-rc.1.patch'],
     ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.5-rc.1.patch'],
     ['@deepseek-ai/dsh-win32-process', 'desktop/patches/dsh-win32-process@0.1.5-rc.1.patch'],
+    ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-96e5961b48.patch'],
   ])
 
   const appBoot = readFileSync(join(harnessRoot, 'packages/boot/app-boot/src/index.ts'), 'utf8')
@@ -149,8 +150,10 @@ test('keeps exactly the three pinned Desktop overlays', () => {
   assert.doesNotMatch(windows, /wShowWindow/u)
   assert.equal(windowsPatch.match(/^\+\s*wShowWindow: 0,/gmu)?.length, 2)
 
-  // 0.1.5 absorbed the former redundant-escalation overlay: each escalation
-  // owner now runs the single native pairing validation, so no patch remains.
+  // The escalation-metadata overlay is NOT absorbed: 0.1.5 still validates the
+  // request/justification pairing before it asks whether this composition can
+  // escalate at all, so an unconfined session refuses a redundant request. The
+  // admitted patch restores the recorded behaviour on top of that native owner.
   for (const path of [
     'packages/fs/tool-fs/src/sandbox.ts',
     'packages/shell/tool-bash/src/index.ts',
@@ -160,6 +163,10 @@ test('keeps exactly the three pinned Desktop overlays', () => {
     assert.equal(native.match(/validateEscalationArgs\(args\.sandbox_permissions, args\.justification\)/gu)?.length, 1)
     assert.doesNotMatch(native, /redundantEscalation/u)
   }
+  const fsPatch = readFileSync(join(root, DESKTOP_OVERLAYS.get('@deepseek-ai/dsh-tool-fs')), 'utf8')
+  assert.match(fsPatch, /if \(!redundantEscalation\) validateEscalationArgs\(/u)
+  assert.match(fsPatch, /standingPolicy\.mode === "danger-full-access"/u)
+  assert.match(fsPatch, /args\.justification === void 0 \|\| redundantEscalation/u)
 })
 
 test('rejects zero or two native owners instead of guessing', () => {

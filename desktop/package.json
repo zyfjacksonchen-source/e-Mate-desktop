@@ -30,7 +30,7 @@
     "app-builder-lib@npm:26.15.7": "patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch",
     "koffi@npm:^3.1.0": "3.1.5",
     "node-pty@npm:1.2.0-beta.15": "patch:node-pty@npm%3A1.2.0-beta.15#./.yarn/patches/node-pty-npm-1.2.0-beta.15-asar-unpacked-path.patch",
-    "@deepseek-ai/dsh-tool-fs@npm:^0.1.5-rc.1": "patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-redundant-escalation.patch"
+    "@deepseek-ai/dsh-tool-fs@npm:^0.1.5-rc.1": "patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.5-rc.1#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-96e5961b48.patch"
   },
   "dependenciesMeta": {
     "@deepseek-ai/dsh-subprocess-local": {

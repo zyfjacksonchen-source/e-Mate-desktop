@@ -46,6 +46,10 @@ export const DESKTOP_OVERLAYS = new Map([
   ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.5-rc.1.patch'],
   ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.5-rc.1.patch'],
   ['@deepseek-ai/dsh-win32-process', 'desktop/patches/dsh-win32-process@0.1.5-rc.1.patch'],
+  // 0.1.5 validates an escalation argument pairing before it asks whether this
+  // composition can escalate at all, so an unconfined policy must ignore redundant
+  // metadata instead of refusing the mutation.
+  ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.5-rc.1-96e5961b48.patch'],
 ])
 
 function compareText(left, right) {
