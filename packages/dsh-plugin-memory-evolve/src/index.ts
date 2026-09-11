@@ -126,10 +126,10 @@ const STORAGE_UNAVAILABLE_CODES = new Set(['backend-not-found', 'form-not-mounte
 const estimateRecallTokens = (text: string): number => Math.ceil(text.length / CHARS_PER_TOKEN) + TOKEN_OVERHEAD
 
 function isStorageUnavailable(error: unknown): error is Error & { readonly code: string } {
-  return error instanceof Error
-    && (error.name === 'StorageError' || error.name === 'DomainError')
-    && typeof (error as { code?: unknown }).code === 'string'
-    && STORAGE_UNAVAILABLE_CODES.has((error as { code: string }).code)
+  if (!(error instanceof Error)) return false
+  if (error.name !== 'StorageError' && error.name !== 'DomainError') return false
+  const code: unknown = 'code' in error ? error.code : undefined
+  return typeof code === 'string' && STORAGE_UNAVAILABLE_CODES.has(code)
 }
 
 function boundedRecallText(items: readonly MemoryPublicRecord[]): string {

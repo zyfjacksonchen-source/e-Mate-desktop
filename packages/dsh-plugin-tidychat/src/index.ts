@@ -8,6 +8,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import type {} from '@deepseek-ai/dsh-settings'
 
 /** Existing tidychat namespace, registered through the pinned rc7 owner. */
 export const TIDYCHAT_SETTINGS_NAMESPACE = 'tidychat' as const
@@ -21,17 +22,17 @@ export interface Config {
   /** 左缘 Codex 式用户消息定位条。 */
   navigator?: boolean
   /** 定位条默认色模式：auto（优先宿主淡色文字色，对比不足自动换纠偏灰）/ custom（用 navColorCustom）；gray…red 为历史色系值（兼容保留）。 */
-  navColor?: string
+  navColor?: (typeof NAV_HUE_KEYS)[number]
   /** 定位条默认色自定义颜色（navColor = custom 时生效）：任意 CSS 颜色，如 #3b82f6 / rgb(59,130,246) / rgba(59,130,246,0.85)。 */
   navColorCustom?: string
   /** 定位条默认色历史明度档：l1…l5，仅 navColor 为历史色系值时生效（兼容保留）。 */
-  navColorLight?: string
+  navColorLight?: (typeof NAV_LIGHT_KEYS)[number]
   /** 定位条强调色模式：auto（跟随主题品牌色）/ custom（用 navAccentCustom）；gray…red 为历史色系值（兼容保留）。 */
-  navAccent?: string
+  navAccent?: (typeof NAV_ACCENT_KEYS)[number]
   /** 定位条强调色自定义颜色（navAccent = custom 时生效）：任意 CSS 颜色。 */
   navAccentCustom?: string
   /** 定位条强调色历史明度档：l1…l5，仅 navAccent 为历史色系值时生效（兼容保留）。 */
-  navAccentLight?: string
+  navAccentLight?: (typeof NAV_LIGHT_KEYS)[number]
 }
 
 /** 定位条默认色模式枚举（auto / custom；gray…red 为历史色系值，兼容保留）。 */

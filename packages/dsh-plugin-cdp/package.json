@@ -50,6 +50,7 @@
   },
   "scripts": {
     "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "typecheck": "../../upstream/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.mjs",
     "prepack": "pnpm run build"
   },
@@ -60,7 +61,7 @@
   },
   "eMate": {
     "harnessVersion": "0.1.5-rc.1",
-    "harnessCommit": "d1d095bee770c3e9d302f844083e02f0b74576ee",
+    "harnessCommit": "8cc7914c51a063cd2b851a9eb956c72b4c16471b",
     "baseImports": [
       "@deepseek-ai/dsh-settings",
       "@deepseek-ai/schemastery"

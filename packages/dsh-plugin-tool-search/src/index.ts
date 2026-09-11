@@ -331,9 +331,12 @@ export function apply(ctx: Context, config: Config = {}): void {
           : new Set([...previousSelection].filter(name => eligibleNames.has(name))),
         allowedNames: [],
       }
-      states.set(agent, state)
+      // One definite binding for the registry closures: the surrounding `let` exists only so the
+      // catch below can clean up an install that threw before the state existed.
+      const installed: AgentState = state
+      states.set(agent, installed)
       if (catalog.size === 0 || [...catalog.keys()].every(name => matchesAlwaysVisible(name, resolved))) return
-      state.removeSearchTool = mutateRegistry(() => agent.ctx.tools.register(defineTool({
+      installed.removeSearchTool = mutateRegistry(() => agent.ctx.tools.register(defineTool({
         name: TOOL_SEARCH_NAME,
         description: 'Discover installed tools by capability or exact name. Some installed tool schemas are exposed on demand; when a task needs a capability with no suitable visible tool, search here before rebuilding it with shell commands or installing another dependency. Matching original tools become available on the next model step.',
         parameters: {
@@ -376,9 +379,9 @@ export function apply(ctx: Context, config: Config = {}): void {
           title: result.isError ? '工具查找失败' : '工具已披露',
           content: result.content,
         }),
-        execute: (args, exec) => Promise.resolve(search(state, args.query, args.limit, exec.agent, exec.parent)),
+        execute: (args, exec) => Promise.resolve(search(installed, args.query, args.limit, exec.agent, exec.parent)),
       })))
-      refreshRestriction(state)
+      refreshRestriction(installed)
     } catch {
       states.delete(agent)
       try {
