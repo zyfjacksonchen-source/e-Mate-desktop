@@ -1621,3 +1621,51 @@ corepack yarn workspace @e-mate/desktop exec vitest run tests/e-mate-profile.spe
 - `packages/dsh-plugin-computer-use` 的 `lib/` 当前**不存在**（构建需 harness workspace 的逐包 node_modules）；
   本轮临时生成的半成品 `lib/` 已删除，避免留下未叠加 e-mate overlay 的错误产物。
 
+
+### 9. 第 44 轮：composer 工具行与 Univer 插件的迁移（已完成并验证）
+
+**A. e-mate 的 composer 控件原本在 0.1.5 上全部消失（真实功能缺陷）**
+0.1.5 的 composer bar 只渲染 `conversation.input.left` / `conversation.input.right`
+（`skeleton/InputBar.tsx:522,527`），**没有** `leftItems`/`rightItems` 属性
+（`contract/slots.ts` 里只剩 `accessory`）。而：
+- file-import 的曲别针按钮通过 `leftItems` 注入 → 被忽略 → **通用文件上传入口不可达**；
+- emate-shell 的专家模式开关注册进 `e-mate.conversation.composer.after-upload`，
+  这个槽只有 file-import 的 composer body 会渲染，而 body 又把控件塞进 `leftItems`
+  → 一并消失。
+已修：曲别针改为 `conversation.input.left` 的独立条目（id `e-mate-file-import`, order 12，
+排在 shell 的 `e-mate-mentions`(11) 之后），点击时派发与 `@文件` 源同一个
+`FILE_PICK_EVENT`，由持有 picker 的控件打开文件选择；专家模式改注册到
+`conversation.input.right`（order 19，在 connectors 之前）。插件 composer body 不再注入
+`leftItems`，只保留 staging 行（accessory）、picker 宿主与 `addFiles` 覆盖。
+验证：file-import 源测试 29 条 + 客户端 27 条全绿；emate-shell 277/277。
+
+**B. Univer Office 插件在 0.1.5 上根本无法激活（真实功能缺陷）**
+它还在用被删除的包与入口：`@deepseek-ai/dsh-client-runtime` 类型、`ctx.conversationEvents`、
+`SessionSnapshot.chat`、以及 `tool/code-dispatch*` 旧事件名。已迁到 0.1.5 owner：
+Chat 快照/视图节点/turn-tail owner/节点数据表 → `dsh-client-ui-chat/client`；
+节点定义与上下文 → `dsh-client-ui-conversation/client`；`SettingsScope` → `dsh-client-ui-settings/client`；
+`ctx.slots` 的声明合并由 `dsh-client-ui-renderer/client` 承载；注册走
+`ctx.uiConversation.events.register`；两个客户端组件改用 `useChat` 标准 hook；
+Host 侧 `settingsNamespace()` 已被删除，改为直接传命名空间字符串。
+验证：`tsc tsconfig.json` / `tsconfig.client.json` 均 0 错误，`build:lib` 成功，
+`node test/client-smoke.mjs` OK；并做了反向对照（把新事件名改回旧名后 smoke 失败，
+证明改名是承重的）。
+
+**C. 待裁决的设计点（Univer turn-tail 选举）**
+0.1.5 的 chain owner 不再暴露 Chat 节点（`TurnTailOwnerProps = { turn, seq, openFile }`），
+而 Location data 每个 Definition kind 每 Turn 只允许一个发布者（`assembler.ts:883-887`），
+本定义又必须按 root call 建 Context（PTC 子调用载荷没有 turn）。因此精确选举在不动内核的前提下
+做不到：现实现是「无条件选举 + 卡片自己读 Chat 快照判空」，并把条目 priority 从 -10 改成 10，
+以免吞掉 emate-shell 的 `ArtifactTerminal`(priority -1) 与 harness 的 `ui-deliverables`(0)。
+这是唯一的用户可见取舍，改回是一行的事。
+
+**D. 仍待修：emate-shell 的 `selectArtifactTerminal` 依赖 `owner.nodes`**
+`image-gallery.tsx:277-317` 的链选择器读 `owner.nodes`（287/288/309 行），
+而 0.1.5 的 `TurnTailOwnerProps` 没有 `nodes` → `owner.nodes ?? []` 恒为空。
+组件自身（1100-1106 行）通过 `useSession(value => value.chat.locations.getTurn(turn.turn)…)`
+重新取节点，所以纯生图路径仍能渲染；但**只靠隐藏节点成立的场景会丢**：
+`nativeToolImageItems`（原生工具图片）、`e-mate-tool-images` 生成的 callIds、
+以及 `e-mate-subagent-settled` 的 childSessionIds（后台子会话图片终态）。
+spec 没抓到是因为它们手工构造带 `nodes` 的 owner。修法：让选择器改读自己定义的 Location data
+（或让 Definition 把 callIds/childSessionIds 发布到 Turn data），与 §C 同一个约束。
+
