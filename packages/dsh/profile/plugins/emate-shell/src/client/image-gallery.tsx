@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject, RefObject } from 'react'
-import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { ChatConversationViewNode, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {
   ConversationLocation,
   ConversationNodeContext,
   ConversationNodeDefinition,
   ConversationSnapshot,
   ToolCallBlock,
-  TurnTailOwnerProps,
+  TurnLocation,
   UseConversation,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionListState, UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -73,8 +73,22 @@ interface SubagentSettledData {
   readonly sessionId: string
 }
 
+/**
+ * Turn-scoped presence of a native background-child settlement.
+ * One publisher per Location is the Conversation engine's rule, and settlements
+ * are per-notice Contexts, so the Turn publishes presence only; the Tail derives
+ * the exact child Sessions from the Turn's Chat Nodes.
+ */
+interface SubagentSettledTurnData {
+  readonly settled: true
+}
+
 interface SubagentSettledState extends SubagentSettledData {
   readonly sourceSeq: number
+  /** Receiving Turn, when the settlement event resolves to one. */
+  readonly turn?: number
+  /** Whether this settlement owns its Turn's Location publication. */
+  readonly publishes: boolean
 }
 
 type ImageOutputEventData = Record<string, unknown>
@@ -90,6 +104,8 @@ declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ConversationTurnDataMap {
     /** Ordered direct ImageGen call identities for this engine-owned Turn. */
     'e-mate-image-calls': ImageCallsTurnData
+    /** Presence of a native background-child settlement received in this Turn. */
+    'e-mate-subagent-settled': SubagentSettledTurnData
   }
 }
 
@@ -153,6 +169,31 @@ export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> =
   },
 }
 
+/**
+ * Call identities of native typed image outputs in one appended tool result.
+ * Any plugin Tool may return image blocks, so this is Turn-local evidence that
+ * exists without an e-Mate receipt. The Block layout is the native tool-result
+ * message: one `tool-result` block per result, correlated by its tool call.
+ */
+function nativeResultImageCallIds(event: { readonly type: string; readonly data: unknown }): readonly string[] {
+  if (event.type !== 'tool/result') return []
+  const message = (event.data as { readonly message?: unknown } | null)?.message
+  const content = (message as { readonly content?: unknown } | undefined)?.content
+  if (!Array.isArray(content)) return []
+  const callIds: string[] = []
+  for (const part of content) {
+    const block = part as {
+      readonly type?: unknown; readonly isError?: unknown
+      readonly toolCallId?: unknown; readonly content?: unknown
+    } | null
+    if (block?.type !== 'tool-result' || block.isError === true || typeof block.toolCallId !== 'string') continue
+    if (!Array.isArray(block.content) || !block.content.some(image =>
+      (image as { readonly type?: unknown } | null)?.type === 'image')) continue
+    callIds.push(block.toolCallId)
+  }
+  return callIds
+}
+
 /** Turn-local direct ImageGen provenance; it publishes no presentation node. */
 export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> = {
   kind: 'e-mate-image-calls',
@@ -162,6 +203,9 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
       && parseImageOutputGroup(event.data) !== null) return { id: String(event.data.turn), role: 'update' }
     if (event.type === 'tool/call'
       && (['generate_image', 'edit_image', 'imagegen', 'image_batch', 'subagent'].includes(event.data.name))) {
+      return { id: String(event.data.turn), role: 'update' }
+    }
+    if (event.type === 'tool/result' && nativeResultImageCallIds(event).length > 0) {
       return { id: String(event.data.turn), role: 'update' }
     }
     return null
@@ -175,6 +219,12 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
       const group = parseImageOutputGroup(match.event.data)
       return group === null || context.state.calls.some(call => call.callId === group.callId)
         ? context.state : { ...context.state, calls: [...context.state.calls, { callId: group.callId, seq: match.event.seq }] }
+    }
+    if (match.event.type === 'tool/result') {
+      const calls = nativeResultImageCallIds(match.event)
+        .filter(callId => !context.state.calls.some(call => call.callId === callId))
+      return calls.length === 0 ? context.state
+        : { ...context.state, calls: [...context.state.calls, ...calls.map(callId => ({ callId, seq: match.event.seq }))] }
     }
     if (match.event.type !== 'tool/call') return context.state
     if (match.event.data.name === 'image_batch') {
@@ -240,10 +290,26 @@ export const subagentSettledDefinition: ConversationNodeDefinition<SubagentSettl
     const sessionId = settledSessionId(event)
     return sessionId === null ? null : { id: `${sessionId}:${event.seq}`, role: 'start' }
   },
-  start: (_context, match) => {
+  start: (context, match, reader) => {
     const sessionId = settledSessionId(match.event)
     if (sessionId === null) throw new Error('subagent settlement marker requires a native sender Session')
-    return { sessionId, sourceSeq: match.event.seq }
+    const location = locationOf(context)
+    const turn = location.kind === 'turn' || location.kind === 'step' ? location.turn.turn : undefined
+    // The engine admits one publisher per (Turn, kind) and settlements are
+    // per-notice Contexts, so the first settlement of a Turn owns its Turn's
+    // publication and later ones publish nothing.
+    const previous = reader.previous<SubagentSettledState>('e-mate-subagent-settled')
+    return {
+      sessionId,
+      sourceSeq: match.event.seq,
+      ...turn === undefined ? {} : { turn },
+      publishes: turn !== undefined && previous?.state.turn !== turn,
+    }
+  },
+  buildLocationData: (context, scope) => {
+    const state = context.state
+    if (scope !== 'turn' || state === undefined || !state.publishes || state.turn === undefined) return null
+    return { kind: 'turn', turn: state.turn, key: 'e-mate-subagent-settled', value: { settled: true } }
   },
   buildViewNode: context => context.state === undefined ? null : ({
     key: context.key,
@@ -273,24 +339,54 @@ export interface ArtifactTerminalMatch {
   }
 }
 
+/** Latest Turn event the ArtifactTerminal admits; a closing Turn stops at its end. */
+export function artifactTerminalThroughSeq(turn: TurnLocation, seq: number): number {
+  return turn.status === 'closed' ? turn.end?.seq ?? seq : Infinity
+}
+
+/**
+ * Turn-local ArtifactTerminal facts that only the rendered Turn's Chat Nodes
+ * can prove: native typed tool images (including nested calls), hidden ImageGen
+ * receipts, and native background-child settlements.
+ * The chain selector cannot read Chat Nodes in 0.1.5 (TurnTailOwnerProps is
+ * `{ turn, seq, openFile }`), so the component derives them here from the same
+ * Turn index the rc.7 chain dispatch used to hand over as `owner.nodes`.
+ * @param nodes - Chat Nodes located in the rendered Turn.
+ * @param turn - rendered Turn number.
+ * @param throughSeq - highest admitted event seq; later evidence belongs to a later Turn.
+ * @returns unique callIds and settled child Session ids.
+ */
+export function artifactTerminalNodeFacts(
+  nodes: Iterable<ChatConversationViewNode>,
+  turn: number,
+  throughSeq = Infinity,
+): { readonly callIds: readonly string[]; readonly childSessionIds: readonly string[] } {
+  const located = [...nodes]
+  const callIds = [
+    ...nativeToolImageItems(located, turn, throughSeq).map(item => item.callId),
+    ...located.flatMap(node => node.kind === 'e-mate-tool-images'
+      && (node.location.kind === 'turn' || node.location.kind === 'step')
+      && node.location.turn.turn === turn
+      ? [(node.data as ToolImagesData).callId] : []),
+  ]
+  return { callIds: [...new Set(callIds)], childSessionIds: [...settledChildSessions(located)] }
+}
+
 /** Keep one live image tail; generic deliverables are added when the Turn closes. */
 export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTerminalMatch | null {
-  const throughSeq = owner.turn.status === 'closed' ? owner.turn.end?.seq ?? owner.seq : Infinity
+  const throughSeq = artifactTerminalThroughSeq(owner.turn, owner.seq)
   const imageData = owner.turn.data.get('e-mate-image-calls')
   const batchCalls = (imageData?.batchCalls ?? [])
     .filter(call => call.seq <= throughSeq)
     .sort((left, right) => left.seq - right.seq)
   const batchCallIds = [...new Set(batchCalls.map(call => call.callId))]
   const candidates = (imageData?.calls ?? []).filter(call => call.seq <= throughSeq)
-  const callIds = [...new Set([
-    ...candidates.sort((left, right) => left.seq - right.seq).map(call => call.callId),
-    ...nativeToolImageItems(owner.nodes ?? [], owner.turn.turn, throughSeq).map(item => item.callId),
-    ...(owner.nodes ?? []).flatMap(node => node.kind === 'e-mate-tool-images'
-      && (node.location.kind === 'turn' || node.location.kind === 'step') && node.location.turn.turn === owner.turn.turn
-      ? [(node.data as ToolImagesData).callId] : []),
-  ])]
+  const callIds = [...new Set(candidates.sort((left, right) => left.seq - right.seq).map(call => call.callId))]
+  // A received background-child settlement is Turn-scoped evidence on its own;
+  // the exact child Sessions come from the Turn's Chat Nodes in the component.
+  const settled = owner.turn.data.get('e-mate-subagent-settled')?.settled === true
   if (owner.turn.status !== 'closed') {
-    return callIds.length === 0 && batchCallIds.length === 0
+    return callIds.length === 0 && batchCallIds.length === 0 && !settled
       ? null
       : {
           callIds,
@@ -306,9 +402,9 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
     seenPaths.add(item.path)
     paths.push(item.path)
   }
-  const childSessionIds = [...new Set((owner.nodes ?? []).flatMap(node => node.kind === 'e-mate-subagent-settled'
-    ? [(node.data as SubagentSettledData).sessionId]
-    : []))]
+  // Derived from this Turn's Chat Nodes by the component; the selector owns no
+  // node access in 0.1.5.
+  const childSessionIds: readonly string[] = []
   const foregroundLabels = (imageData?.foregroundSubagents ?? [])
     .filter(call => call.seq <= throughSeq)
     .sort((left, right) => left.seq - right.seq)
@@ -317,7 +413,7 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
     ? { startTime: owner.turn.start.time, endTime: owner.turn.end.time, labels: foregroundLabels }
     : undefined
   return callIds.length === 0 && batchCallIds.length === 0 && paths.length === 0
-    && childSessionIds.length === 0 && foregroundWindow === undefined
+    && childSessionIds.length === 0 && foregroundWindow === undefined && !settled
     ? null
     : {
         callIds,
@@ -1079,7 +1175,7 @@ export function ArtifactTerminal(props: ArtifactTerminalProps) {
 
 /** Render hidden image receipts, native deliverables, and optional exact batch progress. */
 function ArtifactTerminalBody({
-  matched, sessionId, turn, useSession, useSessions, useInput, useProjection,
+  matched, sessionId, turn, seq, useSession, useSessions, useInput, useProjection,
   openFile, loadImage, addImageToDraft, addImageToCanvas, draftBytes, notify, runResource, renderSlot,
   batches, batchChildIds,
 }: ArtifactTerminalBodyProps) {
@@ -1095,13 +1191,27 @@ function ArtifactTerminalBody({
   const title = summary?.title
   const root = summary?.cwd
   const ambiguousBatch = (matched.batchCallIds?.length ?? 0) > 0 && batches.length === 0
-  const includeChildren = !ambiguousBatch && (matched.childSessionIds.length > 0 || matched.foregroundWindow !== undefined)
-  const sessions = useSessions(value => includeChildren || batches.length > 0 ? value : undefined)
   // rc.7 readers are live objects: compare the actual indexed nodes, not store identity.
   const nodes = useSession(value => value.chat.locations.getTurn(turn.turn).flatMap(key => {
     const node = value.chat.nodes.get(key)
     return node === undefined ? [] : [node]
   }), (left, right) => left.length === right.length && left.every((node, index) => node === right[index]))
+  // The selector reads published Turn data only in 0.1.5; the node-derived facts
+  // replace the `owner.nodes` it used to receive from the rc.7 chain dispatch.
+  const nodeFacts = useMemo(
+    () => artifactTerminalNodeFacts(nodes, turn.turn, artifactTerminalThroughSeq(turn, seq)),
+    [nodes, turn, seq],
+  )
+  const callIds = useMemo(
+    () => [...new Set([...matched.callIds, ...nodeFacts.callIds])],
+    [matched.callIds, nodeFacts],
+  )
+  const childSessionIds = useMemo(
+    () => [...new Set([...matched.childSessionIds, ...nodeFacts.childSessionIds])],
+    [matched.childSessionIds, nodeFacts],
+  )
+  const includeChildren = !ambiguousBatch && (childSessionIds.length > 0 || matched.foregroundWindow !== undefined)
+  const sessions = useSessions(value => includeChildren || batches.length > 0 ? value : undefined)
   const settled = useSession(value => includeChildren && matched.foregroundWindow !== undefined
     ? settledChildSessions(value.chat.nodes.values()) : NO_BATCH_CHILD_IDS,
   (left, right) => left.size === right.size && [...left].every(id => right.has(id)))
@@ -1111,17 +1221,17 @@ function ArtifactTerminalBody({
       const batchImages = new Set(sessions === undefined ? [] : batches.flatMap(batch =>
         batch.tasks.flatMap(task => exactPreview(sessions, task)?.attachment.attachmentId ?? [])))
       return namedGalleryImageItems([
-      ...terminalImageItems(nodes, matched.callIds, turn.turn).filter(item =>
+      ...terminalImageItems(nodes, callIds, turn.turn).filter(item =>
         item.attachment === undefined || !batchImages.has(item.attachment.attachmentId)),
       ...sessions === undefined ? [] : terminalChildImageItems(
         childGalleryImageItems(sessions, sessionId,
-          matched.foregroundWindow === undefined ? new Set(matched.childSessionIds) : undefined,
+          matched.foregroundWindow === undefined ? new Set(childSessionIds) : undefined,
         ).filter(item => item.source === undefined || !batchChildIds.has(item.source.sessionId)),
-        matched.childSessionIds, matched.foregroundWindow, settled,
+        childSessionIds, matched.foregroundWindow, settled,
       ),
     ], title ?? '')
     },
-    [batches, batchChildIds, matched.callIds, matched.childSessionIds, matched.foregroundWindow, nodes, sessionId, sessions, settled, title, turn.turn],
+    [batches, batchChildIds, callIds, childSessionIds, matched.foregroundWindow, nodes, sessionId, sessions, settled, title, turn.turn],
   )
   const seenFailures = useRef(new Set<string>())
   const existingBytes = draftBytes(input.attachmentIds)

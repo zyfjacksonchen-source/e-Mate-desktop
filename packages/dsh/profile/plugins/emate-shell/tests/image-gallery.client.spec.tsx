@@ -26,6 +26,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseImageOutputReceipt, parseImageOutputGroup } from '../src/client/image-gallery-contract.ts'
 import {
   ArtifactTerminal,
+  artifactTerminalNodeFacts,
   childGalleryImageItems,
   galleryImageItems,
   ImageGalleryView,
@@ -954,20 +955,42 @@ describe('completed artifact terminal', () => {
     expect(subagentSettledDefinition.match(noticeEvent as never)).toEqual({
       id: 'child-notice:30', role: 'start',
     })
-    expect(subagentSettledDefinition.start({} as never, { event: noticeEvent } as never, {} as never))
-      .toEqual({ sessionId: 'child-notice', sourceSeq: 30 })
+    // The settlement Context now owns its Turn's Location publication: the chain
+    // selector can no longer read the removed `owner.nodes`, so the receiving
+    // Turn carries the settlement as published Turn data instead.
+    const noticeTurn = { ...turn({}, 2, 'open'), start: { type: 'turn/start', seq: 29, time: 205, data: { turn: 2 } } }
+    const settledState = subagentSettledDefinition.start({
+      start: { event: noticeEvent, role: 'start', location: { kind: 'turn', turn: noticeTurn } },
+      matches: [], key: 'k', kind: 'e-mate-subagent-settled', id: 'child-notice:30', current: new Map(),
+      state: undefined,
+    } as never, { event: noticeEvent } as never, { previous: () => undefined } as never)
+    expect(settledState).toEqual({ sessionId: 'child-notice', sourceSeq: 30, turn: 2, publishes: true })
+    expect(subagentSettledDefinition.buildLocationData!({
+      start: { event: noticeEvent, role: 'start', location: { kind: 'turn', turn: noticeTurn } },
+      matches: [], key: 'k', kind: 'e-mate-subagent-settled', id: 'child-notice:30', current: new Map(),
+      state: settledState,
+    } as never, 'turn', null)).toEqual({
+      kind: 'turn', turn: 2, key: 'e-mate-subagent-settled', value: { settled: true },
+    })
+    const settledTurn = turn({
+      'e-mate-image-calls': { calls: [], foregroundSubagents: [] },
+      'e-mate-subagent-settled': { settled: true },
+    }, 2, 'open')
+    const backgroundMatch = selectArtifactTerminal({
+      turn: settledTurn, seq: 40, openFile: vi.fn(),
+    } as never)
+    expect(backgroundMatch).toEqual({ callIds: [], paths: [], childSessionIds: [] })
 
     const settledNode = {
       key: 'settled', kind: 'e-mate-subagent-settled', id: 'child-notice:30', target: 'chat', anchorSeq: 30,
       location: { kind: 'turn', turn: turn({}, 2) }, visibility: 'hidden', data: { sessionId: 'child-notice' },
     }
-    const backgroundMatch = selectArtifactTerminal({
-      turn: turn({ 'e-mate-image-calls': { calls: [], foregroundSubagents: [] } }, 2),
-      nodes: [settledNode], seq: 40, openFile: vi.fn(),
-    } as never)
-    expect(backgroundMatch).toEqual({ callIds: [], paths: [], childSessionIds: ['child-notice'] })
+    // The component derives the exact settled child from this Turn's Chat Nodes
+    // (rc.7 handed them to the selector as `owner.nodes`).
+    const settledFacts = artifactTerminalNodeFacts([settledNode] as never, 2)
+    expect(settledFacts.childSessionIds).toEqual(['child-notice'])
     const childItems = childGalleryImageItems(sessions as never, parentId)
-    expect(terminalChildImageItems(childItems, backgroundMatch!.childSessionIds)).toMatchObject([
+    expect(terminalChildImageItems(childItems, settledFacts.childSessionIds)).toMatchObject([
       { callId: 'notice-image', source: { sessionId: 'child-notice' } },
     ])
 
@@ -1001,8 +1024,9 @@ describe('completed artifact terminal', () => {
       { callId: 'sibling-image', source: { sessionId: 'child-sibling' } },
     ])
 
-    const props = terminalProps([], backgroundMatch!, {
+    const props = terminalProps([settledNode], backgroundMatch!, {
       sessionId: parentId,
+      turn: turn({ 'e-mate-subagent-settled': { settled: true } }, 2, 'open'),
       useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
     })
     const view = render(<ArtifactTerminal {...props as never} />)
@@ -1017,6 +1041,33 @@ describe('completed artifact terminal', () => {
         resource: expect.objectContaining({ sessionId: 'child-notice' }),
       }))
     })
+  })
+
+  it('lets one Turn publish several settlements as one claim while every settled child stays addressable', () => {
+    const settledNotice = (child: string, seq: number) => ({ type: 'user/message', seq, time: seq, data: {
+      content: [], role: 'user', id: `notice-${child}`,
+      source: { kind: 'subagent-settled', form: 'notice', summary: 'done', senderSessionId: child },
+    } })
+    const assembler = new ConversationNodeAssembler({
+      entries: () => [subagentSettledDefinition, imageCallsDefinition],
+      fallbackEntry: () => unknownFallbackDefinition,
+    }, { entries: () => [chatViewDefinition] })
+    assembler.activateTarget('chat')
+    assembler.replaceWindow([
+      { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } },
+      settledNotice('child-one', 2), settledNotice('child-two', 3),
+    ].map(event => ({ type: 'event', event })), false)
+    assembler.flush()
+    const snapshot = assembler.snapshot('chat') as any
+    const settledTurn = snapshot.timeline.turns.get(1)
+    // One publisher per (Turn, kind): two settlements still yield one Turn value.
+    expect(settledTurn.data.get('e-mate-subagent-settled')).toEqual({ settled: true })
+    expect(selectArtifactTerminal({ turn: settledTurn, seq: 4, openFile: vi.fn() } as never))
+      .toEqual({ callIds: [], paths: [], childSessionIds: [] })
+    const settledNodes = [...snapshot.nodes.values()].filter(node => node.kind === 'e-mate-subagent-settled')
+    expect(settledNodes).toHaveLength(2)
+    expect(artifactTerminalNodeFacts(settledNodes as never, 1).childSessionIds)
+      .toEqual(['child-one', 'child-two'])
   })
 
   it('keeps the newest strict receipt hidden and never joins another Turn call', () => {
@@ -1433,11 +1484,31 @@ describe('native typed tool image outputs', () => {
     const nodes = [native('one', [image('a'), image('b')]), native('two', [image('a')], { subCalls: [nested] }),
       native('prose', [{ type: 'text', text: JSON.stringify(image('d')) }]),
       native('failed', [image('e')], { error: true }), native('other-turn', [image('f')], { turn: 2 })]
-    const matched = selectArtifactTerminal({ turn: turn({}, 1, 'open'), seq: 4, nodes, openFile: vi.fn() } as any)!
-    expect(matched.callIds).toEqual(['one', 'two', 'nested'])
-    const items = terminalImageItems(nodes, matched.callIds, 1)
+    // 0.1.5 removed `owner.nodes` (rc.7 TurnTailOwnerProps), so the Turn claims
+    // through the typed image tool results its Definitions fold into Turn data.
+    const start = { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }
+    let state = imageCallsDefinition.start({} as never, { event: start } as never, {} as never)
+    const result = (callId: string, parts: any[]) => ({ type: 'tool/result', seq: 3, time: 3000, surfaceOp: 'append',
+      data: { turn: 1, step: 1, message: { source: { kind: 'tool', callId },
+        content: [{ type: 'tool-result', toolCallId: callId, isError: false, content: parts }] } } })
+    for (const callId of ['one', 'two']) {
+      const event = result(callId, [image('a')])
+      expect(imageCallsDefinition.match(event as never)).toEqual({ id: '1', role: 'update' })
+      state = imageCallsDefinition.update({ state } as never, { event } as never)
+    }
+    expect(imageCallsDefinition.match(result('prose', [{ type: 'text', text: 'no image' }]) as never)).toBeNull()
+    const claimed = turn({ 'e-mate-image-calls': { calls: state.calls } }, 1, 'open')
+    const matched = selectArtifactTerminal({ turn: claimed, seq: 4, openFile: vi.fn() } as any)!
+    expect(matched.callIds).toEqual(['one', 'two'])
+    // The nodes alone prove the nested Call, which no result message names.
+    const facts = artifactTerminalNodeFacts(nodes as never, 1, Infinity)
+    expect(facts.callIds).toEqual(['one', 'two', 'nested'])
+    const items = terminalImageItems(nodes, [...new Set([...matched.callIds, ...facts.callIds])], 1)
     expect(items.map(item => item.attachment?.name)).toEqual(['a.png', 'b.png', 'c.png'])
-    expect(selectArtifactTerminal({ turn: turn({}, 1, 'open'), seq: 2, nodes, openFile: vi.fn() } as any)?.callIds).toEqual(matched.callIds)
+    expect(selectArtifactTerminal({ turn: claimed, seq: 2, openFile: vi.fn() } as any)?.callIds).toEqual(matched.callIds)
+    render(<ArtifactTerminal {...terminalProps(nodes, matched, { turn: claimed }) as any} />)
+    // Prose, error and other-Turn Nodes contribute no card of their own.
+    expect(screen.getAllByRole('button', { name: /，点击查看原图$/u })).toHaveLength(3)
   })
 
   it('preserves strict receipts over duplicate native outputs and cannot promote failed or review-required calls', () => {
@@ -1485,7 +1556,19 @@ describe('native typed tool image outputs', () => {
     nativeImageRendering.enabled = true
     const nodes = [native('native-call', [image('a'), image('b')])]
     const loadImage = vi.fn(async (ref: any) => `blob:first-${ref.name}`)
-    const match = selectArtifactTerminal({ turn: turn({}, 1, 'open'), seq: 4, nodes, openFile: vi.fn() } as any)!
+    // Formerly `selectArtifactTerminal({ ..., nodes })`: the claim now comes from
+    // the Turn data the same typed image tool results publish.
+    const nativeStart = { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }
+    const nativeState = imageCallsDefinition.update(
+      { state: imageCallsDefinition.start({} as never, { event: nativeStart } as never, {} as never) } as never,
+      { event: { type: 'tool/result', seq: 3, time: 3000, surfaceOp: 'append', data: { turn: 1, step: 1,
+        message: { source: { kind: 'tool', callId: 'native-call' },
+          content: [{ type: 'tool-result', toolCallId: 'native-call', isError: false, content: [image('a'), image('b')] }] } } } } as never,
+    )
+    const match = selectArtifactTerminal({
+      turn: turn({ 'e-mate-image-calls': { calls: nativeState.calls } }, 1, 'open'), seq: 4, openFile: vi.fn(),
+    } as any)!
+    expect(match.callIds).toEqual(['native-call'])
     const props = terminalProps(nodes, match, { turn: turn({}, 1, 'open'), loadImage })
     const view = render(<ArtifactTerminal {...props as any} />)
     await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2))
