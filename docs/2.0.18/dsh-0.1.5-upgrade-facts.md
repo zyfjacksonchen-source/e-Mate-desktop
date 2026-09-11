@@ -2868,3 +2868,19 @@ e-Mate 只保留产品适配（R2 端点、IPC 触发器、托盘文案、无签
 - **企业部署产物**（`enterprise/deploy/sub2api-*.patch`、`gpt-fast-mode.md` 等）位于服务端部署面，
   不随本地应用发布（`package.json` `build.files` 不含 `enterprise/`），符合第 1 条；本轮已为其补配对一致性守卫。
 
+
+### 83.1 待清理的客户端 inject 错位边：先取证再改（避免"删了就炸"）
+
+`packages/dsh/test/client-inject-edges.test.mjs` 当前列出 **13 处**违规（10 处 `@deepseek-ai/dsh-client-runtime` + 3 处 `@deepseek-ai/dsh-api-remotes`，后者是宿主侧包被写进客户端 inject）。
+**清理前必须先判定"是否有源码真的用到"**，实测结果分两类：
+
+1. **glass-composer 不是纯清单问题**：`packages/dsh-plugin-glass-composer/src/client/index.tsx:3` 真的在 import 类型
+   `import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'`。
+   **0.1.5 的 owner 已确认**：`SettingsScope` 现在来自 `@deepseek-ai/dsh-client-ui-settings/client`
+   （证据：`upstream/deepseek-harness/packages/client/locale/src/client/index.ts:14` 正是这样 import 的）。
+   → 正确改法 = **改 import 到新 owner + inject 边换成 `@deepseek-ai/dsh-client-ui-settings`**，只删声明会留下解析失败（且编译面已开启，会被 typecheck 直接抓住）。
+2. **其余 9 个组件的 `dsh-client-runtime` 声明、以及 3 处 `dsh-api-remotes` 声明：全仓源码零 import**（`grep -rn` 仅命中上述 glass-composer 一处）→ 属**纯清单清理**，直接从 `dsh.client.inject` 移除即可。
+
+**执行顺序（不可颠倒）**：等"组件类型检查面"工作令让出 `packages/*/package.json` 写集后一次性做，随后让该守卫转绿；
+该守卫已接入 `test:fast`（见 `test:fast` 提交），因此它是**验收门禁的一部分**，不能靠忽略绕过。
+
