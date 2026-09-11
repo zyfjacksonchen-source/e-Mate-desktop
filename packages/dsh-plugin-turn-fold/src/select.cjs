@@ -244,8 +244,16 @@ function createSelectorEngine(ts) {
  */
 const TARGET_BUNDLE_SHA256 = 'cf53ae8f5978901504286189a64506febf09cd237d097db3abf3f39b3953ba97'
 
-/** The digest the seams were verified against on Windows, where the same source builds a different bundle. */
-const WINDOWS_BUNDLE_SHA256 = '9a54fa521480db27bf10857622c87ba05ad508e278ad349114294bfb02f8db7b'
+/**
+ * The digest the seams were verified against on Windows, where the same source builds a different
+ * bundle (369285 bytes on the current fork head).
+ *
+ * It replaced `9a54fa52…`, which was measured on an earlier Windows build of an earlier fork head
+ * and no longer matches anything the pinned Harness produces: the Windows checkout now builds
+ * `4f0f232a…`. Moved only after re-verifying all three selectors (each 1/1) and all six host
+ * symbols on that bundle, on the Windows machine itself.
+ */
+const WINDOWS_BUNDLE_SHA256 = '4f0f232ae1ef380fc0f453b1ceb3dfe61e6a5fc260c997dcd2f3fd7ef56c8c56'
 
 /**
  * Digests of the e-Mate-*assembled* product bundles, one entry per platform.
@@ -264,6 +272,7 @@ const WINDOWS_BUNDLE_SHA256 = '9a54fa521480db27bf10857622c87ba05ad508e278ad34911
  */
 const ASSEMBLED_BUNDLE_SHA256 = Object.freeze([
   'f86778689ec9dff029995e5584f4c1ffab2bd291761dadd4cca9f5d7791a732e', // darwin assembly, 380708 bytes
+  '86310878b2cfe766ed1b422ce747f52a31bc52c8c46edb378a03dfd933532d18', // win32 assembly, 380386 bytes
 ])
 
 /** Every digest the seams were verified against, one entry per platform. A bundle matching none is refused. */
