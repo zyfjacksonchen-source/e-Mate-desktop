@@ -2652,3 +2652,29 @@ failed to apply loader entry emate-canvas (@e-mate/dsh-plugin-canvas): cannot ge
 (b) 在桌面 profile 里**禁用**原生 web 三行，改用 e-mate 自己的、id 不同的传输行（避免 duplicate id），由桌面自己持有 host/port。
 倾向 (a)：它保留固定版原生 owner，只补齐它依赖的 seat；若时序不可控再退到 (b)。
 
+
+### 79.2 定位收尾：失败数 8 → 1，卡在 canvas（本轮实测）
+
+**又一条被误导的机制**：桌面用的是**物化后的 bundle 副本**
+（`desktop/e-mate-desktop/build/e-mate-profile/bundles/<name>/cordis.patch.yml`），它是**生成物**；
+我改了组件源行与 `packages/dsh/profile/bundles/**` 后，那份副本**仍是旧的**，所以行为看起来"改了没用"。
+实测对比：源行 `inject: [connection, workspaceRegistry, webServer]` vs 物化副本 `inject: [connection, workspaceRegistry]`。
+删除 `build/e-mate-profile/bundles` 并重建后，副本与源一致。
+
+**结果**：`verify:profile` 的失败入口从 **8 个降到 1 个** —— 只剩 `emate-canvas`
+（`cannot get property "webServer" without inject`）。其余 7 个（better-sidebar / file-import / mcp-manage / schedules /
+identity / capabilities / agent-operations）已通过。
+
+**另一条被排除的假设**：`webStartup` 并不缺。临时在 smoke 的 host 回调里补 `host.provide('webStartup', …)` 后，
+失败变成 `failed to apply loader entry web-startup (@deepseek-ai/dsh-web-app/startup): service "webStartup" has been registered at <root>`
+——**反证 `web-startup` 本来就会激活并注册 `webStartup`**（探针已还原）。
+
+**canvas 的最后一步**：其 bundle 行的 inject 本已含 `webServer`，模块侧也已改用 `ctx.get('webServer')`，
+但仍报缺属性 → 需查 canvas 的**其他 apply 期访问点**（或它在 profile 里的第二个 `- insert:` 行覆盖了 bundle 行）。
+
+**同时验证过但未采纳的改动**：曾把 `@deepseek-ai/dsh-web-app` 加进 `base-contract.json#runtime_imports`，
+实测对失败无影响（真因是物化副本陈旧），已回退——不加没有证据支撑的 pin。
+
+**流程教训（写入交接）**：改组件行 inject 后必须刷新 `build/e-mate-profile/bundles/**`（生成物），
+否则一切"改了没反应"的观察都是在看旧副本。
+
