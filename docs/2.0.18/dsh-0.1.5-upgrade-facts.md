@@ -2203,3 +2203,17 @@ redundantEscalation = sandbox_permissions !== undefined && standingPolicy !== un
 - 另注：`desktop/e-mate-desktop/` 里有 3 个**未提交的改动**（`scripts/verify-packaged-runtime.ts`、
   `tests/e-mate-profile.spec.ts`、`tests/verify-packaged-runtime.spec.ts`），来自本会话更早的轮次，需要复核后提交或回退。
 
+
+### 48.11 证据完整性提醒：desktop 工作区存在并发写入
+
+本轮 `desktop` 取证时观察到：`desktop/e-mate-desktop/tests/e-mate-profile.spec.ts` 的 mtime 为 12:17:38，
+而当时我没有任何后台任务在跑，且**失败信息里的期望值与磁盘上的内容不一致**
+（vitest 报 Expected `./node_modules/@e-mate/dsh-plugin-cdp/lib/index.mjs`，而磁盘上是 `@e-mate/dsh-plugin-cdp`）。
+
+结论：该测试**在我读取与运行之间被改写**——即 desktop 目录存在我之外的写入者（用户自己的终端/其他会话，
+或某个生成脚本）。因此：
+
+- 该 spec 的运行结果只能作为"当时那棵树"的证据，不能当作当前树的结论；需在静止的树上重跑（已启动 bash-19 的复跑）。
+- 之前记录的三处未提交改动同理，需先确认它们的来源（人工 vs 生成），再决定提交或回退。
+- 对 desktop 的任何验收，都应先确认没有并发写入者。
+
