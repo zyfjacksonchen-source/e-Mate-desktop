@@ -156,15 +156,48 @@ profile 依 `.e-mate-install.json`（schema 2 / 2.0.18 / harness `43c411a5`）�
 
 | 组 | 状态（C2b） |
 |---|---|
-| A 登录与企业 | `BLOCKED(enterprise-unreachable)`：App 正常渲染到登录页，但企业服务本机不可达（实测 `curl` 面板地址 `http=000` 超时），且会话内被授权的目录中没有 App 登录密码（`企业服务器地址 (2).txt` 与 `e-Mate-管理端与审计面板账号.txt` 只有面板/管理端/审计账号）。不伪造登录，不用其他模型绕过。 |
-| B 会话与转录 | `BLOCKED`（同 A：会话需要登录态） |
-| C 生图 | `BLOCKED`（同 A；对照侧 DSH 原版已完成采样，见上一节） |
-| D 知识 | `BLOCKED`（同 A） |
-| E 画布/侧栏/宠物/屏幕 | `BLOCKED`（同 A；登录页本身已证明 shell/侧栏 owner 可加载——见 AC-02 复测） |
-| F 设置与更新 | `BLOCKED`（同 A） |
+| A 登录与企业 | **`PASS`**（登录与企业鉴权面）：企业主机可达（`https://mvdcm.ecoremedia.net` → HTTP **302**，0.63 s；先前 `http=000` 测的是 txt 里的**面板**主机，不是 App 的企业 API，该结论已在第 4 轮更正）。用用户提供的企业凭据文件里的**管理端账号**走原生登录流程登录成功（值是 `pbcopy` 直接从文件进剪贴板再 Cmd+V 粘入，**从未进入会话、日志或本文件**）。错误口令返回 typed `账号或密码错误`（不循环、不假登录）；正确凭据登录后进入已登录产品界面：侧栏（新任务/搜索/定时任务/能力中心/知识图谱 + 项目区）、页脚（用户中心/设置）、右上 `2.0.18 · 11,000 PTS`，且**升级路径保留的既有项目与会话仍在**（Movies / e-mate / DeepSeek Harness 三个项目及其会话）。 |
+| B 会话与转录 | `BLOCKED`（被 AC-04 阻断：登录后主内容区空白） |
+| C 生图 | `BLOCKED`（同 B；对照侧 DSH 原版已完成采样，见上一节） |
+| D 知识 | `BLOCKED`（同 B） |
+| E 画布/侧栏/宠物/屏幕 | 侧栏 `PASS`（见 A）；画布/宠物/屏幕 `BLOCKED`（同 B） |
+| F 设置与更新 | `BLOCKED`（同 B） |
 | G turn-fold 豁免 | 候选级 `PASS`，GUI 可见性 `BLOCKED`：`bundles/turn-fold` 在候选内；desktop `yarn check` 内置的 profile boot smoke 实测打印 `turn-fold: the served chat bundle carries the injected runtime; the file on disk does not`（即"服务出去的字节带补丁、磁盘上的不带"这一豁免核心断言为真）；折叠的肉眼可见性需要登录后的会话。 |
 | H 移除项核对 | **`PASS`（候选级）**：`app.asar` 与 `app.asar.unpacked/build/e-mate-profile` 中 `dsh-plugin-computer-use`/`dsh-computer-use`/`dsh-plugin-tidychat`/`emate-tidychat` 命中数全为 0；`bundles/` 无对应目录；`bundles/registry.json` 命中 0。GUI 入口核对需要登录态。 |
 | 性能三维度 | 生图对照侧已测（中位数 19330 ms / n=3）；处理侧与首响、多轮均 `BLOCKED`（同 A） |
+
+## AC-04 登录后主内容区空白（`main.conversation` 槽条目崩溃）—— **FAIL → `OPEN`（本轮发现，未修）**
+
+**现象**：以正确凭据登录 C2b 后，侧栏与页脚正常渲染，**主内容区（对话/首页座位）整块空白**，
+点击会话条目也不切换（`effect.observedStateChanged` 始终 false）。
+
+**证据（渲染进程 console，`ELECTRON_ENABLE_LOGGING=1`）**：
+
+```
+CONSOLE:56] "ReferenceError: pending is not defined"
+CONSOLE:11570] "slot entry crashed in 'main.conversation': ReferenceError: pending is not defined"
+```
+
+第一条来自 `/assets/index-CH6ygWcq.js`（即 `@deepseek-ai/dsh-web-frontend@0.1.5-rc.1` 的 shell 资产，
+第 56 行是 React 的错误上报代码 `function ll(e,n){...console.error(n.value)...}`），所以**抛出点在插件侧、
+上报点是 shell**；第二条由 slot 注册表给出座位名 `main.conversation`。
+
+**已完成的隔离（本轮）**：
+- 该座位里 e-Mate 侧只有 shell 的 `registerRouteScopedConversationHeader` 会注册 `StandaloneProductSurface`（仅在独立产品路由下）；
+- 对候选内**全部** e-Mate 客户端 bundle 做"自由标识符 `pending`"扫描：命中项全部是同作用域内的声明
+  （`const pending = …` / 解构 / 类字段），没有跨作用域引用；
+- 对 turn-fold 注入源 `upstream/plugins/dsh-turn-fold/inline-source.cjs` 做花括号深度分析：5 处 `pending`
+  全部位于 `__ch4acko3DshTurnFoldSettingsCard` 函数体内（深度 1–3，函数在 726 行才闭合），
+  即折叠运行时不是首要嫌疑；
+- 把 `@e-mate/dsh-plugin-turn-fold` 从 profile bundle 列表移除后重启：因**未勾选"保持登录"**，
+  会话没有持久化，App 回到登录页，无法在该轮观察主内容区（该实验需在勾选保持登录后重做；
+  实验后 bundle 列表已恢复为 23 项）。
+- 对照线索：同一个 pinned Harness 的 DSH 原版 GUI（`127.0.0.1:3180`，本会话所在界面）主内容区渲染正常，
+  差异只可能来自 e-Mate profile 额外挂载的约 12 个客户端 bundle。
+
+**下一步（下一轮）**：勾选"保持登录"后按插件二分（knowledge / file-import / genui / vision-toolkit /
+canvas / better-sidebar / shell 内部模块），并用 `window.addEventListener('error')` 或 React 组件栈取到确切组件名；
+不修好这条，B–F 组与处理侧性能都无法执行。
 
 ## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
 
