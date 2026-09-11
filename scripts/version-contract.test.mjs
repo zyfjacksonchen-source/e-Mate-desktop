@@ -21,7 +21,10 @@ test('keeps current e-Mate source owners on 2.0.18', () => {
   ]) assert.equal(json(path).version, '2.0.18', path)
 
   const contract = json('desktop/e-mate-desktop/base-contract.json')
-  assert.equal(contract.id, 'e-mate-desktop-profile-v18-dsh-78a2b9856218')
+  // The profile identity names the fork head it was minted against, so it moves
+  // with the baseline like every other fixed point rather than freezing the first
+  // 0.1.5 head this line ever used.
+  assert.equal(contract.id, 'e-mate-desktop-profile-v18-dsh-43c411a51c55')
   assert.equal(contract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.18')
   assert.equal(contract.harness_version, '0.1.5-rc.1')
   assert.equal(json('package.json').packageManager, 'pnpm@11.8.0')
