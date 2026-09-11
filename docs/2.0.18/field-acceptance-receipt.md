@@ -9,8 +9,10 @@
 |---|---|---|---|---|---|
 | C1 | macOS | `a10b485f06` | 466413297 | `65cef6f47e6a5d1c03146472cd75c85c4288d170cf953a47d905646232e6c98b` | **已作废**（见 AC-01） |
 | C2 | macOS | `5bed0f831b` | 466413246 | `6234906b786570c1f1d5dcc158c4cb7eca09596fdb9152c6141cb10544774a14` | **已作废**（AC-01 修复载体；AC-02 缺陷在其上暴露） |
-| **C2b** | macOS | `a215988139` | 466417923 | `d5254bd60f778709f2dee0cf42d542a847fe25007aeac4d5c3b7c135302c2b59` | **待验收（当前安装态）** |
-| **C4** | Windows | `a215988139` | 335410291 | `67797411e7043bbc467e4099fc091f0966d5d4ab213fe4a15122112f17788bc4` | **待验收（未安装）** |
+| C2b | macOS | `a215988139` | 466417923 | `d5254bd60f778709f2dee0cf42d542a847fe25007aeac4d5c3b7c135302c2b59` | **已作废**（AC-04 缺陷载体） |
+| C4 | Windows | `a215988139` | 335410291 | `67797411e7043bbc467e4099fc091f0966d5d4ab213fe4a15122112f17788bc4` | **已作废**（同源，含 AC-04 缺陷） |
+| **C2c** | macOS | `e577776032` | 466413246 | `a345c19c838b16d306646fb85d370dbe23ea2f128a18a8e54033262332191364` | **当前安装态，AC-04 复测 PASS** |
+| **C5** | Windows | `e577776032` | 335410283 | `9ce78a84773af58399822dcdaa0cf00ec86a1ca86c0cc5dc75aded26d033070e` | **候选级完成，未安装**（`win-unpacked/e-Mate.exe` = `16b9522e84f8dd55821001b3165980afa40f79d1eeb0794309429634106359f2`） |
 
 C2b/C4 同源：父仓 HEAD = `a215988139`（已推送），Harness gitlink = 子模块 HEAD = `e217fb0c8d8e377be6d9c0514446f9455821a79b`。
 | C3 | Windows | `a10b485f06` | 构建中 | 构建中 | 将被 C4 取代 |
@@ -166,7 +168,7 @@ profile 依 `.e-mate-install.json`（schema 2 / 2.0.18 / harness `43c411a5`）�
 | H 移除项核对 | **`PASS`（候选级）**：`app.asar` 与 `app.asar.unpacked/build/e-mate-profile` 中 `dsh-plugin-computer-use`/`dsh-computer-use`/`dsh-plugin-tidychat`/`emate-tidychat` 命中数全为 0；`bundles/` 无对应目录；`bundles/registry.json` 命中 0。GUI 入口核对需要登录态。 |
 | 性能三维度 | 生图对照侧已测（中位数 19330 ms / n=3）；处理侧与首响、多轮均 `BLOCKED`（同 A） |
 
-## AC-04 登录后主内容区空白（`main.conversation` 槽条目崩溃）—— **FAIL（C2b）→ 根因定位并修复（`b687a97c4b`），待 C2c/C5 复测**
+## AC-04 登录后主内容区空白（`main.conversation` 槽条目崩溃）—— **FAIL（C2b）→ 修复（`b687a97c4b`）→ C2c 复测 PASS**
 
 **现象**：以正确凭据登录 C2b 后，侧栏与页脚正常渲染，**主内容区（对话/首页座位）整块空白**，
 点击会话条目也不切换（`effect.observedStateChanged` 始终 false）。
@@ -234,7 +236,15 @@ assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSes
 **正确性旁证**：`node scripts/harness-provenance.mjs sync-desktop` 与 `verify-desktop` 均 EXIT 0
 （后者会把桌面侧 bundle 与"pinned 原生 + 产品适配器"逐字节比对），`test:fast` 68+39 全绿。
 
-**下一步**：C2c（macOS）与 C5（Windows）以此源码重建后复测本条，然后继续 B–F 组与三维度性能测量。
+**C2c 复测（PASS，候选字节）**：DMG 466413246 字节 / `a345c19c…` 覆盖安装后，
+候选内 `app.asar.unpacked/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js`
+实测带**修正后**的 seam（`data-emate-has-interactions": pendingInteraction === void 0` 命中 1 处）；
+登录后主内容区**完整渲染**：首页主视觉 + 四张快速开始卡 + 「探索未至之境」输入区（模型 chip、
+专家模式 / 外部连接 / 通用会话、发送按钮），侧栏与项目/会话列表同时可用。
+装机后 asar sha256 `547d585c767ba1950aa307901a1a73a81201aff4…`。截图留档（不入库）：
+`~/.dsh-computer-use/artifacts/session-27e2cf42-7243-4aad-a60b-4065c4b0d9ef/observation-6836c1d1-42f2-462e-8f4e-cda883e032ef.png`。
+
+**下一步**：继续 B–F 组与三维度性能测量（输入区当前提示「当前模型不可用，请先选择模型」，需先选模型）。
 
 ## 附录：本机实机操作的复现配方（不含量值）
 
