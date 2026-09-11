@@ -2039,3 +2039,36 @@ stress 的字节恒等改为"ref 即存储产物"。
 pet 18/18、imagegen 22/22、provenance 14/14、desktop host face `tsc` 0 错。
 desktop client/tests 面已委派专项迁移（见 §49.3 的精确定位 + 本轮补充的"缺原生 client 入口 type import"结论）。
 
+
+
+## 第 51 轮：desktop 两处待迁移的精确坐标（委派执行）
+
+### 51.1 client 面（`tsconfig.client.json`）
+
+根因已确认（我实测）：desktop 自己的 yarn 闭包**有** 245 个 `@deepseek-ai/*`（含 `dsh-client-ui-layout`、
+`dsh-client-ui-slots`、`dsh-client-ui-session`、`dsh-api-session-controller`），
+但程序里**没有任何文件 import 这些原生 client 入口**，所以 augment 不生效——
+`PropsRuntime<'root'>` 能看到的 slot key 只有 `details | settings.* | sidebar | conversation | shell.overlay | desktop.titlebar.utilities`，
+缺 `root`/`main`/`rightbar`，于是 `ctx.slots`/`ctx.sessions`/`useSessions` 全部报"不存在"。
+
+真迁移（不是改名）：子表改成 `sidebar`(single,root) / `main`(**keyed**,root) / `rightbar`(single,root) /
+`shell.overlay`(list,root) + e-mate 的 `desktop.titlebar.utilities`；中间列按原生 `MainPanel` 渲染
+（`usePanelInfo(info => info.activePanelId)` → `renderSlot('main', {}, { entryKey: panelId ?? 'conversation' })`，
+见 `packages/client/ui-layout/src/client/AppFrame.tsx:40-43`）；右列的 track 归属要明确（原生 owner 通过
+`ctx.layout` 上报 shown/track/fullscreen，不要留第二套 owner）。
+
+### 51.2 tests 面（`tsconfig.tests.json`）
+
+- `prepareDesktopProfile` 现在是 `async`（因为 0.1.5 的 `healProfilesModuleFallback({installAnchor, home})`
+  是单 options + 异步，`app-boot/src/profile.ts:552`）。测试里约 10 处调用要区分处理：
+  取值的加 `await`；断言"配置错误会抛"的要改成 `await expect(...).rejects.toThrow(/…/u)`（不能丢断言）。
+- `@deepseek-ai/dsh-host-apiproxy` 及其 `/api` 子路径在 0.1.5 **整体不存在**：
+  - `serverResponseSchema` 现在在 `packages/client/connection/src/rpc-schema.ts:43`；
+  - API 组装 owner 是 `TypertGatewayService`（`packages/api/gateway/src/index.ts:169`），
+    产品路径经由 `api/*-controller` 与 `@deepseek-ai/dsh-client-connection`（包名未变，
+    `HostConnectionService` 在 `packages/client/connection/src/rpc-host.ts:60`）。
+  - 用法在 `tests/e-mate-profile.spec.ts:264` 与 `:823`（`createApiProxy(ctx, …)`）。
+
+两处已分别委派专项迁移，写入集互斥（`src/client/**` 与 `tests/**`），验收命令都已写进工单：
+`tsc -p tsconfig.client.json` / `tsc -p tsconfig.tests.json` / 对应 vitest 套件。
+
