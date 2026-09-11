@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const SHA256 = /^[0-9a-f]{64}$/u
-const HARNESS_COMMIT = 'f9e0f1190e4021e63db579ef36b67484028e8c53'
+const HARNESS_COMMIT = 'bf7179bf3f62585d84b9b41b8cc1a0fffa1d7866'
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

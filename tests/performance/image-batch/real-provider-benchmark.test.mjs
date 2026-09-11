@@ -9,7 +9,7 @@ import { prepareProviderExecution, readConfiguration, runProviderBenchmark } fro
 const digest = value => createHash('sha256').update(value).digest('hex')
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const prompts = Array.from({ length: 30 }, (_, index) => `private-${index + 1}`)
-const provenance = { emate_commit: 'a'.repeat(40), harness_commit: 'f9e0f1190e4021e63db579ef36b67484028e8c53', desktop_reference: '166c16cfc38c51d32c2316715548c0f8271db517', version: '2.0.17' }
+const provenance = { emate_commit: 'a'.repeat(40), harness_commit: 'bf7179bf3f62585d84b9b41b8cc1a0fffa1d7866', desktop_reference: '166c16cfc38c51d32c2316715548c0f8271db517', version: '2.0.17' }
 const success = id => new Response(JSON.stringify({ id: `result-${id}`, data: [{ b64_json: png }], usage: {} }), { status: 200, headers: { 'content-type': 'application/json' } })
 
 const directories = []

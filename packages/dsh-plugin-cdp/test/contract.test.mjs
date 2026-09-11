@@ -72,7 +72,7 @@ test('ships no extension, browser binary, runtime downloader, or MCP subprocess'
   const manifest = JSON.parse(await readFile(`${root}/package.json`, 'utf8'))
   const source = await readFile(`${root}/src/index.ts`, 'utf8')
   assert.equal(manifest.name, '@e-mate/dsh-plugin-cdp')
-  assert.equal(manifest.eMate.harnessCommit, 'f9e0f1190e4021e63db579ef36b67484028e8c53')
+  assert.equal(manifest.eMate.harnessCommit, 'bf7179bf3f62585d84b9b41b8cc1a0fffa1d7866')
   assert.equal(manifest.files.includes('extension'), false)
   assert.doesNotMatch(source, /npx|playwright|puppeteer|chrome-devtools-mcp|child_process/iu)
   assert.match(source, /persistent isolated profile and loopback-only CDP endpoint/u)
