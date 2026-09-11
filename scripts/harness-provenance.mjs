@@ -37,7 +37,9 @@ export const HARNESS_FRONTEND_PACKAGE = '@deepseek-ai/dsh-web-frontend'
 
 // The published 0.1.5-rc.1 build registers one inline listener per source; the
 // Desktop resolves that build, so the pin names the shape it actually ships.
-const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/reference-updated", () => {'
+// The listener call, not its handler spelling: the bundled handler name changed
+// with the 0.1.5 build (a named `refresh` instead of an inline arrow).
+const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/reference-updated",'
 const BUILD_RECEIPT = '.release-cache/harness-build.json'
 const DESKTOP_RECEIPT = 'desktop/e-mate-desktop/build/harness-runtime-provenance.json'
 export const DESKTOP_OVERLAYS = new Map([

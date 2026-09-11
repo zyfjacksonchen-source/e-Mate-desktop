@@ -313,7 +313,7 @@ async function start(): Promise<void> {
     } else if (recoveryClaim.action === 'deferred') {
       throw new Error(`${BIN_NAME}: plugin install recovery is deferred by ${recoveryClaim.reason}`)
     }
-    const prepared = prepareDesktopProfile(
+    const prepared = await prepareDesktopProfile(
       process.env.DSH_TELEMETRY_DISABLED,
       homeDir,
       process.platform,

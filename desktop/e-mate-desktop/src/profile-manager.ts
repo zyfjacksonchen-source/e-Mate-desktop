@@ -143,15 +143,16 @@ function existingProfile(name: string, home: string): DesktopProfileSummary {
 
 /** Describe one profile that upstream app-boot will lazily initialize. */
 function virtualProfile(name: typeof DEFAULT_PROFILE_NAME | typeof WEB_PROFILE_NAME, home: string): DesktopProfileSummary {
-  const bundles = PROFILE_TEMPLATES.web
-  if (bundles === undefined) {
+  // 0.1.5 templates carry { bundles, patchReload } instead of a bare bundle list.
+  const template = PROFILE_TEMPLATES.web
+  if (template === undefined) {
     throw new Error(`${BIN_NAME}: installed dsh-app-boot has no web profile template`)
   }
   return {
     name,
     dir: resolveProfileDir(name, home),
     exists: false,
-    bundles: [...bundles],
+    bundles: [...template.bundles],
     webCapable: true,
   }
 }
