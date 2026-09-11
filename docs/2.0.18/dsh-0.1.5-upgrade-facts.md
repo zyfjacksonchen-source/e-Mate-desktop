@@ -2308,3 +2308,18 @@ peer 为 `ui-chat >=0.1.2-alpha.5 <0.1.3-0` 与 `ui-conversation/settings: >=0.1
   否则 desktop check 直接报 "overlay is not admitted"。第三方依赖（非 `@deepseek-ai/dsh*`）不受此限。
 - desktop verify 脚本用 `cwd=desktop` + `corepack yarn workspace @e-mate/desktop run <script>`；不要用 root corepack 带 `--cwd`。
 
+
+### 73.5 更正 §73.1：credentials 阻塞在**桌面 profile 的接线**，不在调用方
+
+继续追查后确认：调用 `credentials.modifyRecord(...)` 的地方**就在 0.1.5 harness 自己的源码里**——
+`upstream/deepseek-harness/packages/client/connection/src/browser-auth.ts:166`
+（同类另一处：`packages/llm/llm-pi-ai/src/auth.ts:172`，经 `writableStore(ctx)`）。即调用方**不是**旧的 0.1.0 形状（上一轮定性不完整，此处更正）。
+
+因此 `verify:profile` 的 `credentials.modifyRecord is not a function` 意味着：**桌面 profile 在该入口解析到的 `credentials` 不是 harness 期望的那个面**——
+0.1.5 的 `browser-auth` 期望**提供者/可写存储面**（`CredentialProvider`，声明 `packages/credentials/credentials/src/index.ts:247`、实现 `credentials-local/src/index.ts:674`），
+而桌面组合把**消费服务面** `Credentials`（同文件 :171）放到了这个名字上。
+
+修法方向（下一轮先做这一条）：对比 harness 自家 app/CLI 组合里 `credentials` 与凭据提供者行的挂载顺序/选择器，找出桌面 profile 的差异
+（`desktop/e-mate-desktop/src/profile.ts` 的 rows/patches 与产品 profile `packages/dsh/profile/cordis.patch.yml`）；让桌面组合与固定版一致，
+**不要**在 e-mate 侧再造包装或第二个凭据 owner。
+
