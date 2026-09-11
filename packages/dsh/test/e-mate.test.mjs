@@ -531,7 +531,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(skillHubClient, /\/capabilities/)
     assert.match(skillHubClient, /保存 ZIP/)
     assert.match(client, /emate\/legacy-artifacts/)
-    assert.match(client, /conversationEvents\.register/)
+    assert.match(client, /uiConversation\.events\.register/)
     assert.match(client, /legacy-artifact\.download/)
     assert.doesNotMatch(client, /e-mate-activity-group|data-emate-activity-header|e-mate-message-disclosure/)
     const capabilities = readFileSync(new URL('../../dsh-plugin-skill-hub/src/client/capabilities.tsx', import.meta.url), 'utf8')

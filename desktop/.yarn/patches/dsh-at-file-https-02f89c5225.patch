@@ -34,3 +34,16 @@ index 3888b9fea63b90fe8d221abfa69dd5126a89e4a6..0568ecfe7c1b67c80edd90d911ccc625
  
  /** Schemastery schema of the `at-file` namespace section. */
  export const AtFileSettingsSchema: z<AtFileSettings> = z.object({
+diff --git a/lib/client.js b/lib/client.js
+index 0aeee4e4e9ea64adddc82bc7324d0014424491e8..a103417bca17030828e97a8d55b4eb34ae1a092a 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -25,7 +25,7 @@ __export(index_exports, {
+   inject: () => inject
+ });
+ module.exports = __toCommonJS(index_exports);
+-var import_client = require("@deepseek-ai/dsh-client-runtime/client");
++var import_client = require("@deepseek-ai/dsh-client-store");
+ 
+ // node_modules/zod/v4/classic/external.js
+ var external_exports = {};

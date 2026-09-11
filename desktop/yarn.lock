@@ -7361,7 +7361,7 @@ __metadata:
 
 "dsh-at-file@patch:dsh-at-file@https%3A//github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz#~/.yarn/patches/dsh-at-file-https-02f89c5225.patch":
   version: 0.6.2
-  resolution: "dsh-at-file@patch:dsh-at-file@https%3A//github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz#~/.yarn/patches/dsh-at-file-https-02f89c5225.patch::version=0.6.2&hash=4fd4fb"
+  resolution: "dsh-at-file@patch:dsh-at-file@https%3A//github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz#~/.yarn/patches/dsh-at-file-https-02f89c5225.patch::version=0.6.2&hash=535be6"
   dependencies:
     zod: "npm:^4.4.3"
   peerDependencies:
@@ -7411,7 +7411,7 @@ __metadata:
       optional: true
     react:
       optional: true
-  checksum: 10c0/5c877209572847250637025c5ab0ad35ff7ea4d5200121a131e8d1eff24cc9dccb07166aa71d45419ea09ec526ed3fe8e8395ca407581b11131874bccad6cc7b
+  checksum: 10c0/6f98ad4d3d03f1c59e79db2f08e25b8786811ca05f22d665b523608189c3c0813f8910e00feb539f1058f74dac7e35b6e12cf58231d0b1b6d9c93def09246e00
   languageName: node
   linkType: hard
 
@@ -7442,7 +7442,7 @@ __metadata:
 
 "dsh-file-viewer@patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch":
   version: 0.1.0
-  resolution: "dsh-file-viewer@patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch::version=0.1.0&hash=d67cc9"
+  resolution: "dsh-file-viewer@patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch::version=0.1.0&hash=4eec36"
   dependencies:
     "@deepseek-ai/schemastery": "npm:3.18.1"
     lucide-react: "npm:0.468.0"
@@ -7461,7 +7461,7 @@ __metadata:
     "@deepseek-ai/dsh-session": ^0.1.0-rc.6
     "@deepseek-ai/dsh-typert-protocol": ^0.1.0-rc.6
     react: ^18.2.0
-  checksum: 10c0/11377c5bc319446793954f9923b93e166fdad25a69a6a3bf781cdb1d747ac8be22d8e75413177a93df5416ff76ae27d962bbdbb21a0f9a53ed2a7cb6aefa11ac
+  checksum: 10c0/503012f4f5ee20ff7e90ec4559b6613336a9afccd9f05396f0178fb5d56f569f24f80bb1bf5e4e6a8120cf21525b3baf04e74cb1529330b243d87e86626939e2
   languageName: node
   linkType: hard
 

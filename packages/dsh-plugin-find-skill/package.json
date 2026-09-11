@@ -56,7 +56,7 @@
     },
     "upstream": {
       "repository": "https://github.com/zyfjacksonchen-source/dsh-find-skill",
-      "commit": "5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6"
+      "commit": "e217fb0c8d8e377be6d9c0514446f9455821a79b"
     }
   },
   "eMate": {

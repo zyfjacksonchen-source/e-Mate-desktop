@@ -62,7 +62,7 @@ import { ThinkingStatusBranding } from './thinking-status.tsx'
 import { registerPetTaskDetails } from './task-details.tsx'
 
 export const inject = [
-  'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'uiConversation', 'conversationEvents',
+  'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'uiConversation',
   'theme', 'sessionLogDownload', 'inputTriggers', 'remote', 'remote.commands', 'settingsScope',
   // The native right column owns the rightbar track and its tab records.
   'sidebarRight', 'sidebarRightTabs',
@@ -170,9 +170,10 @@ export function registerImageGallery(
     label: '画廊',
     // The Gallery renders message images through the native slot rather than
     // value-importing the attachment plugin, which the 0.1.5 purity gate rejects.
-    children: {
-      'conversation.message.images': { kind: 'single', scope: 'session' },
-    },
+    // It must not declare that slot again: the pinned `ui-chat` entry already declares
+    // `conversation.message.images` as a child of this same `conversation.view` seat
+    // (packages/client/ui-chat/src/client/apply.ts), and ui-slots refuses a second
+    // declaration ("slot \"...\" is already declared"), which would abort the whole shell.
     inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, notice),
   }, ImageGalleryView))
 }
@@ -474,9 +475,9 @@ export function apply(ctx: any): void {
     id: 'e-mate-thinking-status',
     order: -190,
   }, ThinkingStatusBranding))
-  ctx.conversationEvents.register(imageCallsDefinition)
-  ctx.conversationEvents.register(subagentSettledDefinition)
-  ctx.conversationEvents.register(toolImagesDefinition)
+  ctx.uiConversation.events.register(imageCallsDefinition)
+  ctx.uiConversation.events.register(subagentSettledDefinition)
+  ctx.uiConversation.events.register(toolImagesDefinition)
   const galleryNotice = createTransientGalleryNotice(ctx)
   registerImageGallery(ctx, galleryNotice)
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
@@ -485,7 +486,7 @@ export function apply(ctx: any): void {
     select: selectArtifactTerminal,
     inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, galleryNotice),
   }, ArtifactTerminal))
-  ctx.conversationEvents.register(legacyArtifactDefinition)
+  ctx.uiConversation.events.register(legacyArtifactDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'legacy-artifacts',

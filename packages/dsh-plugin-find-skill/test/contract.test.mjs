@@ -35,7 +35,7 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   const runtime = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
   assert.equal(pkg.version, '2.0.18')
-  assert.equal(pkg.dsh.upstream.commit, '5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6')
+  assert.equal(pkg.dsh.upstream.commit, 'e217fb0c8d8e377be6d9c0514446f9455821a79b')
   assert.match(patch, /cliCommand: 'pnpm dlx skills@1\.5\.22'/u)
   assert.match(patch, /registerFindTool: true/u)
   assert.match(patch, /registerInstallTool: true/u)
@@ -58,6 +58,13 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   assert.match(tools, /title: args\.skill \?\? '安装技能'/u)
   assert.match(client, /String\(args\.skill \?\? ["']安装技能["']\)/u)
   assert.doesNotMatch(client, /String\(args\.source/u)
+  // 0.1.5 owns the conversation-node registry at `uiConversation.events`. The retired rc.6
+  // `conversationEvents` service is provided by nothing on the pinned Harness, so a bundle
+  // that still injects it never activates: Cordis leaves the fiber PENDING and the desktop
+  // reports the plugin as one that could not load.
+  assert.match(client, /inject = \["uiConversation", "slots"\]/u)
+  assert.match(client, /ctx\.uiConversation\.events\.register\(/u)
+  assert.doesNotMatch(client, /conversationEvents/u)
   assert.doesNotMatch(runtime, /^import .* from ['"]yaml['"];?$/mu)
   assert.match(runtime, /validated\.registerCommand !== false/u)
   const installDigest = installer.indexOf('managedSkillDigest(fetched.skillDir)')

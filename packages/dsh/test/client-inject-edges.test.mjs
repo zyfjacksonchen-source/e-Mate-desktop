@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // A component that injects a client edge the pinned Harness does not ship fails at load.
@@ -54,4 +54,39 @@ test('every declared client edge names a package the pinned Harness ships', () =
     }
   }
   assert.deepEqual(missing, [])
+})
+
+// A client contribution whose `inject` names a service the pinned Harness does not provide
+// never activates: Cordis leaves the fiber PENDING and the desktop reports the plugin as one
+// that could not load. Package existence is not enough to catch that, because a service is a
+// name inside a package, not a package. 0.1.5 renamed the rc.6 conversation-node registry to
+// `uiConversation.events` (packages/client/ui-conversation), so the retired spelling is the
+// first entry of a list that must stay empty across every shipped client contribution.
+const RETIRED_CLIENT_SERVICES = ['conversationEvents']
+
+function clientSources(directory, found = []) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === 'lib' || entry.name === 'dist') continue
+    const full = join(directory, entry.name)
+    if (entry.isDirectory()) clientSources(full, found)
+    else if (/\.tsx?$/u.test(entry.name)) found.push(full)
+  }
+  return found
+}
+
+test('no shipped client contribution injects a retired client service name', () => {
+  const roots = [packagesRoot, join(repoRoot, 'upstream', 'plugins')].filter(existsSync)
+  assert.ok(roots.length > 0, 'the client contribution inventory looks empty')
+  const offenders = []
+  for (const root of roots) {
+    for (const path of clientSources(root)) {
+      const source = readFileSync(path, 'utf8')
+      for (const retired of RETIRED_CLIENT_SERVICES) {
+        if (source.includes("'" + retired + "'") || source.includes('"' + retired + '"')) {
+          offenders.push(relative(repoRoot, path) + ': ' + retired)
+        }
+      }
+    }
+  }
+  assert.deepEqual(offenders, [])
 })
