@@ -312,6 +312,23 @@ describe('e-Mate desktop profile', { timeout: process.platform === 'win32' ? 120
       name: '@e-mate/dsh-plugin-vision-toolkit',
     }))
     expect(rows.map(row => row.id)).not.toContain('desktop-vision-toolkit')
+    // Every product component the inventory declares must be materialized into this
+    // profile by name. The desktop previously rewrote those names to a relative path
+    // that 0.1.5 resolves beside the declaring patch file, which silently doubled the
+    // path for seven components and left them unable to load.
+    const inventory = JSON.parse(readFileSync(
+      new URL('../../../packages/dsh/profile/component-inventory.json', import.meta.url),
+      'utf8',
+    )) as { components: Array<{ id: string }> }
+    const composedNames = new Set(rows.map(row => row.name))
+    const missing = inventory.components
+      .map(component => component.id)
+      // The client shell is not a Loader row: the desktop materializes it as the
+      // profile's own shell plugin directory instead.
+      .filter(id => id !== '@e-mate/dsh-client-shell')
+      .filter(id => !composedNames.has(id))
+    expect(missing, 'product components missing from the composed desktop profile').toEqual([])
+    expect(existsSync(join(home, 'profiles', 'e-mate', 'plugins', 'emate-shell'))).toBe(true)
     expect(rows.some(row => row.name === '@kelearns/dsh-navigation-bar')).toBe(false)
     expect(rows.filter(row => row.name === '@e-mate/dsh-plugin-tidychat')).toHaveLength(1)
     expect(rows.find(row => row.id === 'emate-better-sidebar')).toEqual(expect.objectContaining({

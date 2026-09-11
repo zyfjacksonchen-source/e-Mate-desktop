@@ -3,8 +3,8 @@
  "head": "3cc4be844607d4f11a4aa5d832a41c9c2dc33825",
  "total": 411,
  "fixes": 236,
- "withGuard": 218,
- "withoutGuard": 18,
+ "withGuard": 219,
+ "withoutGuard": 17,
  "guardFiles": [
   "desktop/e-mate-desktop/scripts/candidate-promotion-worker.test.mjs",
   "desktop/e-mate-desktop/scripts/candidate-update-worker.test.mjs",
@@ -2089,7 +2089,9 @@
    "hash": "2ba3b0941692381c17b1376cb3f96cb28f2cc915",
    "subject": "fix(desktop): materialize every product component before packaging",
    "files": 1,
-   "guards": [],
+   "guards": [
+    "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts"
+   ],
    "areas": [
     "desktop"
    ]
