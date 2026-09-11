@@ -39,3 +39,21 @@ test('the canvas action stays legible over a light image', () => {
   assert.match(rule[0], /background:\s*rgb\(/u, 'the action background is theme dependent again')
   assert.match(rule[0], /box-shadow/u, 'the action lost the shadow that separates it from the image')
 })
+
+// Ledger entry c3ec64ae4: the gallery actions must stay in the flow and right aligned so
+// the carousel controls below them remain reachable. The rule originally used margin-top;
+// a later refactor expressed the same spacing as bottom padding, so the guard requires
+// spacing by either means and never an absolute overlay.
+const galleryStyles = readFileSync(fileURLToPath(new URL(
+  '../profile/plugins/emate-shell/src/client/image-gallery.module.css',
+  import.meta.url,
+)), 'utf8')
+
+test('the gallery actions do not overlay the carousel controls', () => {
+  const rule = /\.galleryActions\s*\{[^}]*\}/u.exec(galleryStyles)
+  assert.notEqual(rule, null, 'the gallery actions rule disappeared')
+  assert.doesNotMatch(rule[0], /position:\s*absolute/u, 'the actions are an overlay again')
+  assert.match(rule[0], /justify-content:\s*flex-end/u, 'the actions are no longer right aligned')
+  const spaced = /margin-top/u.test(rule[0]) || /padding:\s*[^;]*\d/u.test(rule[0])
+  assert.ok(spaced, 'the actions lost the spacing that clears the carousel controls')
+})
