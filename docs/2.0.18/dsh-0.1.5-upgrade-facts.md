@@ -1999,3 +1999,43 @@ knowledge 126/126、memory-evolve 9/9、pet 18/18、imagegen 22/22、`harness-pr
 本轮所有命令仍全部在 worktree 内（`desktop/`、`upstream/deepseek-harness`、`packages/*`），
 唯一触及 worktree 之外的是读取 corepack 缓存里的 pnpm 11.7.0 入口（只读）。
 
+
+
+## 第 50 轮：无测试修复补检查 + 性能证据守卫的定性
+
+### 50.1 已为无自带测试的修复补上定向检查（19 条中的第 1 条）
+
+- **`077f524469 fix(ui): show an orange dot when expert mode is enabled`** → 新增
+  `packages/dsh/profile/plugins/emate-shell/tests/composer-expert-mode.client.spec.tsx`（2 条）：
+  1) 开关**跟随原生回执**而不是点击——set 未落地时 `aria-checked` 保持 false，回执 resolve 后才变 true；
+  set 被拒时弹 alert 且状态不变；2) 点亮的圆点保留 `--emate-color-brand` 与 opacity 1，静止态是 7px/40% 圆点。
+  shell 套件随之 281 → **283/283（22 文件）**。
+- 其余 17 条的现状已核对：`shimmer`/`carousel` 等关键词在当前 shell 源码中**已不存在**——
+  说明这些修复所在的实现或命名在 0.1.5 迁移中已变化/被原生接替；要补检查必须先判定"这条修复的载体还在不在"，
+  不能凭空写断言。下一轮按 area 逐条定性（shell 4 条、desktop 6 条、enterprise 2 条、office/knowledge/canvas 各 1 条、其余 3 条）。
+
+### 50.2 性能/质量证据守卫（ledger 里的 18 个）实测定性
+
+| 守卫 | 结果 |
+| --- | --- |
+| `tests/performance/image-batch` baseline / real-provider-benchmark / release-evidence-protocol | 5/5 · 8/8 · 8/8 |
+| `tests/quality/image-batch` noninferiority / real-study | 9/9 · 5/5 |
+| `tests/performance/image-single` contract | 14/17 → **15/17** |
+| `tests/performance/image-batch` native-tool-cohort | 0/2（已修 API，仍卡在"CAS 字节 == 提供方回执"） |
+| `tests/performance/image-batch` stress | 4/6（同上） |
+
+**共性根因**：这批证据守卫的核心断言是"CAS 里的产物与提供方返回的字节**逐字节相同**"
+（`CAS image requires its actual provider receipt`）。0.1.5 的附件存储在保存时**主动归一化**
+（alpha→WebP / 不透明→JPEG + 像素预算缩放），这条等式在设计上不再成立。
+诚实的替代不是放宽断言，而是**重录原始证据**：把"提供方回执字节"和"存储产物"分别记录并各自校验
+（前者用 receipt 的 `image_sha256`，后者用 ref 自洽性 + 可解码性），再重跑证据协议。
+本轮的 API 侧移植已提交（`e0b7bb92f2`）：`session.events` → `snapshotEvents()`（3 处）、
+stress 的字节恒等改为"ref 即存储产物"。
+
+### 50.3 本轮门禁复核
+
+`component-run check` EXIT=0、`test:fast` 68/68+5/5、`packages/dsh/test/*.test.mjs` 133/133、
+`enterprise pnpm run test` EXIT=0、shell **283/283**、knowledge 126/126、memory-evolve 9/9、
+pet 18/18、imagegen 22/22、provenance 14/14、desktop host face `tsc` 0 错。
+desktop client/tests 面已委派专项迁移（见 §49.3 的精确定位 + 本轮补充的"缺原生 client 入口 type import"结论）。
+
