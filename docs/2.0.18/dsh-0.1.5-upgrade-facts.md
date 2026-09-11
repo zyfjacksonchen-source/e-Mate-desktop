@@ -3209,4 +3209,80 @@ owner 条目加 `disposition`）。
 **结论：canvas 无需再改**；目标备注里「redo or drop the canvas snapshotEvents migration」按
 **drop（已正确）** 结案。
 
+### 88 第 108 轮：目标契约收口复核 + macOS 候选回执
+
+#### 88.1 四个固定点逐一复核（全部一致）
+
+| 固定点 | 复核实测 |
+|---|---|
+| `desktop/e-mate-desktop/base-contract.json` | `harness_version 0.1.5-rc.1`、`harness_commit 43c411a51c…`、`desktop_reference 166c16cf…`、`desktop_reference.harness_commit 183f08e9…`（上游基线）——与 `src/base-contract.ts:7-12` 的常量逐字相符 |
+| `desktop/upstream.json` | `commit 183f08e9c6…`（上游基线，**不是** fork head）、`sourceVersion`/`runtimePackageVersion 0.1.5-rc.1`——与 base-contract 的上游常量一致 |
+| `scripts/harness-provenance.mjs` | `pnpm run test:fast` 内 `test:harness-provenance` 全绿；子模块工作区干净 |
+| `scripts/component-run.mjs` / `scripts/version-contract.test.mjs` | 两条门禁均 EXIT 0 |
+
+#### 88.2 一处真实残留：profile 身份里还钉着旧 fork head（已修）
+
+`base-contract.json` 的 `id` 原本是 `e-mate-desktop-profile-v18-dsh-78a2b9856218`——内嵌 **78a2b985**，
+而 fork head 已经走过 `f9e0f119`、`bf7179bf` 到 `43c411a5`。这是**最后一个仍然携带旧基线的活载体**
+（`f9e0f119` 与 `bf7179bf` 早已 0 残留，只有 `78a2b985` 因为被守卫钉住而留了下来）。
+
+判定依据（不是猜）：`id` 是**不透明标识**而不是 pin——`src/base-contract.ts` 只用 `BASE_ID` 正则校验它的
+**格式**（:3、:41），没有任何地方持久化或比较它的值，全仓只出现 3 次（配置 + 两条断言）。
+因此它应当跟随基线一起回填，和另外 78 个固定点一样。已改为
+`e-mate-desktop-profile-v18-dsh-43c411a51c55`，并同步两条断言
+（`desktop/e-mate-desktop/tests/base-contract.spec.ts:7`、`scripts/version-contract.test.mjs:24`）——
+**固定点合法移动时，守卫必须跟着移动，而不是把旧值冻在守卫里**。改后 `78a2b985` 只存在于本文件（历史记录）。
+
+#### 88.3 两条禁止项复核
+
+| 禁止项 | 实测 |
+|---|---|
+| 不得改动 `update-checker.ts` / `update-download.ts` | 两者与 2.0.18 集成基线 `16ff8dff0f` **逐字节相同**；`git log 16ff8dff0f..HEAD -- <两文件>` **无输出** |
+| 不得引入第二套 Session/Tool/Scheduler/Updater | 组件清单 18 行全部是 e-Mate 自有插件；全插件树**没有任何** `provide('sessions'/'tools'/'scheduler'/'desktopUpdates')` |
+
+#### 88.4 macOS 候选回执（当前唯一有效候选）
+
+```
+file    e-Mate-2.0.18-mac-universal.dmg
+bytes   466446627
+sha256  39f9e3038a6aac1828657e24907323300ba520f9c6d8d419be5c1c3114b59248
+sha512  f031dcc7705d2308296616956e2ca66bb95b8ae82552da0b47c3a965c38c5ce0c4e313e2cf2fb7c6600fa74a4a5375acf3bd5d3bb7b2f2ddca29988386faf669
+built   desktop/e-mate-desktop/dist/mac-release/ @ 2026-09-11 22:18
+```
+
+**来源链完全一致**（这正是候选真值要求的"精确来源溯源"）：
+
+| 项 | 值 |
+|---|---|
+| 源码 HEAD | `d4ef6c01cf878cc2a736676ba975ebf9c542544a` |
+| 父仓远端 | `d4ef6c01cf…`（= 本地 HEAD，工作区 0 未提交） |
+| gitlink | `43c411a51c555e61e9b5f500442cb3404a2d70cd` |
+| fork 远端 `dsh-v0.1.5-rc.1-emate` | `43c411a51c…`（= 子模块工作区 HEAD） |
+
+构建过程自带两级冒烟，均通过：packaged node-pty smoke（`startup_ms/pty_ms` 有值）与
+macOS DMG smoke（挂载 → 校验 `Contents/Info.plist` → 卸载）。
+此前的候选（466941387 字节 / `316b7fde…`，以及 466450200 字节 / `b16012a9…`）**已被本次重建取代**，
+不得再用于晋级：前者早于 sidebar 身份接管与 Computer Use 删除，后者早于 §88.2 的身份回填。
+
+#### 88.5 门禁终态（在 `d4ef6c01cf` 上串行实测）
+
+| 命令 | 结果 |
+|---|---|
+| `pnpm run test:fast` | **EXIT 0** |
+| `node scripts/component-run.mjs check` | **EXIT 0** |
+| `cd desktop && corepack yarn check` | **EXIT 0** |
+| `pnpm run test:image-evidence` | **EXIT 0**（53 条） |
+| `cd enterprise && pnpm run test` | **EXIT 0** |
+| 工作区 | 0 未提交 |
+
+#### 88.6 目标之外仍未完成的部分（如实列出，不在本目标验收范围内）
+
+1. **Windows 候选**（`dist:win`）尚未在本轮重建；`dist:mac` 与 `dist:win` 必须同源同字节口径。
+2. **双平台实机回执与同字节晋级**未进行——按 AGENTS.md，Windows 侧需要已登录的交互式会话，
+   远程命令回执不等于实机验收；晋级必须"不可变字节先行、版本指针最后"。
+3. **turn-fold 复挂工单未动**。四项行为与运行时摘要证明测试仍未实现（完整清单见
+   `1325810bbc` 的提交信息与本文件 §84/§85）。当前该 provider **未挂载**
+   （不在 `component-inventory.json`），因此 AGENTS.md 里那条豁免目前是"机制与守卫就位、
+   但产品不加载"的状态——这是仓库契约与产品现状之间唯一已知的不一致，必须由该工单消除或改口径。
+
 
