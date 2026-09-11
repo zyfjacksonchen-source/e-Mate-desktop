@@ -69,6 +69,7 @@ const ECOSYSTEM_PLUGIN_PACKAGES = [
 ] as const
 
 const PROFILE_PLUGIN_PACKAGES = [
+  '@e-mate/dsh-plugin-turn-fold',
   ...PLUGIN_PACKAGES,
   ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => plugin.name),
 ]
