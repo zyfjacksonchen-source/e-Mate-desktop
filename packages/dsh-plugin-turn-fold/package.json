@@ -7,6 +7,7 @@
   "main": "lib/index.cjs",
   "exports": {
     ".": "./lib/index.cjs",
+    "./transform": "./lib/transform.cjs",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -56,7 +57,7 @@
   },
   "eMate": {
     "harnessVersion": "0.1.5-rc.1",
-    "harnessCommit": "d1d095bee770c3e9d302f844083e02f0b74576ee",
+    "harnessCommit": "43c411a51c555e61e9b5f500442cb3404a2d70cd",
     "baseImports": [
       "@deepseek-ai/schemastery"
     ],

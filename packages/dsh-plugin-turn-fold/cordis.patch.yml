@@ -1,4 +1,13 @@
+# e-Mate mount row for the turn-fold provider.
+#
+# Upstream's own row injects `harmony`, the third-party runtime patcher that ran the
+# Source Patches. DSH 0.1.5 ships no Harmony layer and the vendored harmony runtime
+# cannot be imported on it, so that injection could never be satisfied and the row
+# stayed PENDING forever — the provider never applied. The patch driver is now part of
+# this package (`lib/transform.cjs`), and `lib/index.cjs` is the e-Mate host entry that
+# owns the serving seat: it registers the settings scope and a narrow `/plugins/<ui-chat>`
+# route that hands the patched bundle to the browser from memory. The row therefore needs
+# the native `webServer` and `clientModules` services its entry injects, plus `settings`.
 - insert:
     - id: emate-turn-fold
       name: '@e-mate/dsh-plugin-turn-fold'
-      inject: [harmony]

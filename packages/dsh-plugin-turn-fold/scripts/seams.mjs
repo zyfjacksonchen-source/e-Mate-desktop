@@ -14,19 +14,33 @@
  * `lib/` is build output: run the pinned Harness build first, or this checker
  * fails closed with that instruction instead of guessing.
  *
- * The patches may only touch the bundle they were verified against, so the checker also
- * holds the verified digest (`TARGET_BUNDLE_SHA256`, the AGENTS.md condition "the bundle
- * hash must be verified"). A rebuilt bundle with a different digest is refused *before* a
- * single selector is evaluated: no seam result is produced, no patch is authorized, and the
- * failure names both the pinned and the resolved digest.
+ * The patches may only touch the bundle they were verified against, so the checker verifies
+ * the resolved bundle against the shared pin (`TARGET_BUNDLE_SHA256`, the AGENTS.md condition
+ * "the bundle hash must be verified"). A rebuilt bundle with a different digest is refused
+ * *before* a single selector is evaluated: no seam result is produced, no patch is
+ * authorized, and the failure names both the pinned and the resolved digest. The pin and its
+ * evaluation live in the shared engine (`src/select.cjs`) that the runtime driver imports
+ * too, so the two gates cannot judge different bytes.
  */
-import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { createSelectorEngine } from './tsquery-subset.mjs'
+import {
+  BUNDLE_HASH_CHECK_ID,
+  TARGET_BUNDLE_SHA256,
+  VERIFIED_BUNDLE_SHA256,
+  WINDOWS_BUNDLE_SHA256,
+  createSelectorEngine,
+  evaluateBundleHash,
+  sha256,
+} from './tsquery-subset.mjs'
+
+// The bundle-identity pin and its evaluation belong to the shared engine, so this checker
+// and the runtime driver cannot drift apart. They are re-exported here because this module
+// remains the checker's public surface.
+export { BUNDLE_HASH_CHECK_ID, TARGET_BUNDLE_SHA256, VERIFIED_BUNDLE_SHA256, WINDOWS_BUNDLE_SHA256, evaluateBundleHash }
 
 export const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const repoRoot = resolve(packageRoot, '..', '..')
@@ -36,23 +50,6 @@ export const TARGET = Object.freeze({
   package: '@deepseek-ai/dsh-client-ui-chat',
   file: 'lib/client.js',
 })
-
-/**
- * sha256 of the compiled target those three selectors were verified against.
- *
- * This is the identity of the only bundle the patches may touch, so `assertSeams` compares
- * the resolved bundle against it and refuses everything else. It is pinned deliberately
- * rather than computed at run time: a Harness rebuild that changes the compiled shape must
- * first re-verify the three selectors by hand, and only then may this value move.
- *
- * The file size is reported (`report.fileBytes`) but deliberately not asserted — the digest
- * is the identity, and a second numeric pin would only be one more thing to disagree with it.
- */
-export const TARGET_BUNDLE_SHA256 = 'cf53ae8f5978901504286189a64506febf09cd237d097db3abf3f39b3953ba97'
-/** The digest the seams were verified against on Windows, where the same source builds a different bundle. */
-export const WINDOWS_BUNDLE_SHA256 = '9a54fa521480db27bf10857622c87ba05ad508e278ad349114294bfb02f8db7b'
-/** Every digest the seams were verified against, one entry per platform. A bundle matching none is refused. */
-export const VERIFIED_BUNDLE_SHA256 = Object.freeze([TARGET_BUNDLE_SHA256, WINDOWS_BUNDLE_SHA256])
 
 /**
  * The three selectors are copied verbatim from the vendored
@@ -227,35 +224,6 @@ function bindingNames(ts, name) {
   return names
 }
 
-function sha256(file) {
-  return createHash('sha256').update(readFileSync(file)).digest('hex')
-}
-
-/** Identifier of the bundle-hash gate, reported beside the three selector checks. */
-export const BUNDLE_HASH_CHECK_ID = 'verify-bundle-hash'
-
-/**
- * Compare the resolved bundle digest against the pin, in the same result shape the selector
- * checks use, so the gate is rendered and reported exactly like they are.
- *
- * Pure on purpose: it takes two digests and touches no filesystem, so it carries no file
- * identity and cannot be the gate itself. The gate that owns the file is `assertSeams`,
- * which is the only place the pin can refuse a patch.
- *
- * @param {string} actualSha256 digest of the resolved bundle
- * @param {string} pinnedSha256 the digest that bundle must have; defaults to the pin
- * @returns {{ result: {id: string, ok: boolean, found: number, expect: number, detail: string}, failures: string[] }}
- */
-export function evaluateBundleHash(actualSha256, pinnedSha256 = VERIFIED_BUNDLE_SHA256) {
-  const accepted = Array.isArray(pinnedSha256) ? pinnedSha256 : [pinnedSha256]
-  const ok = accepted.includes(actualSha256)
-  const detail = ok
-    ? `resolved sha256 ${actualSha256} is the verified target`
-    : `resolved sha256 ${actualSha256} is not the verified target (accepted ${accepted.join(', ')})`
-  const result = { id: BUNDLE_HASH_CHECK_ID, ok, found: ok ? 1 : 0, expect: 1, detail }
-  return { result, failures: ok ? [] : [`${BUNDLE_HASH_CHECK_ID}: ${detail}`] }
-}
-
 function line(ts, sourceFile, node) {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
 }
@@ -349,7 +317,7 @@ export function assertSeams(options = {}) {
   const ts = loadCompiler(harnessRoot)
   const target = locateTarget(harnessRoot, TARGET)
   const fileBytes = statSync(target.file).size
-  const fileSha256 = sha256(target.file)
+  const fileSha256 = sha256(readFileSync(target.file))
 
   const hash = evaluateBundleHash(fileSha256, pinnedSha256)
   const identity = {

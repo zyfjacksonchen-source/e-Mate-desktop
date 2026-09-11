@@ -38,11 +38,22 @@ Harness submodule.
 
 ## Local modifications vs upstream
 
-None yet. Slice 1 vendors the tree verbatim; the e-Mate side keeps its own
-manifest, `cordis.patch.yml`, build script, seam assertions and README under
-`packages/dsh-plugin-turn-fold`, and copies the upstream files into `lib/` at
-build time instead of editing them in place. Every divergence added later must be
-logged here.
+Two files carry e-Mate changes. Both are copied into `lib/` unchanged, so
+`packages/dsh-plugin-turn-fold/test/package.test.mjs` still proves the shipped bytes
+equal these bytes; the plan to keep the tree verbatim did not survive the 0.1.5
+baseline, and the entries below were written after the fact (the section previously
+claimed "None yet" while both files were already modified - the inventory hashes
+disagreed with the tree, which is how the omission was found).
+
+| File | Change |
+|---|---|
+| `inline-source.cjs` | The injected runtime, adapted to the 0.1.5 data shapes: 0.1.5 token accounting, and the removal of the 0.1.2-era playback clock the pinned client no longer drives. Later, the live-bar marker was renamed to `data-ch4acko3dsh-turn-fold-summary` (the upstream package id `@ch4acko3/dsh-turn-fold` minus `@` and `/`; the runtime carried a stray hyphen) and the settings card body is now rendered with its closed state carried on `hidden="until-found"` instead of being unmounted, mirroring `ui-chat/src/client/chat/searchable-hidden.ts`. |
+| `patch.cjs` | The three Source Patches re-pointed at the 0.1.5 compiled shape. |
+
+`index.cjs` is **not** modified, but it is no longer shipped: upstream's host entry
+declares `inject: ['harmony']`, and no 0.1.5 package provides that service, so the row
+would stay PENDING forever. `packages/dsh-plugin-turn-fold/src/index.cjs` is the
+e-Mate host entry instead, and it is what `lib/index.cjs` contains.
 
 ## File inventory (sha256 of the vendored content)
 
@@ -55,13 +66,13 @@ ba79bbc25fa8951489e77f28f1561c2e9388115cb33f1c606424f8e08169f96b  .gitignore
 980aa8fab4ffea5428b79fdcd9a03778c0e7ece503d4307ce6cbf81e1e5549aa  README.zh-CN.md
 b8980daf64ebc92318e47df46adbea20a97cd75c365d8fec27483a2359141f21  harmony.patch.yml
 885c9cafb0cbbf720ded02ea49fccbf37d44a45fe4ecdc89d209130342cffd2b  index.cjs
-4be1a988e36f237f3a5a9810bb3234a963c2b58a3d57f78ca997ae13cddaaca6  inline-source.cjs
+f8eec500f1376a2f22c76356b8f1e84cf49617133a3dda78bb2138191ef0c36c  inline-source.cjs
 bca7ec672d062b59e90624f2cc7bc1b6e6b62c54c5f22d5f74788d859900ad9a  locales.cjs
 cf6e5c30d377f7f07a719d871259e5e94086775f27278372e4994fd08c51e2a7  locales/en.json
 3a19a807be3b98582e8e773245be6f071be10050056398aef895ed0d7d988241  locales/zh.json
 2b3dc3c233223def5c2db22e3a80adda61feeeac633611124714b056bc7b0cca  package-lock.json
 46b2d997f1f2cfb46877d8acf553e3d7bd6748927f11e0b1b0734ac99911532e  package.json
-c14763a1824c55733e4f47c505f40fc9e97bad4785717d5b06a614fbbd3f7dd9  patch.cjs
+83704efdf0f12c408aed30dd4b62b8bc1f978226c90a3622082517f48b0b2e22  patch.cjs
 bbf07d4a81c9b2741fc520a93e58078865e2cd7570c4235ce5f3c36c5fa793d8  settings.cjs
 5e5e74d7751bc41a7146efdc0446155ddba2e9c42c05176e7ec96e10b51d47fe  test/run.cjs
 ```

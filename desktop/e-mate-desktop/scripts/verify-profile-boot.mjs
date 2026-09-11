@@ -389,6 +389,7 @@ try {
       registered.add(handoff.id)
     },
   }
+  const servedBundles = new Map()
   try {
     for (const entry of graph.entries) {
       const path = entry.url
@@ -396,9 +397,29 @@ try {
       if (url.origin !== new URL(expectedUrl).origin) throw new Error(`client bundle escaped the loopback origin: ${url.href}`)
       const bundle = await fetch(url, { headers: { cookie: rendererSession.cookieHeader() } })
       if (bundle.status !== 200) throw new Error(`client bundle returned HTTP ${bundle.status}: ${url.href}`)
-      runInThisContext(await bundle.text(), { filename: url.href })
+      const text = await bundle.text()
+      servedBundles.set(entry.id, text)
+      runInThisContext(text, { filename: url.href })
       if (!registered.has(entry.id)) throw new Error(`client bundle did not register its graph id: ${entry.id}`)
     }
+
+    // The turn-fold exemption has to be a fact, not a claim: the row is mounted, so the chat bundle
+    // the browser receives must already carry the injected runtime - and the file on disk must not,
+    // because the exemption authorizes the patches only in memory. Both halves are asserted, so a
+    // provider that is installed but never applies fails here, and so does one that writes through.
+    const CHAT_ID = '@deepseek-ai/dsh-client-ui-chat'
+    const FOLD_MARKER = 'data-ch4acko3dsh-turn-fold-summary'
+    const servedChat = servedBundles.get(CHAT_ID)
+    if (typeof servedChat !== 'string') throw new Error(`the assembled graph does not serve ${CHAT_ID}`)
+    if (!servedChat.includes(FOLD_MARKER)) {
+      throw new Error('the served chat bundle carries no turn-fold runtime: the provider is mounted but not applying')
+    }
+    const chatPath = ctx.get('clientModules')?.clientPath?.(CHAT_ID)
+    if (typeof chatPath !== 'string') throw new Error('the client registry does not name the chat bundle it serves')
+    if (readFileSync(chatPath, 'utf8').includes(FOLD_MARKER)) {
+      throw new Error('the turn-fold runtime reached the chat bundle on disk; the exemption requires the patches to stay in memory')
+    }
+    process.stdout.write('turn-fold: the served chat bundle carries the injected runtime; the file on disk does not\n')
   } finally {
     delete globalThis.__ModuleLoader__
     delete globalThis.window
