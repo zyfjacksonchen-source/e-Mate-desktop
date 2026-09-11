@@ -1938,3 +1938,64 @@ harness 构建、组件 install/build/test、enterprise install/test 都用工�
 | shell 套件 / shell 组件 check | 281/281 / EXIT=0（build+280 测试+tsc） |
 | knowledge / memory-evolve / pet / imagegen | 126/126 / 9/9 / 18/18 / 22/22 |
 
+
+
+## 第 49 轮：desktop 门禁的推进（host 面已 0 错，client/tests 面待续）
+
+### 49.1 本轮修掉的（host 面 `tsc -p tsconfig.json` 已干净）
+
+1. `scripts/harness-provenance.mjs` 把"原生模型目录刷新监听器"钉成了**打包后的处理器拼写**
+   （`() => {` 内联箭头）。0.1.5 的产物是同一个调用、但处理器是具名 `refresh`：
+   `ctx.remote.$on("credentials/reference-updated", refresh)`（源码 `ui-model-selection/src/client/service.ts:70` 与 0.1.0 相同）。
+   守卫改为钉**监听器调用本身**（仍然"恰好一次"），不再依赖压缩器如何内联函数。
+2. 该文件的 `build_owner_sha256` 是对 `harness-provenance.mjs` 自身的哈希 → 改了脚本必须重跑
+   `node scripts/harness-provenance.mjs build`（必须用**继承的 11.7.0 pnpm**，见下）。
+3. desktop launcher：`settingsNamespace()` 已移除 → 两个命名空间改成普通字符串常量；
+   `PROFILE_TEMPLATES.web` 在 0.1.5 是 `{ bundles, patchReload }` 而不是裸数组 → 取 `.bundles`；
+   `healProfilesModuleFallback` 改成**单 options 对象 + 异步** → `prepareDesktopProfile` 变 `async`，`main.ts` 加 `await`。
+
+### 49.2 环境要点：harness 构建必须用继承的 11.7.0 pnpm
+
+根 `pnpm run build:harness` 在本机会失败：root 项目的 corepack 固定 11.8.0，
+而 pnpm 的版本检查在 `--dir upstream/deepseek-harness` 子调用里报
+"configured to use 11.7.0 … your current pnpm is v11.8.0"。正确调用是**显式继承 11.7.0 入口**：
+
+```
+npm_execpath=~/.cache/node/corepack/v1/pnpm/11.7.0/bin/pnpm.cjs node scripts/harness-provenance.mjs build
+```
+
+（`scripts/package-manager.mjs:inheritedPnpmEntry` 就是按 `npm_execpath` 找入口并校验 `--version === 11.7.0`。）
+跑完会写 `.release-cache/harness-build.json` 与 `desktop/e-mate-desktop/build/harness-runtime-provenance.json`。
+
+### 49.3 desktop 仍未绿的两处（下一轮直接从这里接手）
+
+**(a) client 面**（`tsconfig.client.json` / `tsconfig.tests.client.json` 同一批）：
+
+```
+src/client/advanced-shell.ts(48,24): Property 'slots' does not exist on type 'Context'
+src/client/AdvancedFrame.tsx(20,47): Type '"root"' does not satisfy the constraint
+  '"details" | … | "conversation" | "shell.overlay" | "desktop.titlebar.utilities"'
+src/client/AdvancedFrame.tsx(25,63): Property 'useSessions' does not exist on …
+src/client/index.ts(48,45): Property 'sessions' does not exist on type 'Context'
+```
+
+即 desktop 自己的 AdvancedFrame 仍在用 **0.1.0 的 slot 名**（`details`、`conversation`）并注册 `'root'`，
+且它的 Context 面没有 `slots`/`sessions`（说明该 tsconfig 缺原生 augment 的 source paths，或需要像 shell 那样
+把 `ui-slots`/`ui-session` 的契约纳入程序）。**这与第 46 轮 emate-shell 的修法同源**：先补 tsconfig 的
+source paths/include，再改 slot 名（`details`→`rightbar.session` 的 tab 域、`conversation`→`main.conversation`）。
+
+**(b) tests 面**：`tests/e-mate-profile.spec.ts` 仍 import 已删除的 `@deepseek-ai/dsh-host-apiproxy`，
+且 `prepareDesktopProfile` 变 async 后需要 `await`（`:177`/`:178` 读 `.patches`/`.profile`）。
+另有一处与本次迁移无关的 `schemastery` 重复类型声明警告（node_modules 内部两份定义）。
+
+### 49.4 本轮门禁复核（未回退）
+
+`component-run check` EXIT=0、`test:fast` 68/68+5/5、`packages/dsh/test/*.test.mjs` 133/133、
+`enterprise pnpm run test` EXIT=0、shell 281/281 与 shell 组件 check EXIT=0、
+knowledge 126/126、memory-evolve 9/9、pet 18/18、imagegen 22/22、`harness-provenance.test.mjs` 14/14。
+
+### 49.5 隔离纪律
+
+本轮所有命令仍全部在 worktree 内（`desktop/`、`upstream/deepseek-harness`、`packages/*`），
+唯一触及 worktree 之外的是读取 corepack 缓存里的 pnpm 11.7.0 入口（只读）。
+
