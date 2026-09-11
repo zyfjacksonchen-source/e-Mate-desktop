@@ -2884,3 +2884,130 @@ e-Mate 只保留产品适配（R2 端点、IPC 触发器、托盘文案、无签
 **执行顺序（不可颠倒）**：等"组件类型检查面"工作令让出 `packages/*/package.json` 写集后一次性做，随后让该守卫转绿；
 该守卫已接入 `test:fast`（见 `test:fast` 提交），因此它是**验收门禁的一部分**，不能靠忽略绕过。
 
+### 84 原生接入取证（第 104 轮）：四项能力已由原生 owner 提供，撤回不是能力缺口；补上「不碰核心」的可失败守卫
+
+本条回答一个一直被当成前提、但从未被验证过的问题：**Path C 撤回了，折叠/导航的能力缺口到底在哪？**
+结论是：**在固定版 0.1.5-rc.1 上，撤回工作列出的四项能力本来就由原生 owner 提供并已在出货 Profile 里挂载**；
+因此本轮**没有新增任何客户端注册**（新增即为第二套事实源），只补了一条把「不碰核心」变成可执行、可失败的守卫。
+
+#### 84.1 撤回的东西到底提供了什么（capability map，证据来自 git 历史）
+
+三个提交构成 Path C 的完整生命周期：`3c8042caee`（vendor + 建骨架）→ `04b43379f4`（证明接缝守卫能失败）→ `b1357ced55`（整体撤回）。
+`b1357ced55` 的提交信息写明：turn-fold 的工作方式是「inject 进并改写已编译的 `dsh-client-ui-chat` bundle」。
+对照它的 vendored 载体 `upstream/plugins/dsh-turn-fold/inline-source.cjs`（1260 行，取不到工作树，只能从 `3c8042caee` 取回）与 `settings.cjs`，撤回工作实际打算提供的四件事是：
+
+| # | 撤回工作要提供的能力 | 载体证据（`3c8042caee`） |
+|---|---|---|
+| 1 | **逐轮折叠活动**：一轮内的思考/笔记/命令/工具调用收进一个 disclosure，最终答复留在外面，展开时复用原生 node renderer | `inline-source.cjs:241` `ActivityGroup`、`:348-352` 复用 `ReasoningRow`、上游 README「Expanding reuses the original native node renderers」 |
+| 2 | **推理行**：把 reasoning block 渲染成原生那套 reasoning 行 | `inline-source.cjs:183` `ReasoningTexts`、`:350` `jsx(ReasoningRow, ...)` |
+| 3 | **带墙钟时长与 token 的摘要条**：默认字段 `duration / toolCalls / inputTokens / outputTokens`，共 10 个可选字段、可配置可排序 | `settings.cjs:5-20` `SUMMARY_FIELDS` / `DEFAULT_SUMMARY_FIELDS`；`inline-source.cjs:166` `Usage()`、`:272-279` 标签拼装 |
+| 4 | **对话导航**：Codex 式跳转 | 工单把导航列为 turn-fold 要「接管」的能力（`b1357ced55` 提交信息：「running it beside tidychat would create the two mutually exclusive sources of truth」）；载体本身**不含**导航实现，导航当时归 tidychat |
+
+#### 84.2 tidychat 今天实际提供什么（读源码，不是猜）
+
+`packages/dsh-plugin-tidychat/src/client/index.ts`（1619 行）：
+
+- `:20` `export const inject = ['slots', 'sessions']`。
+- `:456` 注入整块 CSS；`:1168-1169` 往 **`conversation.session.header.utilities`**（list 槽）注册 `id: 'tidychat-nav'` 的导航条；
+  `:1615-1616` 往 **`settings.plugin.item`**（keyed 槽）注册 `key: 'tidychat'` 的设置卡。
+- **折叠不是通过槽做的**：`:519` `applySurgery()` 直接扫 DOM（`[data-chat-anchor-key]`、`[data-chat-turn]`、`[data-chat-flow-kind]`），
+  给行打 `data-tidychat-folded` / `data-tidychat-folded-inline` 标记由 CSS 隐藏；`:1084-1104` 用 `MutationObserver` 监听会话滚动容器触发重扫，`:1124` 5 秒兜底扫描。
+- 导航条是 canvas 小地图：`:1134-1165` 自测尺寸、`:1240` 自绘、`:1140` 用 `[data-conversation-scroll]` 定位到会话区**左缘**。
+- 设置命名空间 `tidychat`：`fold / divider / navigator` 三个开关 + 定位条配色（`:484-489`）。
+
+**没有**源码解析、没有编译产物改写、没有 `lib/client.js` 路径引用。撤回提交对 tidychat 的判断是对的。
+
+#### 84.3 槽位调查表（固定版 `8cc7914c51`，即 `0.1.5-rc.1`）
+
+槽位名先按 `interface SlotMap` 的 declare-merge 声明全仓枚举（57 个），再逐条判归属。
+
+| 缺的那一块 | 有没有受支持的槽/服务 | file:line | 裁决 |
+|---|---|---|---|
+| 1 逐轮折叠活动 | **不需要**——原生 `turn-process` 节点 + `transcriptView` 策略已经拥有它 | `chat-settings.ts:18`（`DEFAULT_TRANSCRIPT_VIEW_MODE = 'compact'`）、`:28`（schema 默认 compact）、`ui-chat/src/client/apply.ts:81-95`（`TranscriptViewPolicy` + `settings.general.item` 行 `id: 'transcript-view'`）、`chat/ChatNodeSeat.tsx:62-101`（`processWindowReady`/`processMember`/`foldable`/`processHidden`）、`chat/TurnProcessNodeView.tsx:11,42-58` | **(a) 已原生**，不该再写 |
+| 2 推理行 | **不需要**——原生 | `chat/AssistantMarkdown.tsx:92`（渲染 `ReasoningRow`）、`chat/ReasoningRow.tsx`、`chat/AssistantNodeView.tsx:23-28`（折叠时隐藏内联思考） | **(a) 已原生** |
+| 3 摘要条（墙钟 + token） | **不需要**——原生 turn tail 已给出 | `chat/TurnTailNodeView.tsx:28-30`（`runMs = turn.end.time - turn.start.time`）、`:52-64`（`TurnUsagePanel` + `TurnTimePanel`）、`chat/TurnUsagePanel.tsx:46`（token 面板）、`:132`（时长面板，含 tok/s 与 TTFT） | **(a) 已原生** |
+| 4 对话导航 | **不需要**——原生 `TurnNavigator` 已挂在 ChatView 内 | `chat/ChatView.tsx:763`、`:722-758`（跳转/未加载轮次翻页）、`chat/TurnNavigator.tsx:222`、`chat/TurnNavigator.module.css` `.frame`（**右侧** gutter，宽 28px） | **(a) 已原生** |
+| 4b 导航开关（关掉它） | **有没有**：`TurnNavigator` 在 `ChatView` 内部**无条件渲染**，不是槽，插件无法摘除 | `chat/ChatView.tsx:760-769` | **(b) 不可原生投递**（且也不该做：只能是第二套事实源） |
+| 1b **运行中**（未闭合轮次）就折叠 | **有没有**：折叠判据在槽**之上**算好，插件拿不到 | `chat/ChatNodeSeat.tsx:67`（要求 `processPresentation.turnClosed`）、`:79-81`、`:98` | **(b) 不可原生投递**（要它就得改核心，明确不做） |
+
+同时确认原生能力**确实在出货路径上**：`desktop/e-mate-desktop/src/e-mate-profile.ts:648,752` 挂 `@deepseek-ai/dsh-web-app`；
+`upstream/deepseek-harness/packages/bundle/web-app/cordis.patch.yml:249-256` 挂 `ui-conversation` + `ui-chat`；`base-contract.json` 把 `@deepseek-ai/dsh-client-ui-chat` 钉在 `0.1.5-rc.1`。
+e-Mate 侧**没有任何**对 `transcriptView` 的覆盖（全仓 grep 只命中与本能力无关的同名词）。
+
+#### 84.4 裁决
+
+**撤回工作列的四项能力，在固定版上全部已有原生 owner，且已出货**：折叠 = `ui-chat` 的 `turn-process` 节点 + 默认 compact 的 `transcriptView` 策略；
+推理行 = `AssistantMarkdown`/`ReasoningRow`；摘要条 = `TurnTailNodeView` 的 usage/time pill；导航 = `ChatView` 内的 `TurnNavigator`。
+
+**结论：这里不存在需要补的能力缺口。** 本轮据此**不新增任何客户端注册**——按治理准则第 3 条，给已原生拥有的能力再写一个注册就是第二套事实源。
+明确判 **(b) 不可原生投递**的只有两小项（上表 4b、1b）：关掉原生导航、以及在轮次闭合前折叠；两者都要求改 `ChatView`/`ChatNodeSeat` 的判据，**按准则第 4 条不做**。
+
+> 需要主代理裁决的一件事（本轮只报不改）：原生 `TurnNavigator` 与 tidychat 的 `tidychat-nav` 是**两套导航**同时出货
+> （原生在右侧 gutter、tidychat 在左缘，位置不重叠但能力重复）。AGENTS.md 要求「tidychat 独占折叠与导航、不许第二 owner」。
+> 这是既有事实，不在本轮写集内（改它会动 `packages/dsh-plugin-tidychat/src/**` 的行为），请主代理决定是收回其一还是记录豁免。
+
+#### 84.5 本轮实现了什么 / 刻意没做什么
+
+**实现**：`packages/dsh-plugin-tidychat/test/no-core-rewrite.mjs`（扫描器）+ `no-core-rewrite.test.mjs`（12 条测试）。
+**刻意不做**：不给折叠/导航/摘要/推理行新增任何注册；不碰 `upstream/deepseek-harness`；不重建 turn-fold/harmony。
+
+#### 84.6 守卫：把「不许碰核心」变成可失败的检查
+
+扫描面 = e-Mate 自有的插件树共 **455** 个文件：`packages/dsh-plugin-*/{src,scripts,test,tests}` + `packages/dsh/profile/plugins/*/{src,scripts,test,tests}`（跳过 `node_modules`、`lib/` 构建产物；`upstream/deepseek-harness` 是核心本体，不扫）。
+
+五条规则，全部 fail-closed：
+
+| 规则 | 命中什么 |
+|---|---|
+| `parsing-toolchain` | `import`/`require` 到 `typescript`、`@phenomnomnominal/tsquery`、`ts-morph`、`magic-string`、`@babel/parser|traverse`、`acorn`、`recast`、`jscodeshift` |
+| `source-rewrite` | 调用 `createSourceFile(`、`new MagicString(`、`.prependLeft(`、`.prependRight(`、`.replaceWithText(`、`.insertText(`、`tsquery(`（要求是**调用**，所以 CDP 协议串 `'Input.insertText'` 不误报） |
+| `harness-artifact-write` | 同一行既有写盘调用又有 Harness 闭包位置（`deepseek-harness`/`@deepseek-ai/dsh-*`/`targetLib`/`sourceLib`） |
+| `shipped-harness-bundle` | **出货/构建面**（`src/`、`scripts/`）出现 `client/<pkg>/lib/client.js` 路径 |
+| `unreviewed-harness-bundle` | **测试面**读 `client/<pkg>/lib/client.js`，且不在已复核清单里 |
+
+已复核清单只有 **2** 条（按键 = 文件 + 所读 bundle，**不按行号**，所以上面插几行不会静默让例外失效，换一个 bundle 也不能继承例外）：
+`packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx` → `client/ui-conversation/lib/client.js`；
+`packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx` → `client/ui-chat/lib/client.js`。
+两者的读都是**测试替身里重放原生注册**，不会到达出货 bundle；测试断言「观察到的集合 == 已复核的集合」双向相等，新增或失效都会红。
+扫描器自身两个文件走 `SELF_EXEMPT_PATHS` 精确豁免（规则表里必然写着那些禁词），测试断言豁免集恰好是这两个且都存在。
+
+**故意破坏证明（两种，都实测）**：
+
+1. **对真树注入违规**（复刻撤回包的形状：`tsquery` + `createSourceFile` 选 `ChatView` + 读并写 `ui-chat/lib/client.js`），落在 `packages/dsh-plugin-tidychat/scripts/negative-control.mjs`：
+   守卫 **EXIT=1**，同时报出 `parsing-toolchain`×2、`source-rewrite`×2、`shipped-harness-bundle`×2、`harness-artifact-write`×1；删除该文件后 **EXIT=0**。
+2. **把规则本身打瘸**（`PARSING_TOOLCHAIN_SPECIFIERS.some(...)` → `if (false)`，`unreviewed-harness-bundle` 的 push → `void target`）：
+   套件从 12/12 变 **9 pass / 3 fail，EXIT=1**——证明负向控制是承重的，不是「规则写成 `ok = true` 也照样绿」；
+   随后字节还原（复查 139/157 两行已复原），**12/12，EXIT=0**。
+
+#### 84.7 门禁实测（本轮）
+
+| 命令 | 结果 |
+|---|---|
+| `pnpm --dir packages/dsh-plugin-tidychat run build` | **EXIT=0**（`lib/index.js` 1.52 kB / `lib/client.js` 61.76 kB） |
+| `pnpm --dir packages/dsh-plugin-tidychat run test` | **EXIT=0**（node 15/15 + vitest 3/3） |
+| `pnpm run test:fast` | **EXIT=0**（17:19 实测）→ 17:23 复跑 **EXIT=1，68 通过 / 1 失败**，失败点与本轮写集无关（见下方归属） |
+| `node scripts/component-run.mjs check` | **EXIT=0**（全量组件；末行 `COMPONENT_CHECK_EXIT=0`） |
+| `node scripts/component-run.mjs check --component @e-mate/dsh-plugin-tidychat` | **EXIT=0**（新增守卫 15/15 在 check 链里实跑，末尾还跑 `tsc -p tsconfig.json --noEmit`） |
+
+**`test:fast` 红点的归属（重要，别记到本轮头上）**：失败的是 `scripts/harness-provenance.test.mjs:52`「pins one clean native model-directory refresh owner」，
+抛的是 `scripts/harness-provenance.mjs:222-225` 的 `assertHarnessSourceClean`：`pinned Harness source must be clean before building Base artifacts`。
+原因是**另一个工作令正在改固定版 Harness 子模块、尚未提交**：`git -C upstream/deepseek-harness status --porcelain` 有 3 个文件
+（`packages/credentials/credentials/src/index.ts`、`packages/llm/llm-deepseek/src/index.ts`、`packages/llm/llm-pi-ai/src/index.ts`），两次复跑都在，与 `packages/dsh-plugin-tidychat/test/**` 和 docs 无关。
+（17:19 那次 `test:fast` 通过时子模块是干净的，可作对照。）该红点在该工作令提交或回退后自然消失，不是本轮引入。
+
+#### 84.8 对 §82 的一处事实更正（**必须记**）
+
+§82 写「全仓扫描：**只有** `packages/dsh-plugin-turn-fold/` 在运行时改写核心产物」。**这半句不成立**，同一份 `b1357ced55` 的提交信息也这么写（"the only code in the repository that rewrites a core artifact"）。实际上：
+
+- `scripts/harness-provenance.mjs:329-330` 把固定版 Harness 的 `lib/` 复制进 Desktop 闭包，随后**逐文件改写**：
+  `:343-346` 改写 `@deepseek-ai/dsh-client-ui-conversation` 的 `lib/client.js`，`:347-350` 改写 **`@deepseek-ai/dsh-client-ui-chat` 的 `lib/client.js`**（与 turn-fold 打的是同一个包），`:333/:337/:341/:353/:357` 还改写另外 5 个包的入口；`:359-363` 再用 `git apply` 打 overlay。
+- 改写体在 `scripts/harness-conversation-adapter.mjs`（`replaceOnce` 失败即抛，做了 fail-closed），并由 `scripts/harness-conversation-adapter.test.mjs` 覆盖。
+
+**这不推翻撤回本身**：准则是「不要**插件**碰核心」，`harness-provenance.mjs` 是装配面（build/assemble），不是插件，且它 fail-closed 且有哈希溯源。
+但「全仓只有 turn-fold 改写核心产物」是**错的事实陈述**，后续任何据此做的推理都要更正；本轮的守卫也只约束**插件**面，装配面按设计不在此列（且不在本轮写集内）。
+
+#### 84.9 离线不可验证的部分
+
+- **实机可见性未验**：原生 `turn-process` disclosure、右侧 `TurnNavigator`、usage/time pill 是否真的在打包后的 e-Mate 里可见，本轮只做到**源码级 + Profile 挂载级**取证（`ui-chat` 在 web-app bundle 里、`transcriptView` 无覆盖）。实机核对按 calibration 走 computer use，不在本轮写集。
+- **条数 455 与 2 条已复核读**是当前树的快照；`packages/dsh/profile/plugins/*` 之外的 profile 插件目录若新增，需同步扩大 `SCANNED_SUBDIRECTORIES`（当前覆盖 `src/scripts/test/tests`）。
+- `pnpm-workspace.yaml` 是否把新 `test/*.mjs` 纳入任何 vitest include：已确认 tidychat 的 `vitest.config.ts` 只 include `test/*.spec.tsx`，故无重复执行。
