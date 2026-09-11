@@ -95,7 +95,9 @@ export async function createNativeImageFixture({ request, home, hooks = {} } = {
     const target = options.agent ?? agent, callId = options.callId ?? `native-image-call-${++serial}`
     const turn = options.turn ?? 1, step = options.step ?? 1
     const block = { type: 'tool-call', id: callId, name, arguments: JSON.stringify(args) }
-    target.session.append('assistant/message', { turn, step, message: m.createAssistantMessage({ content: [block],
+    // 0.1.5 requires the streamed records beside the settled message; this
+    // fixture builds the message directly, so no record was streamed.
+    target.session.append('assistant/message', { turn, step, stream: [], message: m.createAssistantMessage({ content: [block],
       source: { provider: 'offline-fixture', model: 'no-model-call' } }) }, { surfaceOp: 'append' })
     const event = target.session.append('tool/call', { turn, step, callId, name, arguments: block.arguments })
     const result = await ctx.tools.execute({ name, arguments: args, agent: target, callId, rootCallId: callId,
