@@ -2750,3 +2750,28 @@ identity / capabilities / agent-operations）已通过。
 **顺带记录的契约问题**：`verify:cli` 的期望值应锚定 **harness 版本**还是 **桌面版本**，需要以原版行为为准做一次对照后定论；
 本轮不改断言（保持现状 PASS）。
 
+
+### 80.1 与原版 dsh-desktop 对照的结果（verify:cli / desktop-cli）
+
+原版仓库已改名（GitHub API 返回 Moved Permanently → repository id `1333321333`），**必须跟随重定向**才能取证；
+根目录含 `dsh-plugin-desktop/`（另有 `-beta/`）、`deepseek-harness/`（submodule）、`patches/`、`upstream.json`。
+`dsh-plugin-desktop/src` 共 119 项，其中与我们相关的有：`bin.ts`、**`desktop-cli.ts`**、`packaged-runtime-path.ts`、
+`packaged-runtime-smoke.ts`、`asar-module-resolver-state.ts`、`host-launch-environment.ts`、`relaunch-arguments.ts`。
+
+**逐行对照结论（`dsh-plugin-desktop/src/desktop-cli.ts`，132 行）**：
+- 第 108/114 行：`await (await load(DSH_ENTRY_URL)).runCli({ allowDesktopProfile: true })`
+  → **上游同样是"调用入口导出的 runCli"，与我们本轮的修复机制一致**（不是靠 import 副作用）。
+- 但**上游那份是针对更新版 harness API 写的**：其 `runCli` **带 options 参数**，而我们固定点的 0.1.5
+  `node_modules/@deepseek-ai/dsh/lib/bin.js:141` 是 **`async function runCli()`（零参）**；
+  上游还引用了 `installProfilePackageResolver` / `desktopCliProfileManifestUrl` / `withoutForwardedDesktopPnpmPolicy`
+  与 app.asar 专用 resolver（第 89/100/112-120 行），这些在 0.1.5 固定点里**不存在**。
+
+**裁决**：**不整文件采用**。理由是采用即把"更新版 harness 的 API 形状"引入到 0.1.5 基线（会与固定点冲突，
+且违反"不得从更新的 DSH 版本推断原生行为"）。我们保留自身实现，仅把**机制对齐**到上游做法（调 `runCli` + 抛错守卫）。
+另：上游 `bin.ts`（154 行）是 **Electron 启动器**，其 `--version` 读**自己的 package.json**，不转发 harness CLI ——
+与 e-mate `verify:cli` 断言 harness 版本 `0.1.5-rc.1` 的锚点不同。两者目的不同，**不互换**；该锚点的取舍已登记为待办。
+
+**本轮验证**：桌面 `build` EXIT=0（上轮 wheel 失败是**瞬时网络**，重跑即过）；
+`electron … lib/desktop-cli.js --version` → `0.1.5-rc.1`；**`corepack yarn run verify:cli` → PASS**。
+桌面检查链（`check:source` 测试面 514 passed / 0 failed + `verify:cli`）**已无红点**。
+
