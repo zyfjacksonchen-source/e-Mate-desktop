@@ -1,4 +1,13 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// The native client entries are what augment Context with slots/sessions and the
+// composed props with the standard hooks; without them the desktop client
+// program sees none of the 0.1.5 slot keys.
+// ui-slots publishes its client types as the package's own entry.
+import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type {} from './contracts.ts'
 import type { DesktopClientEnvironment } from './environment.ts'

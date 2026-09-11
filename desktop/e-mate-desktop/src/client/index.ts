@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // The desktop client does not load or register a settings surface.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
+
 import { applyAdvancedShell } from './advanced-shell.ts'
 import {
   DESKTOP_BOOTSTRAP_BRIDGE,
@@ -52,7 +53,14 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(
     () => installWorkspaceFolderDrop({
       create: input => ctx.workspaces.create(input),
-      startSession: workspaceId => { ctx.workspaces.startSession(workspaceId) },
+      // 0.1.5 starts a Session through the Workspace UI navigation owner, which
+      // connects the Workspace and opens the Session it resolves. Read through
+      // ctx.get like ui-conversation does: the service is optional in frames
+      // that mount no Workspace navigation.
+      startSession: workspaceId => {
+        const navigation = ctx.get('uiWorkspace') as { openWorkspace(id: string): Promise<void> } | undefined
+        void navigation?.openWorkspace(workspaceId)
+      },
     }),
     '@e-mate/desktop: workspace folder drop',
   )
