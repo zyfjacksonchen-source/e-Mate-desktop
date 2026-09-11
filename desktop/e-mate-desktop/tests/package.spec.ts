@@ -537,6 +537,18 @@ describe('published package surface', () => {
     expect(installedBoot.indexOf('if (!Array.isArray(parsed)) throw new Error')).toBeGreaterThan(earlyReturn)
   })
 
+  it('rebuilds the product inventory before the packaging step copies its profile', () => {
+    const sync = readFileSync(new URL('scripts/sync-emate-profile.mjs', packageRoot), 'utf8')
+    const productBuild = sync.indexOf("execFileSync('corepack', ['pnpm', 'run', 'build']")
+    expect(productBuild).toBeGreaterThan(-1)
+    const firstCopy = Math.min(
+      ...[sync.indexOf('await cp(source, destination'), sync.indexOf('await cp(packageRoot')]
+        .filter(index => index >= 0),
+    )
+    // A previous nonempty client.js otherwise silently retains stale UI and CSS.
+    expect(firstCopy).toBeGreaterThan(productBuild)
+  })
+
   it('keeps the pinned app-builder patch free of local NSIS changes', () => {
     const patchResolution = 'patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')

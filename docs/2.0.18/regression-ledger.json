@@ -3,8 +3,8 @@
  "head": "3cc4be844607d4f11a4aa5d832a41c9c2dc33825",
  "total": 411,
  "fixes": 236,
- "withGuard": 219,
- "withoutGuard": 17,
+ "withGuard": 220,
+ "withoutGuard": 16,
  "guardFiles": [
   "desktop/e-mate-desktop/scripts/candidate-promotion-worker.test.mjs",
   "desktop/e-mate-desktop/scripts/candidate-update-worker.test.mjs",
@@ -2054,7 +2054,9 @@
    "hash": "ab3ba1421586ccebb2199ce6a46b87fef86651e2",
    "subject": "fix(desktop): rebuild product profile before packaging",
    "files": 1,
-   "guards": [],
+   "guards": [
+    "desktop/e-mate-desktop/tests/package.spec.ts"
+   ],
    "areas": [
     "desktop"
    ]
