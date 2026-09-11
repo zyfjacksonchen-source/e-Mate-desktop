@@ -935,7 +935,8 @@
    "areas": [
     "other",
     "plugin:skill-hub"
-   ]
+   ],
+   "disposition": "Guarded by the assembly, not by a spec: scripts/component-run.mjs:56 requires every component's eMate.baseImports to be an array and :73 resolves each declared entry out of the pinned Harness through scripts/component-base-imports.mjs, so a declaration the pinned Base cannot supply fails that component's check. The list now ends at react; the react-dom entry this fix removed has not come back."
   },
   {
    "hash": "4f545c21e6ca18840a4f31f48a058adb7736d8b2",
@@ -1341,7 +1342,8 @@
    "guards": [],
    "areas": [
     "enterprise"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: packages/dsh/test/enterprise-admin-surface.test.mjs — \"the bulk selection list stays bounded so the policy controls remain reachable\" and \"the bulk policy fields stay a flat, reachable fieldset\". Runs in the test:fast lane."
   },
   {
    "hash": "b6f340331cee11855226575584144187eccea70e",
@@ -1390,7 +1392,8 @@
    "guards": [],
    "areas": [
     "enterprise"
-   ]
+   ],
+   "disposition": "Not covered by a Node spec, and deliberately so: the fix is a build-time assertion of the image itself. enterprise/deploy/Dockerfile.services pins MIGRATION_NODE_IMAGE by digest and runs `node --input-type=module -e \"... typeof DatabaseSync.prototype.setAuthorizer !== 'function' ... throw\"` in that stage, so an image whose Node lacks the restricted SQLite reader fails the Docker build. Docker image builds are outside the local gates; no local check can replace it without building the image."
   },
   {
    "hash": "6ac9d586cbe50ecf04baa3a5985a6dbe21cea95d",
@@ -1413,7 +1416,8 @@
    "areas": [
     "other",
     "plugin:canvas"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: packages/dsh-plugin-canvas/test/bundle-dependencies.test.mjs covers the bundled private archive dependency. Runs in the component gate."
   },
   {
    "hash": "94d49a34eec07f41c6d2321cee210de4eb7954ae",
@@ -1659,7 +1663,8 @@
    "guards": [],
    "areas": [
     "shell"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: packages/dsh/test/emate-shell-style-contracts.test.mjs — \"the gallery actions do not overlay the carousel controls\". Runs in the test:fast lane."
   },
   {
    "hash": "03764b8fe34e699a6aac766450a3ff6c0ae06523",
@@ -1950,7 +1955,8 @@
    "guards": [],
    "areas": [
     "plugin:knowledge"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: packages/dsh-plugin-knowledge/test/canonical-operation.test.mjs binds the live UI reads to the canonical Xin operation. Runs in the component gate."
   },
   {
    "hash": "4375325503a0b0664ae2ef8885c2e97f1ed34bd3",
@@ -2041,7 +2047,8 @@
    "guards": [],
    "areas": [
     "shell"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: packages/dsh/test/emate-shell-style-contracts.test.mjs — \"the batch action reveals on hover and on focus\". Runs in the test:fast lane."
   },
   {
    "hash": "3e98c59babd9c80043e0940f3607f8fd63185b2a",
@@ -2221,7 +2228,8 @@
    "guards": [],
    "areas": [
     "shell"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: packages/dsh/test/emate-shell-style-contracts.test.mjs — \"the canvas action stays legible over a light image\". Runs in the test:fast lane."
   },
   {
    "hash": "143c25e21cc7c03462fbe52245578da52f5525df",
@@ -2550,7 +2558,8 @@
    "guards": [],
    "areas": [
     "desktop"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: desktop/e-mate-desktop/tests/runtime-imports.spec.ts asserts the pinned web-react runtime import reaches the tool boundary. Runs in the desktop vitest lane (corepack yarn check)."
   },
   {
    "hash": "7cdc14259f5e73711ae8cdec0d89de57ebe42a2e",
@@ -2992,7 +3001,8 @@
    "guards": [],
    "areas": [
     "shell"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: packages/dsh/test/emate-shell-style-contracts.test.mjs — \"nothing hides the checked expert dot\" and \"the expert connector indicates its checked state\" (test:fast lane), plus packages/dsh/profile/plugins/emate-shell/tests/composer-expert-mode.client.spec.tsx, which drives the RPC receipt rather than the click (component gate)."
   },
   {
    "hash": "26b2f789ecd758388187d962c568235b4bf57c8c",
@@ -3001,7 +3011,8 @@
    "guards": [],
    "areas": [
     "enterprise"
-   ]
+   ],
+   "disposition": "Guarded, added after the fix: packages/dsh/test/enterprise-deploy-artifacts.test.mjs — \"the image wrapper keeps the image model and only moves the outer model\". Runs in the test:fast lane."
   },
   {
    "hash": "bdb9e67f14731ca9e3f60a37851635a355303f58",
