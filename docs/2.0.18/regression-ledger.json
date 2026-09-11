@@ -2762,7 +2762,8 @@
    "areas": [
     "other",
     "shell"
-   ]
+   ],
+   "disposition": "removed with the feature: activity-fold.module.css was deleted in 7917c3695f (refactor: remove custom process display modes) when folding moved to the native compact transcript, so the shell owns no shimmer rule to guard"
   },
   {
    "hash": "3b6002f6a4960df06df9783ae5885814ef249c5f",
