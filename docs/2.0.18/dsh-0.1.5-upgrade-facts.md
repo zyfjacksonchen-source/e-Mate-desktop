@@ -2323,3 +2323,37 @@ peer 为 `ui-chat >=0.1.2-alpha.5 <0.1.3-0` 与 `ui-conversation/settings: >=0.1
 （`desktop/e-mate-desktop/src/profile.ts` 的 rows/patches 与产品 profile `packages/dsh/profile/cordis.patch.yml`）；让桌面组合与固定版一致，
 **不要**在 e-mate 侧再造包装或第二个凭据 owner。
 
+
+## 第 74 轮：turn-fold 移植方案评审与**主线裁决（Path A）**
+
+移植方案已完成并逐条给出证据（子代理工单 §1–§6）。它的三项核心发现：
+
+1. **turn-fold 的投递机制在 0.1.5 里不存在**：它靠 `dsh.harmony.patches`（AST 改写已编译的 `ui-chat/lib/client.js`），
+   而全仓库**零处** `harmony` 引用；`dsh.bundle.patch` 的 insert 行才是原生挂载方式。
+2. **它的 3 个 AST 选择器今天仍各命中 1 次**（`ChatView` / `arguments.0.name="ChatNodeList"` / `VariableStatement t = ctx.locale.bind(NS)`），
+   但"编译产物形状不是契约"——harness 一重建即可能失效，只能靠 `expect:1` fail-closed + 启动冒烟兜底。
+3. **真正的运行时缺口是三处词汇改名**：`timeline.playbackClock` 已删（改用 `TurnLocation.start?.time` 或 `turn-tail.data.time`+`ttftMs`）；
+   指标从 `assistant-step.data.usage.*` 迁到 `turn-tail.data.tokenUsage.*`；`TurnLocation.status` 变为 `open|closed|unknown`。
+   而 0.1.5 **原生已有**紧凑折叠（`transcriptView:'compact'` 默认开）与**原生 turn 轨道**（`TurnNavigator.tsx`，10px 间距、点击跳转、无条件渲染）。
+
+### 裁决：走 **Path A**（原生 owner + turn-fold 只供增量），否决 Path B
+
+**Path B**（保留字面 turn-fold 所有权 = 继续用 harmony AST 补丁，并压掉原生折叠与轨道）被否决，理由是可验证的：
+- 需要 **`dsh-harmony@0.8.10`**：它对 0.1.5 **从未运行过**；其 settings builtin 针对 0.1.1 的 `dsh-settings` 并把依赖钉在 `0.1.0-rc.8 || >=0.1.1-rc.1 <0.1.2-0`，
+  pnpm 会**再嵌一份 `dsh-settings`**；4 个 builtin 里只有 `resolveMeta`/`graphRow` 两个选择器被确认仍存在。
+- 压掉原生轨道**没有原生开关**，只能靠 shell CSS 覆盖或**再给 ui-chat 加一条 overlay** —— 正是仓库最高优先规则禁止的"并行 UI / harness 分歧"。
+- 选择器依赖编译产物形状，重建即可能失效。
+
+**Path A 同时满足用户指令的字面含义**：用户要替换的是"**e-mate 自己做的**折叠"与"**已有的消息插件**"（tidychat）——这两者在 Path A 里都退役；
+保留下来的是 **0.1.5 原生**的折叠与轨道（不是 e-mate 自己的实现），turn-fold 以其原生扩展点（`conversation.chat.node` / `conversation.chat.turnTail` 槽）供**指标条 / 状态标签 / 每会话展开增量**。
+即：**零 harness 补丁、无 harmony、无第二套 owner**，且用户要的"用这个插件取代旧实现"照样成立。
+
+### Path A 的执行清单（下一步，未开工）
+1. 退役 tidychat：删 `packages/dsh-plugin-tidychat/**` 与 `packages/dsh/profile/bundles/tidychat/**`，从 `component-inventory.json`（~:112）与 desktop `PROFILE_PLUGIN_PACKAGES` 移除，
+   并把 `@e-mate/dsh-plugin-tidychat` 加入 `RETIRED_PROFILE_PACKAGES`（`e-mate-profile.ts:651`）让旧 profile 升级时丢弃它；重跑 bundle sync 使 `registry.json` 重生成。
+2. 新建 `packages/dsh-plugin-turn-fold`：vendor 上游克隆（genui 同法，`scripts/build.mjs` 拷产物 + 接缝断言），
+   经原生槽位提供指标/状态/展开增量；**不引入 harmony、不 AST 打补丁**。
+3. 守卫改指（绝不删断言）：`dsh-plugin-tidychat/test/folding.test.mjs`（5 例）→ turn-fold 的折叠规格；`navigation.client.spec.tsx` 的轨道几何 → 原生 `TurnNavigator`；
+   `packages/dsh/test/e-mate.test.mjs:247`、`desktop/.../e-mate-profile.spec.ts:224,316,916`、`verify-profile-boot.mjs:272`（tidychat 移入 retired 拒绝表）。
+4. 同批改写根 `AGENTS.md` 第 65 行（"Use dsh-tidychat … do not install a second owner"）为 turn-fold + 原生 owner 的表述，并在 `regression-ledger.{md,json}` 落一行。
+
