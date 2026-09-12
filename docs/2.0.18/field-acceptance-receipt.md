@@ -344,6 +344,11 @@ Windows 的 **GUI/登录态/模型相关用例**一律保持 `OPEN`，不得用�
 而同一账号在正式实例上 200。面板地址（两份文件里的外网面板）从本机均不可达（`curl` HTTP 000），
 因此**无法自行注册/开通**候选账号。
 
+**为什么必须走"测试构建"而不是改安装后的 profile**（本轮实测更正）：`profiles/e-mate/cordis.patch.yml`
+是**被安装器托管的文件** —— App 启动时的 profile 修复路径会用包内同名文件覆盖它。手工改过一次后，
+下一次启动实测已被还原回正式地址（`grep ecoremedia` 三行又变回 `e-mate/...`）。所以端点必须**烘进包**
+才能稳定生效，用户确认的做法正是唯一可靠的做法。
+
 **客户端测试包**：`packages/dsh/profile/cordis.patch.yml` 的三处企业地址临时改指候选路由
 （`model-api/v1→/__emate_2018_candidate/gateway/v1`、`auth-api→/__emate_2018_candidate/auth`、
 `model-api→/__emate_2018_candidate/gateway`；`share` 保持正式），构建后**立即还原源码**，
