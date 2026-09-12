@@ -497,6 +497,18 @@ GUI 组归属规则是 areas → 组（`enterprise`→A；`shell`/`profile-core`
 `plugin:canvas|pet|better-sidebar|office-skills|vision-toolkit|genui|file-import|tool-search|cdp|memory-evolve|schedules`→E；
 `desktop`/`scripts`/发布更新类→F；`plugin:computer-use`/`plugin:tidychat`→H）。
 
+## AC-10 挂载 turn-fold 后遗留的一处陈旧断言（已修 `693ca9ab10`）
+
+`packages/dsh/test/e-mate.test.mjs` 的"managed profile installation is idempotent"用例**在 HEAD 上是红的**：
+它硬编码了一份 CLI profile 的插件清单，而 **CLI 安装器的清单是从 `component-inventory.json` 推导的**
+（`packages/dsh/src/e-mate.ts:51`），所以契约第 (4) 项把 turn-fold 挂进清单后，CLI profile 也装上了它，
+断言于是缺一行。修法是把 `@e-mate/dsh-plugin-turn-fold` **按清单顺序**补进那份列表（断言仍是严格 deepEqual，不放宽）。
+
+**实测**：该文件 **35/35 通过**；`identity-lifecycle.test.mjs` **22/22**；
+`node --test packages/dsh/test/*.test.mjs` 全量 **156 tests / 156 pass / 0 fail**。
+这条不在 `test:fast` 的文件列表里（它只在 `pnpm --filter @e-mate/dsh test` 中跑），所以此前没有任何门禁报红——
+正是"豁免成为事实"这件事在**另一套 profile 安装器**上留下的尾巴。
+
 ## 门禁终态（源码 `9690b1d32c`，第 9 轮复跑）
 
 | 门禁 | 结果 |
