@@ -82,6 +82,14 @@ class RefreshFailure extends Error {
   }
 }
 
+/**
+ * The model gateway rejected the runtime-models *query* because it does not know one of its
+ * parameters. A deployment older than the `capabilities` parameter answers 400 INVALID_REQUEST
+ * for the whole query instead of ignoring the extra parameter, so the caller asks once more
+ * without it. Every other rejection keeps its own error and is never retried.
+ */
+class RuntimeModelsQueryRejection extends Error {}
+
 /** Typed failure for authenticated consumers; no provider credentials leave this boundary. */
 export class EnterpriseAuthenticationRequired extends Error {
   readonly code = 'auth'
@@ -578,6 +586,11 @@ async function responseJson(response: Response, label: string): Promise<unknown>
     if (label === 'login' && response.status === 401 && code === 'INVALID_GRANT') {
       throw new LoginRejection(LOGIN_REJECTION_MESSAGE)
     }
+    // Named exactly so the caller can retry the query without the parameter it sent; any other
+    // 400 (a real policy or boundary error) must keep failing.
+    if (label === 'runtime models' && response.status === 400 && code === 'INVALID_REQUEST') {
+      throw new RuntimeModelsQueryRejection(code)
+    }
     const messages: Record<string, string> = {
       INVALID_GRANT: '账号或密码错误',
       APPROVAL_REQUIRED: '账号正在等待管理员审核',
@@ -888,12 +901,17 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     const value = await active()
     if (value === undefined) throw new Error('e-Mate login is required')
     if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
-    const response = await modelCall(
-      value,
-      '/v1/runtime-models?client_version=2.0.18&capabilities=responses-multimodal',
-      { method: 'GET' },
-      'runtime models',
-    )
+    const readRuntimeModels = (query: string) => modelCall(value, '/v1/runtime-models' + query, { method: 'GET' }, 'runtime models')
+    let response: unknown
+    try {
+      response = await readRuntimeModels('?client_version=2.0.18&capabilities=responses-multimodal')
+    } catch (error) {
+      // Compatibility with a gateway older than the capability: it rejects the whole query, so
+      // ask once without the parameter. The version gate and the response validation below are
+      // untouched, and a second failure propagates unchanged.
+      if (!(error instanceof RuntimeModelsQueryRejection)) throw error
+      response = await readRuntimeModels('?client_version=2.0.18')
+    }
     if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const grant = searchCredentialGrant(response)
     const models = runtimeModels(response, value.session.modelGateway.allowedModelIds, modelRoot)

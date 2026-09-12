@@ -1113,6 +1113,49 @@ test('DeepSeek vision enterprise contract retains the gateway alias and rejects 
   }
 })
 
+test('a gateway older than the capabilities parameter is asked once more without it', async () => {
+  const { createEnterpriseIdentityProvider } = await loadEnterpriseProviderSource()
+  const remembered = JSON.parse(stored())
+  remembered.session.modelGateway.allowedModelIds = ['deepseek']
+  const model = {
+    id: 'deepseek', apiMode: 'responses', upstreamModelId: 'deepseek-v4-flash-vision-exp',
+    label: 'DeepSeek V4 Flash Vision', input: ['text', 'image'], reasoning: true,
+    contextWindow: 1_000_000, maxTokens: 32_768,
+  }
+  const credentials = () => mapCredentials(new Map([
+    [SESSION_REF, JSON.stringify(remembered)], [MODEL_SESSION_REF, 'model.payload.signature'],
+  ]))
+  const granted = () => Response.json({
+    schemaVersion: 1, models: [model],
+    searchCredentialGrant: { schemaVersion: 1, status: 'denied', purpose: 'web-search',
+      provider: 'deepseek-official', credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK' },
+  })
+  // A deployment that predates the parameter rejects the whole query with INVALID_REQUEST; the
+  // same runtime-models answer without it is a complete payload, so exactly one retry happens.
+  const queries = []
+  const older = createEnterpriseIdentityProvider(options(credentials(), async input => {
+    const url = new URL(input)
+    queries.push(url.search)
+    return url.searchParams.get('capabilities') === 'responses-multimodal'
+      ? Response.json({ error: { code: 'INVALID_REQUEST' } }, { status: 400 })
+      : granted()
+  }))
+  const live = await older.modelRuntimePolicy()
+  assert.equal(live.models[0].upstreamModelId, 'deepseek')
+  assert.deepEqual(queries, [
+    '?client_version=2.0.18&capabilities=responses-multimodal',
+    '?client_version=2.0.18',
+  ])
+  // Any other rejection is not a capability mismatch: it propagates and is never retried.
+  const attempts = []
+  const revoked = createEnterpriseIdentityProvider(options(credentials(), async input => {
+    attempts.push(new URL(input).search)
+    return Response.json({ error: { code: 'SESSION_REVOKED' } }, { status: 403 })
+  }))
+  await assert.rejects(revoked.modelRuntimePolicy())
+  assert.deepEqual(attempts, ['?client_version=2.0.18&capabilities=responses-multimodal'])
+})
+
 test('a correctly hashed text-only DeepSeek cache must refresh before accepting vision', async () => {
   const { runtimeProjectionMarker, matchesRuntimeProjection } = await loadModelPolicySource()
   const provider = { api: 'openai-completions', models: [{ id: 'deepseek', input: ['text'] }] }
