@@ -398,6 +398,35 @@ Windows 的 **GUI/登录态/模型相关用例**一律保持 `OPEN`，不得用�
    （候选的策略里 `allowedModelIds` 含 `gpt-image-2.5-flare`/`gpt-image-2-pro`，生图维度也能测）。
    候选上原有会话（`acceptance/login-private.json`，身份"候选版本验收"）已于 **2026-09-09 过期**。
 
+## AC-09 用户提供的测试账号实测：正式可用、候选无此账号；唯一卡点是一个查询参数
+
+用用户提供的测试账号（口令只经环境变量传入脚本，**未落盘、未写入任何文件、未在回执中复述**）实测：
+
+| 服务 | 组织 | 结果 |
+|---|---|---|
+| 正式 `/e-mate/auth-api/v1/auth/password` | **`emate-v2`** | **HTTP 200** —— `schemaVersion,sessionId,accessToken,refreshToken,expiresAt,identity,modelGateway` |
+| 正式 同端点 | `candidate-test` | 401 `INVALID_GRANT` |
+| 候选 `/__emate_2018_candidate/auth/v1/auth/password` | `candidate-test` / `emate-v2` | 401 `INVALID_GRANT`（该账号不在候选实例上） |
+
+拿登录响应的 **模型会话令牌**（`modelGateway.sessionToken`）请求正式模型端点：
+
+| 请求 | 结果 |
+|---|---|
+| `/v1/runtime-models?client_version=2.0.18&capabilities=responses-multimodal`（**客户端实际形状**） | **400 `INVALID_REQUEST`** |
+| `/v1/runtime-models?client_version=2.0.18`（去掉该参数） | **200** —— `schemaVersion: 1`、models = `["gpt-5.6-luna","gpt-5.6-sol","gpt-6-astra","deepseek"]`、`searchCredentialGrant` 存在 |
+
+⇒ **去掉参数后的响应正好满足客户端 `runtimeModels()` 的严格校验**（`schemaVersion===1` / `models[]` / `searchCredentialGrant`）。
+也就是说：**产品缺的只是一次 fail-closed 的"去掉未知参数重试"**，服务端与账号都没有问题。
+
+**同时确认（对验收 (b) 的影响）**：该账号在**正式**拿到的运行时模型列表**只有 4 个文本模型，没有生图模型**
+（`gpt-image-2.5-flare`/`gpt-image-2-pro` 出现在**候选**策略的 `allowedModelIds` 里）。
+因此三维度里"生图延迟"的处理侧要么需要候选账号、要么需要在正式策略里放开生图模型；
+"首响"与"多轮劣化"两项在正式侧即可测。
+
+**待用户裁决（三选一，均已备好执行路径）**：① 把候选那套（已实现契约的）网关构建部署到正式；
+② 客户端加 fail-closed 参数协商（仅当服务端以"未知参数 400"拒绝时去掉该参数重试一次，版本门与校验不动）；
+③ 在候选实例上创建该测试账号。
+
 ## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
 
 `dist/e-Mate-2.0.18-win-x64-Setup.exe` 335410291 字节 / sha256 `67797411…`；
