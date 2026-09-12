@@ -324,6 +324,36 @@ assert.match(adapted, new RegExp('const ' + interactionAttribute[1] + ' = useSes
 "Installed GUI acceptance still requires the signed-in interactive Windows session"，
 Windows 的 **GUI/登录态/模型相关用例**一律保持 `OPEN`，不得用远程命令回执替代。
 
+## AC-07 测试环境（候选服务）联调 —— 服务侧**已就绪**，客户端测试包**已构建**，缺一个候选侧测试账号
+
+用户裁决（原话经确认）："授权测试部署而非正式上线部署，让测试的账号可接收到企业下发模型用于测试" ✅ 并确认采用
+**「测试专用构建 → 指向候选服务」**（发布候选仍指向正式地址）。
+
+**服务侧实测（只读，未改动任何服务）**：
+
+| 探测 | 结果 |
+|---|---|
+| 候选网关 `/__emate_2018_candidate/gateway/v1/runtime-models?client_version=2.0.18&capabilities=responses-multimodal` | **401 AUTHENTICATION_REQUIRED**（查询形状被接受 ⇒ 该构建**已实现 2.0.18 契约**） |
+| 同路径带未知参数 `&bogus=1` | **400 INVALID_REQUEST "Query is not allowed"**（校验与源码一致） |
+| 正式路径同查询 | 旧构建 → `INVALID_REQUEST`（即 AC-05 的现象） |
+| 候选认证 `/__emate_2018_candidate/auth/v1/auth/password`（同一账号同一口令） | **401 INVALID_GRANT** |
+| 正式认证 `/e-mate/auth-api/v1/auth/password`（同一账号同一口令） | **200** + `schemaVersion/sessionId/accessToken/refreshToken/expiresAt/identity/modelGateway` |
+
+⇒ 候选服务**已经**支持 2.0.18；缺的是**该实例上的一个账号**：本机可用的全部凭据（管理端账号/口令、
+以及用户本轮提供的 `企业服务器地址 (1).txt` 里的两组口令）在候选实例上都返回 `INVALID_GRANT`，
+而同一账号在正式实例上 200。面板地址（两份文件里的外网面板）从本机均不可达（`curl` HTTP 000），
+因此**无法自行注册/开通**候选账号。
+
+**客户端测试包**：`packages/dsh/profile/cordis.patch.yml` 的三处企业地址临时改指候选路由
+（`model-api/v1→/__emate_2018_candidate/gateway/v1`、`auth-api→/__emate_2018_candidate/auth`、
+`model-api→/__emate_2018_candidate/gateway`；`share` 保持正式），构建后**立即还原源码**，
+发布候选不受影响。已实测：app 侧登录返回 typed `账号或密码错误`（与直接 curl 候选得到的 401 一致 ⇒
+**测试包确实打到了候选服务**，而不是仍走正式）。
+
+**需要的动作（二选一）**：① 提供候选实例上的测试账号（账号/口令/组织名）；或 ② 让本机可达面板
+（打开 VPN/代理后我自行创建测试账号）。拿到之后即可用测试包登录、让测试账号接收企业下发模型，
+把 B/C/D 组与三维度性能一次跑完。
+
 ## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
 
 `dist/e-Mate-2.0.18-win-x64-Setup.exe` 335410291 字节 / sha256 `67797411…`；
