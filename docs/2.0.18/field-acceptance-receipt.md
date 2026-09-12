@@ -427,6 +427,28 @@ Windows 的 **GUI/登录态/模型相关用例**一律保持 `OPEN`，不得用�
 ② 客户端加 fail-closed 参数协商（仅当服务端以"未知参数 400"拒绝时去掉该参数重试一次，版本门与校验不动）；
 ③ 在候选实例上创建该测试账号。
 
+### 选项 ② 的就绪实现方案（已定到锚点，等一句授权即可落盘）
+
+改 **3 个文件**，形状与文件内既有风格完全一致（该文件已有同构的 `LoginRejection`/`RegistrationRejection` + 调用侧重试）：
+
+1. `packages/dsh/src/profile/identity/enterprise-provider.ts`
+   - `responseJson()` 的 `if (!response.ok)` 分支（**551-580 行**，code 已在 570-572 行取出）：新增
+     `if (label === 'runtime models' && response.status === 400 && code === 'INVALID_REQUEST') throw new RuntimeModelsCapabilityRejection(code)`
+     —— 与既有 `label === 'login' && status === 401 && code === 'INVALID_GRANT'` 判据同形；
+   - `modelRuntimePolicy()`（**888-899 行**）：把那次 `modelCall` 包一层
+     `try { … '/v1/runtime-models?client_version=2.0.18&capabilities=responses-multimodal' … }`
+     `catch (error) { if (!(error instanceof RuntimeModelsCapabilityRejection)) throw error; 用去掉 capabilities 的同一路径重试一次 }`
+     —— **只在"未知参数 400"这一种失败上重试一次**，重试再失败则原样抛出；`client_version` 门、`runtimeModels()` 严格校验、
+     session 版本号（`leaseRevision`）检查全部不动。
+2. `packages/dsh/test/e-mate.test.mjs:1648`：断言从"请求必带 capabilities"改为
+   "首次请求带 capabilities；收到 400 INVALID_REQUEST 后恰好再发一次且**不带** capabilities；其他 4xx/5xx 不重试"。
+3. `packages/dsh/test/identity-lifecycle.test.mjs:1095`：同上口径。
+
+**验证命令**：`pnpm --filter @e-mate/dsh test`（含上述两个文件）→ 再跑 `test:fast`、`component-run check`、
+`desktop yarn check`、`test:image-evidence`、`enterprise:check`；随后重建 macOS/Windows 候选（两平台同源）。
+
+**不做的**：不动 `client_version` 白名单、不降级任何校验、不给"未知参数"加宽恕分支、不改网关源码（服务端要么部署新版、要么由本协商兼容它）。
+
 ## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
 
 `dist/e-Mate-2.0.18-win-x64-Setup.exe` 335410291 字节 / sha256 `67797411…`；
