@@ -374,6 +374,30 @@ Windows 的 **GUI/登录态/模型相关用例**一律保持 `OPEN`，不得用�
 文本会追加成 `emate-adminemate-admin…`），导致登录报 `账号或密码错误` —— 这类失败是**输入问题**，
 不能当成"凭据被拒"的证据；候选侧的结论以**直接 `curl` 的 401/200 对照**为准。
 
+## AC-08 测试账号实测：模型**已经**下发，卡点只在客户端多发的一个参数
+
+用户提供的测试账号（口令未落盘、不写入任何文件）实测：
+
+| 探测（带该账号的 model session token） | 结果 |
+|---|---|
+| 正式 `/v1/auth/password`（org `emate-v2`） | **200** + `sessionId/accessToken/refreshToken/identity/modelGateway`；候选实例（`candidate-test`/`emate-v2`）均 **401 INVALID_GRANT** ⇒ 该账号在**正式**实例 |
+| 正式 `/v1/runtime-models?client_version=2.0.18` | **200**，下发的模型：`gpt-5.6-luna, gpt-5.6-sol, gpt-6-astra, deepseek` ✅ **企业模型确实下发** |
+| 正式 `…&capabilities=responses-multimodal`（**客户端实际发的形状**） | **400 INVALID_REQUEST "Query is not allowed"** ← 正式网关是旧构建（AC-05），不认识该参数 |
+| 候选 `…/__emate_2018_candidate/gateway/v1/runtime-models?client_version=2.0.18&capabilities=…` | **401 AUTHENTICATION_REQUIRED**（形状被接受 ⇒ 候选已实现契约） |
+
+⇒ **B/C/D 组与三维度性能处理侧的卡点精确化为一个参数**：客户端 2.0.18 会带
+`capabilities=responses-multimodal`，而正式网关（旧构建）对任何未知查询参数回 400，
+所以拿不到模型列表。这**不是**账号问题（模型已下发）、**不是**配额问题。
+
+**三条可选解法（需用户择一）**：
+1. **把候选那套（已实现契约的）网关构建部署到正式** —— 我已有该服务器的 root 访问（凭据来自用户提供的
+   私有文件，未落盘；用 pty 交互式登录），可执行，但这是**正式**环境，需明确授权（用户此前只授权"测试部署"）。
+2. **客户端加一条 fail-closed 参数协商**：先带 `capabilities` 请求，仅当服务端以未知参数 400 拒绝时，
+   去掉该参数重试一次；版本门（`client_version` 白名单）与企业策略**完全不动**。属产品改动，需重建双平台候选。
+3. **给出候选实例（tenant `candidate-test`）的测试账号**，用我已构建的测试包在候选上跑完整验收
+   （候选的策略里 `allowedModelIds` 含 `gpt-image-2.5-flare`/`gpt-image-2-pro`，生图维度也能测）。
+   候选上原有会话（`acceptance/login-private.json`，身份"候选版本验收"）已于 **2026-09-09 过期**。
+
 ## Windows 候选 C4 —— 候选级完成，实机安装 `OPEN`
 
 `dist/e-Mate-2.0.18-win-x64-Setup.exe` 335410291 字节 / sha256 `67797411…`；
