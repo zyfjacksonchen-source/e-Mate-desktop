@@ -226,6 +226,9 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-schedules',
+      // The turn-fold provider is a mounted product component (component-inventory.json),
+      // so the CLI profile installs it exactly like the desktop profile does.
+      '@e-mate/dsh-plugin-turn-fold',
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-imagegen',
     ]
