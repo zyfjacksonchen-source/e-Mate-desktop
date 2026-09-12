@@ -56,6 +56,17 @@ e-Mate 的 Profile 与其插件。对照取固定版 Harness 自带的 profile�
 
 **三个必测维度：**
 
+**计时来源（第 18 轮定稿，实测过可用性）**：
+
+- 会话日志 `~/.dsh/sessions/<workspace>/<session>/session.v3.jsonl.zstd` **不可直接解析**：该文件是多帧追加写入，
+  `zlib.zstdDecompressSync` 只出第一帧、`createZstdDecompress()` 流式读到第二帧即 `Unknown frame descriptor`（实测）。
+  因此**不把会话日志当作计时来源**。
+- `storages/emate_task_audit.json`（6.2 MB）与 `emate_weekly_quota.json` 里**没有任何 ms/duration 字段**（实测键名扫描为空）——
+  它们只记账号/任务绑定与用量。
+- **采用外部计时 + 界面终态判定**：由 Agent 以固定节奏（100 ms 轮询 AX 树/截图）测量
+  ①"发送→首个助手文本可见"= 首响；②"发送→该轮 turn-tail 显示完成/耗时"= 每轮总时长；③生图 = "发送→结果图片可见"。
+  每条样本记录：提示词、开始/结束 ISO 时间、轮询次数、命中判据；中位数与 p95 由样本直接算出，脚本与原始样本一并留档。
+
 | 维度 | 测量方式 | 统计 |
 |---|---|---|
 | 生图延迟 | 从工具调用发起到收到终态回执；用会话里 `emate/image-output` 回执已有的阶段时间戳（provider submit/finish、CAS begin/end、tool return），而不是外部计时 | 3 次预热 + 10 次采样，报 p50/p95 与对照比 |
