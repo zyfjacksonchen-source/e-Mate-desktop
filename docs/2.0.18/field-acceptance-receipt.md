@@ -497,6 +497,29 @@ GUI 组归属规则是 areas → 组（`enterprise`→A；`shell`/`profile-core`
 `plugin:canvas|pet|better-sidebar|office-skills|vision-toolkit|genui|file-import|tool-search|cdp|memory-evolve|schedules`→E；
 `desktop`/`scripts`/发布更新类→F；`plugin:computer-use`/`plugin:tidychat`→H）。
 
+## AC-11 让产品兼容"比 capabilities 参数更早"的网关（已修 `183abd9595`）—— 模型阻塞由此解除
+
+**背景**：AC-09/AC-08 证明，唯一的阻塞是客户端在拉运行时模型时多带一个**可选**参数
+`capabilities=responses-multimodal`，而线上（较旧的）网关对"不认识的参数"**整条查询**回
+400 `INVALID_REQUEST`；去掉该参数后同一账号拿到的是 `schemaVersion:1` + 模型列表 + `searchCredentialGrant`
+——**正好满足客户端 `runtimeModels()` 的严格校验**。
+
+**改动（与文件内既有同构写法一致，fail-closed）**：
+- `responseJson()` 新增类型化拒绝 `RuntimeModelsQueryRejection`，判据**只有**
+  `label === 'runtime models' && status === 400 && code === 'INVALID_REQUEST'`；
+- `modelRuntimePolicy()` **只对该拒绝**去掉参数重试**一次**，第二次仍失败则原样抛出；
+- **未改动**：`client_version` 仍发送且仍由服务端把关、响应严格校验、`leaseRevision` 会话版本检查、
+  以及**任何其他 4xx/5xx 一律不重试**。
+
+**测试（新增，实测通过）**：`identity-lifecycle.test.mjs` →
+`a gateway older than the capabilities parameter is asked once more without it`：
+断言两次请求 query 恰为 `?client_version=2.0.18&capabilities=responses-multimodal` → `?client_version=2.0.18`；
+同用例后半段用 403 `SESSION_REVOKED` 证明其他失败**只发一次**。
+**`node --test packages/dsh/test/*.test.mjs` → 157 tests / 157 pass / 0 fail**。
+
+**意义**：不需要把候选部署到正式、也不需要候选实例的账号，App 用用户提供的测试账号登录**正式**即可拿到企业下发的模型，
+B/C/D 组与三维度性能由此具备开测条件。（若后续把正式服务升级到含该参数的构建，本协商自动成为空操作，无副作用。）
+
 ## AC-10 挂载 turn-fold 后遗留的一处陈旧断言（已修 `693ca9ab10`）
 
 `packages/dsh/test/e-mate.test.mjs` 的"managed profile installation is idempotent"用例**在 HEAD 上是红的**：
